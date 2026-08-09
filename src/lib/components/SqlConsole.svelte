@@ -76,13 +76,13 @@
     onmodk = undefined,
     onmods = undefined,
     onmodi = undefined,
-    onmodb = undefined,
     onmodw = undefined,
     onmodn = undefined,
     onmodm = undefined,
     onmodt = undefined,
     onmodshifte = undefined,
     onmodshiftd = undefined,
+    onmodaltd = undefined,
     onmodshifto = undefined,
     onmodshiftb = undefined,
     queryHistoryVisible = $bindable(false),
@@ -363,9 +363,24 @@
     return () => window.removeEventListener('keydown', onKey)
   })
 
+  // The JSON view materialises a real object per row AND a formatted string of
+  // all of them — both O(rows × columns) — while the table beside it is canvas-
+  // virtualised and pays for neither. Unbounded, a `SELECT *` over a million
+  // rows spent its time building a string far too large to read, and often ran
+  // the webview out of memory before it could show any of it.
+  //
+  // Bounded here. The whole result still leaves through Export, which streams
+  // from Rust instead of assembling it in the webview.
+  const JSON_VIEW_ROWS = 1000
+
+  const jsonRows = $derived(
+    currentDisplay.rows.length > JSON_VIEW_ROWS
+      ? currentDisplay.rows.slice(0, JSON_VIEW_ROWS)
+      : currentDisplay.rows,
+  )
   const rowObjects = $derived(
-    currentDisplay.columns.length > 0 && currentDisplay.rows.length > 0
-      ? rowsToObjects(currentDisplay.columns, currentDisplay.rows)
+    currentDisplay.columns.length > 0 && jsonRows.length > 0
+      ? rowsToObjects(currentDisplay.columns, jsonRows)
       : []
   )
 
@@ -738,13 +753,13 @@
       onrunstatement={(stmt) => handleRun(stmt)}
       onmods={openSaveDialog}
       {onmodi}
-      {onmodb}
       {onmodw}
       {onmodn}
       {onmodm}
       {onmodt}
       {onmodshifte}
       {onmodshiftd}
+      {onmodaltd}
       {onmodshifto}
       onmodj={toggleOutput}
       onmodshiftb={() => { queryHistoryVisible = !queryHistoryVisible; onmodshiftb?.() }}
@@ -975,7 +990,7 @@
             {/if}
           {:else if currentDisplay.columns.length > 0}
             {#if outputView === 'json'}
-              <JsonViewer json={jsonText} rowCount={currentDisplay.rows.length} onshowtable={() => (outputView = 'table')} />
+              <JsonViewer json={jsonText} data={rowObjects} shownRows={rowObjects.length} rowCount={currentDisplay.rows.length} onshowtable={() => (outputView = 'table')} />
             {:else if outputView === 'chart'}
               <ChartView
                 columns={currentDisplay.columns}

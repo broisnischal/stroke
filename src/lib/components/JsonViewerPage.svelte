@@ -1,4 +1,7 @@
 <script>
+  import JsonWrapToggle from './JsonWrapToggle.svelte'
+  import JsonPathSuggest from './JsonPathSuggest.svelte'
+  import { appJsonWordWrap } from '$lib/stores/settings.js'
   import { onMount, tick, untrack } from 'svelte'
   import * as monaco from 'monaco-editor'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
@@ -90,7 +93,7 @@
   // ── Effects ───────────────────────────────────────────────────────────────
 
   $effect(() => {
-    if (!pathFocused || completionItems.length === 0) activeIdx = -1
+    activeIdx = pathFocused && completionItems.length ? 0 : -1
   })
 
   // Track resultJson BEFORE the guard - Svelte only registers deps that are
@@ -111,8 +114,8 @@
   // ── Completion helpers ────────────────────────────────────────────────────
 
   /** @param {import('$lib/jsonpath.js').CompletionItem} item */
-  function pickCompletion(item) {
-    jsonPath = applyCompletion(jsonPath, item.insert)
+  function pickCompletion(insert) {
+    jsonPath = applyCompletion(jsonPath, insert)
     activeIdx = -1
     pathInput?.focus()
   }
@@ -133,13 +136,13 @@
       // Tab: accept first item if nothing selected, else accept selected
       if (e.key === 'Tab') {
         e.preventDefault()
-        pickCompletion(completionItems[activeIdx >= 0 ? activeIdx : 0])
+        pickCompletion(completionItems[activeIdx >= 0 ? activeIdx : 0].insert)
         return
       }
       // Enter: only accept if a row is explicitly highlighted
       if (e.key === 'Enter' && activeIdx >= 0) {
         e.preventDefault()
-        pickCompletion(completionItems[activeIdx])
+        pickCompletion(completionItems[activeIdx].insert)
         return
       }
     }
@@ -152,32 +155,7 @@
 
   // ── Kind icon + color (minimal - single letter, no text chars like "{}") ──
   /** @param {import('$lib/jsonpath.js').CompletionItem['kind']} kind */
-  function kindMeta(kind) {
-    switch (kind) {
-      case 'object':   return { dot: 'bg-blue-400',   label: 'obj' }
-      case 'array':    return { dot: 'bg-amber-400',  label: 'arr' }
-      case 'string':   return { dot: 'bg-green-400',  label: 'str' }
-      case 'number':   return { dot: 'bg-yellow-400', label: 'num' }
-      case 'boolean':  return { dot: 'bg-purple-400', label: 'bool' }
-      case 'null':     return { dot: 'bg-slate-400',  label: 'null' }
-      case 'wildcard': return { dot: 'bg-cyan-400',   label: 'all' }
-      case 'index':    return { dot: 'bg-indigo-400', label: 'idx' }
-      case 'filter':   return { dot: 'bg-rose-400',   label: 'fn' }
-      case 'slice':    return { dot: 'bg-teal-400',   label: 'slc' }
-      default:         return { dot: 'bg-muted-foreground/40', label: '·' }
-    }
-  }
 
-  /** Highlight matched prefix in label */
-  function matchParts(label, typedPath) {
-    const token = (() => {
-      const t = typedPath.startsWith('$') ? typedPath.slice(1) : typedPath
-      const i = Math.max(t.lastIndexOf('.'), t.lastIndexOf('['))
-      return i >= 0 ? t.slice(i + 1) : t
-    })()
-    if (!token || !label.toLowerCase().startsWith(token.toLowerCase())) return null
-    return { head: label.slice(0, token.length), tail: label.slice(token.length) }
-  }
 
   // ── Actions ───────────────────────────────────────────────────────────────
   function handleCopyResult() {
@@ -226,7 +204,7 @@
     fontLigatures: false,
     fontWeight: 'normal',
     scrollBeyondLastLine: false,
-    wordWrap: 'off',
+    wordWrap: $appJsonWordWrap ? 'on' : 'off',
     lineNumbers: /** @type {'on'} */ ('on'),
     // 4 (not 3) so the right-aligned numbers get a character of inset instead of
     // sitting flush against the editor edge, and 6px (not Monaco's default 10)
@@ -327,6 +305,11 @@
       themeObs.disconnect()
     }
   })
+
+  // Wrap is an app setting: a change made in Settings, or from any other JSON
+  // view, reflows this editor too rather than leaving it on whatever it was
+  // created with.
+  $effect(() => { editor?.updateOptions({ wordWrap: $appJsonWordWrap ? 'on' : 'off' }) })
 </script>
 
 <div bind:this={pageEl} class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -346,6 +329,7 @@
 
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
       {#if parsedJson !== null}
+        <JsonWrapToggle />
         <button type="button"
           class="inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-ui-2xs text-muted-foreground/55 transition-colors hover:bg-muted hover:text-foreground"
           onclick={formatJson}
@@ -410,43 +394,12 @@
     <!-- Minimal VSCode-style suggestion list -->
     {#if pathFocused && completionItems.length > 0}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <ul
-        class="absolute left-0 top-full z-50 mt-px w-full max-w-[480px] overflow-hidden rounded-b-lg border border-t-0 border-border/60 bg-popover elevate-2-rim"
-        onmousedown={(e) => e.preventDefault()}
-        role="listbox"
-      >
-        {#each completionItems as item, i (item.insert)}
-          {@const meta = kindMeta(item.kind)}
-          {@const parts = matchParts(item.label, jsonPath)}
-          <li role="option" aria-selected={i === activeIdx}>
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors {i === activeIdx ? 'bg-accent' : 'hover:bg-accent/40'}"
-              onclick={() => pickCompletion(item)}
-            >
-              <!-- Color dot (no text icons, just a colored 6px circle) -->
-              <span class="size-1.5 shrink-0 rounded-full {meta.dot}"></span>
-
-              <!-- Label: highlighted match prefix + remainder -->
-              <span class="min-w-0 flex-1 truncate font-mono text-ui-xs">
-                {#if parts}
-                  <span class="text-foreground">{parts.head}</span><span class="text-muted-foreground/60">{parts.tail}</span>
-                {:else}
-                  <span class="{i === activeIdx ? 'text-foreground' : 'text-muted-foreground/75'}">{item.label}</span>
-                {/if}
-              </span>
-
-              <!-- Type tag -->
-              <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/40">{item.detail}</span>
-
-              <!-- Value preview only on selected row -->
-              {#if i === activeIdx && item.preview}
-                <span class="max-w-36 shrink-0 truncate font-mono text-ui-3xs text-muted-foreground/35">{item.preview}</span>
-              {/if}
-            </button>
-          </li>
-        {/each}
-      </ul>
+      <JsonPathSuggest
+        items={completionItems}
+        query={jsonPath}
+        bind:activeIdx
+        onpick={(insert) => pickCompletion(insert)}
+      />
     {/if}
 
     <div class="ml-auto flex shrink-0 items-center gap-0.5">

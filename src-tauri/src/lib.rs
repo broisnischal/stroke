@@ -7,6 +7,7 @@ mod license;
 mod mcp;
 mod omniroute;
 mod metrics;
+mod proc;
 mod providers;
 mod secrets;
 mod web_search;

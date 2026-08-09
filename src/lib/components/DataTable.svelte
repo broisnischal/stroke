@@ -4144,7 +4144,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (visibleColumns.length > 0) {
       drawHeaderRow(ctx, {
         W, cPanel, cFg, cMuted, cGrid, cBorder, cMutedBg, cAccent, cPrimary, cRing,
-        AMBER, AMBER_FG, BLUE_FG, usedW,
+        AMBER, AMBER_FG, BLUE_FG, RED, usedW,
       })
     }
 
@@ -4852,13 +4852,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
     const indReserve = indicators.length * 18
 
-    // Column name - primary, medium weight.
+    // Required marker - a red asterisk ahead of the name on NOT NULL columns.
+    // The same mark a required form field carries, so it reads without a legend,
+    // and it answers "will this row insert" from the header instead of from the
+    // column menu. Its width comes out of the name's budget rather than being
+    // painted over it, so a long name still truncates against the right edge.
     ctx.font = _fonts.header
-    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.9)
-    const nameMaxW = w - CELL_PAD_X - sortReserve - indReserve - 8
+    const required = !!meta && !meta.nullable
+    const reqW = required ? Math.ceil(textWidth(ctx, '*')) + Math.round(4 * canvasZoom) : 0
+
+    // Column name - primary, medium weight.
+    const nameMaxW = w - CELL_PAD_X - sortReserve - indReserve - reqW - 8
     const name = truncText(ctx, col.name, Math.max(0, nameMaxW))
-    ctx.fillText(name, x + CELL_PAD_X, cy + 0.5)
-    let tx = x + CELL_PAD_X + textWidth(ctx, name) + 7
+    if (required) {
+      ctx.fillStyle = withAlpha(c.RED, 0.85)
+      ctx.fillText('*', x + CELL_PAD_X, cy + 0.5)
+    }
+    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.9)
+    ctx.fillText(name, x + CELL_PAD_X + reqW, cy + 0.5)
+    let tx = x + CELL_PAD_X + reqW + textWidth(ctx, name) + 7
 
     // PK / FK glyphs (vertically centred, accent-coloured).
     for (const ind of indicators) {

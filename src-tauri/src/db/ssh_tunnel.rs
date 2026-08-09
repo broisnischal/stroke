@@ -75,11 +75,15 @@ impl SshTunnel {
 
         args.push(dest);
 
-        let child = Command::new("ssh")
-            .args(&args)
+        let mut cmd = Command::new("ssh");
+        cmd.args(&args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        // quiet: the tunnel is a background process the user never interacts with
+        // (all three streams are already closed), so on Windows it must not get a
+        // console window of its own.
+        let child = crate::proc::quiet(&mut cmd)
             .spawn()
             .map_err(|e| {
                 format!(

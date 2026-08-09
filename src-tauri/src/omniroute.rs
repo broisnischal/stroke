@@ -7,9 +7,11 @@
 // npm absent, install rejected, port busy) because "could not start OmniRoute"
 // gives the user nothing to act on.
 
+use crate::proc::quiet;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tokio::io::AsyncBufReadExt;
 use tokio::process::{Child, Command as Cmd};
 
@@ -114,14 +116,11 @@ async fn login_shell_path() -> Option<String> {
     // -i so the rc file that defines the version manager actually runs. stdin
     // closed and a hard timeout because an interactive shell is entitled to
     // wait for input, and the app must not wait with it.
-    let out = tokio::time::timeout(
-        std::time::Duration::from_secs(4),
-        Cmd::new(&shell)
-            .args(["-ilc", "printf %s \"$PATH\""])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output(),
-    )
+    let mut cmd = Cmd::new(&shell);
+    cmd.args(["-ilc", "printf %s \"$PATH\""])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    let out = tokio::time::timeout(std::time::Duration::from_secs(4), quiet(&mut cmd).output())
     .await
     .ok()?
     .ok()?;
@@ -190,6 +189,9 @@ fn node_version_bins(root: &str, suffix: &str) -> Vec<String> {
 async fn tool(program: &str) -> Cmd {
     let mut c = Cmd::new(program);
     c.env("PATH", user_path().await);
+    // Without this every probe of node/npm/omniroute pops a cmd.exe window over
+    // the app on Windows, and the settings panel probes on open.
+    quiet(&mut c);
     c
 }
 
@@ -221,6 +223,50 @@ async fn omniroute_command() -> Cmd {
     }
 }
 
+// ── The app's own copy of OmniRoute ──────────────────────────────────────────
+//
+// `npm install -g` writes to a prefix most users cannot write to: a default
+// nodejs.org install owns /usr/local and a distro package owns /usr/lib, so the
+// install died with EACCES on macOS and Linux for exactly the people who
+// followed the app's own advice to get Node from nodejs.org. All the app could
+// do was tell them to go run npm in a terminal themselves.
+//
+// So the app keeps its own copy under its data directory. That needs no
+// elevation on any platform, leaves the user's global npm prefix alone, and —
+// because the entry script then sits at a known absolute path — lets the server
+// start as `node <entry>`, with no PATH search and no shell in between. On
+// Windows that is what stops a console window from existing, rather than merely
+// hiding one.
+//
+// A pre-existing global install still works: every lookup falls back to it.
+
+/// `<app data>/omniroute` — the npm project the app installs into.
+fn managed_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Could not locate the app data directory: {e}"))?
+        .join("omniroute"))
+}
+
+/// The installed package's entry script and version, read straight out of its
+/// `package.json`. One file read replaces spawning `omniroute --version`, and
+/// the bin path comes from the package rather than being hardcoded here.
+fn managed_pkg(app: &tauri::AppHandle) -> Option<(PathBuf, String)> {
+    let dir = managed_root(app).ok()?.join("node_modules").join("omniroute");
+    let text = std::fs::read_to_string(dir.join("package.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let version = json.get("version")?.as_str()?.to_string();
+    // `bin` is either a bare path or a map of command name → path.
+    let rel = match json.get("bin")? {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Object(m) => m.get("omniroute")?.as_str()?.to_string(),
+        _ => return None,
+    };
+    let entry = dir.join(rel.trim_start_matches("./"));
+    entry.is_file().then_some((entry, version))
+}
+
 #[derive(serde::Serialize)]
 pub struct NodeStatus {
     pub node: Option<String>,
@@ -231,9 +277,17 @@ pub struct NodeStatus {
 /// What is present on this machine. Never errors: the UI needs to render the
 /// gaps, not a failure.
 #[tauri::command]
-pub async fn omniroute_env() -> Result<NodeStatus, String> {
+pub async fn omniroute_env(app: tauri::AppHandle) -> Result<NodeStatus, String> {
     async fn version(mut cmd: Cmd) -> Option<String> {
-        let out = cmd.arg("--version").output().await.ok()?;
+        // A tool that never exits would otherwise hang this command forever, and
+        // with it the Install and Start buttons that both begin by calling it.
+        let out = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            cmd.arg("--version").output(),
+        )
+        .await
+        .ok()?
+        .ok()?;
         if !out.status.success() {
             return None;
         }
@@ -241,17 +295,25 @@ pub async fn omniroute_env() -> Result<NodeStatus, String> {
         if v.is_empty() { None } else { Some(v) }
     }
 
+    let omniroute = match managed_pkg(&app) {
+        // The app's own copy: a file read, no process at all.
+        Some((_, v)) => Some(v),
+        // Otherwise honour a global install the user already had.
+        None => version(omniroute_command().await).await,
+    };
+
     Ok(NodeStatus {
         node: version(tool("node").await).await,
         npm: version(npm_command().await).await,
-        omniroute: version(omniroute_command().await).await,
+        omniroute,
     })
 }
 
-/// `npm i -g omniroute`, streaming npm's output to the UI as it goes.
+/// Install OmniRoute into the app's own directory, streaming npm's output to the
+/// UI as it goes. Not `-g`: see the note above `managed_root`.
 #[tauri::command]
 pub async fn omniroute_install(app: tauri::AppHandle) -> Result<String, String> {
-    let env = omniroute_env().await?;
+    let env = omniroute_env(app.clone()).await?;
     if env.node.is_none() {
         return Err(
             "Node.js is not installed. OmniRoute runs on Node - install it from nodejs.org (or your package manager), then try again."
@@ -265,9 +327,28 @@ pub async fn omniroute_install(app: tauri::AppHandle) -> Result<String, String> 
         );
     }
 
-    emit(&app, "npm install -g omniroute", "cmd");
+    let root = managed_root(&app)?;
+    std::fs::create_dir_all(&root)
+        .map_err(|e| format!("Could not create {}: {e}", root.display()))?;
+    // npm walks up the tree looking for a package.json when there is none here,
+    // and would install into whatever project it found above the data directory.
+    let manifest = root.join("package.json");
+    if !manifest.exists() {
+        std::fs::write(
+            &manifest,
+            "{\n  \"name\": \"stroke-omniroute\",\n  \"private\": true,\n  \"version\": \"1.0.0\"\n}\n",
+        )
+        .map_err(|e| format!("Could not write {}: {e}", manifest.display()))?;
+    }
+
+    emit(&app, &format!("npm install omniroute  (in {})", root.display()), "cmd");
+    // --loglevel http: OmniRoute pulls ~1200 packages and takes minutes, and at
+    // npm's default level it prints nothing at all until it finishes. The panel
+    // shows the newest log line as a one-line status, so without this it sits on
+    // "resolving package…" for the whole install and reads as hung.
     let mut child = npm_command().await
-        .args(["install", "-g", "omniroute"])
+        .args(["install", "omniroute", "--no-fund", "--no-audit", "--loglevel", "http"])
+        .current_dir(&root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -297,14 +378,19 @@ pub async fn omniroute_install(app: tauri::AppHandle) -> Result<String, String> 
         .await
         .map_err(|e| format!("npm install failed: {e}"))?;
     if !status.success() {
-        return Err(
-            "npm install failed. A global install may need elevated permissions - run `npm install -g omniroute` in a terminal to see the full error."
-                .to_string(),
-        );
+        return Err(format!(
+            "npm could not install OmniRoute into {}. The log above has npm's own reason - a network or registry failure is the usual one.",
+            root.display()
+        ));
     }
 
-    let v = omniroute_env().await?.omniroute;
-    Ok(v.unwrap_or_else(|| "installed".to_string()))
+    let (_, version) = managed_pkg(&app).ok_or_else(|| {
+        format!(
+            "npm reported success but no OmniRoute package landed in {}.",
+            root.join("node_modules").join("omniroute").display()
+        )
+    })?;
+    Ok(version)
 }
 
 /// Is the GATEWAY answering - not merely "is the port open".
@@ -346,12 +432,27 @@ pub async fn omniroute_start(
         return Ok(format!("http://127.0.0.1:{port}"));
     }
 
-    if omniroute_env().await?.omniroute.is_none() {
-        return Err("OmniRoute is not installed yet. Install it first.".to_string());
-    }
+    // Prefer the app's own copy and run its entry script through node directly.
+    // An absolute path needs no PATH search and no shell, so on Windows there is
+    // no console to suppress in the first place. A global install predating this
+    // still starts the old way.
+    let mut cmd = match managed_pkg(&app) {
+        Some((entry, _)) => {
+            emit(&app, &format!("node {} --port {port}", entry.display()), "cmd");
+            let mut c = tool("node").await;
+            c.arg(entry);
+            c
+        }
+        None => {
+            if omniroute_env(app.clone()).await?.omniroute.is_none() {
+                return Err("OmniRoute is not installed yet. Install it first.".to_string());
+            }
+            emit(&app, &format!("omniroute --port {port}"), "cmd");
+            omniroute_command().await
+        }
+    };
 
-    emit(&app, &format!("omniroute --port {port}"), "cmd");
-    let mut child = omniroute_command().await
+    let mut child = cmd
         .args(["--port", &port.to_string()])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

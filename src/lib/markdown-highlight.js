@@ -1,6 +1,16 @@
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 
-import { highlightCode, resolveShikiLang } from '$lib/shiki-highlighter.js'
+// Imported lazily, not statically: this module is reached from AiMarkdown, which
+// CommandPalette pulls into the boot chunk. A static import would drag Shiki (and
+// the grammar/theme graph behind it) into app startup even for users who never
+// render a markdown code block. `highlightMarkdownHtml` is already async, so the
+// extra await costs nothing at the call site; the module promise dedups.
+/** @type {Promise<typeof import('$lib/shiki-highlighter.js')> | null} */
+let shikiModule = null
+function loadShiki() {
+  if (!shikiModule) shikiModule = import('$lib/shiki-highlighter.js')
+  return shikiModule
+}
 
 /** @param {string} className */
 function langFromCodeClass(className) {
@@ -21,6 +31,11 @@ export async function highlightMarkdownHtml(html, theme = 'dark') {
   if (!root) return html
 
   const pres = [...root.querySelectorAll('pre')]
+  // Nothing to highlight → never pay for the Shiki chunk at all. Still returns
+  // the parsed markup, not the input, so the output stays byte-identical to what
+  // the highlighting path produces for the same input.
+  if (pres.length === 0) return root.innerHTML
+  const { highlightCode, resolveShikiLang } = await loadShiki()
   await Promise.all(
     pres.map(async (pre) => {
       const code = pre.querySelector('code')

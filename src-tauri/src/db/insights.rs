@@ -582,7 +582,8 @@ pub async fn instance_state(state: State<'_, DbState>) -> Result<InstanceState, 
                         wait_event,
                         pg_blocking_pids(pid) AS blocking_pids
                  FROM pg_stat_activity
-                 ORDER BY pid",
+                 ORDER BY pid
+                 LIMIT 500",
             )
             .await;
             let locks = pg_query_objects(
@@ -595,7 +596,7 @@ pub async fn instance_state(state: State<'_, DbState>) -> Result<InstanceState, 
             )
             .await;
             let prepared_transactions =
-                pg_query_objects(&pool, "SELECT * FROM pg_prepared_xacts").await;
+                pg_query_objects(&pool, "SELECT * FROM pg_prepared_xacts LIMIT 200").await;
             Ok(InstanceState { engine: "postgres".into(), sessions, locks, prepared_transactions })
         }
         ActiveConnection::Mysql(pool) => {
@@ -604,7 +605,8 @@ pub async fn instance_state(state: State<'_, DbState>) -> Result<InstanceState, 
                 "SELECT ID AS id, USER AS user, HOST AS host, DB AS db,
                         COMMAND AS command, STATE AS state, INFO AS info
                  FROM information_schema.PROCESSLIST
-                 ORDER BY ID",
+                 ORDER BY ID
+                 LIMIT 500",
             )
             .await;
             // performance_schema.data_locks may be disabled or unavailable → empty.
@@ -635,7 +637,8 @@ pub async fn instance_state(state: State<'_, DbState>) -> Result<InstanceState, 
                 &cfg,
                 "SELECT query_id, user, toString(address) AS client, elapsed, \
                         read_rows, memory_usage, query \
-                 FROM system.processes",
+                 FROM system.processes \
+                 LIMIT 500",
             )
             .await;
             Ok(InstanceState {

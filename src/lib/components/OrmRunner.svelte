@@ -47,13 +47,13 @@
       () => {}
     ),
     onmodi = undefined,
-    onmodb = undefined,
     onmodw = undefined,
     onmodn = undefined,
     onmodm = undefined,
     onmodt = undefined,
     onmodshifte = undefined,
     onmodshiftd = undefined,
+    onmodaltd = undefined,
   } = $props();
 
   /** @type {HTMLElement | null} */
@@ -120,8 +120,8 @@
 
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerShortcuts(ed) {
-    const { CtrlCmd, Shift } = monaco.KeyMod
-    const { Enter, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyE } = monaco.KeyCode
+    const { CtrlCmd, Shift, Alt } = monaco.KeyMod
+    const { Enter, KeyS, KeyI, KeyW, KeyN, KeyM, KeyT, KeyD, KeyE } = monaco.KeyCode
     const run = (/** @type {(() => void) | undefined} */ fn) => fn?.()
 
     // Editor-local
@@ -130,12 +130,12 @@
 
     // Global app shortcuts
     ed.addCommand(CtrlCmd | KeyI,         () => run(onmodi))
-    ed.addCommand(CtrlCmd | KeyB,         () => run(onmodb))
     ed.addCommand(CtrlCmd | KeyW,         () => run(onmodw))
     ed.addCommand(CtrlCmd | KeyN,         () => run(onmodn))
     ed.addCommand(CtrlCmd | KeyM,         () => run(onmodm))
     ed.addCommand(CtrlCmd | KeyT,         () => run(onmodt))
     ed.addCommand(CtrlCmd | Shift | KeyD, () => run(onmodshiftd))
+    ed.addCommand(CtrlCmd | Alt | KeyD, () => run(onmodaltd))
     ed.addCommand(CtrlCmd | Shift | KeyE, () => run(onmodshifte))
   }
 
@@ -171,8 +171,17 @@
   }
 
   // ── JSON output ───────────────────────────────────────────────────────────
+  // Bounded for the same reason as the SQL console's: this builds an object per
+  // row and a formatted string of all of them, both O(rows × columns), while
+  // the table beside it is virtualised and pays for neither. Export still
+  // carries the whole result.
+  const JSON_VIEW_ROWS = 1000;
+
+  const jsonRows = $derived(
+    rows.length > JSON_VIEW_ROWS ? rows.slice(0, JSON_VIEW_ROWS) : rows,
+  );
   const rowObjects = $derived(
-    columns.length > 0 && rows.length > 0 ? rowsToObjects(columns, rows) : [],
+    columns.length > 0 && jsonRows.length > 0 ? rowsToObjects(columns, jsonRows) : [],
   );
 
   const jsonText = $derived(
@@ -817,6 +826,8 @@
       {:else}
         <JsonViewer
           json={jsonText}
+          data={rowObjects}
+          shownRows={rowObjects.length}
           rowCount={rows.length}
           onshowtable={() => (outputView = "table")}
         />

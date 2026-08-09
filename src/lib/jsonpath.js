@@ -282,8 +282,14 @@ export function evalJsonPath(root, path) {
  * }} CompletionItem
  */
 
-/** @param {string} path @returns {{ prefix: string, token: string }} */
-function splitPath(path) {
+/**
+ * Split a typed path into the part that is settled and the fragment still being
+ * typed. Exported so the completion widget can bold the characters you actually
+ * typed inside each suggestion — matching without showing the match is what made
+ * the old list read as unrelated noise.
+ * @param {string} path @returns {{ prefix: string, token: string }}
+ */
+export function splitPath(path) {
   if (!path || path === '$') return { prefix: '$', token: '' }
   for (let i = path.length - 1; i >= 1; i--) {
     const ch = path[i]

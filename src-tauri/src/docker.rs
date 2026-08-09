@@ -1,7 +1,16 @@
+use crate::proc::quiet;
 use std::process::Stdio;
 use tauri::Emitter;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::Command as Cmd;
+
+/// `docker …`, with no console window on Windows. The container scan runs on the
+/// connection screen, so a bare spawn flashed a cmd.exe window at app start.
+fn docker() -> Cmd {
+    let mut c = Cmd::new("docker");
+    quiet(&mut c);
+    c
+}
 
 // ── DB-level readiness checks ─────────────────────────────────────────────────
 // TCP-open ≠ database-ready. MySQL/Postgres accept TCP connections seconds before
@@ -76,7 +85,7 @@ fn emit_log(app: &tauri::AppHandle, event: &str, line: &str, kind: &str) {
 
 #[tauri::command]
 pub async fn docker_check() -> Result<String, String> {
-    let out = Cmd::new("docker")
+    let out = docker()
         .args(["version", "--format", "{{.Server.Version}}"])
         .output()
         .await
@@ -135,7 +144,7 @@ pub async fn docker_run_db(
     // ── Pull ──────────────────────────────────────────────────────────────────
     emit_log(&app, &evt, &format!("Pulling {image}…"), "info");
 
-    let mut pull_child = Cmd::new("docker")
+    let mut pull_child = docker()
         .args(["pull", image])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -162,7 +171,7 @@ pub async fn docker_run_db(
     emit_log(&app, &evt, "Image ready. Starting container…", "info");
 
     // ── Run ───────────────────────────────────────────────────────────────────
-    let mut run_cmd = Cmd::new("docker");
+    let mut run_cmd = docker();
     run_cmd
         .arg("run")
         .arg("-d")
@@ -490,7 +499,7 @@ fn database_from_inspect(c: &Value) -> Option<DockerDatabase> {
 /// there is nothing to offer, and the connection screen stays quiet about it.
 #[tauri::command]
 pub async fn scan_docker_databases() -> Result<Vec<DockerDatabase>, String> {
-    let Ok(ps) = Cmd::new("docker").args(["ps", "--format", "{{.ID}}"]).output().await else {
+    let Ok(ps) = docker().args(["ps", "--format", "{{.ID}}"]).output().await else {
         return Ok(Vec::new());
     };
     if !ps.status.success() {
@@ -508,7 +517,7 @@ pub async fn scan_docker_databases() -> Result<Vec<DockerDatabase>, String> {
 
     // One inspect for every container, line-delimited so a single malformed
     // entry can't take the whole scan down with it.
-    let Ok(out) = Cmd::new("docker")
+    let Ok(out) = docker()
         .arg("inspect")
         .arg("--format")
         .arg("{{json .}}")

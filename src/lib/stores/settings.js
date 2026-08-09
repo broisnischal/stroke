@@ -15,7 +15,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -201,8 +201,31 @@ export const DEFAULT_NULL_SORT = 'unset'
 
 /** Selectable font sizes (px) for the AI/agent chat + code blocks. */
 export const AGENT_FONT_SIZES = /** @type {const} */ ([12, 13, 14, 15, 16])
-export const DEFAULT_AGENT_CHAT_FONT = 14
-export const DEFAULT_AGENT_CODE_FONT = 13
+export const DEFAULT_AGENT_CHAT_FONT = 16
+export const DEFAULT_AGENT_CODE_FONT = 16
+
+/**
+ * Chat and code both used to default to the app's 14/13px UI scale, which is the
+ * right size for dense chrome and the wrong one for prose you actually read. The
+ * defaults below moved to 16px; these are what they used to be, so a stored value
+ * that still matches can be recognised as "never chosen" and moved up with them.
+ * @see migrateAgentFont
+ */
+const LEGACY_AGENT_CHAT_FONT = 14
+const LEGACY_AGENT_CODE_FONT = 13
+
+/**
+ * Existing installs have the old default written into localStorage - not because
+ * anyone picked it, but because saving any unrelated setting persists the whole
+ * object. Left alone they would keep 14/13 forever and never see the new default.
+ * A value that still equals the old default is treated as unset; anything else is
+ * a real choice and is left exactly as it is.
+ * @param {unknown} stored @param {number} legacy @param {number} next
+ */
+function migrateAgentFont(stored, legacy, next) {
+  if (!AGENT_FONT_SIZES.includes(/** @type {never} */ (stored))) return next
+  return stored === legacy ? next : /** @type {number} */ (stored)
+}
 /** Thinking-indicator visual styles for the agent chat. */
 export const THINKING_STYLES = /** @type {const} */ ([
   { id: 'shimmer', label: 'Shimmer' },
@@ -250,6 +273,10 @@ export const DEFAULT_SETTINGS = {
   sessionTimezone: DEFAULT_SESSION_TIMEZONE,
   vimMode: false,
   cmdkAiEnabled: false,
+  // Soft-wrap in every JSON viewer. Off by default: unwrapped keeps the
+  // structure scannable down the left edge, and one embedding value can run to
+  // tens of thousands of characters — wrapped, it buries every row around it.
+  jsonWordWrap: false,
   // On by default, and stated plainly in Settings. What it sends is a fixed
   // list of event names, the version and the OS — never a query, a table name
   // or anything about a connection. See src/lib/telemetry.js.
@@ -293,6 +320,12 @@ export const appVimMode = writable(false)
 
 /** Reactive: experimental ⌘K "Ask AI" enabled (off by default; synced by applySettings). */
 export const appCmdkAi = writable(false)
+
+/** Reactive JSON soft-wrap preference (synced by applySettings).
+ *  Every JSON viewer subscribes, so flipping it in Settings — or from the Wrap
+ *  button on any one of them — reflows all of them at once instead of leaving
+ *  each open view on whatever it happened to be created with. */
+export const appJsonWordWrap = writable(false)
 
 /** Reactive: experimental Live mode (auto-refresh) status-bar toggle enabled (off by default). */
 export const appLiveMode = writable(false)
@@ -436,15 +469,16 @@ export function loadSettings() {
     // Absent means on: only an explicit false opts out.
     const telemetry = parsed.telemetry !== false
     const cmdkAiEnabled = parsed.cmdkAiEnabled === true
+    const jsonWordWrap = parsed.jsonWordWrap === true
     const liveModeEnabled = parsed.liveModeEnabled === true
     const nullSortOrder = NULL_SORT_IDS.includes(parsed.nullSortOrder) ? parsed.nullSortOrder : DEFAULT_NULL_SORT
-    const agentChatFontSize = AGENT_FONT_SIZES.includes(parsed.agentChatFontSize) ? parsed.agentChatFontSize : DEFAULT_AGENT_CHAT_FONT
-    const agentCodeFontSize = AGENT_FONT_SIZES.includes(parsed.agentCodeFontSize) ? parsed.agentCodeFontSize : DEFAULT_AGENT_CODE_FONT
+    const agentChatFontSize = migrateAgentFont(parsed.agentChatFontSize, LEGACY_AGENT_CHAT_FONT, DEFAULT_AGENT_CHAT_FONT)
+    const agentCodeFontSize = migrateAgentFont(parsed.agentCodeFontSize, LEGACY_AGENT_CODE_FONT, DEFAULT_AGENT_CODE_FONT)
     const agentThinkingStyle = THINKING_STYLE_IDS.includes(parsed.agentThinkingStyle) ? parsed.agentThinkingStyle : DEFAULT_THINKING_STYLE
     const agentShowQueryCards = parsed.agentShowQueryCards !== false
     const agentWebAccess = parsed.agentWebAccess === true
     const tableTextAlign = TABLE_ALIGN_IDS.includes(parsed.tableTextAlign) ? parsed.tableTextAlign : DEFAULT_TABLE_ALIGN
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry }
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -544,6 +578,7 @@ export function applySettings(settings) {
   setStore(appPreviewDml, settings.previewDmlBeforeApply !== false)
   setStore(appVimMode, settings.vimMode === true)
   setStore(appCmdkAi, settings.cmdkAiEnabled === true)
+  setStore(appJsonWordWrap, settings.jsonWordWrap === true)
   setStore(appLiveMode, settings.liveModeEnabled === true)
   setStore(appAgentQueryCards, settings.agentShowQueryCards !== false)
   setStore(appAgentWebAccess, settings.agentWebAccess === true)

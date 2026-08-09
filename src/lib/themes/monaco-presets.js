@@ -796,12 +796,52 @@ export const MONACO_THEME_SPECS = {
 }
 
 /** @param {ThemeId} id */
+/**
+ * JSON token colours, derived from whatever the theme already says.
+ *
+ * Every preset here was written for SQL — `keyword`, `string`, `number`,
+ * `identifier`. Monaco's JSON tokenizer emits its own scopes (`string.key.json`
+ * for a property name, `string.value.json` for a string value, `keyword.json`
+ * for true/false/null), and a theme that names none of them leaves the JSON
+ * viewer to fall back to the editor foreground for nearly everything — a wall
+ * of one colour, correctly indented and unreadable.
+ *
+ * Keys deliberately take the keyword colour rather than the string colour:
+ * in a result set the property names are the structure and the values are the
+ * data, and colouring both the same is what made them impossible to scan.
+ *
+ * @param {object[]} rules the theme's own rules, read for its palette
+ */
+function jsonRules(rules) {
+  const of = (/** @type {string} */ token) =>
+    /** @type {any} */ (rules.find((r) => /** @type {any} */ (r).token === token))?.foreground
+  const string = of('string')
+  const number = of('number')
+  const keyword = of('keyword')
+  const operator = of('operator')
+  const out = []
+  const add = (/** @type {string} */ token, /** @type {string|undefined} */ fg) => {
+    if (fg) out.push({ token, foreground: fg })
+  }
+  add('string.key.json', keyword)
+  add('string.value.json', string)
+  add('number.json', number)
+  add('keyword.json', keyword)
+  add('delimiter.bracket.json', operator)
+  add('delimiter.array.json', operator)
+  add('delimiter.colon.json', operator)
+  add('delimiter.comma.json', operator)
+  return out
+}
+
 export function monacoThemeDefinition(id) {
   const spec = MONACO_THEME_SPECS[id]
   return {
     base: spec.base,
     inherit: true,
-    rules: spec.rules,
+    // JSON scopes appended after the theme's own, so a preset that names one
+    // explicitly still wins.
+    rules: [...jsonRules(spec.rules), ...spec.rules],
     colors: darkChrome(spec.chrome),
   }
 }

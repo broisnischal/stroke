@@ -1,4 +1,5 @@
 <script>
+  import { appJsonWordWrap, loadSettings, saveSettings } from '$lib/stores/settings.js'
   import { tick } from 'svelte'
   import Copy from '@lucide/svelte/icons/copy'
   import Check from '@lucide/svelte/icons/check'
@@ -37,10 +38,6 @@
   } = $props()
 
   let html = $state('')
-  const WRAP_KEY = 'stroke:json-word-wrap'
-  function loadWrap() {
-    try { return localStorage.getItem(WRAP_KEY) === 'true' } catch { return false }
-  }
 
   // Tree = collapsible fold view (issue #2: wrap/unwrap json inside row data);
   // Raw = the original highlighted text block.
@@ -50,7 +47,6 @@
   }
 
   let copied = $state(false)
-  let wordWrap = $state(loadWrap())
   let viewMode = $state(loadView())
 
   /** @param {'tree' | 'raw'} mode */
@@ -122,7 +118,7 @@
   })
 
   // keep the wordWrap reactive - the pre's whitespace class is toggled via CSS var
-  const wrapClass = $derived(wordWrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre')
+  const wrapClass = $derived($appJsonWordWrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre')
 
   $effect(() => {
     if (!html || !rootEl) return
@@ -285,11 +281,12 @@
         title="Toggle word wrap"
         class={[
           'inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-ui-xs transition-colors hover:bg-accent/40 hover:text-foreground',
-          wordWrap ? 'text-foreground bg-accent/30' : 'text-muted-foreground/60',
+          $appJsonWordWrap ? 'text-foreground bg-accent/30' : 'text-muted-foreground/60',
         ].join(' ')}
         onclick={() => {
-          wordWrap = !wordWrap
-          try { localStorage.setItem(WRAP_KEY, String(wordWrap)) } catch { /* ignore */ }
+          const next = !$appJsonWordWrap
+          appJsonWordWrap.set(next)
+          saveSettings({ ...loadSettings(), jsonWordWrap: next })
         }}
       >
         <WrapText class="size-3.5 shrink-0" />
@@ -349,7 +346,7 @@
     <div
       bind:this={rootEl}
       data-studio-selectable="text"
-      class={['px-5 py-2', wordWrap ? '' : 'overflow-x-auto'].join(' ')}
+      class={['px-5 py-2', $appJsonWordWrap ? '' : 'overflow-x-auto'].join(' ')}
       onwheel={handleWheel}
       oncontextmenu={handleContextMenu}
     >

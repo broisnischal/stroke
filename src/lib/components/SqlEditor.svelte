@@ -33,13 +33,13 @@
     onmods = undefined,
     // Global app shortcuts - registered inside Monaco so they work when editor is focused
     onmodi = undefined,
-    onmodb = undefined,
     onmodw = undefined,
     onmodn = undefined,
     onmodm = undefined,
     onmodt = undefined,
     onmodshifte = undefined,
     onmodshiftd = undefined,
+    onmodaltd = undefined,
     onmodshifto = undefined,
     onmodj = undefined,
     onmodshiftb = undefined,
@@ -119,7 +119,7 @@
 
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerAppShortcuts(ed) {
-    const { CtrlCmd, Shift } = monaco.KeyMod
+    const { CtrlCmd, Shift, Alt } = monaco.KeyMod
     const { KeyK, KeyL, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, KeyE, KeyJ, Enter } = monaco.KeyCode
 
     /** @param {() => void | undefined} fn */
@@ -179,12 +179,12 @@
 
     // Global app shortcuts - work even when Monaco has focus
     ed.addCommand(CtrlCmd | KeyI,           () => run(onmodi))
-    ed.addCommand(CtrlCmd | KeyB,           () => run(onmodb))
     ed.addCommand(CtrlCmd | KeyW,           () => run(onmodw))
     ed.addCommand(CtrlCmd | KeyN,           () => run(onmodn))
     ed.addCommand(CtrlCmd | KeyM,           () => run(onmodm))
     ed.addCommand(CtrlCmd | KeyT,           () => run(onmodt))
     ed.addCommand(CtrlCmd | Shift | KeyD,   () => run(onmodshiftd))
+    ed.addCommand(CtrlCmd | Alt | KeyD,   () => run(onmodaltd))
     ed.addCommand(CtrlCmd | Shift | KeyE,   () => run(onmodshifte))
     ed.addCommand(CtrlCmd | Shift | KeyO,   () => run(onmodshifto))
     ed.addCommand(CtrlCmd | KeyJ,           () => run(onmodj))

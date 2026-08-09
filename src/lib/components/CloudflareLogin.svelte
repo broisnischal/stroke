@@ -9,6 +9,8 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import DbIcon from './DbIcon.svelte'
   import SearchableMenu from './SearchableMenu.svelte'
+  import ProviderAuthPanel from './ProviderAuthPanel.svelte'
+  import { Button } from '$lib/components/ui/button/index.js'
   import { cfStartOAuth, cfOAuthStatus, cfLogout } from '$lib/cloudflare.js'
   import { cloudflareListAccounts, cloudflareListD1Databases } from '$lib/api.js'
   import { cn } from '$lib/utils.js'
@@ -182,45 +184,52 @@
 <div class="flex flex-col gap-3">
 
   {#if phase === 'idle'}
-    <!-- Not connected, compact CTA (the provider row above already names it). -->
-    <div class="flex flex-col gap-2">
-      <button
-        type="button"
-        class="group flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/90 active:scale-[0.98]"
-        onclick={startAuth}
-      >
-        Sign in with Cloudflare
-        <ArrowRight class="size-4 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
-      </button>
-      <p class="text-ui-xs text-muted-foreground">Opens your browser to authorize · same PKCE flow as Wrangler</p>
-    </div>
+    <ProviderAuthPanel
+      title="Sign in with Cloudflare"
+      subtitle="Opens your browser to authorize. Stroke gets a scoped token for D1 — your Cloudflare password never passes through it."
+      hint="Same PKCE flow as Wrangler"
+    >
+      {#snippet mark()}<DbIcon id="d1" class="size-4 shrink-0" />{/snippet}
+      {#snippet action()}
+        <Button class="group" onclick={startAuth}>
+          Sign in
+          <ArrowRight class="size-3.5 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
+        </Button>
+      {/snippet}
+    </ProviderAuthPanel>
 
   {:else if phase === 'authorizing'}
-    <!-- ── Waiting for browser ── -->
-    <div class="flex flex-col gap-3.5 rounded-lg border border-border/40 bg-muted/[0.03] p-4">
-      <div class="flex items-center gap-3.5">
-        <div class="relative flex size-11 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background">
-          <span class="pulse-ring pointer-events-none absolute inset-0 rounded-lg ring-1 ring-primary/40"></span>
-          <DbIcon id="d1" class="size-5 text-foreground" />
-        </div>
-        <div class="min-w-0">
-          <p class="text-ui-sm font-semibold leading-tight text-foreground">Waiting for Cloudflare…</p>
-          <p class="mt-1 text-ui-xs leading-relaxed text-pretty text-muted-foreground">
-            Finish authorizing in the browser tab, then come back here.
-          </p>
-        </div>
-      </div>
-      <div class="h-1 overflow-hidden rounded-full bg-muted/60">
-        <span class="progress-slide block h-full w-1/3 rounded-full bg-primary/70"></span>
-      </div>
-    </div>
+    <ProviderAuthPanel
+      tone="busy"
+      progress
+      title="Waiting for Cloudflare…"
+      subtitle="Finish authorizing in the browser tab, then come back here."
+      hint="Times out in 5 min"
+    >
+      {#snippet mark()}<DbIcon id="d1" class="size-4 shrink-0" />{/snippet}
+    </ProviderAuthPanel>
 
   {:else if phase === 'fetching'}
-    <!-- ── Loading accounts ── -->
-    <div class="flex items-center gap-2.5 py-2 text-ui-xs text-muted-foreground">
-      <Loader2 class="size-4 animate-spin" />
-      Loading your Cloudflare accounts…
-    </div>
+    <ProviderAuthPanel
+      tone="busy"
+      progress
+      title="Signed in"
+      subtitle="Loading your Cloudflare accounts…"
+      hint={email}
+    >
+      {#snippet mark()}<Check class="size-4 shrink-0 text-success" />{/snippet}
+    </ProviderAuthPanel>
+
+  {:else if phase === 'error'}
+    <ProviderAuthPanel tone="error" title={shownError.title} subtitle={shownError.detail} hint="Nothing was saved">
+      {#snippet mark()}<AlertTriangle class="size-4 shrink-0 text-destructive" />{/snippet}
+      {#snippet action()}
+        <Button variant="outline" class="group" onclick={startAuth}>
+          <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" />
+          Try again
+        </Button>
+      {/snippet}
+    </ProviderAuthPanel>
 
   {:else if phase === 'selecting'}
     <!-- ── Connected header ── -->
@@ -337,56 +346,7 @@
       </div>
     {/if}
 
-  {:else if phase === 'error'}
-    <div class="err-card overflow-hidden rounded-lg border border-border/70 bg-card shadow-[var(--elevate-1)]">
-      <div class="flex items-start gap-3 p-4">
-        <div class="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/15">
-          <AlertTriangle class="size-4" />
-        </div>
-        <div class="min-w-0 flex-1">
-          <p class="text-ui-sm font-semibold leading-snug text-foreground">{shownError.title}</p>
-          <p class="mt-1.5 break-words rounded-md bg-muted/40 px-2 py-1.5 font-mono text-ui-2xs leading-relaxed text-muted-foreground select-text">{shownError.detail}</p>
-        </div>
-      </div>
-      <div class="flex items-center justify-end border-t border-border/50 bg-muted/[0.15] px-3 py-2.5">
-        <button
-          type="button"
-          class="group inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3.5 text-ui-xs font-medium text-background transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-foreground/90 active:scale-[0.97]"
-          onclick={startAuth}
-        >
-          <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" /> Try again
-        </button>
-      </div>
-    </div>
   {/if}
 
 </div>
 
-<style>
-  /* Expanding pulse ring on the Cloudflare mark while awaiting the browser. */
-  @keyframes pulse-ring {
-    0%   { opacity: 0.55; transform: scale(1); }
-    100% { opacity: 0;    transform: scale(1.35); }
-  }
-  .pulse-ring { animation: pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-
-  /* Indeterminate bar sweeping left→right. */
-  @keyframes progress-slide {
-    0%   { transform: translateX(-120%); }
-    100% { transform: translateX(320%); }
-  }
-  .progress-slide { animation: progress-slide 1.3s ease-in-out infinite; }
-
-  /* Error card entrance - a calm rise + settle (never scale from 0). */
-  @keyframes err-in {
-    from { opacity: 0; transform: translateY(6px) scale(0.985); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  .err-card { animation: err-in 240ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)) both; }
-
-  @media (prefers-reduced-motion: reduce) {
-    .pulse-ring { animation: none; opacity: 0.4; }
-    .progress-slide { animation: none; width: 100%; opacity: 0.5; }
-    .err-card { animation: none; }
-  }
-</style>

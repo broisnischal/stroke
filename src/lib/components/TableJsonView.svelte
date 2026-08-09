@@ -9,9 +9,12 @@
   import { untrack } from 'svelte'
   import Icon from './Icon.svelte'
   import MonacoTextView from './MonacoTextView.svelte'
+  import JsonWrapToggle from './JsonWrapToggle.svelte'
+  import JsonPathSuggest from './JsonPathSuggest.svelte'
+  import { appJsonWordWrap } from '$lib/stores/settings.js'
   import { cn } from '$lib/utils.js'
   import { rowToRecord, formatJsonValue } from '$lib/row-inspector.js'
-  import { evalJsonPath, getCompletions, applyCompletion, describeResult } from '$lib/jsonpath.js'
+  import { evalJsonPath, getCompletionItems, applyCompletion, describeResult } from '$lib/jsonpath.js'
 
   /**
    * JSON mode for the data table - a read-only Monaco surface (smooth
@@ -82,11 +85,13 @@
 
   const completions = $derived.by(() => {
     if (!pathFocused) return []
-    return getCompletions(records, jsonPath).slice(0, 8)
+    return getCompletionItems(records, jsonPath).slice(0, 12)
   })
 
   $effect(() => {
-    if (!pathFocused || completions.length === 0) activeIdx = -1
+    // Arm the top match: a filtered list where Enter does nothing is a list
+    // you have to arrow into before it is any use.
+    activeIdx = pathFocused && completions.length ? 0 : -1
   })
 
   /** @param {string} completion */
@@ -107,7 +112,7 @@
       activeIdx = (activeIdx - 1 + completions.length) % completions.length
     } else if ((e.key === 'Tab' || e.key === 'Enter') && activeIdx >= 0) {
       e.preventDefault()
-      pickCompletion(completions[activeIdx])
+      pickCompletion(completions[activeIdx].insert)
     } else if (e.key === 'Escape') {
       activeIdx = -1
       pathFocused = false
@@ -155,31 +160,13 @@
         </button>
       {/if}
 
-      <!-- Autocomplete dropdown, anchored under the field -->
       {#if pathFocused && completions.length > 0}
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <ul
-          class="absolute left-0 top-full z-50 mt-1 min-w-48 overflow-hidden rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim"
-          onmousedown={(e) => e.preventDefault()}
-        >
-          {#each completions as completion, i (completion)}
-            <li>
-              <button
-                type="button"
-                class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-ui-xs transition-colors {i === activeIdx ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
-                onclick={() => pickCompletion(completion)}
-              >
-                {#if completion.startsWith('[')}
-                  <span class="shrink-0 text-ui-3xs text-muted-foreground/50">[idx]</span>
-                {:else}
-                  <span class="shrink-0 text-ui-3xs text-muted-foreground/50">.key</span>
-                {/if}
-                <span class="truncate">{completion.startsWith('.') ? completion.slice(1) : completion}</span>
-                <span class="ml-auto shrink-0 text-muted-foreground/40">{completion}</span>
-              </button>
-            </li>
-          {/each}
-        </ul>
+        <JsonPathSuggest
+          items={completions}
+          query={jsonPath}
+          bind:activeIdx
+          onpick={(insert) => pickCompletion(insert)}
+        />
       {/if}
     </div>
 
@@ -196,6 +183,6 @@
       <p class="font-mono text-ui-sm text-muted-foreground/40">No data to display</p>
     </div>
   {:else}
-    <MonacoTextView text={displayedJson} language="json" />
+    <MonacoTextView text={displayedJson} language="json" wordWrap={$appJsonWordWrap ? 'on' : 'off'} />
   {/if}
 </div>

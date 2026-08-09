@@ -8,14 +8,34 @@
   import Copy from '@lucide/svelte/icons/copy'
   import Download from '@lucide/svelte/icons/download'
   import CheckCheck from '@lucide/svelte/icons/check-check'
-  import { evalJsonPath, getCompletions, applyCompletion, describeResult } from '$lib/jsonpath.js'
+  import JsonWrapToggle from './JsonWrapToggle.svelte'
+  import JsonPathSuggest from './JsonPathSuggest.svelte'
+  import { appJsonWordWrap } from '$lib/stores/settings.js'
+  import { cn } from '$lib/utils.js'
+  import { evalJsonPath, getCompletionItems, applyCompletion, describeResult } from '$lib/jsonpath.js'
 
   let {
     json = '[]',
+    /**
+     * The already-parsed value, when the caller has one.
+     *
+     * Passing it skips a full `JSON.parse` of `json`. The callers build these
+     * objects, stringify them for the editor, and this component used to parse
+     * that string straight back into the same shape purely so JSONPath had
+     * something to walk — a third pass over the whole payload, and a second
+     * copy of it in memory, to recover data the caller was already holding.
+     */
+    data = /** @type {any} */ (undefined),
+    /** Rows actually rendered, when the caller bounded what it handed over. */
+    shownRows = 0,
     rowCount = 0,
     onshowtable = () => {},
     ondownload = /** @type {(() => void) | undefined} */ (undefined),
   } = $props()
+
+  /** True when the caller trimmed the result to keep this view responsive. */
+  const truncated = $derived(shownRows > 0 && rowCount > shownRows)
+
 
   /** @type {HTMLElement | null} */
   let container = $state(null)
@@ -33,6 +53,7 @@
   let pathInput = $state(null)
 
   const parsedJson = $derived.by(() => {
+    if (data !== undefined) return data
     try { return JSON.parse(json) } catch { return null }
   })
 
@@ -48,14 +69,23 @@
     return JSON.stringify(pathResult.value, null, 2)
   })
 
+  // The rich items, not just their insert strings. `kind`, `detail` and
+  // `preview` were being computed and then thrown away, which is why every row
+  // read `.key auth_name .auth_name` — the widget was reconstructing a worse
+  // version of data it already had.
   const completions = $derived.by(() => {
     if (!pathFocused || parsedJson === null) return []
-    return getCompletions(parsedJson, jsonPath).slice(0, 8)
+    return getCompletionItems(parsedJson, jsonPath).slice(0, 12)
   })
 
+  // Nothing selected means Enter does nothing, which is the wrong default for a
+  // list that is already filtered to what you typed. The top match is armed, so
+  // Tab or Enter takes it straight away.
   $effect(() => {
-    if (!pathFocused || completions.length === 0) activeIdx = -1
+    void completions
+    activeIdx = completions.length ? 0 : -1
   })
+
 
   /** @param {string} completion */
   function pickCompletion(completion) {
@@ -75,7 +105,7 @@
       activeIdx = (activeIdx - 1 + completions.length) % completions.length
     } else if ((e.key === 'Tab' || e.key === 'Enter') && activeIdx >= 0) {
       e.preventDefault()
-      pickCompletion(completions[activeIdx])
+      pickCompletion(completions[activeIdx].insert)
     } else if (e.key === 'Escape') {
       activeIdx = -1
       pathFocused = false
@@ -118,7 +148,7 @@
       fontWeight: 'normal',
       padding: { top: 12, bottom: 12 },
       scrollBeyondLastLine: false,
-      wordWrap: 'off',
+      wordWrap: $appJsonWordWrap ? 'on' : 'off',
       renderLineHighlight: 'none',
       lineNumbers: 'on',
       // 4 (not 3) so the right-aligned numbers get a character of inset instead
@@ -166,6 +196,9 @@
     if (!editor) return
     if (editor.getValue() !== displayedJson) editor.setValue(displayedJson)
   })
+
+  // Wrap is an app setting, so a change made anywhere reflows this editor too.
+  $effect(() => { editor?.updateOptions({ wordWrap: $appJsonWordWrap ? 'on' : 'off' }) })
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -191,39 +224,30 @@
       <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/50">{describeResult(pathResult.value)}</span>
     {/if}
 
-    <!-- Autocomplete dropdown -->
     {#if pathFocused && completions.length > 0}
-      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <ul
-        class="absolute left-0 top-full z-50 mt-px min-w-48 overflow-hidden rounded-b-md border border-border bg-popover elevate-2-rim"
-        onmousedown={(e) => e.preventDefault()}
-      >
-        {#each completions as completion, i (completion)}
-          <li>
-            <button
-              type="button"
-              class="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-ui-xs transition-colors {i === activeIdx ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'}"
-              onclick={() => pickCompletion(completion)}
-            >
-              {#if completion.startsWith('[')}
-                <span class="shrink-0 text-ui-3xs text-muted-foreground/50">[idx]</span>
-              {:else}
-                <span class="shrink-0 text-ui-3xs text-muted-foreground/50">.key</span>
-              {/if}
-              <span class="truncate">{completion.startsWith('.') ? completion.slice(1) : completion}</span>
-              <span class="ml-auto shrink-0 text-muted-foreground/40">{completion}</span>
-            </button>
-          </li>
-        {/each}
-      </ul>
+      <JsonPathSuggest
+        items={completions}
+        query={jsonPath}
+        bind:activeIdx
+        onpick={(insert) => pickCompletion(insert)}
+      />
     {/if}
 
     <!-- toolbar right side -->
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
-      {#if rowCount > 0}
+      {#if truncated}
+        <!-- Say what is missing rather than quietly showing a prefix: a JSON
+             document that silently stops at 1000 rows reads as the answer. -->
+        <span
+          class="select-none px-2 font-mono text-ui-2xs text-warning"
+          title="The JSON view is capped to keep it responsive. Export to get every row."
+        >{shownRows.toLocaleString()} of {rowCount.toLocaleString()} rows</span>
+      {:else if rowCount > 0}
         <span class="select-none px-2 font-mono text-ui-2xs text-muted-foreground">{rowCount} rows</span>
         <div class="h-4 w-px bg-border/60"></div>
       {/if}
+
+      <JsonWrapToggle />
 
       <button
         type="button"

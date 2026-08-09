@@ -726,7 +726,9 @@
                     {#if omniBusy === 'installing'}
                       <Loader2 class="size-3.5 animate-spin" />Installing…
                     {:else}
-                      <Plus class="size-3.5" />Install OmniRoute (npm i -g omniroute)
+                      <!-- Not `-g`: Stroke installs its own copy under the app
+                           data directory, so this never needs elevation. -->
+                      <Plus class="size-3.5" />Install OmniRoute
                     {/if}
                   </button>
                 {:else if omniEnv && !omniServing}

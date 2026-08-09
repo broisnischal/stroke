@@ -169,7 +169,7 @@
     const q = (question ?? '').trim()
     if (!q) return
     if (!isAiConfigured(get(aiSettings))) { onopensettings(); open = false; return }
-    askApi = []; askTurns = []; askError = ''
+    askApi = []; askTurns = []; askError = ''; askStick = true
     page = 'ask'; paletteSearch = ''
     await askTurn(q)
   }
@@ -187,6 +187,7 @@
     const settings = get(aiSettings)
     askError = ''
     askApi.push({ role: 'user', content: q })
+    askStick = true
     askTurns = [...askTurns, { id: uid(), role: 'user', text: q }]
     askExecuted = new Set()
     askStreaming = true
@@ -295,30 +296,60 @@
   // Keep the ask thread pinned to the newest message as it streams / grows.
   // Coalesced to one adjustment per frame and gated on "near the bottom" so it
   // never fights manual scroll and doesn't jitter the view on every token.
-  let askBottomEl = $state(/** @type {HTMLElement | null} */ (null))
-  let _askScrollRaf = 0
-  /** @param {HTMLElement | null} el */
+  /** The transcript container, watched for growth. */
+  let askContentEl = $state(/** @type {HTMLElement | null} */ (null))
+  /** Whether to keep pinning to the bottom. False once the user scrolls away. */
+  let askStick = true
+
+  /**
+   * The scrolling ancestor (the command list).
+   *
+   * Deliberately does NOT require the element to be overflowing yet: at the
+   * moment the transcript mounts it is shorter than the list, so a check on
+   * scrollHeight found nothing and the effect below bailed for good.
+   * @param {HTMLElement | null} el
+   */
   function _nearestScroller(el) {
     let n = el?.parentElement
     while (n) {
       const oy = getComputedStyle(n).overflowY
-      if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n
+      if (oy === 'auto' || oy === 'scroll') return n
       n = n.parentElement
     }
     return null
   }
+
+  // Follow the answer as it streams.
+  //
+  // Driven by a ResizeObserver on the transcript rather than by askTurns:
+  // AiMarkdown renders on a 120ms debounce, so a measurement taken when the
+  // state changed is always behind what is actually on screen. The old effect
+  // scrolled to a bottom that did not exist yet, fell a little further behind on
+  // every token, and once the gap passed its 120px "near the bottom" gate it
+  // stopped following for the rest of the answer — which is exactly when there
+  // was most left to read. Watching the box means the scroll happens after the
+  // content it is scrolling to.
   $effect(() => {
-    void askTurns
-    if (page !== 'ask' || !askBottomEl) return
-    if (_askScrollRaf) return
-    _askScrollRaf = requestAnimationFrame(() => {
-      _askScrollRaf = 0
-      const scroller = _nearestScroller(askBottomEl)
-      if (!scroller) return
-      if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120) {
-        scroller.scrollTop = scroller.scrollHeight
-      }
+    const content = askContentEl
+    if (page !== 'ask' || !content) return
+    const scroller = _nearestScroller(content)
+    if (!scroller) return
+
+    // A small tolerance, not a large one: this decides "is the user reading the
+    // live end", and sub-pixel layout means exact equality never holds.
+    const atBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24
+    const onScroll = () => { askStick = atBottom() }
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+
+    const ro = new ResizeObserver(() => {
+      if (askStick) scroller.scrollTop = scroller.scrollHeight
     })
+    ro.observe(content)
+
+    return () => {
+      scroller.removeEventListener('scroll', onScroll)
+      ro.disconnect()
+    }
   })
 
   /** @param {KeyboardEvent} e */
@@ -556,7 +587,7 @@
 
       <!-- Taller on the Ask AI page: a transcript scrolled inside 440px shows about
            one exchange at a time, so answers and their result tables get clipped. -->
-      <Command.List class={page === 'ask' ? 'max-h-[min(640px,74vh)]' : 'max-h-[min(440px,58vh)]'}>
+      <Command.List class={page === 'ask' ? 'h-[min(640px,74vh)] max-h-[min(640px,74vh)]' : 'max-h-[min(440px,58vh)]'}>
         {#if page !== 'ask'}
           <Command.Empty class="py-8 text-center text-ui-xs text-muted-foreground/40">No results.</Command.Empty>
         {/if}
@@ -572,7 +603,7 @@
 
         <!-- ── ASK AI (inline quick-ask) ─────────────────────────────── -->
         {#if page === 'ask'}
-          <div class="px-3 py-2.5">
+          <div bind:this={askContentEl} class="select-text px-3 py-2.5">
             {#each askTurns as turn (turn.id)}
               {#if turn.role === 'user'}
                 <div class="mb-1.5 flex items-start gap-2">
@@ -649,7 +680,6 @@
               {/if}
             </div>
             <div class="ml-[22px] mt-1.5 text-ui-3xs text-muted-foreground/35">Type below and press ↵ to follow up</div>
-            <div bind:this={askBottomEl} class="h-px"></div>
           </div>
         {/if}
 
