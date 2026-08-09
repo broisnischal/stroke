@@ -18,9 +18,10 @@ export const PROVIDERS = [
   { id: 'mistral',    label: 'Mistral',          url: 'https://api.mistral.ai/v1', keysUrl: 'https://console.mistral.ai/api-keys' },
   { id: 'google',     label: 'Google',           url: 'https://generativelanguage.googleapis.com/v1beta/openai', keysUrl: 'https://aistudio.google.com/apikey' },
   { id: 'ollama',     label: 'Ollama',           url: 'http://localhost:11434/v1', keysUrl: null },
-  // OmniRoute is a gateway you run yourself (`npm i -g omniroute && omniroute`); it
-  // fronts many providers behind one OpenAI-compatible endpoint on :20128, and its
-  // key comes from its own local dashboard rather than a hosted console.
+  // OmniRoute is a gateway that runs locally; Stroke installs and starts its own
+  // copy (see src-tauri/src/omniroute.rs). It fronts many providers behind one
+  // OpenAI-compatible endpoint on :20128, and its key comes from its own local
+  // dashboard rather than a hosted console.
   { id: 'omniroute',  label: 'OmniRoute',        url: 'http://localhost:20128/v1', keysUrl: 'http://localhost:20128/dashboard' },
   { id: 'custom',     label: 'Custom',           url: '', keysUrl: null },
 ]
