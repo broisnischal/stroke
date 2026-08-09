@@ -171,8 +171,17 @@
   }
 
   // ── JSON output ───────────────────────────────────────────────────────────
+  // Bounded for the same reason as the SQL console's: this builds an object per
+  // row and a formatted string of all of them, both O(rows × columns), while
+  // the table beside it is virtualised and pays for neither. Export still
+  // carries the whole result.
+  const JSON_VIEW_ROWS = 1000;
+
+  const jsonRows = $derived(
+    rows.length > JSON_VIEW_ROWS ? rows.slice(0, JSON_VIEW_ROWS) : rows,
+  );
   const rowObjects = $derived(
-    columns.length > 0 && rows.length > 0 ? rowsToObjects(columns, rows) : [],
+    columns.length > 0 && jsonRows.length > 0 ? rowsToObjects(columns, jsonRows) : [],
   );
 
   const jsonText = $derived(
@@ -817,6 +826,8 @@
       {:else}
         <JsonViewer
           json={jsonText}
+          data={rowObjects}
+          shownRows={rowObjects.length}
           rowCount={rows.length}
           onshowtable={() => (outputView = "table")}
         />

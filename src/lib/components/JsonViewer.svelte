@@ -12,10 +12,25 @@
 
   let {
     json = '[]',
+    /**
+     * The already-parsed value, when the caller has one.
+     *
+     * Passing it skips a full `JSON.parse` of `json`. The callers build these
+     * objects, stringify them for the editor, and this component used to parse
+     * that string straight back into the same shape purely so JSONPath had
+     * something to walk — a third pass over the whole payload, and a second
+     * copy of it in memory, to recover data the caller was already holding.
+     */
+    data = /** @type {any} */ (undefined),
+    /** Rows actually rendered, when the caller bounded what it handed over. */
+    shownRows = 0,
     rowCount = 0,
     onshowtable = () => {},
     ondownload = /** @type {(() => void) | undefined} */ (undefined),
   } = $props()
+
+  /** True when the caller trimmed the result to keep this view responsive. */
+  const truncated = $derived(shownRows > 0 && rowCount > shownRows)
 
   /** @type {HTMLElement | null} */
   let container = $state(null)
@@ -33,6 +48,7 @@
   let pathInput = $state(null)
 
   const parsedJson = $derived.by(() => {
+    if (data !== undefined) return data
     try { return JSON.parse(json) } catch { return null }
   })
 
@@ -220,7 +236,14 @@
 
     <!-- toolbar right side -->
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
-      {#if rowCount > 0}
+      {#if truncated}
+        <!-- Say what is missing rather than quietly showing a prefix: a JSON
+             document that silently stops at 1000 rows reads as the answer. -->
+        <span
+          class="select-none px-2 font-mono text-ui-2xs text-warning"
+          title="The JSON view is capped to keep it responsive. Export to get every row."
+        >{shownRows.toLocaleString()} of {rowCount.toLocaleString()} rows</span>
+      {:else if rowCount > 0}
         <span class="select-none px-2 font-mono text-ui-2xs text-muted-foreground">{rowCount} rows</span>
         <div class="h-4 w-px bg-border/60"></div>
       {/if}
