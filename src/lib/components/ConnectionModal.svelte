@@ -3129,10 +3129,7 @@
                     </div>
                     <!-- /manual column -->
                   {:else if isProvider}
-                    <!-- Narrower than the manual form on purpose. A sign-in is one
-                       column of short lines; stretched to the form's 880px it read
-                       as a landing-page banner rather than a control. -->
-                    <div class="mt-6 flex max-w-[520px] flex-col gap-4">
+                    <div class="mt-6 flex flex-col gap-4">
                       <!-- Keyed on the provider so switching fully remounts the flow:
                          re-checks sign-in status and clears the previous provider's
                          database list (otherwise a stale pick hits the wrong account). -->
@@ -3169,7 +3166,7 @@
                       {@render advancedSection()}
                     </div>
                   {:else if dbType === "d1"}
-                    <div class="mt-6 flex max-w-[520px] flex-col gap-4">
+                    <div class="mt-6 flex flex-col gap-4">
                       {#key dbType}
                         <CloudflareLogin
                           onselect={connectD1Selection}

@@ -5,12 +5,14 @@
    * Cloudflare and the OAuth providers each used to draw their own idle CTA,
    * waiting card, loading row and error card. Four shapes per provider, none of
    * them the same size, so every step of a sign-in resized the pane under the
-   * cursor - and the idle step was a full-bleed black slab that read like a
-   * landing-page CTA rather than a control in a desktop app.
+   * cursor.
    *
-   * This is one card with four tones. The mark, the two lines of copy and the
-   * footer stay exactly where they are from the first frame to the last; only
-   * their contents change. Nothing moves while you sign in.
+   * This is one block with four tones, and deliberately NOT a card: a bordered
+   * box floating above the form it belongs to reads as an advert, not as the
+   * first step of the form. It is a section — icon, copy, one action, a rule —
+   * flush with the fields below it and the same width as them. The rule doubles
+   * as the progress track, so a long wait can show life without a bar appearing
+   * out of nowhere and pushing everything down.
    */
   import Loader2 from '@lucide/svelte/icons/loader-2'
   import { cn } from '$lib/utils.js'
@@ -20,28 +22,23 @@
     tone = /** @type {'idle' | 'busy' | 'error'} */ ('idle'),
     title = '',
     subtitle = '',
-    /** Quiet line in the footer, left of the action. */
+    /** Quiet third line — the reassurance, not the instruction. */
     hint = '',
-    /** Indeterminate bar under the header - proof a long wait is still alive. */
+    /** Animate the rule, for a wait with no percentage to report. */
     progress = false,
-    /** The provider logo. Sits in a fixed 36px well so every provider aligns. */
+    /** The provider logo, in a fixed well so every provider aligns. */
     mark = undefined,
     /** The one button for this step. */
     action = undefined,
   } = $props()
 </script>
 
-<div
-  class={cn(
-    'flex flex-col overflow-hidden rounded-xl border bg-card/40',
-    tone === 'error' ? 'border-destructive/25' : 'border-border/50',
-  )}
->
-  <div class="flex items-start gap-3 p-3.5">
+<section class="flex flex-col gap-3.5">
+  <div class="flex items-start gap-3">
     <div
       class={cn(
-        'relative flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background',
-        tone === 'error' ? 'border-destructive/25' : 'border-border/50',
+        'relative mt-px flex size-8 shrink-0 items-center justify-center rounded-lg',
+        tone === 'error' ? 'bg-destructive/10' : 'bg-muted/50',
       )}
     >
       {#if tone === 'busy'}
@@ -50,27 +47,32 @@
       {/if}
       {#if mark}{@render mark()}{:else}<Loader2 class="size-4 animate-spin text-muted-foreground" />{/if}
     </div>
-    <div class="min-w-0 flex-1 pt-px">
+
+    <div class="min-w-0 flex-1">
       <p class="text-ui-sm font-medium leading-snug text-foreground">{title}</p>
       {#if subtitle}
-        <p class="mt-1 text-pretty text-ui-xs leading-relaxed text-muted-foreground">{subtitle}</p>
+        <!-- Capped at a readable measure: the pane is as wide as the manual form,
+             and a sentence run across all of it is a line you lose your place in. -->
+        <p class="mt-1 max-w-[68ch] text-pretty text-ui-xs leading-relaxed text-muted-foreground">
+          {subtitle}
+        </p>
+      {/if}
+      {#if hint}
+        <p class="mt-1.5 text-ui-2xs text-muted-foreground/50">{hint}</p>
       {/if}
     </div>
-  </div>
 
-  <!-- Reserved whether or not it is running: a bar that appears mid-flow would
-       nudge the footer down by its own height. -->
-  <div class="h-px bg-border/40">
-    {#if progress}
-      <span class="progress-slide block h-px w-1/3 bg-primary/70"></span>
+    {#if action}
+      <div class="shrink-0">{@render action()}</div>
     {/if}
   </div>
 
-  <div class="flex min-h-11 items-center justify-between gap-3 px-3.5 py-2">
-    <span class="min-w-0 truncate text-ui-2xs text-muted-foreground/55">{hint}</span>
-    {#if action}<div class="shrink-0">{@render action()}</div>{/if}
+  <div class="h-px w-full overflow-hidden bg-border/40">
+    {#if progress}
+      <span class="progress-slide block h-px w-1/4 bg-primary/70"></span>
+    {/if}
   </div>
-</div>
+</section>
 
 <style>
   @keyframes pulse-ring {
@@ -81,7 +83,7 @@
 
   @keyframes progress-slide {
     0%   { transform: translateX(-120%); }
-    100% { transform: translateX(320%); }
+    100% { transform: translateX(420%); }
   }
   .progress-slide { animation: progress-slide 1.3s ease-in-out infinite; }
 
