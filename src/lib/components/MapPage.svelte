@@ -935,7 +935,7 @@
           <Select.Item
             value={layerLabel(l)}
             label={layerLabel(l)}
-            class="rounded-md py-1.5 pl-2 text-ui-xs"
+            class="py-1.5 pl-2 text-ui-xs"
           >
             <span class="truncate">{layerLabel(l)}</span>
             <span class="ml-auto shrink-0 pl-3 text-ui-2xs text-muted-foreground/60">
@@ -954,11 +954,11 @@
             <span class="truncate">{filterColumn || 'Column'}</span>
           </Select.Trigger>
           <Select.Content class="z-[120] max-h-[20rem] min-w-[10rem] p-1" sideOffset={6}>
-            <Select.Item value="" label="No filter" class="rounded-md py-1.5 pl-2 text-ui-xs">
+            <Select.Item value="" label="No filter" class="py-1.5 pl-2 text-ui-xs">
               No filter
             </Select.Item>
             {#each filterColumns as c (c)}
-              <Select.Item value={c} label={c} class="rounded-md py-1.5 pl-2 text-ui-xs">{c}</Select.Item>
+              <Select.Item value={c} label={c} class="py-1.5 pl-2 text-ui-xs">{c}</Select.Item>
             {/each}
           </Select.Content>
         </Select.Root>
@@ -972,7 +972,7 @@
             </Select.Trigger>
             <Select.Content class="z-[120] max-h-[20rem] min-w-[10rem] p-1" sideOffset={6}>
               {#each FILTER_OPS as o (o.value)}
-                <Select.Item value={o.value} label={o.label} class="rounded-md py-1.5 pl-2 text-ui-xs">
+                <Select.Item value={o.value} label={o.label} class="py-1.5 pl-2 text-ui-xs">
                   {o.label}
                 </Select.Item>
               {/each}
@@ -1014,7 +1014,7 @@
         </Select.Trigger>
         <Select.Content class="z-[120] min-w-[15rem] p-1" sideOffset={6}>
           {#each BASEMAPS as b (b.id)}
-            <Select.Item value={b.id} label={b.label} class="rounded-md py-1.5 pl-2 text-ui-xs">
+            <Select.Item value={b.id} label={b.label} class="py-1.5 pl-2 text-ui-xs">
               <span class="truncate">{b.label}</span>
               <span class="ml-auto shrink-0 pl-3 text-ui-2xs text-muted-foreground/60">
                 {b.offline ? 'offline' : 'online tiles'}

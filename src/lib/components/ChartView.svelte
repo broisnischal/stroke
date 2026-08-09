@@ -320,7 +320,9 @@
   const axisLabel = 'flex h-full shrink-0 select-none items-center border-r border-border/30 px-2 text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/35'
   const axisValue = 'truncate px-2 font-mono text-ui-xs text-foreground'
   const axisContent = 'z-[120] max-h-[20rem] min-w-[11rem] p-1'
-  const axisItem = 'rounded-md py-1.5 pl-2 font-mono text-ui-xs'
+  // No radius here: Select.Item's own rounded-lg is derived from the panel's
+  // radius minus its padding, and overriding it breaks that relationship.
+  const axisItem = 'py-1.5 pl-2 font-mono text-ui-xs'
   const iconBtn = 'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground'
 </script>
 
