@@ -224,6 +224,8 @@
   /** Filter over the saved rail. Matches the things you would recognise a
    *  connection by — its name, its engine, and where it points. */
   let savedQuery = $state("");
+  /** @type {HTMLInputElement | null} */
+  let savedSearchEl = $state(null);
   const savedMatches = $derived.by(() => {
     const q = savedQuery.trim().toLowerCase();
     if (!q) return saved;
@@ -233,6 +235,27 @@
         .some((v) => String(v).toLowerCase().includes(q)),
     );
   });
+  /** What Enter in the filter acts on — same target the eye is already on. */
+  const firstSavedMatch = $derived(savedMatches[0] ?? null);
+
+  /**
+   * Whether rows still play their staggered entrance.
+   *
+   * The stagger is a first-impression flourish, and it is the wrong thing the
+   * moment the list becomes a filter result: rows enter and leave on every
+   * keystroke, and replaying a 250ms rise with up to 480ms of accumulated delay
+   * on each one reads as lag rather than polish. So it retires on the first
+   * keystroke and comes back the next time the dialog is opened.
+   */
+  let savedStagger = $state(true);
+
+  /** Move focus from the filter into the list, so a match can be reached without
+   *  leaving the keyboard. Rows carry tabindex, so they take focus directly. */
+  function focusFirstSavedRow() {
+    /** @type {HTMLElement | null} */
+    const row = document.querySelector('[data-conn-row]');
+    row?.focus();
+  }
   let lastId = $state(getLastConnectionId());
   let editingId = $state(/** @type {string|null} */ (null));
   let connecting = $state(/** @type {string|null} */ (null));
@@ -1083,8 +1106,23 @@
     engineMatches[0]?.drivers.find((d) => !DISABLED_TABS.has(d.id)) ?? null,
   );
 
+  /** Same rule as the rail's `savedStagger`: the local-target cards are filtered
+   *  by this search, so their entrance stagger has to stop once it would be
+   *  replaying on every keystroke rather than introducing the panel. */
+  let engineStagger = $state(true);
+
   $effect(() => {
     if (open && step === "pick" && engineSearchEl) engineSearchEl.focus();
+  });
+
+  // A fresh open is a fresh first impression: the rail's entrance stagger is
+  // armed again, and a filter left over from last time is not what you want to
+  // be looking at.
+  $effect(() => {
+    if (!open) return;
+    savedStagger = true;
+    engineStagger = true;
+    savedQuery = "";
   });
 
   // ── Connections rail: width + collapsed state, remembered ──────────────────
@@ -1957,39 +1995,65 @@
 
             <!-- Search. Four connections fit on screen; forty do not, and the
                  rail is the fastest way in for someone who already knows which
-                 database they want. Only shown once there are enough to hunt
-                 through — below that it is one more thing to look past. -->
-            {#if saved.length > 5}
+                 database they want.
+                 Shown from two connections up — the point at which there is
+                 something to tell apart. It used to appear only past five, so
+                 the control materialised out of nowhere as the list grew, and
+                 the people most likely to reach for it were the ones who had
+                 never seen it. The engine panel opposite always shows its
+                 search; this one now matches it. -->
+            {#if saved.length > 1}
               <div class="shrink-0 px-2 pb-2">
                 <div class="relative">
                   <Icon
                     name="search"
-                    class="pointer-events-none absolute left-2.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40"
+                    class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40"
                   />
-                  <input
-                    type="text"
+                  <!-- The shared Input, resized to the rail's compact scale, so
+                       the focus ring and border states match the engine search
+                       rather than being approximated a second time. -->
+                  <Input
+                    bind:ref={savedSearchEl}
                     bind:value={savedQuery}
                     placeholder="Filter connections…"
                     aria-label="Filter saved connections"
                     autocomplete="off"
                     spellcheck="false"
-                    class="h-7 w-full rounded-md border border-border/40 bg-background/60 pl-7 pr-6 text-ui-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-ring/55"
+                    class="h-8 rounded-md border pl-8 pr-8 text-ui-xs"
+                    oninput={() => (savedStagger = false)}
                     onkeydown={(e) => {
-                      if (e.key !== "Escape" || !savedQuery) return;
-                      // Clear first, close the dialog second — Escape on a
-                      // non-empty filter should undo the filter, not the dialog.
-                      e.preventDefault();
-                      e.stopPropagation();
-                      savedQuery = "";
+                      if (e.key === "Escape" && savedQuery) {
+                        // Clear first, close the dialog second — Escape on a
+                        // non-empty filter should undo the filter, not the dialog.
+                        e.preventDefault();
+                        e.stopPropagation();
+                        savedQuery = "";
+                        return;
+                      }
+                      // Enter takes the top match, the same way clicking it would.
+                      if (e.key === "Enter" && firstSavedMatch) {
+                        e.preventDefault();
+                        resetForm(firstSavedMatch);
+                        return;
+                      }
+                      // Down arrow hands off to the list, so a filtered result can
+                      // be reached without going back to the mouse.
+                      if (e.key === "ArrowDown" && savedMatches.length) {
+                        e.preventDefault();
+                        focusFirstSavedRow();
+                      }
                     }}
                   />
                   {#if savedQuery}
                     <button
                       type="button"
                       aria-label="Clear filter"
-                      onclick={() => (savedQuery = "")}
-                      class="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground/40 transition-colors hover:text-foreground"
-                      ><Icon name="x" class="size-3" /></button
+                      onclick={() => {
+                        savedQuery = "";
+                        savedSearchEl?.focus();
+                      }}
+                      class="absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground after:absolute after:-inset-1 after:content-['']"
+                      ><Icon name="x" class="size-3.5" /></button
                     >
                   {/if}
                 </div>
@@ -1998,9 +2062,22 @@
 
             <div class="min-h-0 flex-1 border-t border-border/15 pt-1">
               {#if savedQuery && savedMatches.length === 0}
-                <p class="px-4 py-3 text-ui-2xs text-muted-foreground/50">
-                  No connection matches “{savedQuery}”.
-                </p>
+                <!-- A dead end needs a way out: the filter that emptied the list
+                     is the only thing standing between here and the list. -->
+                <div class="flex flex-col items-start gap-1.5 px-4 py-3">
+                  <p class="text-ui-2xs text-muted-foreground/50">
+                    No connection matches “{savedQuery}”.
+                  </p>
+                  <button
+                    type="button"
+                    onclick={() => {
+                      savedQuery = "";
+                      savedSearchEl?.focus();
+                    }}
+                    class="rounded text-ui-2xs text-primary transition-colors hover:underline"
+                    >Clear filter</button
+                  >
+                </div>
               {:else if saved.length > 0}
                 <ScrollArea type="auto" class="h-full scroll-smooth">
                   <div class="px-2 py-1 flex flex-col gap-0.5">
@@ -2013,18 +2090,32 @@
                           ? `${conn.type}-memory`
                           : conn.type}
                       <div
+                        data-conn-row
                         class={cn(
-                          "cn-stagger-in group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.98]",
+                          "group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.98]",
+                          savedStagger && "cn-stagger-in",
                           isSel
                             ? "bg-muted/50 text-foreground"
                             : "text-muted-foreground/60 hover:bg-muted/30 hover:text-foreground",
                         )}
-                        style="animation-delay: {Math.min(i, 12) * 40}ms"
+                        style={savedStagger
+                          ? `animation-delay: ${Math.min(i, 12) * 40}ms`
+                          : ""}
                         role="button"
                         tabindex="0"
                         onclick={() => resetForm(conn)}
                         ondblclick={() => { if (!connecting) void connectWith(conn); }}
-                        onkeydown={(e) => e.key === "Enter" && resetForm(conn)}
+                        onkeydown={(e) => {
+                          if (e.key === "Enter") { resetForm(conn); return; }
+                          // Arrow keys walk the list; Up off the top row returns
+                          // to the filter, so the whole rail is one keyboard path.
+                          if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+                          e.preventDefault();
+                          const rows = [...document.querySelectorAll("[data-conn-row]")];
+                          const next = rows.indexOf(e.currentTarget) + (e.key === "ArrowDown" ? 1 : -1);
+                          if (next < 0) savedSearchEl?.focus();
+                          else /** @type {HTMLElement|undefined} */ (rows[next])?.focus();
+                        }}
                         title="Click to edit · double-click to connect"
                       >
                         {#if isSel}
@@ -2148,6 +2239,9 @@
                   id={activeDriver.id}
                   class={cn("size-5 shrink-0", engineTint(activeDriver.id))}
                 />
+                <!-- No blurb under the title: by this point the engine has been
+                     chosen, so "Local file-based database" is describing a
+                     decision already made. The form below is what to read. -->
                 <div class="min-w-0">
                   <h2
                     class="truncate text-ui-lg font-semibold tracking-tight text-foreground"
@@ -2180,6 +2274,7 @@
                   placeholder="Search databases and local studios…"
                   aria-label="Search databases"
                   class="pl-9 pr-8"
+                  oninput={() => (engineStagger = false)}
                   onkeydown={(e) => {
                     if (e.key !== "Enter" || !firstEngineMatch) return;
                     e.preventDefault();
@@ -2294,9 +2389,12 @@
                           disabled={!t.conn || !!connecting}
                           title={t.hint}
                           onclick={() => void connectLocal(t)}
-                          style="animation-delay: {Math.min(i, 8) * 35}ms"
+                          style={engineStagger
+                            ? `animation-delay: ${Math.min(i, 8) * 35}ms`
+                            : ""}
                           class={cn(
-                            "cn-stagger-in group flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out",
+                            "group flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out",
+                            engineStagger && "cn-stagger-in",
                             t.conn
                               ? "border-border/50 text-foreground/90 hover:border-border hover:bg-muted/40 hover:text-foreground active:scale-[0.98] disabled:opacity-60"
                               : "cursor-not-allowed border-border/30 text-muted-foreground/40",
