@@ -201,8 +201,31 @@ export const DEFAULT_NULL_SORT = 'unset'
 
 /** Selectable font sizes (px) for the AI/agent chat + code blocks. */
 export const AGENT_FONT_SIZES = /** @type {const} */ ([12, 13, 14, 15, 16])
-export const DEFAULT_AGENT_CHAT_FONT = 14
-export const DEFAULT_AGENT_CODE_FONT = 13
+export const DEFAULT_AGENT_CHAT_FONT = 16
+export const DEFAULT_AGENT_CODE_FONT = 16
+
+/**
+ * Chat and code both used to default to the app's 14/13px UI scale, which is the
+ * right size for dense chrome and the wrong one for prose you actually read. The
+ * defaults below moved to 16px; these are what they used to be, so a stored value
+ * that still matches can be recognised as "never chosen" and moved up with them.
+ * @see migrateAgentFont
+ */
+const LEGACY_AGENT_CHAT_FONT = 14
+const LEGACY_AGENT_CODE_FONT = 13
+
+/**
+ * Existing installs have the old default written into localStorage - not because
+ * anyone picked it, but because saving any unrelated setting persists the whole
+ * object. Left alone they would keep 14/13 forever and never see the new default.
+ * A value that still equals the old default is treated as unset; anything else is
+ * a real choice and is left exactly as it is.
+ * @param {unknown} stored @param {number} legacy @param {number} next
+ */
+function migrateAgentFont(stored, legacy, next) {
+  if (!AGENT_FONT_SIZES.includes(/** @type {never} */ (stored))) return next
+  return stored === legacy ? next : /** @type {number} */ (stored)
+}
 /** Thinking-indicator visual styles for the agent chat. */
 export const THINKING_STYLES = /** @type {const} */ ([
   { id: 'shimmer', label: 'Shimmer' },
@@ -438,8 +461,8 @@ export function loadSettings() {
     const cmdkAiEnabled = parsed.cmdkAiEnabled === true
     const liveModeEnabled = parsed.liveModeEnabled === true
     const nullSortOrder = NULL_SORT_IDS.includes(parsed.nullSortOrder) ? parsed.nullSortOrder : DEFAULT_NULL_SORT
-    const agentChatFontSize = AGENT_FONT_SIZES.includes(parsed.agentChatFontSize) ? parsed.agentChatFontSize : DEFAULT_AGENT_CHAT_FONT
-    const agentCodeFontSize = AGENT_FONT_SIZES.includes(parsed.agentCodeFontSize) ? parsed.agentCodeFontSize : DEFAULT_AGENT_CODE_FONT
+    const agentChatFontSize = migrateAgentFont(parsed.agentChatFontSize, LEGACY_AGENT_CHAT_FONT, DEFAULT_AGENT_CHAT_FONT)
+    const agentCodeFontSize = migrateAgentFont(parsed.agentCodeFontSize, LEGACY_AGENT_CODE_FONT, DEFAULT_AGENT_CODE_FONT)
     const agentThinkingStyle = THINKING_STYLE_IDS.includes(parsed.agentThinkingStyle) ? parsed.agentThinkingStyle : DEFAULT_THINKING_STYLE
     const agentShowQueryCards = parsed.agentShowQueryCards !== false
     const agentWebAccess = parsed.agentWebAccess === true

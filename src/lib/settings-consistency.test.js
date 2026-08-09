@@ -91,4 +91,18 @@ describe('settings option lists stay in step with their consumers', () => {
     const offenders = files.filter((f) => /\.download\s*=/.test(read(f)))
     expect(offenders).toEqual([])
   })
+
+  it('defaults the agent fonts to a size the picker actually offers', () => {
+    // loadSettings only keeps a stored value that is in AGENT_FONT_SIZES, and
+    // the picker is built from the same list. A default outside it would show
+    // an empty select and silently snap back on the next load.
+    const sizes = listBlock(settings, 'AGENT_FONT_SIZES')
+      .match(/\d+/g)
+      .map(Number)
+    for (const name of ['DEFAULT_AGENT_CHAT_FONT', 'DEFAULT_AGENT_CODE_FONT', 'LEGACY_AGENT_CHAT_FONT', 'LEGACY_AGENT_CODE_FONT']) {
+      const m = settings.match(new RegExp(`${name} = (\\d+)`))
+      expect(m, `${name} not found — was it renamed?`).toBeTruthy()
+      expect(sizes, `${name} = ${m[1]} is not offered by the picker`).toContain(Number(m[1]))
+    }
+  })
 })
