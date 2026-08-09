@@ -11,6 +11,8 @@
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import X from '@lucide/svelte/icons/x'
   import DbIcon from './DbIcon.svelte'
+  import ProviderAuthPanel from './ProviderAuthPanel.svelte'
+  import { Button } from '$lib/components/ui/button/index.js'
   import Search from '@lucide/svelte/icons/search'
   import KeyRound from '@lucide/svelte/icons/key-round'
   import Eye from '@lucide/svelte/icons/eye'
@@ -252,77 +254,81 @@
 
 <div class="flex flex-col gap-3">
   {#if phase === 'idle'}
-    <!-- Not connected, compact CTA (the selected provider row above already
-         carries the icon + name + blurb, so no redundant hero here). -->
     {#if meta?.mode === 'token'}
-      <div class="flex flex-col gap-2">
-        <input
-          type="text"
-          bind:value={tokenInput}
-          placeholder="postgres://…"
-          class="h-9 w-full rounded-lg border-2 border-border bg-muted/25 px-3 font-mono text-ui-2xs outline-none transition-[border-color] focus:border-foreground/55"
-          onkeydown={(e) => { if (e.key === 'Enter') saveToken() }}
-        />
-        <button
-          type="button"
-          class="flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/90 active:scale-[0.98] disabled:opacity-40"
-          disabled={!tokenInput.trim()}
-          onclick={saveToken}
-        >
-          <KeyRound class="size-4 shrink-0" /> Continue
-        </button>
-        <p class="text-ui-xs text-muted-foreground">Paste your {meta?.name} connection string to continue.</p>
-      </div>
+      <!-- Providers with no OAuth: one field and one button, same frame. -->
+      <ProviderAuthPanel
+        title="Connect to {meta?.name}"
+        subtitle="Paste the connection string from your {meta?.name} dashboard. It is stored locally, in this app only."
+        hint="Nothing leaves your machine"
+      >
+        {#snippet mark()}<DbIcon id={provider} class="size-4 shrink-0" />{/snippet}
+        {#snippet action()}
+          <Button disabled={!tokenInput.trim()} onclick={saveToken}>
+            <KeyRound class="size-3.5 shrink-0" /> Continue
+          </Button>
+        {/snippet}
+      </ProviderAuthPanel>
+      <input
+        type="text"
+        bind:value={tokenInput}
+        placeholder="postgres://…"
+        aria-label="{meta?.name} connection string"
+        class="h-9 w-full rounded-lg border-2 border-border bg-muted/25 px-3 font-mono text-ui-2xs outline-none transition-[border-color] focus:border-foreground/55"
+        onkeydown={(e) => { if (e.key === 'Enter') saveToken() }}
+      />
     {:else}
-      <div class="flex flex-col gap-2">
-        <button
-          type="button"
-          class="group flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/90 active:scale-[0.98]"
-          onclick={startAuth}
-        >
-          <DbIcon id={provider} class="size-4 shrink-0" />
-          <span>Sign in with {meta?.name}</span>
-          <ArrowRight class="size-4 shrink-0 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
-        </button>
-        <p class="text-ui-xs text-muted-foreground">Opens your browser to authorize · secure PKCE flow</p>
-      </div>
+      <ProviderAuthPanel
+        title="Sign in with {meta?.name}"
+        subtitle="Opens your browser to authorize. Stroke receives a scoped token — your {meta?.name} password never passes through it."
+        hint="Secure PKCE flow"
+      >
+        {#snippet mark()}<DbIcon id={provider} class="size-4 shrink-0" />{/snippet}
+        {#snippet action()}
+          <Button class="group" onclick={startAuth}>
+            Sign in
+            <ArrowRight class="size-3.5 transition-transform duration-150 ease-out group-hover:translate-x-0.5" />
+          </Button>
+        {/snippet}
+      </ProviderAuthPanel>
     {/if}
 
   {:else if phase === 'authorizing'}
-    <div class="flex flex-col gap-3.5 rounded-lg border border-border/40 bg-muted/[0.03] p-4">
-      <div class="flex items-center gap-3.5">
-        <!-- Provider mark with a live pulse ring, reads as "waiting on this one". -->
-        <div class="relative flex size-11 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background">
-          <span class="pulse-ring pointer-events-none absolute inset-0 rounded-lg ring-1 ring-primary/40"></span>
-          <DbIcon id={provider} class="size-5 text-foreground" />
-        </div>
-        <div class="min-w-0">
-          <p class="text-ui-sm font-semibold leading-tight text-foreground">Waiting for {meta?.name}…</p>
-          <p class="mt-1 text-ui-xs leading-relaxed text-pretty text-muted-foreground">
-            Finish authorizing in the browser tab, then come back here.
-          </p>
-        </div>
-      </div>
-      <!-- Indeterminate progress, quiet proof the flow is still alive. -->
-      <div class="h-1 overflow-hidden rounded-full bg-muted/60">
-        <span class="progress-slide block h-full w-1/3 rounded-full bg-primary/70"></span>
-      </div>
-      <div class="flex items-center justify-between gap-3">
-        <span class="text-ui-2xs tabular-nums text-muted-foreground/50">Times out in 5 min</span>
-        <button
-          type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/50 px-2.5 text-ui-2xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/50 hover:text-foreground active:scale-[0.96]"
-          onclick={cancelAuth}
-        >
-          <X class="size-3" /> Cancel
-        </button>
-      </div>
-    </div>
+    <ProviderAuthPanel
+      tone="busy"
+      progress
+      title="Waiting for {meta?.name}…"
+      subtitle="Finish authorizing in the browser tab, then come back here."
+      hint="Times out in 5 min"
+    >
+      {#snippet mark()}<DbIcon id={provider} class="size-4 shrink-0" />{/snippet}
+      {#snippet action()}
+        <Button variant="ghost" size="sm" onclick={cancelAuth}>
+          <X class="size-3.5" /> Cancel
+        </Button>
+      {/snippet}
+    </ProviderAuthPanel>
 
   {:else if phase === 'fetching'}
-    <div class="flex items-center gap-2.5 py-2 text-ui-xs text-muted-foreground">
-      <Loader2 class="size-4 animate-spin" /> Loading your databases…
-    </div>
+    <ProviderAuthPanel
+      tone="busy"
+      progress
+      title="Signed in"
+      subtitle="Loading your databases…"
+      hint={meta?.name ?? ''}
+    >
+      {#snippet mark()}<Check class="size-4 shrink-0 text-success" />{/snippet}
+    </ProviderAuthPanel>
+
+  {:else if phase === 'error'}
+    <ProviderAuthPanel tone="error" title={shownError.title} subtitle={shownError.detail} hint="Nothing was saved">
+      {#snippet mark()}<AlertTriangle class="size-4 shrink-0 text-destructive" />{/snippet}
+      {#snippet action()}
+        <Button variant="outline" class="group" onclick={() => (phase = 'idle')}>
+          <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" />
+          Try again
+        </Button>
+      {/snippet}
+    </ProviderAuthPanel>
 
   {:else if phase === 'selecting' || phase === 'building' || phase === 'password'}
     <!-- Connected header -->
@@ -449,55 +455,6 @@
       </div>
     {/if}
 
-  {:else if phase === 'error'}
-    <div class="err-card overflow-hidden rounded-lg border border-border/70 bg-card shadow-[var(--elevate-1)]">
-      <div class="flex items-start gap-3 p-4">
-        <div class="flex size-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/15">
-          <AlertTriangle class="size-4" />
-        </div>
-        <div class="min-w-0 flex-1">
-          <p class="text-ui-sm font-semibold leading-snug text-foreground">{shownError.title}</p>
-          <p class="mt-1.5 break-words rounded-md bg-muted/40 px-2 py-1.5 font-mono text-ui-2xs leading-relaxed text-muted-foreground select-text">{shownError.detail}</p>
-        </div>
-      </div>
-      <div class="flex items-center justify-end border-t border-border/50 bg-muted/[0.15] px-3 py-2.5">
-        <button
-          type="button"
-          class="group inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-foreground px-3.5 text-ui-xs font-medium text-background transition-[background-color,transform] duration-150 ease-[var(--ease-out)] hover:bg-foreground/90 active:scale-[0.97]"
-          onclick={() => (phase = 'idle')}
-        >
-          <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" /> Try again
-        </button>
-      </div>
-    </div>
   {/if}
 </div>
 
-<style>
-  /* Expanding pulse ring on the provider mark while awaiting the browser. */
-  @keyframes pulse-ring {
-    0%   { opacity: 0.55; transform: scale(1); }
-    100% { opacity: 0;    transform: scale(1.35); }
-  }
-  .pulse-ring { animation: pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-
-  /* Indeterminate bar sweeping left→right. */
-  @keyframes progress-slide {
-    0%   { transform: translateX(-120%); }
-    100% { transform: translateX(320%); }
-  }
-  .progress-slide { animation: progress-slide 1.3s ease-in-out infinite; }
-
-  /* Error card entrance - a calm rise + settle (never scale from 0). */
-  @keyframes err-in {
-    from { opacity: 0; transform: translateY(6px) scale(0.985); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  .err-card { animation: err-in 240ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)) both; }
-
-  @media (prefers-reduced-motion: reduce) {
-    .pulse-ring { animation: none; opacity: 0.4; }
-    .progress-slide { animation: none; width: 100%; opacity: 0.5; }
-    .err-card { animation: none; }
-  }
-</style>
