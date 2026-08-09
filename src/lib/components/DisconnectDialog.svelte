@@ -20,5 +20,6 @@
   confirmLabel="Disconnect"
   confirmIcon="unplug"
   variant="destructive"
+  confirmOnEnter
   onconfirm={ondisconnect}
 />

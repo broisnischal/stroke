@@ -40,6 +40,7 @@
     onmodt = undefined,
     onmodshifte = undefined,
     onmodshiftd = undefined,
+    onmodaltd = undefined,
     onmodshifto = undefined,
     onmodj = undefined,
     onmodshiftb = undefined,
@@ -119,7 +120,7 @@
 
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerAppShortcuts(ed) {
-    const { CtrlCmd, Shift } = monaco.KeyMod
+    const { CtrlCmd, Shift, Alt } = monaco.KeyMod
     const { KeyK, KeyL, KeyR, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyO, KeyE, KeyJ, Enter } = monaco.KeyCode
 
     /** @param {() => void | undefined} fn */
@@ -185,6 +186,7 @@
     ed.addCommand(CtrlCmd | KeyM,           () => run(onmodm))
     ed.addCommand(CtrlCmd | KeyT,           () => run(onmodt))
     ed.addCommand(CtrlCmd | Shift | KeyD,   () => run(onmodshiftd))
+    ed.addCommand(CtrlCmd | Alt | KeyD,   () => run(onmodaltd))
     ed.addCommand(CtrlCmd | Shift | KeyE,   () => run(onmodshifte))
     ed.addCommand(CtrlCmd | Shift | KeyO,   () => run(onmodshifto))
     ed.addCommand(CtrlCmd | KeyJ,           () => run(onmodj))

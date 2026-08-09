@@ -46,7 +46,7 @@
         { keys: [mod, "⇧", "F"], desc: "Focus table filter" },
         { keys: [mod, "D"], desc: "Switch database" },
         { keys: [mod, "⇧", "C"], desc: "Switch connection" },
-        { keys: [mod, opt, "D"], desc: "Disconnect" },
+        { keys: [mod, opt, "D"], desc: "Data view" },
         { keys: [mod, "/"], desc: "Keyboard shortcuts" },
         { keys: ["F11"], desc: "Toggle fullscreen" },
       ],
@@ -55,7 +55,7 @@
       label: "Views",
       icon: Monitor,
       shortcuts: [
-        { keys: [mod, "⇧", "D"], desc: "Data view" },
+        { keys: [mod, "⇧", "D"], desc: "Disconnect" },
         { keys: [mod, "⇧", "S"], desc: "SQL editor" },
         { keys: [mod, "⇧", "O"], desc: "ORM Runner" },
         { keys: [mod, "⇧", "X"], desc: "Extensions" },

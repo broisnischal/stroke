@@ -83,6 +83,7 @@
     onmodt = undefined,
     onmodshifte = undefined,
     onmodshiftd = undefined,
+    onmodaltd = undefined,
     onmodshifto = undefined,
     onmodshiftb = undefined,
     queryHistoryVisible = $bindable(false),
@@ -745,6 +746,7 @@
       {onmodt}
       {onmodshifte}
       {onmodshiftd}
+      {onmodaltd}
       {onmodshifto}
       onmodj={toggleOutput}
       onmodshiftb={() => { queryHistoryVisible = !queryHistoryVisible; onmodshiftb?.() }}

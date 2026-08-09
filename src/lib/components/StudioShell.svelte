@@ -2011,11 +2011,13 @@ let rowSearch = $state('')
     commandOpen = true
   })
 
-  // Disconnect the current connection (opens the confirm dialog).
+  // Data view (⌘⌥D). It used to be ⌘⇧D; that key now disconnects, which is the
+  // more consequential of the two and the one worth having under the easier
+  // chord.
   createHotkey('Mod+Alt+D', (e) => {
     if (!connection) return
     e.preventDefault()
-    showDisconnectDialog = true
+    void focusDataView()
   })
 
   // Open the keyboard-shortcuts reference (Ctrl/⌘+/ - same key as Mod+? without shift).
@@ -2067,10 +2069,11 @@ let rowSearch = $state('')
     })()
   })
 
+  // Disconnect (⌘⇧D) - opens the confirm dialog, where Enter confirms.
   createHotkey('Mod+Shift+D', (e) => {
     if (!connection) return
     e.preventDefault()
-    void focusDataView()
+    showDisconnectDialog = true
   })
 
   createHotkey('Mod+Shift+S', (e) => {
@@ -6281,7 +6284,8 @@ let rowSearch = $state('')
             onmodm={() => cycleTheme()}
             onmodt={() => { if (connection) { commandPage = 'tables'; commandOpen = true } }}
             onmodshifte={() => { if (connection) aiMode ? exitAiMode() : enterAiMode() }}
-            onmodshiftd={() => { if (connection) void focusDataView() }}
+            onmodshiftd={() => { if (connection) showDisconnectDialog = true }}
+            onmodaltd={() => { if (connection) void focusDataView() }}
           />
           {/await}
           </svelte:boundary>
@@ -6322,7 +6326,8 @@ let rowSearch = $state('')
             onmodm={() => cycleTheme()}
             onmodt={() => { if (connection) { commandPage = 'tables'; commandOpen = true } }}
             onmodshifte={() => { if (connection) aiMode ? exitAiMode() : enterAiMode() }}
-            onmodshiftd={() => { if (connection) void focusDataView() }}
+            onmodshiftd={() => { if (connection) showDisconnectDialog = true }}
+            onmodaltd={() => { if (connection) void focusDataView() }}
             onmodshifto={() => { if (connection) openOrmTab() }}
             onqueryrefresh={refreshQueryStores}
             onhistoryselect={(sql) => void openQueryInEditor(sql)}
