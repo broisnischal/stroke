@@ -22,6 +22,7 @@
   import History from '@lucide/svelte/icons/history'
   import Plus from '@lucide/svelte/icons/plus'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
+  import { IS_MAC } from '$lib/shortcuts.js'
   import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode } from '$lib/stores/settings.js'
   import { isTextEntryTarget, setVimSubMode } from '$lib/vim/vim.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
@@ -38,12 +39,14 @@
   import * as PaneTree from '$lib/pane-layout.js'
   import TabLoading from './TabLoading.svelte'
   import TableToolbar from './TableToolbar.svelte'
-  import StructureView from './StructureView.svelte'
   import DataTable from './DataTable.svelte'
   import RowDetailPanel from './RowDetailPanel.svelte'
-  import TableJsonView from './TableJsonView.svelte'
+  // TableJsonView / TableTextView are NOT imported here: both reach monaco-editor
+  // statically, which would drag ~3.7 MB of Monaco (plus its CSS) into the boot
+  // chunk even though neither view is on screen until the user picks that data
+  // view mode. They load via {#await import()} at their (already guarded) call
+  // sites below, exactly like MapPage / EntityRelationPage.
   import TableRecordView from './TableRecordView.svelte'
-  import TableTextView from './TableTextView.svelte'
   import ChartView from './ChartView.svelte'
   import CommandPalette from './CommandPalette.svelte'
   // AiChat / AiSidebar (large, pull in marked + shiki) are loaded lazily the first time
@@ -75,16 +78,15 @@
   import DisconnectDialog from './DisconnectDialog.svelte'
   import SwitchDatabaseDialog from './SwitchDatabaseDialog.svelte'
   import McpPanel from './McpPanel.svelte'
-  import SearchPage from './SearchPage.svelte'
   // NotebookEditor (pulls Monaco via SqlCell + marked via MarkdownCell) is lazy-loaded
   // at its render site so notebooks don't drag those into the startup bundle.
-  import SchemaTimelinePage from './SchemaTimelinePage.svelte'
-  import SchemaPage from './SchemaPage.svelte'
-  import BackupPage from './BackupPage.svelte'
-  import LogsPage from './LogsPage.svelte'
-  import InstanceInsightsPage from './InstanceInsightsPage.svelte'
-  import ObjectsPage from './ObjectsPage.svelte'
-  import RedisKeyspacePage from './RedisKeyspacePage.svelte'
+  //
+  // The keep-alive tab pages — SearchPage, SchemaTimelinePage, SchemaPage,
+  // BackupPage, LogsPage, InstanceInsightsPage, ObjectsPage, RedisKeyspacePage —
+  // are lazy-loaded at their render sites for the same reason. Each is already
+  // behind an `{#if …EverOpened}` guard, so a static import only ever meant
+  // "ship this page's code to every user at boot whether or not they open it".
+  // They are warmed during idle below, so opening one is still instant.
   // Monaco-backed pages (DataDiffPage, OrmRunner, SecurityPage, JsonViewerPage, SqlConsole)
   // are loaded lazily at their render sites so the Monaco editor stays out of the
   // startup bundle until the user actually opens a SQL / ORM / JSON / diff / security tab.
@@ -546,7 +548,13 @@
 
   let schemas = $state([])
   let activeSchema = $state('public')
-  let tables = $state([])
+  // $state.raw: a large schema is thousands of table objects, and deep $state
+  // proxies every one of them plus every field. Nothing mutates a table in
+  // place — the list is always replaced wholesale (including the rowCount
+  // backfill, which rebuilds it with .map) — so the proxies bought nothing and
+  // cost a walk of the whole list on load plus a proxy hop on every read from
+  // Sidebar's and CommandPalette's filter/map passes.
+  let tables = $state.raw([])
   let indexes = $state([])
   /** @type {{ name: string, values: string[] }[]} */
   let enums = $state([])
@@ -1927,14 +1935,31 @@ let rowSearch = $state('')
   // and Cmd+Tab on macOS. No additional Ctrl+Tab registration needed - duplicates
   // cause the "[already registered]" warning from @tanstack/svelte-hotkeys.
 
-  createHotkey('Mod+B', (e) => {
-    e.preventDefault()
+  // ⌘B / Ctrl+B is bound in the CAPTURE phase on window, not through
+  // createHotkey. The hotkey layer listens on `document` in the BUBBLE phase, so
+  // anything between the focused element and the document that calls
+  // stopPropagation eats the chord first — and the places you most want to hide
+  // the sidebar from are exactly those: the Monaco editors, the grid canvas, and
+  // the bits-ui overlays. That is why SqlEditor and OrmRunner had to be handed a
+  // manual `onmodb` callback to forward the key back out; capture makes the one
+  // global binding reach every one of them, so the forwarding is gone.
+  //
+  // Matching the modifier per platform rather than accepting either one matters
+  // on macOS: Ctrl+B is the emacs "move backward" binding that text fields there
+  // still honour, and swallowing it would break caret movement in every input.
+  function onWindowKeydownCapture(/** @type {KeyboardEvent} */ e) {
+    const modOnly = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
+    if (!modOnly || e.altKey || e.shiftKey) return
+    if (e.key.toLowerCase() !== 'b') return
     // The connection dialog owns the screen while it's open, and it binds ⌘B to
     // its own connections rail — toggling the workspace sidebar behind it would
     // be an invisible edit the user only discovers after closing the dialog.
+    // Left un-stopped so the dialog's own handler still receives it.
     if (showConnectionModal) return
+    e.preventDefault()
+    e.stopPropagation()
     toggleSidebar()
-  })
+  }
 
   createHotkey('Mod+Shift+B', (e) => {
     e.preventDefault()
@@ -4741,15 +4766,26 @@ let rowSearch = $state('')
       () => import('./AiSidebar.svelte'),        // marked + shiki
       () => import('./AiChat.svelte'),           // marked + shiki
       () => import('./OrmRunner.svelte'),        // monaco
+      () => import('./TableJsonView.svelte'),    // monaco - data view mode
+      () => import('./TableTextView.svelte'),    // monaco - data view mode
+      () => import('./StructureView.svelte'),
+      () => import('./SchemaPage.svelte'),
       () => import('./ChartsPage.svelte'),       // echarts
       () => import('./DashboardPage.svelte'),
       () => import('./SecurityPage.svelte'),
+      () => import('./SearchPage.svelte'),
+      () => import('./InstanceInsightsPage.svelte'),
+      () => import('./ObjectsPage.svelte'),
       () => import('./DiagramsPage.svelte'),     // echarts
       () => import('./EntityRelationPage.svelte'),
       () => import('./DataDiffPage.svelte'),     // monaco
       () => import('./NotebookEditor.svelte'),
       () => import('./JsonViewerPage.svelte'),
       () => import('./ExtensionsPage.svelte'),
+      () => import('./BackupPage.svelte'),
+      () => import('./LogsPage.svelte'),
+      () => import('./SchemaTimelinePage.svelte'),
+      () => import('./RedisKeyspacePage.svelte'),
     ]
     const ric = window.requestIdleCallback ?? ((/** @type {Function} */ fn) => setTimeout(() => fn(), 200))
     const cancel = window.cancelIdleCallback ?? clearTimeout
@@ -5627,6 +5663,9 @@ let rowSearch = $state('')
 />
 
 
+<!-- Capture phase, deliberately — see onWindowKeydownCapture. -->
+<svelte:window onkeydowncapture={onWindowKeydownCapture} />
+
 {#if autoConnecting && !connection}
   <!-- Only covers the actual connect handshake: onConnected sets `connection`
        the moment the backend confirms, which drops this overlay and lets the
@@ -5931,18 +5970,20 @@ let rowSearch = $state('')
         <!-- AI is handled via AI mode toggle -->
       {:else if activeTab?.kind === 'schema'}
         <svelte:boundary failed={tabError}>
-          <SchemaPage
-            schema={activeSchema}
-            connectionType={connection?.type ?? null}
-            {indexes}
-            {enums}
-            {triggers}
-            {sequences}
-            {tables}
-            loading={loadingTables}
-            active={activeTab?.kind === 'schema'}
-            onrefresh={async () => { await loadSchemas(); await loadTables({ force: true }) }}
-          />
+          {#await import('./SchemaPage.svelte')}<TabLoading />{:then { default: SchemaPage }}
+            <SchemaPage
+              schema={activeSchema}
+              connectionType={connection?.type ?? null}
+              {indexes}
+              {enums}
+              {triggers}
+              {sequences}
+              {tables}
+              loading={loadingTables}
+              active={activeTab?.kind === 'schema'}
+              onrefresh={async () => { await loadSchemas(); await loadTables({ force: true }) }}
+            />
+          {/await}
         </svelte:boundary>
       {/if}
 
@@ -5981,7 +6022,9 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'backup' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <BackupPage dbType={dbType} activeSchema={activeSchema} {schemas} tables={tables.map((t) => ({ name: t.name, rowCount: t.rowCount }))} />
+            {#await import('./BackupPage.svelte')}<TabLoading />{:then { default: BackupPage }}
+              <BackupPage dbType={dbType} activeSchema={activeSchema} {schemas} tables={tables.map((t) => ({ name: t.name, rowCount: t.rowCount }))} />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -5993,7 +6036,9 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'logs' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <LogsPage active={activeTab?.kind === 'logs'} />
+            {#await import('./LogsPage.svelte')}<TabLoading />{:then { default: LogsPage }}
+              <LogsPage active={activeTab?.kind === 'logs'} />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -6005,7 +6050,9 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'insights' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <InstanceInsightsPage active={activeTab?.kind === 'insights'} connectionName={connection?.name ?? connection?.database ?? ''} {dbType} />
+            {#await import('./InstanceInsightsPage.svelte')}<TabLoading />{:then { default: InstanceInsightsPage }}
+              <InstanceInsightsPage active={activeTab?.kind === 'insights'} connectionName={connection?.name ?? connection?.database ?? ''} {dbType} />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -6017,7 +6064,9 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'objects' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <ObjectsPage active={activeTab?.kind === 'objects'} connectionType={connection?.type ?? null} />
+            {#await import('./ObjectsPage.svelte')}<TabLoading />{:then { default: ObjectsPage }}
+              <ObjectsPage active={activeTab?.kind === 'objects'} connectionType={connection?.type ?? null} />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -6029,7 +6078,9 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'redis' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <RedisKeyspacePage active={activeTab?.kind === 'redis'} {connection} />
+            {#await import('./RedisKeyspacePage.svelte')}<TabLoading />{:then { default: RedisKeyspacePage }}
+              <RedisKeyspacePage active={activeTab?.kind === 'redis'} {connection} />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -6172,16 +6223,18 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'search' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <SearchPage
-              {tables}
-              schema={activeSchema}
-              dialect={dbType}
-              active={activeTab?.kind === 'search'}
-              onopentable={(tableName, searchTerm) => {
-                if (aiMode) exitAiMode()
-                void openTableTab(activeSchema, tableName, { search: searchTerm })
-              }}
-            />
+            {#await import('./SearchPage.svelte')}<TabLoading />{:then { default: SearchPage }}
+              <SearchPage
+                {tables}
+                schema={activeSchema}
+                dialect={dbType}
+                active={activeTab?.kind === 'search'}
+                onopentable={(tableName, searchTerm) => {
+                  if (aiMode) exitAiMode()
+                  void openTableTab(activeSchema, tableName, { search: searchTerm })
+                }}
+              />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -6229,12 +6282,14 @@ let rowSearch = $state('')
           inert={activeTab?.kind !== 'schema-timeline' || undefined}
         >
           <svelte:boundary failed={tabError}>
-            <SchemaTimelinePage
-              connectionId={persistConnectionId}
-              connectionLabel={connection?.name ?? connection?.database ?? connection?.filePath ?? ''}
-              dbType={dbType}
-              connections={savedConnections}
-            />
+            {#await import('./SchemaTimelinePage.svelte')}<TabLoading />{:then { default: SchemaTimelinePage }}
+              <SchemaTimelinePage
+                connectionId={persistConnectionId}
+                connectionLabel={connection?.name ?? connection?.database ?? connection?.filePath ?? ''}
+                dbType={dbType}
+                connections={savedConnections}
+              />
+            {/await}
           </svelte:boundary>
         </div>
       {/if}
@@ -6278,7 +6333,6 @@ let rowSearch = $state('')
             schemaHints={sqlSchemaHints}
             onrun={(d) => void runOrm(d)}
             onmodi={() => { if (connection) toggleAiSidebar() }}
-            onmodb={() => { sidebarOpen = !sidebarOpen }}
             onmodw={() => closeActiveTab()}
             onmodn={() => { if (connection) openWelcomeTab() }}
             onmodm={() => cycleTheme()}
@@ -6320,7 +6374,6 @@ let rowSearch = $state('')
             onmodk={() => { commandOpen = true }}
             onmods={() => saveActiveTabState()}
             onmodi={() => { if (connection) toggleAiSidebar() }}
-            onmodb={() => { sidebarOpen = !sidebarOpen }}
             onmodw={() => closeActiveTab()}
             onmodn={() => { if (connection) openWelcomeTab() }}
             onmodm={() => cycleTheme()}
@@ -6432,20 +6485,22 @@ let rowSearch = $state('')
               onstructuresearchchange={(v) => (structureSearch = v)}
             />
             {/if}
-            <StructureView
-              schema={activeSchema}
-              table={activeTable ?? ''}
-              connectionType={connection?.type ?? null}
-              {primaryKey}
-              columns={structureColumns}
-              indexes={activeTableIndexes}
-              triggers={activeTableTriggers}
-              {tables}
-              {enums}
-              columnSearch={structureSearch}
-              loading={loadingStructure}
-              onrefresh={() => { void loadStructure(); void loadTriggers() }}
-            />
+            {#await import('./StructureView.svelte')}<TabLoading />{:then { default: StructureView }}
+              <StructureView
+                schema={activeSchema}
+                table={activeTable ?? ''}
+                connectionType={connection?.type ?? null}
+                {primaryKey}
+                columns={structureColumns}
+                indexes={activeTableIndexes}
+                triggers={activeTableTriggers}
+                {tables}
+                {enums}
+                columnSearch={structureSearch}
+                loading={loadingStructure}
+                onrefresh={() => { void loadStructure(); void loadTriggers() }}
+              />
+            {/await}
           {:else}
           {#if tableToolbarVisible}
           <TableToolbar
@@ -6629,11 +6684,13 @@ let rowSearch = $state('')
               />
               </div>
               {#if dataViewMode === 'json'}
-                <TableJsonView
-                  columns={dataViewColumns}
-                  rows={dataViewRows}
-                  tableKey={`${activeSchema}.${activeTable}`}
-                />
+                {#await import('./TableJsonView.svelte')}<TabLoading />{:then { default: TableJsonView }}
+                  <TableJsonView
+                    columns={dataViewColumns}
+                    rows={dataViewRows}
+                    tableKey={`${activeSchema}.${activeTable}`}
+                  />
+                {/await}
               {:else if dataViewMode === 'record'}
                 <TableRecordView
                   {columns}
@@ -6652,7 +6709,9 @@ let rowSearch = $state('')
                   onsave={handleSaveCell}
                 />
               {:else if dataViewMode === 'text'}
-                <TableTextView columns={dataViewColumns} rows={dataViewRows} tableName={activeTable} />
+                {#await import('./TableTextView.svelte')}<TabLoading />{:then { default: TableTextView }}
+                  <TableTextView columns={dataViewColumns} rows={dataViewRows} tableName={activeTable} />
+                {/await}
               {:else if dataViewMode === 'chart'}
                 <ChartView bind:this={chartPane} columns={dataViewColumns} rows={dataViewRows} connectionId={persistConnectionId} />
               {:else if dataViewMode === 'map'}
