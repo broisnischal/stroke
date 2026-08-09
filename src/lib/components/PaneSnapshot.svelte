@@ -1,9 +1,9 @@
 <script>
   import DataTable from './DataTable.svelte'
   import ChartView from './ChartView.svelte'
-  import TableJsonView from './TableJsonView.svelte'
+  // TableJsonView / TableTextView reach monaco-editor statically; importing them
+  // here would pull all of Monaco into the boot chunk. Loaded lazily below.
   import TableRecordView from './TableRecordView.svelte'
-  import TableTextView from './TableTextView.svelte'
   import ShikiBlock from './ShikiBlock.svelte'
   import Table2 from '@lucide/svelte/icons/table-2'
   import PanelLeft from '@lucide/svelte/icons/panel-left'
@@ -83,7 +83,9 @@
     </div>
   {:else if tableState.dataViewMode === 'json'}
     <div class="flex min-h-0 min-w-0 flex-1">
-      <TableJsonView columns={viewColumns} rows={viewRows} tableKey={`${tableState.schema}.${tableState.table}`} />
+      {#await import('./TableJsonView.svelte')}<TabLoading />{:then { default: TableJsonView }}
+        <TableJsonView columns={viewColumns} rows={viewRows} tableKey={`${tableState.schema}.${tableState.table}`} />
+      {/await}
     </div>
   {:else if tableState.dataViewMode === 'record'}
     <div class="flex min-h-0 min-w-0 flex-1">
@@ -102,7 +104,9 @@
     </div>
   {:else if tableState.dataViewMode === 'text'}
     <div class="flex min-h-0 min-w-0 flex-1">
-      <TableTextView columns={viewColumns} rows={viewRows} tableName={tableState.table} />
+      {#await import('./TableTextView.svelte')}<TabLoading />{:then { default: TableTextView }}
+        <TableTextView columns={viewColumns} rows={viewRows} tableName={tableState.table} />
+      {/await}
     </div>
   {:else if tableState.dataViewMode === 'erd'}
     <div class="flex min-h-0 min-w-0 flex-1">
