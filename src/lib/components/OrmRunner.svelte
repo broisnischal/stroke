@@ -47,7 +47,6 @@
       () => {}
     ),
     onmodi = undefined,
-    onmodb = undefined,
     onmodw = undefined,
     onmodn = undefined,
     onmodm = undefined,
@@ -122,7 +121,7 @@
   /** @param {monaco.editor.IStandaloneCodeEditor} ed */
   function registerShortcuts(ed) {
     const { CtrlCmd, Shift, Alt } = monaco.KeyMod
-    const { Enter, KeyS, KeyI, KeyB, KeyW, KeyN, KeyM, KeyT, KeyD, KeyE } = monaco.KeyCode
+    const { Enter, KeyS, KeyI, KeyW, KeyN, KeyM, KeyT, KeyD, KeyE } = monaco.KeyCode
     const run = (/** @type {(() => void) | undefined} */ fn) => fn?.()
 
     // Editor-local
@@ -131,7 +130,6 @@
 
     // Global app shortcuts
     ed.addCommand(CtrlCmd | KeyI,         () => run(onmodi))
-    ed.addCommand(CtrlCmd | KeyB,         () => run(onmodb))
     ed.addCommand(CtrlCmd | KeyW,         () => run(onmodw))
     ed.addCommand(CtrlCmd | KeyN,         () => run(onmodn))
     ed.addCommand(CtrlCmd | KeyM,         () => run(onmodm))
