@@ -42,6 +42,10 @@
    *  Only offered for the SQL target: DDL names are schema-qualified, so two
    *  schemas owning a `users` table produce two statements rather than a clash,
    *  which is not true of a Prisma model or a Drizzle export. */
+  const SCOPES = /** @type {const} */ ([
+    { id: 'schema', label: 'This schema' },
+    { id: 'database', label: 'Whole database' },
+  ])
   let scope = $state(/** @type {'schema'|'database'} */ ('schema'))
   /** Models for every schema, loaded only when the database scope is picked. */
   let dbModels = $state.raw(/** @type {import('$lib/orm-schema.js').OrmSchemaModel[]} */ ([]))
@@ -58,16 +62,25 @@
   let copyTimer
   onDestroy(() => clearTimeout(copyTimer))
 
-  /** Arrow keys move between targets, as a tablist is expected to. */
-  function onTargetKeydown(/** @type {KeyboardEvent} */ e) {
+  /**
+   * Arrow-key movement for a roving tablist. Shared by both switches: a
+   * `role="tablist"` that cannot be walked with the arrow keys is worse than
+   * one that never claimed the role, because it tells assistive tech to expect
+   * behaviour that is not there.
+   * @param {KeyboardEvent} e
+   * @param {readonly {id: string}[]} items
+   * @param {string} current
+   * @param {(id: string) => void} pick
+   */
+  function rovingKeydown(e, items, current, pick) {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
     e.preventDefault()
-    const i = TARGETS.findIndex((t) => t.id === target)
-    const next = TARGETS[(i + (e.key === 'ArrowRight' ? 1 : -1) + TARGETS.length) % TARGETS.length]
-    target = /** @type {'prisma'|'drizzle'|'sql'} */ (next.id)
+    const i = items.findIndex((t) => t.id === current)
+    const next = items[(i + (e.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length]
+    pick(next.id)
     const list = /** @type {HTMLElement} */ (e.currentTarget)
     requestAnimationFrame(() =>
-      /** @type {HTMLElement | null} */ (list.querySelector(`[data-target="${next.id}"]`))?.focus(),
+      /** @type {HTMLElement | null} */ (list.querySelector(`[data-tab="${next.id}"]`))?.focus(),
     )
   }
 
@@ -226,8 +239,9 @@
     <div
       role="tablist"
       aria-label="Code target"
+      tabindex="-1"
       class="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/40 p-0.5"
-      onkeydown={onTargetKeydown}
+      onkeydown={(e) => rovingKeydown(e, TARGETS, target, (id) => (target = /** @type {'prisma'|'drizzle'|'sql'} */ (id)))}
     >
       {#each TARGETS as t (t.id)}
         {@const on = target === t.id}
@@ -236,7 +250,7 @@
           role="tab"
           aria-selected={on}
           tabindex={on ? 0 : -1}
-          data-target={t.id}
+          data-tab={t.id}
           onclick={() => (target = /** @type {'prisma'|'drizzle'} */ (t.id))}
           class={cn(
             'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-ui-xs transition-[color,background-color,box-shadow,scale] duration-150 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
@@ -264,15 +278,18 @@
       <div
         role="tablist"
         aria-label="Scope"
+        tabindex="-1"
         class="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/40 p-0.5"
+        onkeydown={(e) => rovingKeydown(e, SCOPES, scope, (id) => (scope = /** @type {'schema'|'database'} */ (id)))}
       >
-        {#each [{ id: 'schema', label: schema }, { id: 'database', label: 'Whole database' }] as sc (sc.id)}
+        {#each SCOPES.map((sc) => ({ ...sc, label: sc.id === 'schema' ? schema : sc.label })) as sc (sc.id)}
           {@const on = scope === sc.id}
           <button
             type="button"
             role="tab"
             aria-selected={on}
             tabindex={on ? 0 : -1}
+            data-tab={sc.id}
             onclick={() => (scope = /** @type {'schema'|'database'} */ (sc.id))}
             class={cn(
               'inline-flex h-7 max-w-[12rem] items-center rounded-md px-2.5 text-ui-xs transition-[color,background-color,box-shadow,scale] duration-150 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
