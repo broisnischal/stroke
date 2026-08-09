@@ -33,7 +33,6 @@
     onmods = undefined,
     // Global app shortcuts - registered inside Monaco so they work when editor is focused
     onmodi = undefined,
-    onmodb = undefined,
     onmodw = undefined,
     onmodn = undefined,
     onmodm = undefined,
@@ -180,7 +179,6 @@
 
     // Global app shortcuts - work even when Monaco has focus
     ed.addCommand(CtrlCmd | KeyI,           () => run(onmodi))
-    ed.addCommand(CtrlCmd | KeyB,           () => run(onmodb))
     ed.addCommand(CtrlCmd | KeyW,           () => run(onmodw))
     ed.addCommand(CtrlCmd | KeyN,           () => run(onmodn))
     ed.addCommand(CtrlCmd | KeyM,           () => run(onmodm))
