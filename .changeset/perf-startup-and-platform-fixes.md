@@ -2,6 +2,8 @@
 
 - **The app starts in a fraction of the time it used to.** Stroke was compiling **6.8 MB** of JavaScript and CSS before it could paint a single pixel, and about 3.9 MB of that was the Monaco editor — loaded at boot whether or not you ever opened a SQL tab. The cause was one static import four components deep: the split-pane snapshot imported the JSON view, which imported the Monaco text view, which imported Monaco. Being in a separate chunk file does not make code lazy; only being unreachable from a plain `import` does. Monaco, Shiki and the confetti library are now off that path entirely, along with eight tab pages that were shipped to every user at boot despite being behind "only if opened" guards. **The startup payload is 2.6 MB, down 61%.** Every one of those chunks is still warmed during idle time, so opening a tab is no slower than before — the work simply no longer happens between launching the app and seeing it.
 
+- **Required columns are marked in the grid header.** A `NOT NULL` column carries a red asterisk before its name, the same mark a required form field carries. The constraint used to be discoverable only by trying — clearing a cell and being told "Cannot set NULL" — which is late to find out.
+
 ### Bug Fixes
 
 #### Instance Insights
