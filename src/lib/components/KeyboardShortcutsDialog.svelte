@@ -13,142 +13,38 @@
   import Settings from "@lucide/svelte/icons/settings";
   import X from "@lucide/svelte/icons/x";
 
+  import { SHORTCUT_GROUPS, keycaps, comboText, IS_MAC } from "$lib/shortcuts.js";
+
   let { open = $bindable(false) } = $props();
 
-  const isMac =
-    typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
+  // Platform flag comes from the index too, so this dialog and the bindings
+  // agree on what machine they are running on.
+  const isMac = IS_MAC;
   const mod = isMac ? "⌘" : "Ctrl";
-  const opt = isMac ? "⌥" : "Alt";
+
+  // The shortcut list lives in $lib/shortcuts.js. It used to be written out here
+  // as per-platform keycap arrays, which meant this dialog could — and did —
+  // describe a binding the app no longer had. Groups now carry an icon NAME so
+  // that module can stay plain data; the components stay here.
+  /** @type {Record<string, any>} */
+  const GROUP_ICONS = {
+    navigation: Navigation,
+    monitor: Monitor,
+    terminal: Terminal,
+    "code-2": Code2,
+    "table-2": Table2,
+    bot: Bot,
+    palette: Palette,
+    settings: Settings,
+  };
 
   /**
-   * @typedef {{ keys: string[]; desc: string }} Shortcut
-   * @typedef {{ label: string; icon: any; shortcuts: Shortcut[] }} Group
+   * @typedef {{ combo: string; desc: string }} Shortcut
+   * @typedef {{ label: string; icon: string; shortcuts: Shortcut[] }} Group
    */
 
   /** @type {Group[]} */
-  const groups = [
-    {
-      label: "Navigation",
-      icon: Navigation,
-      shortcuts: [
-        { keys: [mod, "K"], desc: "Command menu" },
-        { keys: [mod, "⇧", "P"], desc: "Command menu" },
-        { keys: [mod, opt, "1–9"], desc: "Switch to saved connection" },
-        { keys: [mod, "T"], desc: "Search tables" },
-        { keys: [mod, "N"], desc: "New tab" },
-        { keys: [mod, "W"], desc: "Close tab" },
-        { keys: [mod, "Tab"], desc: "Next tab" },
-        { keys: [mod, "⇧", "Tab"], desc: "Previous tab" },
-        { keys: [mod, "⇧", "T"], desc: "Reopen closed tab" },
-        { keys: [mod, "1–9"], desc: "Go to tab (9 = last)" },
-        { keys: [opt, "⇧", "T"], desc: "Toggle tab bar" },
-        { keys: [mod, "B"], desc: "Toggle sidebar" },
-        { keys: [mod, "⇧", "F"], desc: "Focus table filter" },
-        { keys: [mod, "D"], desc: "Switch database" },
-        { keys: [mod, "⇧", "C"], desc: "Switch connection" },
-        { keys: [mod, opt, "D"], desc: "Data view" },
-        { keys: [mod, "/"], desc: "Keyboard shortcuts" },
-        { keys: ["F11"], desc: "Toggle fullscreen" },
-      ],
-    },
-    {
-      label: "Views",
-      icon: Monitor,
-      shortcuts: [
-        { keys: [mod, "⇧", "D"], desc: "Disconnect" },
-        { keys: [mod, "⇧", "S"], desc: "SQL editor" },
-        { keys: [mod, "⇧", "O"], desc: "ORM Runner" },
-        { keys: [mod, "⇧", "X"], desc: "Extensions" },
-        { keys: [mod, "⇧", "E"], desc: "Toggle AI panel" },
-        { keys: [mod, "I"], desc: "Toggle AI sidebar" },
-        { keys: [mod, "⇧", "L"], desc: "Activity log" },
-        { keys: [mod, "R"], desc: "Refresh current view" },
-        { keys: [mod, "⇧", "V"], desc: "Cycle table data view" },
-        { keys: [opt, "1–5"], desc: "Table / JSON / Record / Text / Chart view" },
-        { keys: [mod, opt, "F"], desc: "Find & replace in table" },
-      ],
-    },
-    {
-      label: "SQL Editor",
-      icon: Terminal,
-      shortcuts: [
-        { keys: [mod, "↵"], desc: "Run all statements" },
-        { keys: [mod, "R"], desc: "Run statement at cursor" },
-        { keys: [mod, "L"], desc: "Select current statement" },
-        { keys: [mod, "S"], desc: "Save query" },
-        { keys: [mod, "J"], desc: "Toggle output panel" },
-        { keys: [mod, "⇧", "B"], desc: "Query history" },
-      ],
-    },
-    {
-      label: "ORM Runner",
-      icon: Code2,
-      shortcuts: [
-        { keys: [mod, "↵"], desc: "Run query" },
-        { keys: [mod, "S"], desc: "Format code" },
-      ],
-    },
-    {
-      label: "Data Table",
-      icon: Table2,
-      shortcuts: [
-        { keys: [mod, "F"], desc: "Search rows" },
-        { keys: [opt, "⇧", "F"], desc: "Open filter menu" },
-        { keys: [opt, "⇧", "S"], desc: "Open sort menu" },
-        { keys: [opt, "⇧", "C"], desc: "Open columns menu" },
-        { keys: [opt, "⇧", "R"], desc: "Reset table view (clear filters/sort/search)" },
-        { keys: ["↵", "F2"], desc: "Edit cell" },
-        { keys: ["Esc"], desc: "Cancel edit" },
-        { keys: [mod, "↵"], desc: "Navigate to FK row" },
-        { keys: [mod, "C"], desc: "Copy cell value" },
-        { keys: [mod, "⌫"], desc: "Delete selected rows" },
-        { keys: [mod, "A"], desc: "Select all rows" },
-        { keys: [mod, "Z"], desc: "Undo cell edit" },
-        { keys: [mod, "⇧", "Z"], desc: "Redo cell edit" },
-        { keys: [mod, "↑"], desc: "Scroll to top" },
-        { keys: [mod, "↓"], desc: "Scroll to bottom" },
-        { keys: [mod, "←"], desc: "Previous page" },
-        { keys: [mod, "→"], desc: "Next page" },
-        { keys: [mod, "⇧", "←"], desc: "First page" },
-        { keys: [mod, "⇧", "→"], desc: "Last page" },
-        { keys: [opt, "⇧", "1–5"], desc: "Jump to pinned table" },
-      ],
-    },
-    {
-      label: "AI Chat",
-      icon: Bot,
-      shortcuts: [
-        { keys: ["↵"], desc: "Send message" },
-        { keys: ["⇧", "↵"], desc: "New line" },
-        { keys: [mod, "⇧", "B"], desc: "Toggle conversation list" },
-        { keys: [mod, "⇧", "T"], desc: "New conversation" },
-      ],
-    },
-    {
-      label: "Appearance",
-      icon: Palette,
-      shortcuts: [
-        { keys: [mod, "B"], desc: "Toggle sidebar" },
-        { keys: [mod, "⇧", "T"], desc: "Toggle tab bar" },
-        { keys: [mod, "⇧", "B"], desc: "Toggle status bar" },
-        { keys: [mod, "M"], desc: "Cycle theme" },
-        { keys: [mod, "⇧", "M"], desc: "Previous theme" },
-        { keys: [mod, "+"], desc: "Zoom in" },
-        { keys: [mod, "−"], desc: "Zoom out" },
-        { keys: [mod, "0"], desc: "Reset zoom" },
-      ],
-    },
-    {
-      label: "General",
-      icon: Settings,
-      shortcuts: [
-        { keys: [mod, "?"], desc: "Keyboard shortcuts" },
-        { keys: ["?"], desc: "Keyboard shortcuts" },
-        { keys: [mod, ","], desc: "Settings" },
-        { keys: ["Esc"], desc: "Dismiss / close" },
-      ],
-    },
-  ];
+  const groups = SHORTCUT_GROUPS;
 
   let query = $state("");
   let selectedGroup = $state(groups[0].label);
@@ -176,7 +72,7 @@
         shortcuts: g.shortcuts.filter(
           (s) =>
             s.desc.toLowerCase().includes(q) ||
-            s.keys.join(" ").toLowerCase().includes(q),
+            comboText(s.combo).includes(q),
         ),
       }))
       .filter((g) => g.shortcuts.length > 0);
@@ -264,7 +160,7 @@
       {#if !isSearching}
         <nav class="flex w-48 shrink-0 flex-col gap-px overflow-y-auto border-r border-border/40 px-2 py-3">
           {#each groups as group (group.label)}
-            {@const Icon = group.icon}
+            {@const Icon = GROUP_ICONS[group.icon]}
             {@const active = selectedGroup === group.label}
             <button
               type="button"
@@ -306,7 +202,7 @@
         {:else}
           <div class={cn(isSearching ? "divide-y divide-border/30" : "")}>
             {#each displayGroups as group (group.label)}
-              {@const Icon = group.icon}
+              {@const Icon = GROUP_ICONS[group.icon]}
               <div class="px-6 py-5">
 
                 {#if isSearching}
@@ -320,6 +216,7 @@
 
                 <ul class="flex flex-col">
                   {#each group.shortcuts as shortcut, i (group.label + ':' + i)}
+                    {@const caps = keycaps(shortcut.combo)}
                     <li
                       class={cn(
                         "group/row flex items-center justify-between gap-8 px-2 py-2 rounded-md transition-colors hover:bg-accent/30",
@@ -331,9 +228,9 @@
                       </span>
 
                       <span class="flex shrink-0 items-center gap-1">
-                        {#each shortcut.keys as key, ki (ki)}
+                        {#each caps as key, ki (ki)}
                           <kbd>{key}</kbd>
-                          {#if ki < shortcut.keys.length - 1}
+                          {#if ki < caps.length - 1}
                             <span class="text-ui-3xs text-muted-foreground/20 select-none">+</span>
                           {/if}
                         {/each}
