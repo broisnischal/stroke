@@ -2156,9 +2156,6 @@
                       ? name || activeDriver.label
                       : activeDriver.label}
                   </h2>
-                  <p class="mt-0.5 truncate text-ui-xs text-muted-foreground">
-                    {activeDriver.desc}
-                  </p>
                 </div>
               </div>
             {/if}
