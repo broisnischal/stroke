@@ -631,14 +631,6 @@
       toggleAgentWebAccess,
     )}
   {/if}
-  {#if show('Anonymous usage data', 'Help decide what to build next')}
-    {@render switchRow(
-      'Anonymous usage data',
-      'Sends which features you use, how often, the app version and your OS — nothing else. No queries, no table or database names, no connection details, and nothing about the data you browse. Turning it off takes effect immediately.',
-      settings.telemetry,
-      toggleTelemetry,
-    )}
-  {/if}
   {#if show('Show query cards', 'Display the SQL the agent ran and the rows it returned')}
     {@render switchRow(
       'Show query cards',
@@ -671,6 +663,18 @@
   {/if}
   {#if show($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'))}
     {@render switchRow($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'), settings.mcpAutoStart, toggleMcpAutoStart)}
+  {/if}
+
+  <!-- Privacy lives in General, not Agent: this switch covers the whole app, and
+       under Agent it read as if it were about the AI features alone. -->
+  {@render secLabel('Privacy')}
+  {#if show('Anonymous usage data', 'Help decide what to build next')}
+    {@render switchRow(
+      'Anonymous usage data',
+      'Sends which features you use, how often, the app version and your OS — nothing else. No queries, no table or database names, no connection details, and nothing about the data you browse. Turning it off takes effect immediately.',
+      settings.telemetry,
+      toggleTelemetry,
+    )}
   {/if}
 {/snippet}
 
