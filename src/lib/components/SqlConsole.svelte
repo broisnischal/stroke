@@ -76,7 +76,6 @@
     onmodk = undefined,
     onmods = undefined,
     onmodi = undefined,
-    onmodb = undefined,
     onmodw = undefined,
     onmodn = undefined,
     onmodm = undefined,
@@ -739,7 +738,6 @@
       onrunstatement={(stmt) => handleRun(stmt)}
       onmods={openSaveDialog}
       {onmodi}
-      {onmodb}
       {onmodw}
       {onmodn}
       {onmodm}
