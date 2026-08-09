@@ -39,15 +39,20 @@
   let autoRefresh = $state(false)
   let refreshing = $state(false)
   let lastUpdated = $state(/** @type {number | null} */ (null))
-  let version = $state(/** @type {any} */ (null))
-  let activity = $state(/** @type {any} */ (null))
-  let stateData = $state(/** @type {any} */ (null))
-  let config = $state(/** @type {any[]} */ ([]))
-  let replication = $state(/** @type {any} */ (null))
+  // $state.raw for every server payload: each one is replaced wholesale by its
+  // refresh fn and only ever read, never mutated in place. Deep $state would
+  // proxy every row object and every field — `config` alone is 350+ rows on
+  // Postgres and 600+ on MySQL, and `stateData` carries the session/lock lists —
+  // so the proxies cost more to build than the render they feed.
+  let version = $state.raw(/** @type {any} */ (null))
+  let activity = $state.raw(/** @type {any} */ (null))
+  let stateData = $state.raw(/** @type {any} */ (null))
+  let config = $state.raw(/** @type {any[]} */ ([]))
+  let replication = $state.raw(/** @type {any} */ (null))
   let configSearch = $state('')
   let error = $state('')
   /** @type {{ t: number, sessions: any, counters: any }[]} */
-  let samples = $state([])
+  let samples = $state.raw([])
   const MAX_SAMPLES = 40
   const REFRESH_MS = 5000
 
@@ -118,6 +123,11 @@
     refreshing = true
     error = ''
     try {
+      // All five, in parallel, on open. Deferring config until its tab is opened
+      // was tried and reverted: the sub-tab bar shows a "restart pending" count
+      // derived from the full settings list, and that badge exists precisely to
+      // send you to a tab you would not otherwise open. The fetch is cheap now
+      // that the payload is $state.raw and the list renders behind a budget.
       await Promise.all([loadVersion(), refreshActivity(), refreshState(), refreshConfig(), refreshReplication()])
       lastUpdated = Date.now()
       // Per-second rates (TPS, tuples, block I/O) are deltas between two samples,
@@ -355,6 +365,75 @@
     }
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([group, rows]) => ({ group, rows }))
   })
+
+  // ── Config render budget ───────────────────────────────────────────────────
+  // The unfiltered list is 350+ rows on Postgres and 600+ on MySQL, and each row
+  // is a ~20-node subtree. Building all of them the instant the Config tab opens
+  // is a visible hitch for a list where about fifteen rows fit on screen.
+  // `content-visibility` already skips their layout and paint; this skips their
+  // construction too.
+  //
+  // Nothing ends up hidden: the budget refills itself during idle time until the
+  // whole list is in the DOM, so ctrl-F and assistive tech still see every row a
+  // moment after the tab opens. The scroll sentinel below is the safety net for
+  // a user who scrolls faster than idle fills.
+  const CONFIG_PAGE = 60
+  let configRenderLimit = $state(CONFIG_PAGE)
+
+  // Fill the rest of the list in idle slots, one page per slot. This is the
+  // difference between "the first paint is cheap" and "the list is incomplete" —
+  // only the former is wanted.
+  $effect(() => {
+    if (subtab !== 'config' || !active) return
+    if (configRenderLimit >= configFiltered.length) return
+    const ric = window.requestIdleCallback ?? ((/** @type {any} */ fn) => setTimeout(fn, 60))
+    const cancel = window.cancelIdleCallback ?? clearTimeout
+    const handle = ric(() => { configRenderLimit += CONFIG_PAGE }, { timeout: 500 })
+    return () => cancel(handle)
+  })
+
+  // A new filter is a new list: start it at one page instead of inheriting the
+  // budget the previous scroll had grown to.
+  $effect(() => {
+    void configGroup
+    void configStatus
+    void configSearch
+    configRenderLimit = CONFIG_PAGE
+  })
+
+  /** `configSections`, truncated to the current budget. */
+  const configSectionsShown = $derived.by(() => {
+    let budget = configRenderLimit
+    const out = []
+    for (const sec of configSections) {
+      if (budget <= 0) break
+      out.push(sec.rows.length <= budget ? sec : { ...sec, rows: sec.rows.slice(0, budget) })
+      budget -= sec.rows.length
+    }
+    return out
+  })
+  const configHasMore = $derived(configFiltered.length > configRenderLimit)
+
+  /**
+   * Sentinel that extends the config render budget as it approaches the viewport.
+   * @type {import('svelte/action').Action<HTMLElement>}
+   */
+  function revealMoreConfig(node) {
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0].isIntersecting) return
+        configRenderLimit += CONFIG_PAGE
+        // Re-arm. If the sentinel is still in view after the list grew, there is
+        // no intersection *change* for the observer to report, and the list
+        // would stall short of the end. Re-observing redelivers immediately.
+        io.unobserve(node)
+        io.observe(node)
+      },
+      { rootMargin: '300px' },
+    )
+    io.observe(node)
+    return { destroy: () => io.disconnect() }
+  }
 
   function clearConfigFilters() {
     configGroup = 'all'; configStatus = 'all'; configSearch = ''
@@ -805,7 +884,7 @@
           </div>
         {:else}
           <div class="flex flex-col gap-5">
-            {#each configSections as sec (sec.group || '_flat')}
+            {#each configSectionsShown as sec (sec.group || '_flat')}
               <section>
                 {#if sec.group}
                   <div class="mb-1.5 flex items-baseline gap-2">
@@ -955,6 +1034,11 @@
                 </div>
               </section>
             {/each}
+            {#if configHasMore}
+              <!-- Extends the render budget before it reaches the viewport, so
+                   the rest of the list is already built by the time you get there. -->
+              <div use:revealMoreConfig class="h-6 shrink-0" aria-hidden="true"></div>
+            {/if}
           </div>
         {/if}
 
@@ -1069,7 +1153,10 @@
       </div>
     </div>
     {#if c.ready}
-      <div class="h-52"><EChartPanel option={c.option} /></div>
+      <!-- mergeUpdates: these three options are built inline above from a fixed
+           set of series with no conditional keys, and are rebuilt on every
+           refresh tick — exactly the case merging is for. -->
+      <div class="h-52"><EChartPanel option={c.option} mergeUpdates /></div>
     {:else}
       <div class="flex h-52 flex-col items-center justify-center gap-1 rounded-md bg-muted/20 text-center">
         <p class="text-ui-xs text-muted-foreground">Collecting samples…</p>
@@ -1110,12 +1197,16 @@
   {#if !rows || rows.length === 0}
     <div class="rounded-lg border border-border/40 bg-muted/[0.04] py-10 text-center text-ui-xs text-muted-foreground/70">{empty}</div>
   {:else}
+    <!-- Column list computed ONCE per grid. It used to be re-derived inside the
+         row loop, so a 200-session table allocated 200 throwaway Object.keys()
+         arrays on every render of this page. -->
+    {@const cols = keysOf(rows)}
     <div class="app-scroll max-h-96 overflow-auto rounded-lg border border-border/50">
       <table class="w-full border-collapse text-ui-2xs">
         <thead>
           <tr>
             <th class="sticky top-0 z-10 w-8 whitespace-nowrap border-b border-border/50 bg-panel px-2 py-1.5 text-right font-medium text-muted-foreground/60">#</th>
-            {#each keysOf(rows) as k (k)}
+            {#each cols as k (k)}
               <th class="sticky top-0 z-10 whitespace-nowrap border-b border-border/50 bg-panel px-2.5 py-1.5 text-left font-medium text-muted-foreground">{humanize(k)}</th>
             {/each}
           </tr>
@@ -1124,16 +1215,18 @@
           {#each rows as row, i (i)}
             <tr class={cn('transition-colors hover:bg-accent/30', isBlocked(row) && 'bg-destructive/[0.06]')}>
               <td class="border-b border-border/20 px-2 py-1 text-right tabular-nums text-muted-foreground/50">{i + 1}</td>
-              {#each keysOf(rows) as k (k)}
-                <td class="max-w-[280px] truncate border-b border-border/20 px-2.5 py-1 font-mono text-foreground/85" title={cell(row[k])}>
+              {#each cols as k (k)}
+                {@const raw = row[k]}
+                {@const text = cell(raw)}
+                <td class="max-w-[280px] truncate border-b border-border/20 px-2.5 py-1 font-mono text-foreground/85" title={text}>
                   {#if k === 'state' || k === 'command'}
-                    {#if row[k]}
-                      <span class={cn('inline-flex items-center rounded px-1.5 py-px font-sans text-ui-3xs', stateTone(row[k]))}>{row[k]}</span>
+                    {#if raw}
+                      <span class={cn('inline-flex items-center rounded px-1.5 py-px font-sans text-ui-3xs', stateTone(raw))}>{raw}</span>
                     {:else}
                       <span class="text-muted-foreground/40">–</span>
                     {/if}
                   {:else}
-                    {cell(row[k])}
+                    {text}
                   {/if}
                 </td>
               {/each}
