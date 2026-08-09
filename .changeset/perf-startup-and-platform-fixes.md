@@ -29,6 +29,8 @@
 
 #### SQL editor
 - **A running query survives leaving its tab.** Two Query Editor tabs share one editor component, and switching between them swapped its state out from under an in-flight query — the spinner stopped, the results pane showed the other tab's, and whatever came back landed in whichever tab happened to be in front. The query itself never stopped; only the app lost track of which tab had asked. A run now belongs to the tab that started it.
+- **JSON has its colours back.** The viewer was rendering correctly-indented monochrome — keys, strings and numbers all the same shade. Every editor theme in the app was written for SQL and named none of the scopes JSON actually produces, so nearly every token fell through to the plain foreground. All 28 themes now colour it, with property names distinct from values so a page of rows can be scanned.
+- **A wrap toggle in the JSON viewer.** An embedding or a document chunk ran off the right edge with no way to see the rest of it. Off by default — unwrapped keeps the structure scannable, and one embedding wrapped can bury every row around it — and remembered once you set it.
 - **The JSON view no longer freezes on a large result.** It built one object per row, flattened all of them to a single string, then parsed that string straight back into objects — three passes over the whole result and two copies of it in memory, with no limit. `SELECT *` over a million rows spent its time assembling text far too large to read. It now renders the first thousand rows, says so, and Export still carries everything.
 
 #### Codegen
