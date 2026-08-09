@@ -82,3 +82,21 @@ describe('find helpers', () => {
     expect(findAiTab([createSqlTab('SELECT 1;')])).toBeNull()
   })
 })
+
+describe('cloneSqlTabState', () => {
+  it('preserves the running flag', () => {
+    // A tab's snapshot is what the shell restores when you switch back to it.
+    // Dropping this flag is what made a long query look cancelled the moment
+    // you left its tab: the spinner stopped and the results pane reverted.
+    const cloned = cloneSqlTabState({
+      sqlText: 'select 1',
+      sqlColumns: [],
+      sqlRows: [],
+      sqlQueryMs: 0,
+      sqlMessage: '',
+      sqlLoading: true,
+      sqlError: '',
+    })
+    expect(cloned.sqlLoading).toBe(true)
+  })
+})

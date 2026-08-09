@@ -1721,7 +1721,9 @@ let rowSearch = $state('')
       sqlRows,
       sqlQueryMs,
       sqlMessage,
-      sqlLoading: false,
+      // The real flag, not a hardcoded false. Saving a running tab as "idle"
+      // is what made a long query look cancelled the moment you left it.
+      sqlLoading,
       sqlError,
     }
   }
@@ -1733,8 +1735,30 @@ let rowSearch = $state('')
     sqlRows = s.sqlRows
     sqlQueryMs = s.sqlQueryMs
     sqlMessage = s.sqlMessage
-    sqlLoading = false
+    sqlLoading = s.sqlLoading ?? false
     sqlError = s.sqlError
+  }
+
+  /**
+   * Write a finished run into the tab that started it.
+   *
+   * A run outlives the tab being in front of it: the editor is one shared
+   * component driven by shell-level state, so switching tabs used to swap that
+   * state out from under an in-flight query — the spinner stopped, the results
+   * pane showed the other tab's snapshot, and whatever came back landed in
+   * whichever tab happened to be active by then. The query itself never
+   * stopped; only the UI lost track of it.
+   *
+   * @param {string} tabId
+   * @param {Partial<SqlTabState>} patch
+   */
+  function patchSqlTab(tabId, patch) {
+    const idx = tabs.findIndex((t) => t.id === tabId && t.kind === 'sql')
+    if (idx === -1) return
+    const t = tabs[idx]
+    const next = [...tabs]
+    next[idx] = { ...t, state: cloneSqlTabState({ .../** @type {SqlTabState} */ (t.state), ...patch }) }
+    tabs = next
   }
 
   function clearTableEditor() {
@@ -4630,34 +4654,58 @@ let rowSearch = $state('')
       sqlError = 'This connection is open in read-only mode, so write statements are blocked.'
       return
     }
+    // The tab that owns this run. Everything below writes results back through
+    // it, so leaving for another tab mid-query neither stops the spinner here
+    // nor drops the answer into whatever tab is in front when it arrives.
+    const runTabId = activeTabId
+    const stillHere = () => activeTabId === runTabId
     sqlLoading = true
     sqlError = ''
     sqlMessage = ''
     sqlColumns = []
     sqlRows = []
     sqlMultiResults = []
+    // Mark the owning tab as running too, so its snapshot says so if the user
+    // leaves before this finishes.
+    patchSqlTab(runTabId, { sqlLoading: true, sqlError: '', sqlMessage: '', sqlColumns: [], sqlRows: [] })
+    let ranMs = 0
+    let ranError = ''
+    let ranRowCount = 0
     try {
       const results = await executeSqlMulti(sqlRan)
-      sqlMultiResults = results.length > 1 ? results : []
       const data = results.length > 0 ? results[results.length - 1] : {}
-      sqlColumns = data.columns ?? []
-      sqlRows = data.rows ?? []
-      sqlQueryMs = data.query_ms ?? data.queryMs ?? 0
-      sqlMessage = data.message ?? ''
-      if (!sqlMessage && data.row_count != null && sqlColumns.length === 0) {
-        sqlMessage = `${formatCompactCount(data.row_count)} row(s) affected`
+      const cols = data.columns ?? []
+      const rws = data.rows ?? []
+      ranMs = data.query_ms ?? data.queryMs ?? 0
+      ranRowCount = rws.length
+      let msg = data.message ?? ''
+      if (!msg && data.row_count != null && cols.length === 0) {
+        msg = `${formatCompactCount(data.row_count)} row(s) affected`
+      }
+      patchSqlTab(runTabId, { sqlColumns: cols, sqlRows: rws, sqlQueryMs: ranMs, sqlMessage: msg, sqlError: '' })
+      if (stillHere()) {
+        sqlMultiResults = results.length > 1 ? results : []
+        sqlColumns = cols
+        sqlRows = rws
+        sqlQueryMs = ranMs
+        sqlMessage = msg
       }
     } catch (e) {
-      sqlError = String(e)
-      sqlMultiResults = []
-      if (isNetworkError(sqlError)) { connectionLost = true; void silentReconnect() }
+      ranError = String(e)
+      patchSqlTab(runTabId, { sqlError: ranError })
+      if (stillHere()) {
+        sqlError = ranError
+        sqlMultiResults = []
+      }
+      if (isNetworkError(ranError)) { connectionLost = true; void silentReconnect() }
     } finally {
-      sqlLoading = false
-      recordActivity({ type: 'sql_exec', title: sqlRan.trim().slice(0, 80) + (sqlRan.trim().length > 80 ? '…' : ''), detail: sqlRan, durationMs: sqlQueryMs, rowCount: sqlRows.length || undefined, success: !sqlError, error: sqlError || undefined })
-      if (persistConnectionId && !sqlError) {
+      patchSqlTab(runTabId, { sqlLoading: false })
+      if (stillHere()) sqlLoading = false
+      recordActivity({ type: 'sql_exec', title: sqlRan.trim().slice(0, 80) + (sqlRan.trim().length > 80 ? '…' : ''), detail: sqlRan, durationMs: ranMs, rowCount: ranRowCount || undefined, success: !ranError, error: ranError || undefined })
+      if (persistConnectionId && !ranError) {
         await recordQueryExecution(persistConnectionId, sqlRan, {
           success: true,
-          queryMs: sqlQueryMs,
+          queryMs: ranMs,
         })
         await refreshQueryStores()
       }
