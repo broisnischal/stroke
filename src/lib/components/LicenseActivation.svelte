@@ -1,12 +1,16 @@
 <script>
   import { activateLicense } from '$lib/stores/license.js'
-  import confetti from 'canvas-confetti'
   import Icon from './Icon.svelte'
   import { cn } from '$lib/utils.js'
 
   let { onactivated = () => {}, compact = false, naked = false, inline = false } = $props()
 
-  function fireConfetti() {
+  // canvas-confetti is loaded on demand. Onboarding mounts this component, so a
+  // static import puts the whole library in the boot chunk for a one-off burst
+  // that most sessions never fire. Matches LicensePage's existing lazy import.
+  async function fireConfetti() {
+    const confetti = await import('canvas-confetti').then((m) => m.default).catch(() => null)
+    if (!confetti) return // a missed celebration must never fail the activation
     const burst = (angle, origin) =>
       confetti({ angle, origin, spread: 55, particleCount: 80, startVelocity: 45, decay: 0.92, scalar: 1.1, ticks: 200 })
     burst(60,  { x: 0, y: 0.65 })
@@ -32,7 +36,7 @@
     loading = false
     if (result.ok) {
       success = true
-      fireConfetti()
+      void fireConfetti()
       setTimeout(() => onactivated(), 1800)
     } else {
       error = result.error.replace(/^Error invoking remote method '[^']+': /, '')
