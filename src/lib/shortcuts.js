@@ -86,6 +86,7 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Mod+D', desc: 'Switch database' },
       { combo: 'Mod+Shift+C', desc: 'Switch connection' },
       { combo: 'Mod+Alt+D', desc: 'Data view' },
+      { combo: '/', desc: 'Focus the search box on screen' },
       { combo: 'Mod+/', desc: 'Keyboard shortcuts' },
       { combo: 'F11', desc: 'Toggle fullscreen' },
     ],

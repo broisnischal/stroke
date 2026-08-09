@@ -23,6 +23,7 @@
   import Plus from '@lucide/svelte/icons/plus'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
   import { IS_MAC } from '$lib/shortcuts.js'
+  import { findSearchInput, isTypingTarget } from '$lib/focus-search.js'
   import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode } from '$lib/stores/settings.js'
   import { isTextEntryTarget, setVimSubMode } from '$lib/vim/vim.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
@@ -2366,10 +2367,28 @@ let rowSearch = $state('')
     return () => document.removeEventListener('keydown', onFullscreenKey)
   })
 
+  // "/" focuses the search box for whatever is on screen — the sidebar filter,
+  // the settings search, a dialog's own field. It resolves its target from the
+  // live DOM rather than being bound per field, so a search box added later is
+  // reachable without anyone registering it. See $lib/focus-search.js.
+  createHotkey('/', (e) => {
+    if (isTypingTarget(document.activeElement)) return
+    const el = findSearchInput()
+    if (!el) return
+    e.preventDefault()
+    el.focus()
+    // Select what is there: "/" then typing should replace a stale query, which
+    // is what every other search-on-slash does. The caret lands at the end for
+    // anyone who meant to append.
+    el.select?.()
+  })
+
   createHotkey('?', (e) => {
     if (commandOpen || showConnectionModal || showSettingsModal || showShortcutsModal) return
-    const tag = document.activeElement?.tagName ?? ''
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    // Was a tag check, which missed contenteditable and anything Monaco routes
+    // through a non-textarea — so "?" in those opened the shortcuts panel
+    // mid-sentence.
+    if (isTypingTarget(document.activeElement)) return
     e.preventDefault()
     showShortcutsModal = true
   })
