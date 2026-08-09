@@ -66,7 +66,11 @@
   })
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<!-- The mousedown handler is not an interaction, it is the opposite of one:
+     pressing inside the panel would blur the path input and close the list
+     before the click could land, so the default is swallowed. The interactive
+     elements are the option buttons inside; this wrapper is scaffolding. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="absolute left-0 top-full z-50 mt-1 w-[min(32rem,calc(100vw-3rem))] overflow-hidden rounded-lg border border-border/70 bg-popover elevate-2-rim"
   onmousedown={(e) => e.preventDefault()}
