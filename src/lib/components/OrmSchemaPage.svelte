@@ -35,13 +35,30 @@
   ]
 
   let target  = $state(/** @type {'prisma'|'drizzle'} */ ('prisma'))
-  let model   = $state(/** @type {import('$lib/orm-schema.js').OrmSchemaModel | null} */ (null))
+  // $state.raw: the model is a whole introspected schema — every table, every
+  // column, every index — and it is replaced wholesale by `load` and never
+  // mutated. Deep $state proxied every one of those objects on a hundred-table
+  // database for a value only ever read by the two renderers.
+  let model   = $state.raw(/** @type {import('$lib/orm-schema.js').OrmSchemaModel | null} */ (null))
   let loading = $state(true)
   let error   = $state('')
   let copied  = $state(false)
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let copyTimer
   onDestroy(() => clearTimeout(copyTimer))
+
+  /** Arrow keys move between targets, as a tablist is expected to. */
+  function onTargetKeydown(/** @type {KeyboardEvent} */ e) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+    e.preventDefault()
+    const i = TARGETS.findIndex((t) => t.id === target)
+    const next = TARGETS[(i + (e.key === 'ArrowRight' ? 1 : -1) + TARGETS.length) % TARGETS.length]
+    target = /** @type {'prisma'|'drizzle'} */ (next.id)
+    const list = /** @type {HTMLElement} */ (e.currentTarget)
+    requestAnimationFrame(() =>
+      /** @type {HTMLElement | null} */ (list.querySelector(`[data-target="${next.id}"]`))?.focus(),
+    )
+  }
 
   const active    = $derived(TARGETS.find((t) => t.id === target) ?? TARGETS[0])
   const supported = $derived(active.engines.includes(dbType))
@@ -126,16 +143,33 @@
 
 <div class="flex min-h-0 flex-1 flex-col">
   <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-3">
-    <!-- Target switch: the same schema, in either ORM's dialect. -->
-    <div class="flex shrink-0 items-center gap-0.5 rounded-md bg-muted/40 p-0.5">
+    <!-- Target switch: the same schema, in either ORM's dialect.
+         rounded-lg (8px) outer against p-0.5 (2px) puts the pills at 6px —
+         outer minus padding, so the active pill's corners follow the track's
+         curve instead of cutting inside it. h-7 is the design system's compact
+         control height; the pills were 24px, under any sane target size and
+         visibly shorter than the Refresh/Save/Copy buttons beside them.
+         A real tablist, not two buttons: this is the page's primary switch and
+         it was invisible to assistive tech and unreachable by arrow key. -->
+    <div
+      role="tablist"
+      aria-label="Code target"
+      class="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/40 p-0.5"
+      onkeydown={onTargetKeydown}
+    >
       {#each TARGETS as t (t.id)}
+        {@const on = target === t.id}
         <button
           type="button"
+          role="tab"
+          aria-selected={on}
+          tabindex={on ? 0 : -1}
+          data-target={t.id}
           onclick={() => (target = /** @type {'prisma'|'drizzle'} */ (t.id))}
           class={cn(
-            'inline-flex h-6 items-center gap-1.5 rounded px-2 text-ui-xs transition-colors',
-            target === t.id
-              ? 'bg-background text-foreground shadow-sm'
+            'inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-ui-xs transition-[color,background-color,box-shadow,scale] duration-150 ease-out active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
+            on
+              ? 'bg-background font-medium text-foreground elevate-1-rim'
               : 'text-muted-foreground hover:text-foreground',
           )}
         >
