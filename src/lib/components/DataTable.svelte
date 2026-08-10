@@ -125,6 +125,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     withAlpha,
     drawIcon,
     roundRect,
+    roundRectPath,
     drawCheckbox,
     computeColumnGeometry,
     colDrawnX,
@@ -611,7 +612,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // and the level persists via app settings.
 
   // All layout constants scale with canvasZoom so the entire canvas zooms together.
-  const ROW_HEIGHT = $derived(Math.round(24 * canvasZoom))
+  // The base height comes from Settings → Appearance → Row spacing; everything
+  // else in the grid (row tops, hit tests, the scroll spacer) is derived from
+  // ROW_HEIGHT, so changing it reflows the whole grid with no other edits.
+  const ROW_HEIGHT = $derived(Math.round(rowSpacingHeight($appRowSpacing) * canvasZoom))
 
   // `_scrollTop` is the VIRTUAL scroll offset used for all row math (content
   // space). `_physScrollTop` is the raw DOM scrollTop of the container, which is
@@ -1010,10 +1014,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Resolved canvas-grid style preset (Settings → Appearance). Read once per frame
   // by draw() and passed into the row context, so it never adds per-cell reactivity.
-  const _tableStyle = $derived(TABLE_STYLES[normalizeTableStyle($appTableStyle)]);
-  // Repaint the grid the moment the user switches preset.
+  // The zebra flag is folded in here rather than checked per cell: the preset can
+  // bring its own alternating shading (Striped, Dots) and the standalone setting
+  // adds it to any other preset, so draw() only ever reads one boolean.
+  const _tableStyle = $derived.by(() => {
+    const preset = TABLE_STYLES[normalizeTableStyle($appTableStyle)]
+    const zebra = preset.zebra === true || $appZebraRows === true
+    return zebra === (preset.zebra === true) ? preset : { ...preset, zebra }
+  });
+  // Repaint the grid the moment the user switches preset, alignment, spacing or shading.
   $effect(() => { void $appTableStyle; scheduleDraw(); });
   $effect(() => { void $appTableAlign; scheduleDraw(); });
+  $effect(() => { void $appZebraRows; scheduleDraw(); });
 
   // ── Search-match highlighting ──────────────────────────────────────────────
   // The toolbar search filters rows server-side (ILIKE, case-insensitive);
@@ -4000,6 +4012,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // multiply the probe fonts by canvasZoom again - that double-scales them.
     if (!_fonts) _fonts = readFonts(colorProbe)
     syncDisplayCaches()
+    // Shimmer phase for skeleton rows, advanced from the clock so it moves at the
+    // same rate whatever the frame rate. _sawSkeleton is reset here and set by any
+    // skeleton row painted below; the tail uses it to decide whether to keep
+    // animating, so a fully loaded grid schedules nothing at all.
+    _sawSkeleton = false
+    if (_shimmerOn) _shimmerPhase = (performance.now() % SHIMMER_PERIOD) / SHIMMER_PERIOD
 
     const W = _viewportWidth
     const H = _viewportHeight
@@ -4152,25 +4170,113 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Now that the visible set is known, drop the backlog the viewport has moved
     // past and start whatever decodes fit in the remaining slots.
     if (_imgQueue.length) pumpCellImages()
+    // Keep the shimmer moving while skeleton rows are on screen, and only then.
+    // Capped at ~30fps: it's a slow sweep across a few grey bars, so half the
+    // frames look identical and the other half are free. The moment the windows
+    // land, _sawSkeleton stays false and this loop ends by itself.
+    if (_shimmerOn && _sawSkeleton) {
+      const now = performance.now()
+      if (now - _lastShimmerFrame > 32) {
+        _lastShimmerFrame = now
+        scheduleDraw()
+      } else if (!_shimmerTimer) {
+        _shimmerTimer = setTimeout(() => { _shimmerTimer = 0; scheduleDraw() }, 32)
+      }
+    }
   }
 
-  /** Skeleton row for a window that hasn't loaded yet (windowed mode only). */
+  /**
+   * Deterministic 0..1 from a cell's coordinates.
+   *
+   * Deterministic matters twice over: a bar whose width changed between frames
+   * would flicker, and a skeleton that reshuffles on every scroll frame reads as
+   * the layout moving. Same cell, same width, every frame, until the real value
+   * replaces it.
+   */
+  function cellNoise(/** @type {number} */ row, /** @type {number} */ col) {
+    const h = Math.imul(row * 73856093 ^ col * 19349663, 0x45d9f3b)
+    return ((h >>> 8) & 0xffff) / 0xffff
+  }
+
+  /** Fraction of a frame's sweep the shimmer band covers, in viewport widths. */
+  const SHIMMER_BAND = 0.28
+  /** One full left-to-right pass, in ms. */
+  const SHIMMER_PERIOD = 1400
+  /** True while any skeleton row was painted this frame - drives the shimmer loop. */
+  let _sawSkeleton = false
+  let _shimmerPhase = 0
+  let _lastShimmerFrame = 0
+  /** @type {ReturnType<typeof setTimeout> | 0} */
+  let _shimmerTimer = 0
+  /** Someone who asked for less motion gets static bars, not a sweep. */
+  const _shimmerOn =
+    typeof matchMedia !== 'function' || !matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  /**
+   * Skeleton row for a window that hasn't loaded yet (windowed mode only).
+   *
+   * Built to be replaced without anything appearing to move: each bar sits on the
+   * text baseline band, is as wide as a plausible value for that cell rather than a
+   * flat 50%, and is flush right in the columns whose values will be flush right.
+   * The old version drew identical half-width bars hard left in every column, so
+   * the moment real rows landed every number jumped to the other side of its cell -
+   * which is what read as the layout shifting.
+   */
   function drawLoadingRow(ctx, idx, ry, rh, c) {
     if (c.tableStyle.zebra && (idx & 1)) {
-      ctx.fillStyle = withAlpha(c.cMutedBg, 0.05)
+      // Softer than a loaded row's stripe: a skeleton row is already busy with bars.
+      ctx.fillStyle = withAlpha(c.cMutedBg, ZEBRA_ALPHA * 0.6)
       ctx.fillRect(0, ry, c.usedW, rh)
     }
+    _sawSkeleton = true
+    // Sit on the text's own band: cap height, centred where the glyphs will be, so
+    // the bar and the value it becomes occupy the same pixels.
+    const barH = Math.max(3, Math.round(rh * 0.28))
     const cy = ry + rh / 2
-    const barH = Math.max(4, Math.round(6 * canvasZoom))
     const gut = geom.gutterWidth
-    ctx.fillStyle = withAlpha(c.cMutedBg, 0.45)
-    for (const col of geom.cols) {
+    const shimmerX = _shimmerPhase * (_viewportWidth + _viewportWidth * SHIMMER_BAND) - _viewportWidth * SHIMMER_BAND
+    const band = Math.max(1, _viewportWidth * SHIMMER_BAND)
+    // Two passes so each opacity is one fill() for the whole row: the base bars,
+    // then a brighter overlay for the ones inside the shimmer band. Per-bar fills
+    // were the most expensive thing on screen in exactly the state that has to
+    // feel smooth, and a canvas gradient per row allocates.
+    ctx.beginPath()
+    let any = false
+    /** @type {Array<[number, number]>} */
+    const lit = []
+    for (let ci = 0; ci < geom.cols.length; ci++) {
+      const col = geom.cols[ci]
       const x = colDrawnX(col, geom, _scrollLeft)
       if (x + col.w <= gut || x >= _viewportWidth) continue
-      const bx = Math.max(x, gut) + CELL_PAD_X
-      const bw = Math.min(col.w - CELL_PAD_X * 2, Math.round(col.w * 0.5))
-      if (bw > 4) { roundRect(ctx, bx, cy - barH / 2, bw, barH, barH / 2); ctx.fill() }
+      const avail = col.w - CELL_PAD_X * 2
+      if (avail <= 4) continue
+      // 40-92% of the cell, stable per cell: text of varying length, not a barcode.
+      const bw = Math.max(6, Math.round(avail * (0.4 + cellNoise(idx, ci) * 0.52)))
+      const cellLeft = Math.max(x, gut)
+      const bx = _skeletonRightAligned(col)
+        ? x + col.w - CELL_PAD_X - bw
+        : cellLeft + CELL_PAD_X
+      if (bx + bw <= gut || bx >= _viewportWidth) continue
+      roundRectPath(ctx, bx, cy - barH / 2, bw, barH, barH / 2)
+      any = true
+      if (_shimmerOn && Math.abs(bx + bw / 2 - shimmerX) < band / 2) lit.push([bx, bw])
     }
+    if (!any) return
+    ctx.fillStyle = withAlpha(c.cMutedBg, 0.4)
+    ctx.fill()
+    if (lit.length === 0) return
+    ctx.beginPath()
+    for (const [bx, bw] of lit) roundRectPath(ctx, bx, cy - barH / 2, bw, barH, barH / 2)
+    ctx.fillStyle = withAlpha(c.cMutedBg, 0.72)
+    ctx.fill()
+  }
+
+  /** Whether a skeleton bar should hug the right edge, matching where the real
+   *  value will sit. Uses the same name→index map drawCell does, so it costs a
+   *  Map lookup rather than a scan of `columns` per bar per frame. @param {any} col */
+  function _skeletonRightAligned(col) {
+    const actualIdx = _nameToActualIdx.get(col.name) ?? -1
+    return actualIdx >= 0 && isRightAlignedColumn(actualIdx)
   }
 
   /**
@@ -4188,11 +4294,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (selected.has(idx)) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.18 : 0.13)
     if (focusedRow === idx) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.09 : 0.07)
     if (hoveredRow === idx) return withAlpha(c.cMutedBg, 0.18)
-    // Zebra striping - a soft tint on odd rows. Below every interactive state
-    // above so selection/hover/focus always win; O(1), no per-row allocation.
-    if (c.tableStyle.zebra && (idx & 1)) return withAlpha(c.cMutedBg, 0.07)
+    // Zebra striping - a tint on odd rows. Below every interactive state above so
+    // selection/hover/focus always win; O(1), no per-row allocation.
+    if (c.tableStyle.zebra && (idx & 1)) return withAlpha(c.cMutedBg, ZEBRA_ALPHA)
     return null
   }
+
+  /**
+   * Alpha of the alternating-row tint, over `--muted`.
+   *
+   * Was 0.07, which in a dark theme put `--muted` a couple of values away from
+   * `--panel` and made the stripe invisible - the Striped preset and the
+   * "Alternating row colours" setting both looked like they did nothing. One
+   * constant so the preset and the setting can never disagree.
+   */
+  const ZEBRA_ALPHA = 0.16
 
   /** Row tint for the row currently being drawn, hoisted so drawCell reads it for free. */
   let _rowBg = /** @type {string | null} */ (null)
@@ -4853,25 +4969,33 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
     const indReserve = indicators.length * 18
 
-    // Required marker - a red asterisk ahead of the name on NOT NULL columns.
-    // The same mark a required form field carries, so it reads without a legend,
-    // and it answers "will this row insert" from the header instead of from the
-    // column menu. Its width comes out of the name's budget rather than being
-    // painted over it, so a long name still truncates against the right edge.
+    // Required marker - a red asterisk on NOT NULL columns. The same mark a
+    // required form field carries, so it reads without a legend, and it answers
+    // "will this row insert" from the header instead of from the column menu. Its
+    // width comes out of the name's budget rather than being painted over it, so a
+    // long name still truncates against the right edge.
     ctx.font = _fonts.header
     const required = !!meta && !meta.nullable
     const reqW = required ? Math.ceil(textWidth(ctx, '*')) + Math.round(4 * canvasZoom) : 0
 
-    // Column name - primary, medium weight.
+    // Column name - primary, medium weight. ALWAYS starts at CELL_PAD_X, the same
+    // inset the cells below use, so every header lines up with every other header
+    // and with its own column's values.
     const nameMaxW = w - CELL_PAD_X - sortReserve - indReserve - reqW - 8
     const name = truncText(ctx, col.name, Math.max(0, nameMaxW))
+    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.9)
+    ctx.fillText(name, x + CELL_PAD_X, cy + 0.5)
+    let tx = x + CELL_PAD_X + textWidth(ctx, name)
+    // The asterisk TRAILS the name. Leading it - which is what this used to do -
+    // indented the name by its width on required columns only, so those headers
+    // sat a few pixels right of every other header, and right of the values
+    // underneath them. That mismatch is the misalignment; the mark itself is fine.
     if (required) {
       ctx.fillStyle = withAlpha(c.RED, 0.85)
-      ctx.fillText('*', x + CELL_PAD_X, cy + 0.5)
+      ctx.fillText('*', tx + Math.round(2 * canvasZoom), cy + 0.5)
+      tx += reqW
     }
-    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.9)
-    ctx.fillText(name, x + CELL_PAD_X + reqW, cy + 0.5)
-    let tx = x + CELL_PAD_X + reqW + textWidth(ctx, name) + 7
+    tx += 7
 
     // PK / FK glyphs (vertically centred, accent-coloured).
     for (const ind of indicators) {
@@ -5059,6 +5183,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Thumbnails hold GPU/heap memory that is not reclaimed by dropping the
     // component, and pending retry timers would fire against a dead canvas.
     releaseCellImages()
+    if (_shimmerTimer) { clearTimeout(_shimmerTimer); _shimmerTimer = 0 }
     // Remove any window resize listeners still attached from a drag in progress.
     clearActiveResizeListeners()
   })
@@ -5976,9 +6101,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 {#if rows[exIdx] !== undefined}
                   {#if _scrollScale === 1}
                     <!-- Normal table: content-space vertical (native scroll moves it,
-                         no per-frame re-render), sticky-left for the horizontal pin. -->
+                         no per-frame re-render), sticky-left for the horizontal pin.
+                         clip-path keeps it out of the header band: the panel sits above
+                         the canvas (it has to - the canvas paints an opaque background),
+                         so without the clip it drew straight over the sticky column
+                         header as soon as its row scrolled up behind it. Only panels
+                         actually touching the band pay anything, and only while they do. -->
+                    {@const clipTop = Math.max(0, HEADER_H - (rowDocTop(exIdx) + ROW_HEIGHT - _scrollTop))}
                     <div class="absolute z-10 left-0 right-0" style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px">
-                      <div style="position:sticky; left:0; width:{_viewportWidth}px" use:trackExpandHeight={exIdx}>
+                      <div
+                        style="position:sticky; left:0; width:{_viewportWidth}px{clipTop > 0 ? `; clip-path: inset(${clipTop}px 0 0 0)` : ''}"
+                        use:trackExpandHeight={exIdx}
+                      >
                         {@render expandBody(exIdx)}
                       </div>
                     </div>
@@ -5987,8 +6121,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                          would be tens of millions of px (past WebKit's layout range), and
                          a far-off-screen panel there would also blow out the scroll height,
                          so only render when the expanded row is near the viewport. -->
+                    {@const clipTopScaled = Math.max(0, HEADER_H - (rowViewportY(exIdx) + ROW_HEIGHT))}
                     <div style="position:sticky;top:0;left:0;width:0;height:0;overflow:visible;z-index:10">
-                      <div class="absolute left-0" style="top:{rowViewportY(exIdx) + ROW_HEIGHT}px; width:{_viewportWidth}px" use:trackExpandHeight={exIdx}>
+                      <div
+                        class="absolute left-0"
+                        style="top:{rowViewportY(exIdx) + ROW_HEIGHT}px; width:{_viewportWidth}px{clipTopScaled > 0 ? `; clip-path: inset(${clipTopScaled}px 0 0 0)` : ''}"
+                        use:trackExpandHeight={exIdx}
+                      >
                         {@render expandBody(exIdx)}
                       </div>
                     </div>
