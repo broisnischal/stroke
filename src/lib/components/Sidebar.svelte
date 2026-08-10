@@ -7,6 +7,8 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import { readOnlyMode, guardWrite, READ_ONLY_HINT } from "$lib/stores/read-only.js";
+  import { appNativeScroll } from "$lib/stores/settings.js";
+  import { smoothScroll } from "$lib/smooth-scroll.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import PanelRight from "@lucide/svelte/icons/panel-right";
@@ -865,6 +867,7 @@
           bind:clientHeight={sidebarHeight}
           class="app-scroll min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain [will-change:scroll-position]"
           role="none"
+          use:smoothScroll={{ enabled: !$appNativeScroll }}
           onscroll={onSidebarScroll}
           onclick={(e) => {
             if (selectedItems.size > 0 && !/** @type {Element} */(e.target).closest?.('li')) {
