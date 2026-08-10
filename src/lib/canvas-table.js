@@ -200,8 +200,16 @@ export function drawIcon(ctx, name, x, y, size, color, lineWidth = 2) {
 
 /** Rounded-rect path on the current context. */
 export function roundRect(ctx, x, y, w, h, r) {
-  const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
+  roundRectPath(ctx, x, y, w, h, r);
+}
+
+/**
+ * Rounded-rect *sub-path* - appended to whatever path is already open, so many
+ * of them can share one beginPath/fill instead of one fill each.
+ */
+export function roundRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
   ctx.moveTo(x + rr, y);
   ctx.arcTo(x + w, y, x + w, y + h, rr);
   ctx.arcTo(x + w, y + h, x, y + h, rr);
