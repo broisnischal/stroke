@@ -8,6 +8,7 @@ import {
 } from '$lib/themes/registry.js'
 import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js'
 import { detectOs } from '$lib/platform.js'
+import { SQL_FORMAT_DEFAULTS, normalizeSqlFormat, setSqlFormatOptions } from '$lib/sql-format-options.js'
 
 const STORAGE_KEY = 'stroke:settings'
 
@@ -15,7 +16,7 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, zebraRows: boolean, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
@@ -157,6 +158,31 @@ export const TABLE_STYLES = {
 }
 /** @type {TableStyleId} */
 export const DEFAULT_TABLE_STYLE = 'lines'
+
+/**
+ * Row spacing for the data grid, as a row height in CSS pixels at 100% zoom.
+ * The grid multiplies by the canvas zoom, so these stay proportional.
+ * Compact fits roughly a third more rows on screen; relaxed is easier to track
+ * across wide tables and kinder at small font sizes.
+ * @typedef {'compact' | 'standard' | 'relaxed'} RowSpacingId
+ * @type {Record<RowSpacingId, { label: string, height: number }>}
+ */
+export const ROW_SPACINGS = {
+  compact: { label: 'Compact', height: 20 },
+  standard: { label: 'Standard', height: 24 },
+  relaxed: { label: 'Relaxed', height: 32 },
+}
+/** @type {RowSpacingId} */
+export const DEFAULT_ROW_SPACING = 'standard'
+export const ROW_SPACING_IDS = /** @type {RowSpacingId[]} */ (Object.keys(ROW_SPACINGS))
+/** @param {unknown} id @returns {RowSpacingId} */
+export function normalizeRowSpacing(id) {
+  return ROW_SPACING_IDS.includes(/** @type {any} */ (id)) ? /** @type {RowSpacingId} */ (id) : DEFAULT_ROW_SPACING
+}
+/** Row height in px at 100% zoom for a spacing id. @param {unknown} id */
+export function rowSpacingHeight(id) {
+  return ROW_SPACINGS[normalizeRowSpacing(id)].height
+}
 /** @returns {TableStyleId} */
 export function normalizeTableStyle(/** @type {unknown} */ id) {
   return TABLE_STYLES[/** @type {TableStyleId} */ (id)] ? /** @type {TableStyleId} */ (id) : DEFAULT_TABLE_STYLE
@@ -277,6 +303,24 @@ export const DEFAULT_SETTINGS = {
   // structure scannable down the left edge, and one embedding value can run to
   // tens of thousands of characters — wrapped, it buries every row around it.
   jsonWordWrap: false,
+  // Off by default, i.e. the grid and the sidebar scroll with the app's own eased
+  // scrolling. Turning it on hands both back to the OS - which is what you want
+  // if your system already does momentum/inertia scrolling well, or if you drive
+  // the app through a trackpad or a screen reader whose behaviour we shouldn't
+  // second-guess.
+  nativeScroll: false,
+  rowSpacing: DEFAULT_ROW_SPACING,
+  // SQL formatter preferences. Defaults live with the formatter (format-sql.js)
+  // so there is one source for what a valid option set is.
+  sqlFormat: { ...SQL_FORMAT_DEFAULTS },
+  // Independent of the grid-style preset: two of those presets (Striped, Dots)
+  // shade alternate rows as part of their look, and this turns the same shading
+  // on for any of the others without changing the separators you picked.
+  zebraRows: false,
+  // Off by default: every executed statement is already in Query History, and
+  // saving each one would bury the handful you deliberately kept. On, a run that
+  // succeeded is filed under Saved Queries too, deduplicated by its SQL.
+  autoSaveQueries: false,
   // On by default, and stated plainly in Settings. What it sends is a fixed
   // list of event names, the version and the OS — never a query, a table name
   // or anything about a connection. See src/lib/telemetry.js.
@@ -326,6 +370,21 @@ export const appCmdkAi = writable(false)
  *  button on any one of them — reflows all of them at once instead of leaving
  *  each open view on whatever it happened to be created with. */
 export const appJsonWordWrap = writable(false)
+
+/** Reactive data-grid row spacing (synced by applySettings); DataTable derives its
+ *  row height from it and repaints. */
+export const appRowSpacing = writable(/** @type {RowSpacingId} */ (DEFAULT_ROW_SPACING))
+
+/** Reactive: shade alternate grid rows regardless of the style preset. */
+export const appZebraRows = writable(false)
+
+/** Reactive: file every successful run under Saved Queries as well as History. */
+export const appAutoSaveQueries = writable(false)
+
+/** Reactive: use the OS's native scrolling instead of the app's eased scrolling
+ *  (off by default). The grid and the sidebar both subscribe, so flipping it
+ *  applies without reopening anything. */
+export const appNativeScroll = writable(false)
 
 /** Reactive: experimental Live mode (auto-refresh) status-bar toggle enabled (off by default). */
 export const appLiveMode = writable(false)
@@ -470,6 +529,11 @@ export function loadSettings() {
     const telemetry = parsed.telemetry !== false
     const cmdkAiEnabled = parsed.cmdkAiEnabled === true
     const jsonWordWrap = parsed.jsonWordWrap === true
+    const nativeScroll = parsed.nativeScroll === true
+    const rowSpacing = normalizeRowSpacing(parsed.rowSpacing)
+    const sqlFormat = normalizeSqlFormat(parsed.sqlFormat)
+    const zebraRows = parsed.zebraRows === true
+    const autoSaveQueries = parsed.autoSaveQueries === true
     const liveModeEnabled = parsed.liveModeEnabled === true
     const nullSortOrder = NULL_SORT_IDS.includes(parsed.nullSortOrder) ? parsed.nullSortOrder : DEFAULT_NULL_SORT
     const agentChatFontSize = migrateAgentFont(parsed.agentChatFontSize, LEGACY_AGENT_CHAT_FONT, DEFAULT_AGENT_CHAT_FONT)
@@ -478,7 +542,7 @@ export function loadSettings() {
     const agentShowQueryCards = parsed.agentShowQueryCards !== false
     const agentWebAccess = parsed.agentWebAccess === true
     const tableTextAlign = TABLE_ALIGN_IDS.includes(parsed.tableTextAlign) ? parsed.tableTextAlign : DEFAULT_TABLE_ALIGN
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap }
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, zebraRows, autoSaveQueries, sqlFormat }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -579,6 +643,12 @@ export function applySettings(settings) {
   setStore(appVimMode, settings.vimMode === true)
   setStore(appCmdkAi, settings.cmdkAiEnabled === true)
   setStore(appJsonWordWrap, settings.jsonWordWrap === true)
+  setStore(appNativeScroll, settings.nativeScroll === true)
+  setStore(appRowSpacing, normalizeRowSpacing(settings.rowSpacing))
+  // Push formatter prefs into the shared option holder that format-sql.js reads.
+  setSqlFormatOptions(settings.sqlFormat)
+  setStore(appZebraRows, settings.zebraRows === true)
+  setStore(appAutoSaveQueries, settings.autoSaveQueries === true)
   setStore(appLiveMode, settings.liveModeEnabled === true)
   setStore(appAgentQueryCards, settings.agentShowQueryCards !== false)
   setStore(appAgentWebAccess, settings.agentWebAccess === true)
