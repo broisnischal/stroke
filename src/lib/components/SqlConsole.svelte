@@ -67,6 +67,9 @@
     queryMs = 0,
     message = "",
     loading = false,
+    /** Cancel handle for the run in flight in THIS tab - so Stop can't cancel
+     *  a query another tab happens to be running at the same time. */
+    runningQueryId = /** @type {string | null} */ (null),
     error = "",
     /** @type {any[]} */
     multiResults = [],
@@ -506,7 +509,7 @@
         variant="destructive"
         size="sm"
         class="h-7 shrink-0 gap-2 pl-2.5 pr-2 font-medium shadow-sm"
-        onclick={() => void cancelQuery()}
+        onclick={() => void cancelQuery(runningQueryId ?? undefined)}
         title={tipText('Stop', 'Cancel the running query.')}
       >
         <Square class="size-3 shrink-0 fill-current" data-icon="inline-start" />
