@@ -49,6 +49,9 @@
     rowSort = null,
     rowFilters = [],
     onrefresh = () => {},
+    /** Auto-refresh interval for THIS tab, in ms (0 = off). */
+    autoRefreshMs = 0,
+    onautorefreshchange = /** @type {(ms: number) => void} */ (() => {}),
     onprev = () => {},
     onnext = () => {},
     /** Keyset/cursor/temporal pagination: next/prev only, no page-jump. */
@@ -326,6 +329,21 @@
 
   const iconBtn =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
+
+  /** Auto-refresh intervals. Nothing shorter than 5s: a refresh re-runs the page
+   *  query and its count, and a faster cadence would spend more time fetching than
+   *  showing. */
+  const AUTO_REFRESH_OPTIONS = [
+    { ms: 0, label: "Off" },
+    { ms: 5_000, label: "5 seconds" },
+    { ms: 10_000, label: "10 seconds" },
+    { ms: 30_000, label: "30 seconds" },
+    { ms: 60_000, label: "1 minute" },
+    { ms: 300_000, label: "5 minutes" },
+  ];
+  const autoRefreshLabel = $derived(
+    AUTO_REFRESH_OPTIONS.find((o) => o.ms === autoRefreshMs)?.label ?? "off",
+  );
 
   /** @type {Array<{ id: 'table' | 'json' | 'record' | 'text' | 'chart' | 'erd' | 'map', icon: string, label: string, title?: string }>} */
   const DATA_VIEW_MODES = [
@@ -1141,16 +1159,60 @@
 
     {/if}
 
-    <button
-      type="button"
-      class={cn(iconBtn, "shrink-0")}
-      disabled={loading}
-      onclick={onrefresh}
-      title="Refresh data (⌘R)"
-      aria-label="Refresh data"
-    >
-      <Icon name="refresh-cw" class={cn("size-3.5", loading && "animate-spin")} />
-    </button>
+    <!-- Refresh + auto-refresh interval read as ONE control: the caret configures
+         the button it's attached to, so they share a single rounded outline and the
+         halves only differ on hover. A separate free-floating caret button looked
+         like a second, unrelated control competing with the refresh icon.
+         Armed state is carried by the caret's colour rather than a badge - there
+         is no room for a dot at this size, and the tooltip states the interval. -->
+    <div class="flex shrink-0 items-stretch">
+      <button
+        type="button"
+        class={cn(iconBtn, "w-6 rounded-r-none")}
+        disabled={loading}
+        onclick={onrefresh}
+        title={autoRefreshMs > 0 ? `Refresh data (⌘R) · auto every ${autoRefreshLabel}` : "Refresh data (⌘R)"}
+        aria-label="Refresh data"
+      >
+        <Icon name="refresh-cw" class={cn("size-3.5", loading && "animate-spin")} />
+      </button>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <button
+              {...props}
+              type="button"
+              class={cn(
+                iconBtn,
+                "h-7 w-4 rounded-l-none",
+                autoRefreshMs > 0 && "text-primary hover:text-primary",
+              )}
+              title={autoRefreshMs > 0 ? `Auto-refresh: every ${autoRefreshLabel}` : "Auto-refresh: off"}
+              aria-label="Auto-refresh interval"
+            >
+              <Icon name="chevron-down" class="size-2.5" />
+            </button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end" class="min-w-44">
+          <!-- GroupHeading needs a Group parent: bits-ui reads the group context from
+               it, and rendering one bare throws "Menu.Group not found". -->
+          <DropdownMenu.Group>
+            <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
+              Auto-refresh
+            </DropdownMenu.GroupHeading>
+            {#each AUTO_REFRESH_OPTIONS as opt (opt.ms)}
+              <DropdownMenu.Item onSelect={() => onautorefreshchange(opt.ms)}>
+                <span class="flex-1">{opt.label}</span>
+                {#if autoRefreshMs === opt.ms}
+                  <Icon name="check" class="size-3.5 text-primary" />
+                {/if}
+              </DropdownMenu.Item>
+            {/each}
+          </DropdownMenu.Group>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+    </div>
 
     <!-- Custom limit / offset -->
     <DropdownMenu.Root bind:open={limitOffsetOpen}
