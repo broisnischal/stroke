@@ -69,7 +69,9 @@
       <Table2 class="size-6 text-muted-foreground/30" />
       <p class="font-mono text-ui-xs text-muted-foreground/60">No table</p>
     </div>
-  {:else if tableState.columns.length === 0}
+  <!-- windowedHead: a huge result set whose rows live outside the tab state (only
+       the focused pane holds the sparse array), so there is nothing to preview. -->
+  {:else if tableState.columns.length === 0 || tableState.windowedHead}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
       <Table2 class="size-6 text-muted-foreground/30" />
       <p class="font-mono text-ui-xs text-muted-foreground/60">Focus this pane to load {tableState.table}</p>
