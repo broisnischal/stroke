@@ -1,14 +1,31 @@
 import { format } from 'sql-formatter'
+import { normalizeSqlFormat, sqlFormatOptions } from '$lib/sql-format-options.js'
 
-/** @param {string} sql */
-export function formatSql(sql) {
+/**
+ * SQL formatting. The preferences themselves live in `sql-format-options.js`,
+ * which is free of this module's `sql-formatter` import so the settings store can
+ * validate and hold them without putting the library on the startup path.
+ */
+
+/** @typedef {import('$lib/sql-format-options.js').SqlFormatOptions} SqlFormatOptions */
+
+/** @param {string} sql @param {Partial<SqlFormatOptions>} [overrides] */
+export function formatSql(sql, overrides) {
   const trimmed = sql.trim()
   if (!trimmed) return sql
+  const o = overrides ? normalizeSqlFormat({ ...sqlFormatOptions(), ...overrides }) : sqlFormatOptions()
   try {
     return format(trimmed, {
       language: 'postgresql',
-      tabWidth: 2,
-      keywordCase: 'upper',
+      tabWidth: o.tabWidth,
+      useTabs: o.useTabs,
+      keywordCase: o.keywordCase,
+      dataTypeCase: o.dataTypeCase,
+      functionCase: o.functionCase,
+      identifierCase: o.identifierCase,
+      logicalOperatorNewline: o.logicalOperatorNewline,
+      expressionWidth: o.expressionWidth,
+      linesBetweenQueries: o.linesBetweenQueries,
     })
   } catch {
     return sql
