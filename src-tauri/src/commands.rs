@@ -903,6 +903,16 @@ pub async fn instance_set_config(
     crate::db::instance_set_config(state, name, value).await
 }
 
+/// Read-only lint pass over the connected database (Advisor tab). Catalog queries
+/// only - it never reads user rows and never writes.
+#[tauri::command]
+pub async fn advisor_scan(
+    state: State<'_, DbState>,
+) -> Result<crate::db::advisor::AdvisorReport, String> {
+    let conn = crate::db::connection::require_conn(&state)?;
+    crate::db::advisor::scan(&conn).await
+}
+
 #[tauri::command]
 pub async fn instance_replication(
     state: State<'_, DbState>,
@@ -910,14 +920,24 @@ pub async fn instance_replication(
     crate::db::instance_replication(state).await
 }
 
+/// `queryId` (optional) names this run so `cancel_query` can target it. Omitting
+/// it keeps the single-slot behaviour older callers relied on.
 #[tauri::command]
-pub async fn pg_execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
-    execute_sql(state, sql).await
+pub async fn pg_execute_sql(
+    state: State<'_, DbState>,
+    sql: String,
+    query_id: Option<String>,
+) -> Result<SqlResult, String> {
+    execute_sql(state, sql, query_id).await
 }
 
 #[tauri::command]
-pub async fn pg_execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result<Vec<SqlResult>, String> {
-    execute_sql_multi(state, sql).await
+pub async fn pg_execute_sql_multi(
+    state: State<'_, DbState>,
+    sql: String,
+    query_id: Option<String>,
+) -> Result<Vec<SqlResult>, String> {
+    execute_sql_multi(state, sql, query_id).await
 }
 
 /// Execute SQL against an arbitrary saved connection without switching the
@@ -997,11 +1017,25 @@ pub async fn pg_insert_table_row(
 
 // ── Cancel running query ──────────────────────────────────────────────────────
 
+/// Cancel one running query by the `queryId` it was started with. Without an id,
+/// cancels every query in flight (the old whole-app "stop" behaviour).
 #[tauri::command]
-pub async fn cancel_query(state: State<'_, DbState>) -> Result<(), String> {
-    if let Ok(mut guard) = state.cancel_tx.lock() {
-        if let Some(tx) = guard.take() {
-            let _ = tx.send(());
+pub async fn cancel_query(
+    state: State<'_, DbState>,
+    query_id: Option<String>,
+) -> Result<(), String> {
+    if let Ok(mut map) = state.cancels.lock() {
+        match query_id {
+            Some(id) => {
+                if let Some(tx) = map.remove(&id) {
+                    let _ = tx.send(());
+                }
+            }
+            None => {
+                for (_, tx) in map.drain() {
+                    let _ = tx.send(());
+                }
+            }
         }
     }
     Ok(())

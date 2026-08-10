@@ -113,7 +113,7 @@ pub fn run() {
     let db_conn: Arc<Mutex<Option<ActiveConnection>>> = Arc::new(Mutex::new(None));
     let db_state = DbState {
         conn: Arc::clone(&db_conn),
-        cancel_tx: Arc::new(std::sync::Mutex::new(None)),
+        cancels: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     };
     let db_conn_for_setup = Arc::clone(&db_conn);
     let mcp_state = McpState::new(db_conn);
@@ -439,6 +439,7 @@ pub fn run() {
             commands::enable_autostart,
             commands::disable_autostart,
             commands::get_autostart_status,
+            commands::advisor_scan,
             commands::cancel_query,
             #[cfg(debug_assertions)]
             commands::debug_set_trial_days_ago,
