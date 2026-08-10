@@ -18,7 +18,7 @@ MCP server.
 
 Built with **Rust + Svelte** — a native backend paired with a reactive UI — so the app is snappy, memory-efficient, and never feels like a browser tab.
 
-- **Under 40 MB memory** at runtime
+- **Fast
 - **Handles millions of rows** without slowing down
 - **Keyboard-first** — every feature is reachable without a mouse
 - **Read-only mode** — safely browse production without risking accidental writes
