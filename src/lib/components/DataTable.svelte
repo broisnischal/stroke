@@ -5,7 +5,8 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight } from '$lib/stores/settings.js'
+  import { createSmoothScroll, wheelPixels } from '$lib/smooth-scroll.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -5072,13 +5073,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // tables. So the non-passive listener is attached ONLY while Ctrl/Shift is
   // physically held; the rest of the time there is no blocking wheel listener at
   // all and the OS scrolls the container directly.
+  // With eased scrolling on (the default - Settings → Appearance → Native
+  // scrolling), the listener has to be live for EVERY tick, because the offset is
+  // animated here rather than by the OS. That is the cost the setting exists to
+  // let people opt out of: turning native scrolling on removes this listener
+  // except while Ctrl/Shift is held, restoring the compositor-driven path exactly
+  // as described above.
   $effect(() => {
     const el = tableContainer
     if (!el) return
+    const easedScroll = !$appNativeScroll
     // Accumulates pinch/ctrl-wheel delta so many small gesture ticks map to whole
     // app-zoom steps instead of one step per event.
     let _zoomAccum = 0
     let _activeAttached = false
+    const scroller = easedScroll ? createSmoothScroll(el) : null
 
     function doZoom(/** @type {number} */ deltaY) {
       _zoomAccum += deltaY
@@ -5086,24 +5095,48 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       while (_zoomAccum >= 24) { decreaseZoom(); _zoomAccum -= 24 }
     }
 
-    // Non-passive: only live while a modifier that needs preventDefault is down.
+    // Non-passive: live for every tick under eased scrolling, otherwise only while
+    // a modifier that needs preventDefault is down.
     const onWheelActive = (/** @type {WheelEvent} */ e) => {
       if (e.ctrlKey) { e.preventDefault(); doZoom(e.deltaY); return }
-      if (!e.shiftKey) return
-      const delta = e.deltaY || e.deltaX
-      if (!delta) return
       // If the pointer is over a nested horizontally-scrollable panel (the FK
       // sub-view), scroll that instead of the main grid.
       const inner = e.target instanceof Element
         ? e.target.closest('[data-fk-subview-scroll]')
         : null
-      if (inner && inner !== el && inner.scrollWidth > inner.clientWidth) {
+      if (e.shiftKey) {
+        // Normalize FIRST. A mouse that reports deltaMode 1 (lines) sends ±1..3,
+        // and treating that as pixels moved the grid by three pixels a notch -
+        // horizontal scrolling looked broken under eased scrolling while native
+        // mode looked fine, because there the browser does this conversion itself.
+        const { dx, dy } = wheelPixels(e, el.clientWidth)
+        const delta = dy || dx // shift + vertical wheel IS horizontal movement
+        if (!delta) return
+        if (inner && inner !== el && inner.scrollWidth > inner.clientWidth) {
+          e.preventDefault()
+          inner.scrollLeft += delta
+          return
+        }
         e.preventDefault()
-        inner.scrollLeft += delta
+        if (scroller) scroller.push(delta, 0)
+        else el.scrollLeft += delta
         return
       }
-      e.preventDefault()
-      el.scrollLeft += delta
+      if (!scroller) return
+      // Plain wheel, eased: animate the offset ourselves. The rAF redraw loop
+      // still runs off the resulting `scroll` events, so nothing else changes.
+      if (inner && inner !== el) return
+      const { dx, dy } = wheelPixels(e, el.clientHeight)
+      if (!dy && !dx) return
+      // A trackpad's horizontal swipe arrives as plain deltaX (no Shift).
+      if (dy && el.scrollHeight > el.clientHeight) {
+        e.preventDefault()
+        scroller.push(0, dy)
+      }
+      if (dx && el.scrollWidth > el.clientWidth) {
+        e.preventDefault()
+        scroller.push(dx, 0)
+      }
     }
 
     // Passive fallback (always on, never blocks scroll): catches a trackpad pinch,
@@ -5127,19 +5160,45 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       el.removeEventListener('wheel', onWheelActive)
       _activeAttached = false
     }
+    // Under eased scrolling the listener stays attached; the modifier gating below
+    // is what keeps it OFF the hot path when the OS is doing the scrolling.
     /** @param {KeyboardEvent} e */
-    const onKey = (e) => { if (e.ctrlKey || e.shiftKey) attach(); else detach() }
+    const onKey = (e) => {
+      if (easedScroll) return
+      if (e.ctrlKey || e.shiftKey) attach()
+      else detach()
+    }
+    // A keyboard scroll, scrollIntoView, or a scrollbar drag moved the element
+    // without us: adopt the new position so the next wheel tick eases from there.
+    const onScrollSync = () => { if (scroller && !scroller.animating()) scroller.sync() }
+    // Blur drops the modifier-gated listener because a keyup that happens while
+    // another window has focus never reaches us. Under eased scrolling the
+    // listener is not modifier-gated and must survive - detaching it there would
+    // leave the grid unable to scroll until the component remounted.
+    const onBlur = () => { if (!easedScroll) detach() }
+
+    // A press interrupts coasting - grabbing the scrollbar, or clicking a cell
+    // while the tail of an ease is still running, takes effect now.
+    const onInterrupt = () => { scroller?.stop(); scroller?.sync() }
 
     el.addEventListener('wheel', onWheelPassive, { passive: true })
+    if (easedScroll) {
+      attach()
+      el.addEventListener('scroll', onScrollSync, { passive: true })
+      el.addEventListener('pointerdown', onInterrupt, { passive: true })
+    }
     window.addEventListener('keydown', onKey, true)
     window.addEventListener('keyup', onKey, true)
-    window.addEventListener('blur', detach)
+    window.addEventListener('blur', onBlur)
     return () => {
+      scroller?.stop()
       detach()
+      el.removeEventListener('pointerdown', onInterrupt)
+      el.removeEventListener('scroll', onScrollSync)
       el.removeEventListener('wheel', onWheelPassive)
       window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('keyup', onKey, true)
-      window.removeEventListener('blur', detach)
+      window.removeEventListener('blur', onBlur)
     }
   })
 
