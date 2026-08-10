@@ -24,7 +24,7 @@
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
   import { IS_MAC } from '$lib/shortcuts.js'
   import { findSearchInput, isTypingTarget } from '$lib/focus-search.js'
-  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode, appAutoSaveQueries } from '$lib/stores/settings.js'
   import { isTextEntryTarget, setVimSubMode } from '$lib/vim/vim.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
   import {
@@ -136,7 +136,9 @@
     createSecurityTab,
     createLogsTab,
     createInsightsTab,
+    createAdvisorTab,
     findInsightsTab,
+    findAdvisorTab,
     createObjectsTab,
     findObjectsTab,
     createRedisTab,
@@ -271,6 +273,7 @@
     listQueryHistory,
     listSavedQueries,
     createSavedQuery,
+    saveQueryOnce,
   } from '$lib/stores/query-history.js'
   import { recordActivity } from '$lib/stores/activity-log.js'
   import { loadRecentTabs, pushRecentTab, removeRecentTab, clearRecentTabs } from '$lib/stores/recent-tabs.js'
@@ -683,6 +686,7 @@
   let securityEverOpened = $state(false)
   let logsEverOpened = $state(false)
   let insightsEverOpened = $state(false)
+  let advisorEverOpened = $state(false)
   let objectsEverOpened = $state(false)
   let redisEverOpened = $state(false)
   let extensionsEverOpened = $state(false)
@@ -940,6 +944,7 @@
     if (activeTab?.kind === 'security') securityEverOpened = true
     if (activeTab?.kind === 'logs') logsEverOpened = true
     if (activeTab?.kind === 'insights') insightsEverOpened = true
+    if (activeTab?.kind === 'advisor') advisorEverOpened = true
     if (activeTab?.kind === 'objects') objectsEverOpened = true
     if (activeTab?.kind === 'redis') redisEverOpened = true
     if (activeTab?.kind === 'extensions') extensionsEverOpened = true
@@ -974,6 +979,7 @@
     { kind: 'security',        get: () => securityEverOpened,       set: (/** @type {boolean} */ v) => (securityEverOpened = v) },
     { kind: 'backup',          get: () => backupEverOpened,         set: (/** @type {boolean} */ v) => (backupEverOpened = v) },
     { kind: 'insights',        get: () => insightsEverOpened,       set: (/** @type {boolean} */ v) => (insightsEverOpened = v) },
+    { kind: 'advisor',         get: () => advisorEverOpened,        set: (/** @type {boolean} */ v) => (advisorEverOpened = v) },
     { kind: 'charts',          get: () => chartsEverOpened,         set: (/** @type {boolean} */ v) => (chartsEverOpened = v) },
     { kind: 'dashboard',       get: () => dashboardEverOpened,      set: (/** @type {boolean} */ v) => (dashboardEverOpened = v) },
     { kind: 'erd',             get: () => erdEverOpened,            set: (/** @type {boolean} */ v) => (erdEverOpened = v) },
@@ -1326,8 +1332,103 @@ let rowSearch = $state('')
   })
 
 
-  /** Tracks which tab IDs currently have an in-flight background fetch. */
+  /** Tracks which tab IDs have an in-flight background fetch (re-entry guard). */
   const fetchingTabIds = new Set()
+
+  // ── Per-tab auto-refresh ──────────────────────────────────────────────────
+  // An interval per tab, not one global setting: the table you're watching should
+  // re-poll while the one you're editing stays still. Only the tab on screen
+  // actually polls - a background tab re-fetches when you return to it anyway, so
+  // ticking there would spend queries on nothing.
+  /** @type {Map<string, number>} */
+  const _autoRefreshByTab = new Map()
+  let _autoRefreshTick = $state(0)
+  const activeAutoRefreshMs = $derived.by(() => {
+    void _autoRefreshTick
+    return activeTabId ? _autoRefreshByTab.get(activeTabId) ?? 0 : 0
+  })
+  /** @param {number} ms */
+  function setActiveAutoRefresh(ms) {
+    if (!activeTabId) return
+    if (ms > 0) _autoRefreshByTab.set(activeTabId, ms)
+    else _autoRefreshByTab.delete(activeTabId)
+    _autoRefreshTick += 1
+  }
+  // The timer is torn down and rebuilt whenever the interval or the active tab
+  // changes, so exactly one is ever running and it always belongs to what's on
+  // screen. Effects run after init, so the deriveds read here are live by then.
+  $effect(() => {
+    const ms = activeAutoRefreshMs
+    const tabId = activeTabId
+    if (!ms || !tabId) return
+    if (activeTab?.kind !== 'table') return
+    const timer = setInterval(() => {
+      // Never stack a refresh on a load still running, and never pull rows out
+      // from under an open cell editor or an in-flight save.
+      if (!activeTable || isTabBusy(tabId) || editingCell || savingCell) return
+      // keepScroll: this is a background update, not navigation - it must not jump
+      // the grid to the top or close the row inspector.
+      void loadRows({ keepScroll: true })
+    }, ms)
+    return () => clearInterval(timer)
+  })
+  /** Cancel handle of the run in flight per tab (`Stop` targets just that query). @type {Map<string, string>} */
+  const _sqlQueryIdByTab = new Map()
+  let _sqlRunSeq = 0
+  /** Cancel handle for the tab on screen, handed to SqlConsole's Stop button. */
+  const activeSqlQueryId = $derived.by(() => {
+    void _busyTick
+    return activeTabId ? _sqlQueryIdByTab.get(activeTabId) ?? null : null
+  })
+  // ── Per-tab busy accounting ───────────────────────────────────────────────
+  // A tab is busy while it owns an UNSETTLED PROMISE - not while a hand-written
+  // flag or counter says so. Both of those went wrong here: a flag let an older
+  // load clear a mark its successor still needed, and guarding the clear to fix
+  // that let a mark outlive its work, leaving the tab strip spinning forever
+  // after the rows had landed. A promise settles exactly once, and the runtime
+  // runs its continuation on every path - early return, throw, supersede - so
+  // the mark cannot leak or clear early.
+  /** @type {Map<string, Set<Promise<any>>>} */
+  const _busyJobs = new Map()
+  // Bumped on every change so consumers (activeSqlQueryId) recompute without the
+  // map itself having to be a reactive proxy. The tab-strip spinner deliberately
+  // does NOT read this: it draws from each tab's own loadingRows/sqlLoading, which
+  // is written in the same patch as the rows and so can't disagree with them.
+  let _busyTick = $state(0)
+  /**
+   * Mark `tabId` busy until `promise` settles. Returns the SAME promise, so
+   * callers keep their own error handling; the bookkeeping hangs off a separate
+   * continuation whose rejection is already handled here.
+   * @template T @param {string | null} tabId @param {Promise<T>} promise @returns {Promise<T>}
+   */
+  function trackBusy(tabId, promise) {
+    if (!tabId) return promise
+    let jobs = _busyJobs.get(tabId)
+    if (!jobs) { jobs = new Set(); _busyJobs.set(tabId, jobs) }
+    jobs.add(promise)
+    _busyTick += 1
+    const settled = () => {
+      jobs.delete(promise)
+      if (jobs.size === 0) _busyJobs.delete(tabId)
+      _busyTick += 1
+    }
+    promise.then(settled, settled)
+    return promise
+  }
+  /** Forget a tab's work entirely - the tab itself is gone. @param {string | null} tabId */
+  function clearBusy(tabId) {
+    if (tabId && _busyJobs.delete(tabId)) _busyTick += 1
+  }
+  /**
+   * Whether `tabId` really has work in flight *right now*. Snapshots store the
+   * loading flag so a tab you leave mid-query still reads as running, but a
+   * snapshot can outlive its query (duplicated tab, reconnect, restored session)
+   * - restoring it blindly would strand a spinner nothing ever clears.
+   * @param {string | null} tabId
+   */
+  function isTabBusy(tabId) {
+    return !!tabId && (_busyJobs.get(tabId)?.size ?? 0) > 0
+  }
   let error = $state('')
   /** Whether the error banner is showing the raw driver text. */
   let showRawError = $state(false)
@@ -1755,7 +1856,7 @@ let rowSearch = $state('')
     rows = s.rows
     total = s.total
     queryMs = s.queryMs
-    loadingRows = s.loadingRows ?? false
+    loadingRows = !!s.loadingRows && isTabBusy(tabId)
     error = s.error
     selected = new Set(s.selected)
     focusedRow = s.focusedRow
@@ -1792,14 +1893,14 @@ let rowSearch = $state('')
     }
   }
 
-  /** @param {SqlTabState} s */
-  function applySqlSnapshot(s) {
+  /** @param {SqlTabState} s @param {string | null} [tabId] - owner, for the live-running check */
+  function applySqlSnapshot(s, tabId = null) {
     sqlText = s.sqlText
     sqlColumns = s.sqlColumns
     sqlRows = s.sqlRows
     sqlQueryMs = s.sqlQueryMs
     sqlMessage = s.sqlMessage
-    sqlLoading = s.sqlLoading ?? false
+    sqlLoading = !!s.sqlLoading && isTabBusy(tabId)
     sqlError = s.sqlError
   }
 
@@ -1898,13 +1999,18 @@ let rowSearch = $state('')
 
   /** @param {StudioTab} tab */
   async function applyTabToEditor(tab) {
+    // Moving to a tab that isn't a SQL editor parks the editor's run state. A run
+    // that finishes while its own tab is in the background leaves the shared
+    // `sqlLoading` true (only the owning tab's state is patched), and the next
+    // snapshot of ANY sql tab would then capture that stale true as its own.
+    if (tab.kind !== 'sql') sqlLoading = false
     if (tab.kind === 'welcome' || tab.kind === 'ai' || tab.kind === 'schema' || tab.kind === 'orm' || tab.kind === 'ddl') {
       clearTableEditor()
       return
     }
     if (tab.kind === 'sql' && tab.state) {
       clearTableEditor()
-      applySqlSnapshot(cloneSqlTabState(/** @type {SqlTabState} */ (tab.state)))
+      applySqlSnapshot(cloneSqlTabState(/** @type {SqlTabState} */ (tab.state)), tab.id)
       return
     }
     if (tab.kind === 'table' && tab.state) {
@@ -2893,6 +2999,10 @@ let rowSearch = $state('')
     openSingletonTab({ find: findInsightsTab, create: createInsightsTab })
   }
 
+  function openAdvisorTab() {
+    openSingletonTab({ find: findAdvisorTab, create: createAdvisorTab })
+  }
+
   function openObjectsTab() {
     openSingletonTab({ find: findObjectsTab, create: createObjectsTab })
   }
@@ -3406,6 +3516,12 @@ let rowSearch = $state('')
       fresh.kind === 'table'
         ? cloneTableTabState(/** @type {TableTabState} */ (fresh.state))
         : cloneSqlTabState(/** @type {SqlTabState} */ (fresh.state))
+    // The copy owns no in-flight work, so it must not inherit the original's
+    // loading flags - nothing would ever clear them on the duplicate.
+    if (state) {
+      if (fresh.kind === 'table') /** @type {any} */ (state).loadingRows = false
+      else /** @type {any} */ (state).sqlLoading = false
+    }
     const copy = { id: crypto.randomUUID(), kind: fresh.kind, title: fresh.title, state }
     const idx = tabs.findIndex((t) => t.id === id)
     tabs = [...tabs.slice(0, idx + 1), copy, ...tabs.slice(idx + 1)]
@@ -4234,7 +4350,8 @@ let rowSearch = $state('')
       if (_tabFetches.get(tabId) === p) _tabFetches.delete(tabId)
     })
     _tabFetches.set(tabId, p)
-    return p
+    // The spinner lives exactly as long as this promise.
+    return trackBusy(tabId, p)
   }
 
   /** Resolve once nothing is fetching rows for `tabId`. @param {string} tabId */
@@ -4404,7 +4521,7 @@ let rowSearch = $state('')
         total = 0
       }
     } finally {
-      fetchingTabIds.delete(tabId)
+      done()
     }
   }
 
@@ -5085,7 +5202,14 @@ let rowSearch = $state('')
    * ⌘R), only that statement runs; otherwise the whole editor buffer runs.
    * @param {string} [overrideSql]
    */
-  async function runSql(overrideSql) {
+  function runSql(overrideSql) {
+    // The owning tab spins until the run settles, wherever the user has navigated
+    // to in the meantime.
+    return trackBusy(activeTabId, runSqlOnTab(overrideSql))
+  }
+
+  /** @param {string} [overrideSql] */
+  async function runSqlOnTab(overrideSql) {
     track('sql_run')
     const sqlRan = typeof overrideSql === 'string' && overrideSql.trim() ? overrideSql : sqlText
     if (!connection || !sqlRan.trim()) return
@@ -5098,6 +5222,10 @@ let rowSearch = $state('')
     // nor drops the answer into whatever tab is in front when it arrives.
     const runTabId = activeTabId
     const stillHere = () => activeTabId === runTabId
+    // Cancel handle for this run, keyed to its tab: several tabs can be running
+    // at once, and Stop has to reach the query belonging to the tab you're on.
+    const queryId = `sql-${runTabId ?? 'none'}-${++_sqlRunSeq}`
+    if (runTabId) _sqlQueryIdByTab.set(runTabId, queryId)
     sqlLoading = true
     sqlError = ''
     sqlMessage = ''
@@ -5111,7 +5239,7 @@ let rowSearch = $state('')
     let ranError = ''
     let ranRowCount = 0
     try {
-      const results = await executeSqlMulti(sqlRan)
+      const results = await executeSqlMulti(sqlRan, queryId)
       const data = results.length > 0 ? results[results.length - 1] : {}
       const cols = data.columns ?? []
       const rws = data.rows ?? []
@@ -5138,6 +5266,7 @@ let rowSearch = $state('')
       }
       if (isNetworkError(ranError)) { connectionLost = true; void silentReconnect() }
     } finally {
+      if (runTabId && _sqlQueryIdByTab.get(runTabId) === queryId) _sqlQueryIdByTab.delete(runTabId)
       patchSqlTab(runTabId, { sqlLoading: false })
       if (stillHere()) sqlLoading = false
       recordActivity({ type: 'sql_exec', title: sqlRan.trim().slice(0, 80) + (sqlRan.trim().length > 80 ? '…' : ''), detail: sqlRan, durationMs: ranMs, rowCount: ranRowCount || undefined, success: !ranError, error: ranError || undefined })
@@ -5146,6 +5275,12 @@ let rowSearch = $state('')
           success: true,
           queryMs: ranMs,
         })
+        // Settings → Database → Auto-save executed queries. Only successful runs,
+        // and deduplicated by SQL, so re-running the statement you're iterating on
+        // doesn't push out the ones you saved deliberately.
+        if (get(appAutoSaveQueries)) {
+          await saveQueryOnce(persistConnectionId, sqlRan).catch(() => {})
+        }
         await refreshQueryStores()
       }
     }
@@ -6126,6 +6261,7 @@ let rowSearch = $state('')
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
   onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
+  onopenadvisor={() => { if (aiMode) exitAiMode(); openAdvisorTab() }}
   onopenobjects={() => { if (aiMode) exitAiMode(); openObjectsTab() }}
   onopenormschema={() => { if (aiMode) exitAiMode(); openOrmSchemaTab() }}
   ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
@@ -6551,6 +6687,21 @@ let rowSearch = $state('')
         </div>
       {/if}
 
+      <!-- Advisor tab - mount once, keep alive. Teardown-eligible: it re-scans on
+           reopen, so nothing the user typed is lost by unmounting it. -->
+      {#if advisorEverOpened}
+        <div
+          class={activeTab?.kind === 'advisor' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'advisor' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./AdvisorPage.svelte')}<TabLoading />{:then { default: AdvisorPage }}
+              <AdvisorPage connectionId={persistConnectionId} />
+            {/await}
+          </svelte:boundary>
+        </div>
+      {/if}
+
       <!-- Database Objects tab - mount once, keep alive -->
       {#if objectsEverOpened}
         <div
@@ -6860,6 +7011,7 @@ let rowSearch = $state('')
             queryMs={sqlQueryMs}
             message={sqlMessage}
             loading={sqlLoading}
+            runningQueryId={activeSqlQueryId}
             error={sqlError}
             multiResults={sqlMultiResults}
             schemaHints={sqlSchemaHints}
@@ -7021,6 +7173,8 @@ let rowSearch = $state('')
             hasPrimaryKey={primaryKey.length > 0}
             deleting={deletingRows}
                         onrefresh={loadRows}
+            autoRefreshMs={activeAutoRefreshMs}
+            onautorefreshchange={setActiveAutoRefresh}
             onsearchchange={handleRowSearchChange}
             onfilterschange={(f) => void handleRowFiltersChange(f)}
             onsortchange={(s) => void handleRowSortChange(s)}
@@ -7351,6 +7505,7 @@ let rowSearch = $state('')
 
             {#if !isRedis}
               {@render tile(Database, 'Insights', openInsightsTab, {})}
+              {@render tile(ShieldCheck, 'Advisor', openAdvisorTab, { hint: 'Advisor — security, performance and schema checks over this database' })}
               {@render tile(Boxes, 'Objects', openObjectsTab, {})}
               {@render tile(FileCode2, 'Codegen', openOrmSchemaTab, { pro: true, hint: 'Codegen — schema as Prisma or Drizzle code' })}
               {@render tile(BarChart2, 'Charts', openChartsTab, { pro: true })}
