@@ -25,6 +25,7 @@
     ICON_SETS,
     TABLE_STYLES,
     TABLE_ALIGN_OPTIONS,
+    ROW_SPACINGS,
     DEFAULT_MAX_QUERY_HISTORY,
     DEFAULT_CONNECT_TIMEOUT_MS,
     DEFAULT_SOCKET_TIMEOUT_MS,
@@ -33,6 +34,12 @@
     AGENT_FONT_SIZES,
     THINKING_STYLES,
   } from "$lib/stores/settings.js";
+  import {
+    SQL_CASE_OPTIONS,
+    SQL_FORMAT_FIELDS,
+    SQL_TAB_WIDTHS,
+    normalizeSqlFormat,
+  } from "$lib/sql-format-options.js";
   import { aiProfiles, activeProfileId, setActiveProfile } from "$lib/stores/ai-settings.js";
   import PenTool from "@lucide/svelte/icons/pen-tool";
   import LucideSparkles from "@lucide/svelte/icons/sparkles";
@@ -169,6 +176,47 @@
 
   function toggleJsonWordWrap() {
     settings = updateSettings({ jsonWordWrap: !settings.jsonWordWrap });
+  }
+
+  function toggleNativeScroll() {
+    settings = updateSettings({ nativeScroll: !settings.nativeScroll });
+  }
+
+  const rowSpacingEntries = Object.entries(ROW_SPACINGS);
+
+  /** @param {string | undefined} id */
+  function setRowSpacing(id) {
+    if (!id || id === settings.rowSpacing) return;
+    settings = updateSettings({ rowSpacing: /** @type {any} */ (id) });
+  }
+
+  function toggleZebraRows() {
+    settings = updateSettings({ zebraRows: !settings.zebraRows });
+  }
+
+  function toggleAutoSaveQueries() {
+    settings = updateSettings({ autoSaveQueries: !settings.autoSaveQueries });
+  }
+
+  // ── SQL formatting ────────────────────────────────────────────────────────
+  // Collapsed by default - see the section comment in databaseContent.
+  let sqlFmtOpen = $state(false);
+  // Read through the normalizer, never straight off `settings`. Settings persisted
+  // by a build that predates this option set can be partial (or absent), and one
+  // `undefined[key]` in a row would throw the whole pane into the error boundary.
+  const sqlFmt = $derived(/** @type {any} */ (normalizeSqlFormat(settings.sqlFormat)));
+
+  /** @param {string} key @param {unknown} value */
+  function setSqlFormat(key, value) {
+    const next = { ...sqlFmt, [key]: value };
+    settings = updateSettings({ sqlFormat: normalizeSqlFormat(next) });
+  }
+  /** @param {{ key: string, min?: number, max?: number, step?: number }} field @param {number} dir */
+  function bumpSqlFormat(field, dir) {
+    const step = field.step ?? 1;
+    const cur = Number(sqlFmt[field.key]);
+    const next = Math.min(field.max ?? 999, Math.max(field.min ?? 0, cur + dir * step));
+    if (next !== cur) setSqlFormat(field.key, next);
   }
 
   function toggleCmdkAi() {
@@ -556,6 +604,102 @@
   {#if show($t('settings.timezone'), $t('settings.timezone.desc'))}
     {@render textRow($t('settings.timezone'), $t('settings.timezone.desc'), 'sessionTimezone', DEFAULT_SESSION_TIMEZONE)}
   {/if}
+
+  {#if show('Auto-save executed queries', 'File every successful run under Saved Queries, not just Query History')}
+    {@render switchRow(
+      'Auto-save executed queries',
+      'File every successful run under Saved Queries as well as Query History, deduplicated by its SQL so re-running the same statement adds one entry, not fifty.',
+      settings.autoSaveQueries,
+      toggleAutoSaveQueries,
+    )}
+  {/if}
+
+  <!-- SQL formatting: nine options, so it opens COLLAPSED. Mounting nine popover
+       selects just to show the Database tab is what made this pane feel slow, and
+       these are settings you touch once. Search still reaches them - a query
+       expands the section, because a setting you can't find may as well not exist. -->
+  {@render secLabel('SQL formatting')}
+  {#if !searching}
+    <button
+      type="button"
+      class="{rowCls} w-full text-left"
+      aria-expanded={sqlFmtOpen}
+      onclick={() => (sqlFmtOpen = !sqlFmtOpen)}
+    >
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">Formatting options</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Casing, indentation and wrapping for Format (⇧⌥F) in every editor and for the DDL viewer.
+        </p>
+      </div>
+      <Icon name={sqlFmtOpen ? 'chevron-up' : 'chevron-down'} class="size-3.5 shrink-0 text-muted-foreground" />
+    </button>
+  {/if}
+  {#if sqlFmtOpen || searching}
+    <!-- One row per sql-formatter option, rendered from SQL_FORMAT_FIELDS so the
+         list can't drift from what the formatter actually reads. -->
+    {#each SQL_FORMAT_FIELDS as field (field.key)}
+      {#if show(field.label, field.desc)}
+        {#if field.kind === 'bool'}
+          {@render switchRow(field.label, field.desc, sqlFmt[field.key] === true, () => setSqlFormat(field.key, !sqlFmt[field.key]))}
+        {:else}
+          <div class={rowCls}>
+            <div class="min-w-0">
+              <p class="text-ui-sm font-medium text-foreground">{field.label}</p>
+              <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">{field.desc}</p>
+            </div>
+            {#if field.kind === 'case'}
+              {@render segmented(field.label, SQL_CASE_OPTIONS.map((o) => ({ value: o.id, label: o.label })), sqlFmt[field.key], (v) => setSqlFormat(field.key, v))}
+            {:else if field.kind === 'tabWidth'}
+              {@render segmented(field.label, SQL_TAB_WIDTHS.map((n) => ({ value: n, label: String(n) })), sqlFmt.tabWidth, (v) => setSqlFormat('tabWidth', v))}
+            {:else if field.kind === 'operatorNewline'}
+              {@render segmented(field.label, [{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }], sqlFmt.logicalOperatorNewline, (v) => setSqlFormat('logicalOperatorNewline', v))}
+            {:else}
+              <div class="flex items-center gap-1">
+                <Button type="button" variant="ghost" size="icon" class="size-7" aria-label={`Decrease ${field.label}`} onclick={() => bumpSqlFormat(field, -1)}>
+                  <Minus class="size-3.5" />
+                </Button>
+                <span class="min-w-10 text-center font-mono text-ui-xs tabular-nums text-foreground">{sqlFmt[field.key]}</span>
+                <Button type="button" variant="ghost" size="icon" class="size-7" aria-label={`Increase ${field.label}`} onclick={() => bumpSqlFormat(field, 1)}>
+                  <Plus class="size-3.5" />
+                </Button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      {/if}
+    {/each}
+  {/if}
+{/snippet}
+
+<!-- Inline choice control for two-to-three short options. A popover select costs a
+     floating layer, a focus trap and a search box; for "Upper / Lower / Preserve"
+     the choices fit on screen, so the whole row is cheaper AND quicker to read. -->
+{#snippet segmented(
+  /** @type {string} */ ariaLabel,
+  /** @type {Array<{ value: any, label: string }>} */ options,
+  /** @type {any} */ value,
+  /** @type {(v: any) => void} */ onpick,
+)}
+  <div role="radiogroup" aria-label={ariaLabel} class="inline-flex shrink-0 items-stretch overflow-hidden rounded-md border border-border/60">
+    {#each options as o, i (o.value)}
+      <button
+        type="button"
+        role="radio"
+        aria-checked={value === o.value}
+        class={cn(
+          'h-7 px-2.5 text-ui-xs transition-colors',
+          i > 0 && 'border-l border-border/60',
+          value === o.value
+            ? 'bg-muted/70 font-medium text-foreground'
+            : 'text-muted-foreground hover:bg-muted/30 hover:text-foreground',
+        )}
+        onclick={() => onpick(o.value)}
+      >
+        {o.label}
+      </button>
+    {/each}
+  </div>
 {/snippet}
 
 {#snippet agentContent()}
@@ -830,6 +974,30 @@
       </SelectMenu>
     </div>
   {/if}
+  {#if show('Row spacing', 'Vertical space each row of the data grid takes')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">Row spacing</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Vertical space each row of the data grid takes. Compact fits about a third more rows on screen; relaxed is easier to track across a wide table.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="Row spacing"
+        value={settings.rowSpacing}
+        onValueChange={setRowSpacing}
+        items={rowSpacingEntries.map(([id, s]) => ({ value: id, label: s.label, keywords: [s.label] }))}
+      />
+    </div>
+  {/if}
+  {#if show('Alternating row colors', 'Shade every other grid row')}
+    {@render switchRow(
+      'Alternating row colors',
+      'Shade every other row so a long row stays readable across the full width. The Striped and Dots grid styles already do this as part of their look.',
+      settings.zebraRows,
+      toggleZebraRows,
+    )}
+  {/if}
   {#if show('Cell alignment', 'Which side grid cell text sits on')}
     <div class={rowCls}>
       <div class="min-w-0">
@@ -845,6 +1013,15 @@
         items={TABLE_ALIGN_OPTIONS.map((o) => ({ value: o.id, label: o.label, keywords: [o.label] }))}
       />
     </div>
+  {/if}
+
+  {#if show('Native scrolling', 'Let the OS scroll the grid and the sidebar instead of the app\'s eased scrolling')}
+    {@render switchRow(
+      'Native scrolling',
+      "Hand the data grid and the sidebar back to the OS scroller. Off (the default) the app eases each wheel tick to its destination, which reads as smoother on mice that scroll in big jumps; on, scrolling behaves exactly like the rest of your desktop — including its own momentum — and nothing of ours sits in front of the wheel.",
+      settings.nativeScroll,
+      toggleNativeScroll,
+    )}
   {/if}
 
   {@render secLabel($t('settings.sec.display'))}
