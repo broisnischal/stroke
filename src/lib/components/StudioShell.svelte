@@ -208,6 +208,17 @@
     readRowsResponse,
   } from '$lib/table-query.js'
   import {
+    WINDOW_PROBE,
+    WINDOW_ROWS_DEFAULT,
+    WINDOW_THRESHOLD,
+    measureRowBytes,
+    pickWindowRows,
+    shouldWindow,
+    stableWindowOrder,
+    windowKeepCount,
+    windowsFullyCovered,
+  } from '$lib/row-window.js'
+  import {
     buildForeignKeyFilters,
     buildReverseForeignKeyFilters,
     findForeignKeyForColumn,
@@ -1205,6 +1216,11 @@
     if ($appPaginationMode === 'offset') return false
     if (!_keysetKeyCol || !_keysetKeyType) return false
     if (pageSize === PAGE_SIZE_ALL) return false
+    // A page big enough to be windowed can't be keyset-driven: the windows are
+    // fetched by offset, so a keyset-ordered first fetch and offset-ordered
+    // windows would be two different orderings spliced into one view. Keyset
+    // exists to make *small* deep pages cheap, which a 1M-row page isn't.
+    if (Number.isFinite(pageSize) && pageSize > WINDOW_THRESHOLD) return false
     if ((connection?.type ?? '') !== 'postgres') return false // keyset is Postgres-only
     if (rowSortMore.length > 0) return false                   // multi-sort → offset
     if (rowSort && rowSort.column !== _keysetKeyCol) return false // sorted by a non-key col → offset
@@ -1216,8 +1232,21 @@
   // top, so a reload never leaves the view stranded mid-table.
   let reloadToken = $state(0)
   // Monotonic id so an out-of-order / superseded row fetch can't clobber a
-  // newer one when the user pages rapidly.
-  let _loadSeq = 0
+  // newer one when the user pages rapidly. Kept PER TAB: a single global token
+  // meant starting a load in one tab silently invalidated a load still running
+  // in another, so a big table left fetching in the background was abandoned the
+  // moment you touched a second tab.
+  /** @type {Map<string, number>} */
+  const _loadSeqByTab = new Map()
+  /** @param {string | null} tabId */
+  const loadSeqOf = (tabId) => (tabId ? _loadSeqByTab.get(tabId) ?? 0 : 0)
+  /** @param {string | null} tabId */
+  function bumpLoadSeq(tabId) {
+    if (!tabId) return 0
+    const n = loadSeqOf(tabId) + 1
+    _loadSeqByTab.set(tabId, n)
+    return n
+  }
   // Infinite scroll - accumulated rows across all "load more" fetches. Plain
   // (non-reactive) array: handing a deep proxy to the grid would put get-traps
   // on every rows[r][c] read in the per-frame canvas draw (the scroll-lag
@@ -1240,16 +1269,38 @@
   // preserved (rows[i] is still row i), so selection / hit-testing / scroll are
   // untouched - only the *data* is windowed. dataVersion bumps trigger a grid
   // redraw after a window is spliced in (rows identity is unchanged).
-  const WINDOW_FETCH = 20_000     // rows per window request
-  const WINDOW_THRESHOLD = 200_000 // window only above this total
-  const WINDOW_KEEP = 4           // windows kept resident on each side of the viewport
+  // Window size is measured, not fixed - see $lib/row-window.js for why and how.
+  const WINDOW_MAX_INFLIGHT = 3     // concurrent window requests (rest queue)
+  const WINDOW_PREFETCH = 4         // windows fetched ahead in the scroll direction
   let windowed = $state(false)
   let dataVersion = $state(0)
   let _windowSeq = 0
+  /** Rows per window for the current load (measured - see pickWindowRows). */
+  let _windowRows = WINDOW_ROWS_DEFAULT
+  /** Absolute row offset this windowed view starts at (page offset; 0 for "All"). */
+  let _windowBase = 0
+  /** How many rows this windowed view covers (the page, or the whole table). */
+  let _windowCount = 0
+  /** Measured payload per row, for sizing the export chunk too. */
+  let _windowBytesPerRow = 0
+  /** The one total order every window of this view slices - see stableWindowOrder.
+   *  @type {{ sortColumn: string, sortDirection: string, sorts: Array<{column:string,direction:string}> } | null} */
+  let _windowOrder = null
   /** @type {Set<number>} */
   let _windowLoaded = new Set()
   /** @type {Set<number>} */
   let _windowFetching = new Set()
+  /** Windows wanted but not yet started, nearest-to-viewport first. @type {number[]} */
+  let _windowQueue = []
+  let _windowInFlight = 0
+  /** Last visible window + travel direction, so prefetch runs ahead of the scroll. */
+  let _lastFirstW = 0
+  let _lastDir = 1
+  // Set when a window fetch still comes back slow despite the sizing above (a slow
+  // link, a sort the server can't index). Prefetch depth and concurrency drop to 1:
+  // reading ahead then queues more work than the scroll can consume.
+  let _windowSlow = false
+  const WINDOW_SLOW_MS = 400
 let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   /** Secondary sort keys for multi-column sort (primary is rowSort). @type {TableSort[]} */
@@ -1644,9 +1695,11 @@ let rowSearch = $state('')
 
   /** @returns {TableTabState} */
   function captureTableSnapshot() {
-    // A windowed result set holds a huge sparse array - never cache it into the
-    // tab. Store empty columns/rows so re-activation takes the refetch path
-    // (fetchRowsForTab → loadRows) and re-establishes windowing cleanly.
+    // A windowed result set holds a sparse array as long as the whole table, so it
+    // never goes into `tabs` (a $state proxy would then trap every rows[r][c] read
+    // in the draw loop). It's parked in _liveRowsByTab instead and handed back on
+    // re-activation together with the window bookkeeping below - so leaving a
+    // million-row table and coming back no longer re-runs the fetch and the count.
     return {
       schema: activeSchema,
       table: activeTable,
@@ -1656,13 +1709,23 @@ let rowSearch = $state('')
       rowSort: rowSort ? { ...rowSort } : null,
       rowSortMore: rowSortMore.map((s) => ({ ...s })),
       rowFilters: rowFilters.map((f) => ({ ...f })),
-      columns: windowed ? [] : columns,
+      columns,
       primaryKey,
       foreignKeys,
       rows: windowed ? [] : rows,
+      windowedHead: windowed,
+      windowedLoaded: windowed ? [..._windowLoaded] : [],
+      windowRows: windowed ? _windowRows : 0,
+      windowBase: windowed ? _windowBase : 0,
+      windowCount: windowed ? _windowCount : 0,
+      windowBytesPerRow: windowed ? _windowBytesPerRow : 0,
+      windowOrder: windowed ? _windowOrder : null,
       total,
       queryMs,
-      loadingRows: false,
+      // The real flag, not a hardcoded false: a table left mid-fetch has to read
+      // as still loading, or leaving the tab makes a 1M-row load look cancelled.
+      // applyTableSnapshot only trusts it while that tab is genuinely busy.
+      loadingRows,
       error,
       selected: new Set(selected),
       focusedRow,
@@ -1678,8 +1741,8 @@ let rowSearch = $state('')
     }
   }
 
-  /** @param {TableTabState} s */
-  function applyTableSnapshot(s) {
+  /** @param {TableTabState} s @param {string | null} [tabId] - owner, for the live-loading check */
+  function applyTableSnapshot(s, tabId = null) {
     page = s.page
     pageSize = s.pageSize ?? loadDefaultPageSize()
     rowSearch = s.rowSearch ?? ''
@@ -1762,6 +1825,22 @@ let rowSearch = $state('')
     tabs = next
   }
 
+  /**
+   * Write a partial update into a table tab's own state, whichever tab is in
+   * front. Same contract as patchSqlTab: a row fetch outlives the tab being
+   * visible, so its results (and its loading flag) belong to the tab that
+   * started it, never to whatever tab happens to be active when it lands.
+   * @param {string} tabId
+   * @param {Partial<TableTabState>} patch
+   */
+  function patchTableTab(tabId, patch) {
+    const i = tabs.findIndex((t) => t.id === tabId && t.kind === 'table')
+    if (i === -1) return
+    const next = [...tabs]
+    next[i] = { ...next[i], state: { .../** @type {TableTabState} */ (next[i].state), ...patch } }
+    tabs = next
+  }
+
   function clearTableEditor() {
     activeTable = null
     page = 1
@@ -1803,8 +1882,10 @@ let rowSearch = $state('')
     if (t.kind === 'table') {
       const state = cloneTableTabState(captureTableSnapshot())
       updated = { ...t, state, title: tableTabTitle(state) }
-      if (windowed) _liveRowsByTab.delete(activeTabId)
-      else _liveRowsByTab.set(activeTabId, rows)
+      // Windowed sets are cached the same way - the sparse array stays raw here
+      // and out of the reactive tree. evictColdTabRows drops it once the tab
+      // falls out of the recently-viewed window.
+      _liveRowsByTab.set(activeTabId, rows)
     } else if (t.kind === 'sql') {
       updated = { ...t, state: cloneSqlTabState(captureSqlSnapshot()) }
     }
@@ -1834,8 +1915,12 @@ let rowSearch = $state('')
       }
       if (raw.columns.length === 0) {
         // No cached data - apply lightweight snapshot (no need to clone rows)
-        applyTableSnapshot(raw)
-        if (raw.table && !fetchingTabIds.has(tab.id)) void startTabFetch(tab.id)
+        if (windowed) resetWindowing()
+        applyTableSnapshot(raw, tab.id)
+        // A fetch this tab already has in flight (including a windowed loadRows
+        // it started before you left) keeps running and lands here on its own -
+        // starting a second one would duplicate the work and fight over the grid.
+        if (raw.table && !isTabBusy(tab.id)) void startTabFetch(tab.id)
       } else {
         // Has cached data - clone Sets so mutations don't bleed between tabs, and
         // restore the RAW rows reference (not the proxied tab.state.rows) so the
@@ -1843,7 +1928,27 @@ let rowSearch = $state('')
         const snap = cloneTableTabState(raw)
         const rawRows = _liveRowsByTab.get(tab.id)
         if (rawRows) snap.rows = rawRows
-        applyTableSnapshot(snap)
+        // A windowed tab comes back with its sparse array and its resident window
+        // set intact, so the rows already fetched are still on screen and only new
+        // windows are requested. The length check is the consistency guard: without
+        // the cached array (evicted), fall through to a clean refetch.
+        if (raw.windowedHead) {
+          const want = raw.windowCount ?? raw.total
+          if (Array.isArray(rawRows) && want > 0 && rawRows.length === want) {
+            restoreWindowing(raw)
+          } else {
+            resetWindowing()
+            snap.rows = []
+            snap.columns = []
+            applyTableSnapshot(snap, tab.id)
+            if (raw.table && !isTabBusy(tab.id)) void startTabFetch(tab.id)
+            return
+          }
+        } else if (windowed) {
+          // Coming from a windowed tab into a normal one.
+          resetWindowing()
+        }
+        applyTableSnapshot(snap, tab.id)
       }
     }
   }
@@ -2626,6 +2731,13 @@ let rowSearch = $state('')
     _liveRowsByTab.clear()
     _tabRowsMru = []
     closedTabStack = []
+    _loadSeqByTab.clear()
+    fetchingTabIds.clear()
+    _sqlQueryIdByTab.clear()
+    _autoRefreshByTab.clear()
+    _autoRefreshTick += 1
+    _busyJobs.clear()
+    _busyTick += 1
     // Every tab id in the history just died with the tab list.
     resetNav(_nav)
     syncNavFlags()
@@ -2964,7 +3076,14 @@ let rowSearch = $state('')
     const evictable = (t) => {
       if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return false
       const st = /** @type {TableTabState} */ (t.state)
-      return !!st && Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD
+      if (!st) return false
+      if (Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD) return true
+      // Windowed tabs keep their (huge, sparse) array outside the reactive tree,
+      // so `st.rows` is empty and the check above can't see them. Measure the
+      // cached array instead, or an open million-row table would be retained for
+      // the whole session however cold it got.
+      const cached = _liveRowsByTab.get(t.id)
+      return Array.isArray(cached) && cached.length > TAB_EVICT_ROW_THRESHOLD
     }
     // Most switches evict nothing. Test first so the common path doesn't rebuild
     // the tabs array - that write invalidates every consumer of `tabs` (tab strip,
@@ -2974,7 +3093,9 @@ let rowSearch = $state('')
       if (!evictable(t)) return t
       _liveRowsByTab.delete(t.id)
       const st = /** @type {TableTabState} */ (t.state)
-      return { ...t, state: { ...st, rows: [], columns: [], selected: new Set() } }
+      // windowedHead cleared too: with the array gone the tab has to refetch, and
+      // the restore path must not look for a cache that no longer exists.
+      return { ...t, state: { ...st, rows: [], columns: [], selected: new Set(), windowedHead: false, windowedLoaded: [], windowCount: 0, loadingRows: false } }
     })
   }
 
@@ -3173,6 +3294,14 @@ let rowSearch = $state('')
   function rememberClosedTab(tab) {
     if (!tab || tab.kind === 'welcome') return
     _liveRowsByTab.delete(tab.id)
+    // Anything still in flight for this tab is now orphaned: dropping its load
+    // token makes the in-flight result fail its own liveness check instead of
+    // being applied to whatever tab took its place.
+    _loadSeqByTab.delete(tab.id)
+    fetchingTabIds.delete(tab.id)
+    _sqlQueryIdByTab.delete(tab.id)
+    if (_autoRefreshByTab.delete(tab.id)) _autoRefreshTick += 1
+    clearBusy(tab.id)
     // Snapshot with a shallow state clone so later edits to the live tree can't
     // mutate what we'll restore. `id`/`pinned` are dropped - reopen mints fresh.
     const { id: _id, pinned: _pinned, ...rest } = tab
@@ -3185,9 +3314,14 @@ let rowSearch = $state('')
       state.rows = []
       state.columns = []
       state.selected = new Set()
+      state.loadingRows = false
+      state.windowedHead = false
+      state.windowedLoaded = []
+      state.windowCount = 0
     } else if (state && tab.kind === 'sql') {
       state.sqlRows = []
       state.sqlColumns = []
+      state.sqlLoading = false
     }
     const snapshot = { ...rest, state }
     closedTabStack = [...closedTabStack, snapshot].slice(-CLOSED_TAB_STACK_MAX)
@@ -4118,51 +4252,69 @@ let rowSearch = $state('')
   async function fetchRowsForTab(tabId) {
     if (fetchingTabIds.has(tabId)) return
     fetchingTabIds.add(tabId)
+    // Re-entry guard only - the tab-strip spinner is tied to this function's
+    // promise by startTabFetch, so `done` never has to be reached for it to stop.
+    let _settled = false
+    const done = () => {
+      if (_settled) return
+      _settled = true
+      fetchingTabIds.delete(tabId)
+    }
 
     const getTab = () => tabs.find((t) => t.id === tabId)
     const tab = getTab()
     if (!tab || tab.kind !== 'table' || !tab.state) {
-      fetchingTabIds.delete(tabId)
+      done()
       return
     }
     const s = /** @type {TableTabState} */ (tab.state)
     if (!s.table) {
-      fetchingTabIds.delete(tabId)
+      done()
       return
     }
     // A fresh fetch replaces the row set, so any row-index-keyed staged changes
     // cached for this table no longer line up - drop them.
     clearPendingChanges(`${s.schema}.${s.table}`)
 
-    // Single helper to patch the tab state - avoids multiple tabs.map() calls per fetch
+    // Patch this tab's own state (shared helper - one tabs write per call).
     /** @param {Partial<TableTabState>} patch */
-    function patchTab(patch) {
-      const i = tabs.findIndex((t) => t.id === tabId)
-      if (i === -1) return
-      const next = [...tabs]
-      next[i] = { ...next[i], state: { .../** @type {TableTabState} */ (next[i].state), ...patch } }
-      tabs = next
-    }
+    const patchTab = (patch) => patchTableTab(tabId, patch)
 
     // Mark loading - one tabs write
     patchTab({ loadingRows: true, error: '' })
     if (tabId === activeTabId) { loadingRows = true; error = '' }
 
-    // "All" on a large table would pull the whole set into this tab. Route the
-    // active tab through loadRows (which windows it) and skip prefetch entirely
-    // for large background tabs - they window on activation instead.
-    if (s.pageSize === PAGE_SIZE_ALL && (s.total > WINDOW_THRESHOLD || s.total <= 0)) {
-      fetchingTabIds.delete(tabId)
-      if (tabId === activeTabId) await loadRows()
+    // A big fetch limit must never be pulled whole into a tab - and especially not
+    // into a background one. Opening three tables with the page size on 1M used to
+    // fire three million-row requests at once and lock the app up for the duration.
+    // The active tab goes through loadRows (which probes, measures and windows);
+    // background tabs are left for activation.
+    const hugeLimit =
+      s.pageSize === PAGE_SIZE_ALL
+        ? (s.total > WINDOW_THRESHOLD || s.total <= 0)
+        : (Number.isFinite(s.pageSize) && s.pageSize > WINDOW_THRESHOLD)
+    if (hugeLimit) {
+      if (tabId === activeTabId) {
+        // loadRows takes over the loading flag (and clears it in its finally).
+        const p = loadRows()
+        done()
+        await p
+      } else {
+        // Nothing will fetch this tab until it's activated, so don't leave it
+        // marked as loading - that spinner would never stop.
+        patchTab({ loadingRows: false })
+        done()
+      }
       return
     }
 
     // Keyset/cursor/temporal: route the active tab's first page through loadRows
     // so it's ordered by the key column (page 1 and cursor pages share one order).
     if (tabId === activeTabId && _keysetActive) {
-      fetchingTabIds.delete(tabId)
       _keysetCursor = null
-      await loadRows()
+      const p = loadRows()
+      done()
+      await p
       return
     }
 
@@ -4262,32 +4414,111 @@ let rowSearch = $state('')
     _windowSeq++
     _windowLoaded = new Set()
     _windowFetching = new Set()
+    _windowQueue = []
+    _windowInFlight = 0
+    _windowSlow = false
+    _windowBase = 0
+    _windowCount = 0
+    _windowRows = WINDOW_ROWS_DEFAULT
+    _windowBytesPerRow = 0
+    _windowOrder = null
   }
 
-  /** Build the shared row-query options for the current view (search/sort/filter). */
+  /**
+   * Re-establish windowing for a tab being restored from its snapshot: the sparse
+   * `rows` array is handed back by applyTabToEditor, and this restores the
+   * bookkeeping that says which windows it already holds, at the same window size
+   * the rows were fetched with. Bumping _windowSeq abandons any window still in
+   * flight for the tab we just left.
+   * @param {TableTabState} s
+   */
+  function restoreWindowing(s) {
+    _windowSeq++
+    _windowLoaded = new Set(s.windowedLoaded ?? [])
+    _windowFetching = new Set()
+    _windowQueue = []
+    _windowInFlight = 0
+    _windowSlow = false
+    _windowRows = s.windowRows && s.windowRows > 0 ? s.windowRows : WINDOW_ROWS_DEFAULT
+    _windowBase = s.windowBase ?? 0
+    _windowCount = s.windowCount ?? (Array.isArray(s.rows) ? s.rows.length : 0)
+    _windowBytesPerRow = s.windowBytesPerRow ?? 0
+    // Same total order as before, so windows fetched after the switch back still
+    // line up with the rows already resident.
+    _windowOrder = s.windowOrder ? { ...s.windowOrder, sorts: (s.windowOrder.sorts ?? []).map((k) => ({ ...k })) } : null
+    windowed = true
+    dataVersion++
+  }
+
+  /** Install a fresh windowed view over `count` rows starting at absolute `base`. */
+  function beginWindowing(base, count, rowsPerWindow, bytesPerRow = 0, order = null) {
+    _windowSeq++
+    _windowLoaded = new Set()
+    _windowFetching = new Set()
+    _windowQueue = []
+    _windowInFlight = 0
+    _windowSlow = false
+    _windowRows = rowsPerWindow
+    _windowBase = base
+    _windowCount = count
+    _windowBytesPerRow = bytesPerRow
+    _windowOrder = order
+    _lastFirstW = 0
+    _lastDir = 1
+    windowed = true
+  }
+
+  /** Build the shared row-query options for the current view (search/sort/filter).
+   *  A windowed view substitutes its stable order, so every window - and an export
+   *  reading the same view - slices one and the same total ordering. */
   function currentRowQuery(includeCount = false) {
-    const { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
-    return { ...apiSearch(rowSearch), sortColumn, sortDirection, sorts, filters: filtersForApi(rowFilters, columns), includeMeta: false, includeCount }
+    const order = (windowed && _windowOrder) ? _windowOrder : sortForApi(rowSort, rowSortMore)
+    return { ...apiSearch(rowSearch), ...order, filters: filtersForApi(rowFilters, columns), includeMeta: false, includeCount }
   }
 
-  /** Fetch one window and splice it into the sparse `rows` array in place. */
+  /** Fetch one window and splice it into the sparse `rows` array in place.
+   *  Window `w` covers view rows [w*_windowRows, …), which live at absolute table
+   *  offset _windowBase + that - the view can be a page, not just the whole table. */
   async function fetchWindow(w) {
     if (!windowed || w < 0 || _windowLoaded.has(w) || _windowFetching.has(w)) return
-    const offset = w * WINDOW_FETCH
-    if (offset >= total) return
+    const start = w * _windowRows
+    if (start >= _windowCount) return
+    const limit = Math.min(_windowRows, _windowCount - start)
     const seq = _windowSeq
     _windowFetching.add(w)
+    _windowInFlight++
+    const t0 = performance.now()
     try {
-      const data = await getTableRows(activeSchema, activeTable, WINDOW_FETCH, offset, currentRowQuery(false))
+      const data = await getTableRows(activeSchema, activeTable, limit, _windowBase + start, currentRowQuery(false))
+      if (performance.now() - t0 > WINDOW_SLOW_MS) _windowSlow = true
       if (seq !== _windowSeq) return // table / query changed while in flight
       const fetched = data.rows ?? []
-      for (let i = 0; i < fetched.length; i++) rows[offset + i] = fetched[i]
+      for (let i = 0; i < fetched.length; i++) rows[start + i] = fetched[i]
       _windowLoaded.add(w)
       dataVersion++
     } catch {
       // leave unloaded - the next visible-range emit retries
     } finally {
       _windowFetching.delete(w)
+      // Clamped: a reset (new query) zeroes the counter while requests are still
+      // in flight, and their finallys must not drive it negative.
+      _windowInFlight = Math.max(0, _windowInFlight - 1)
+      pumpWindowQueue()
+    }
+  }
+
+  /**
+   * Start queued window fetches up to the concurrency cap. Bounded on purpose: a
+   * fast flick crosses many windows, and firing a request for each one at once
+   * both floods the pool and puts the rows the user is actually looking at behind
+   * a queue of windows already scrolled past.
+   */
+  function pumpWindowQueue() {
+    const cap = _windowSlow ? 1 : WINDOW_MAX_INFLIGHT
+    while (windowed && _windowInFlight < cap && _windowQueue.length > 0) {
+      const w = /** @type {number} */ (_windowQueue.shift())
+      if (_windowLoaded.has(w) || _windowFetching.has(w)) continue
+      void fetchWindow(w)
     }
   }
 
@@ -4295,11 +4526,12 @@ let rowSearch = $state('')
   function evictFarWindows(firstW, lastW) {
     if (!windowed) return
     let evicted = false
+    const keep = windowKeepCount(_windowRows)
     for (const w of _windowLoaded) {
-      if (w < firstW - WINDOW_KEEP || w > lastW + WINDOW_KEEP) {
-        const offset = w * WINDOW_FETCH
-        const endI = Math.min(offset + WINDOW_FETCH, total)
-        for (let i = offset; i < endI; i++) rows[i] = undefined
+      if (w < firstW - keep || w > lastW + keep) {
+        const start = w * _windowRows
+        const endI = Math.min(start + _windowRows, _windowCount)
+        for (let i = start; i < endI; i++) rows[i] = undefined
         _windowLoaded.delete(w)
         evicted = true
       }
@@ -4308,31 +4540,61 @@ let rowSearch = $state('')
   }
 
   let _visRangeTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null)
-  /** DataTable reports its visible row range → load nearby windows, evict far ones.
-   *  Debounced so fast scrolling doesn't fire a fetch for every window flown past. */
+  /**
+   * DataTable reports its visible row range → load nearby windows, evict far ones.
+   *
+   * The windows under the viewport are requested immediately: those are the rows
+   * being drawn as skeletons right now, and the old 100ms debounce added that
+   * delay to every one of them. Only eviction waits for the scroll to settle -
+   * dropping windows mid-flick just re-fetches them a moment later.
+   */
   function handleVisibleRange(start, end) {
     if (!windowed) return
+    const firstW = Math.floor(start / _windowRows)
+    const lastW = Math.floor(end / _windowRows)
+    if (firstW !== _lastFirstW) {
+      _lastDir = firstW > _lastFirstW ? 1 : -1
+      _lastFirstW = firstW
+    }
+    // Priority order: what's on screen, then ahead in the direction of travel,
+    // then the window just behind (so a small scroll-back is already resident).
+    /** @type {number[]} */
+    const want = []
+    const ahead = _windowSlow ? 1 : WINDOW_PREFETCH
+    for (let w = firstW; w <= lastW; w++) want.push(w)
+    for (let i = 1; i <= ahead; i++) want.push(_lastDir >= 0 ? lastW + i : firstW - i)
+    want.push(_lastDir >= 0 ? firstW - 1 : lastW + 1)
+    // Rebuilt (not appended) every emit, so windows already scrolled past drop out
+    // of the queue instead of being fetched after the user has left them.
+    _windowQueue = want.filter(
+      (w) => w >= 0 && w * _windowRows < _windowCount && !_windowLoaded.has(w) && !_windowFetching.has(w),
+    )
+    pumpWindowQueue()
     if (_visRangeTimer) clearTimeout(_visRangeTimer)
     _visRangeTimer = setTimeout(() => {
       _visRangeTimer = null
-      if (!windowed) return
-      const firstW = Math.floor(start / WINDOW_FETCH)
-      const lastW = Math.floor(end / WINDOW_FETCH)
-      for (let w = firstW - 1; w <= lastW + 1; w++) void fetchWindow(w)
-      evictFarWindows(firstW, lastW)
-    }, 100)
+      if (windowed) evictFarWindows(firstW, lastW)
+    }, 300)
   }
 
-  /** Fetch the full ordered result set in chunks (windowed export/copy path). */
+  /** Fetch the full ordered result set in chunks (windowed export/copy path).
+   *  Chunked coarser than the scroll windows - nothing is being rendered meanwhile,
+   *  so throughput matters more than latency - but still by BYTES, since 50k rows
+   *  of a table with an embedding column is most of a gigabyte in one response. */
+  const EXPORT_CHUNK_MAX = 50_000
+  const EXPORT_TARGET_BYTES = 20_000_000
   async function fetchAllRows(onProgress) {
+    const chunk = _windowBytesPerRow > 0
+      ? Math.max(500, Math.min(EXPORT_CHUNK_MAX, Math.round(EXPORT_TARGET_BYTES / _windowBytesPerRow)))
+      : EXPORT_CHUNK_MAX
     /** @type {any[]} */
     const out = []
-    for (let off = 0; off < total; off += WINDOW_FETCH) {
-      const data = await getTableRows(activeSchema, activeTable, WINDOW_FETCH, off, currentRowQuery(false))
+    for (let off = 0; off < total; off += chunk) {
+      const data = await getTableRows(activeSchema, activeTable, chunk, off, currentRowQuery(false))
       const r = data.rows ?? []
       for (let i = 0; i < r.length; i++) out.push(r[i])
       onProgress?.(out.length)
-      if (r.length < WINDOW_FETCH) break
+      if (r.length < chunk) break
     }
     return out
   }
@@ -4343,7 +4605,16 @@ let rowSearch = $state('')
    *   sort, search, page from global state) but update rows in place without
    *   jumping the grid to the top or closing the row inspector.
    */
-  async function loadRows({ keepScroll = false } = {}) {
+  function loadRows(opts = {}) {
+    // The tab that owns this load, captured before anything can await. Every
+    // write inside is routed through it, so switching or closing tabs mid-fetch
+    // neither cancels the query nor drops its rows into whichever tab happens to
+    // be in front when they arrive - and the tab strip spins until it settles.
+    return trackBusy(activeTabId, runLoadRows(opts, activeTabId))
+  }
+
+  /** @param {{ keepScroll?: boolean }} opts @param {string | null} ownerTabId */
+  async function runLoadRows({ keepScroll = false } = {}, ownerTabId = null) {
     if (!activeTable) {
       columns = []
       rows = []
@@ -4351,7 +4622,14 @@ let rowSearch = $state('')
       total = 0
       return
     }
-    const seq = ++_loadSeq
+    const ownerSchema = activeSchema
+    const ownerTable = activeTable
+    const seq = bumpLoadSeq(ownerTabId)
+    /** Still the newest load for its tab, and that tab still exists. */
+    const live = () => seq === loadSeqOf(ownerTabId) && tabs.some((t) => t.id === ownerTabId)
+    /** Owner is on screen - only then may this load touch the shared editor state. */
+    const isActive = () => ownerTabId === activeTabId
+    patchTableTab(ownerTabId ?? '', { loadingRows: true, error: '' })
     _windowSeq++ // discard any window fetches in flight from a prior query
     loadingRows = true
     _infiniteRows = []
@@ -4390,70 +4668,194 @@ let rowSearch = $state('')
       // fetches (pagination, sort, filter, live) reuse what we already hold,
       // skipping several round-trips per fetch.
       const includeMeta = columns.length === 0
-      // Window only in "All" mode on a large set - fixed page sizes still
-      // paginate exactly as before. When windowing we cap the first fetch to one
-      // window and ask for the count up front (needed to size the sparse array).
-      const wantsWindow = pageSize === PAGE_SIZE_ALL && effectivePageSize > WINDOW_THRESHOLD
+      // A large fetch limit gets probed instead of pulled: 200 rows plus the count,
+      // then the rows are measured and either the rest is loaded normally (small,
+      // light result) or a windowed view is installed.
+      //
+      // Note this is NOT gated on the "All" sentinel. Page size 1M is an ordinary
+      // option in the toolbar, and taking it literally meant one request for a
+      // million rows - ~130MB of JSON decoded on the main thread, per tab, which
+      // froze the whole app. Any limit past the threshold is treated the same way
+      // now, whichever control produced it.
+      const wantsWindow = effectivePageSize > WINDOW_THRESHOLD
+      // A windowed view is assembled from many separate LIMIT/OFFSET queries, and
+      // those only line up if they all slice ONE total order - so the probe is
+      // ordered by the primary key too, whenever we already know it. On the very
+      // first load of a table the key arrives with this response, so the probe
+      // can't be ordered yet; its rows are then treated as provisional below.
+      const probeOrder = wantsWindow ? stableWindowOrder(rowSort, rowSortMore, primaryKey) : null
+      // Query shape frozen at call time. The remainder fetch below must not read
+      // it back off the globals - by then they may describe another tab.
+      const ownerQuery = {
+        ...apiSearch(rowSearch),
+        ...(probeOrder ?? { sortColumn, sortDirection, sorts }),
+        filters: filtersForApi(rowFilters, columns),
+      }
       const data = await getTableRows(
-        activeSchema, activeTable,
-        wantsWindow ? WINDOW_FETCH : effectivePageSize,
-        wantsWindow ? 0 : offset,
-        {
-          ...apiSearch(rowSearch),
-          sortColumn,
-          sortDirection,
-          sorts,
-          filters: filtersForApi(rowFilters, columns),
+        ownerSchema, ownerTable,
+        wantsWindow ? WINDOW_PROBE : effectivePageSize,
+        offset,
+        { ...ownerQuery,
           keyset: keysetArg,
           includeMeta,
           // Don't wait on COUNT(*) - paint rows now, count streams in below.
           // Windowed loads need the total immediately to size the sparse array.
           includeCount: wantsWindow,
         })
-      if (seq !== _loadSeq) return
+      if (!live()) return
       const nextColumns = data.columns ?? []
+      const fetched = data.rows ?? []
+      const windowTotal = wantsWindow ? Number(data.total ?? 0) : 0
+      const ranMs = Number(data.queryMs ?? data.query_ms ?? 0)
+      // How long this view is, and how heavy: both decide whether to window.
+      // `articles` at 100k rows is small enough to load whole; `openai_docs` at
+      // 10k rows is not, because each row carries a ~17KB embedding.
+      const viewBase = wantsWindow ? offset : 0
+      // A windowed view has to know exactly how long it is - a sparse array sized
+      // from a guess would leave skeleton rows past the end of the table forever.
+      // Engines that can't count (total ≤ 0) therefore keep the old behaviour: load
+      // the requested limit in full.
+      const countKnown = windowTotal > 0
+      const viewCount = wantsWindow
+        ? (countKnown ? Math.max(0, Math.min(effectivePageSize, windowTotal - viewBase)) : effectivePageSize)
+        : fetched.length
+      const bytesPerRow = wantsWindow ? measureRowBytes(fetched) : 0
+      const probeRows = wantsWindow ? pickWindowRows(bytesPerRow) : WINDOW_ROWS_DEFAULT
+      // The order every window will slice. Recomputed here because the primary key
+      // may only just have arrived with this response.
+      const pkNow = includeMeta ? (data.primaryKey ?? data.primary_key ?? []) : primaryKey
+      const windowOrder = wantsWindow ? stableWindowOrder(rowSort, rowSortMore, pkNow) : null
+      // No stable order (a table with no primary key) means no windowing: a single
+      // query is internally consistent, many unordered ones are not. Such a table
+      // loads whole, as it did before.
+      const useWindow =
+        wantsWindow && !!windowOrder && shouldWindow({ rowCount: viewCount, bytesPerRow, countKnown })
+      // Probe rows belong in the sparse array only if they came from that same
+      // order. Otherwise they're a different slice of the table, and keeping them
+      // is exactly the "row 108 shows a different id each time" problem - so they
+      // are dropped and window 0 is fetched properly.
+      const probeUsable = !!probeOrder
+      if (includeMeta && nextColumns.length) {
+        lruSet(tableColumnsCache, `${ownerSchema}.${ownerTable}`, nextColumns)
+      }
+
+      // ── The owner moved to the background while this ran ────────────────────
+      // Commit into its own tab state and leave the visible editor untouched.
+      // (Before this branch existed, a 1M-row load landing after a tab switch
+      // overwrote whatever table was now on screen.)
+      if (!isActive()) {
+        const meta = includeMeta
+          ? {
+              primaryKey: data.primaryKey ?? data.primary_key ?? [],
+              foreignKeys: normalizeForeignKeys(data.foreignKeys ?? data.foreign_keys),
+            }
+          : {}
+        // Keep the columns the tab already holds when the shape is unchanged -
+        // they carry enum/nullable metadata a includeMeta:false fetch doesn't.
+        const prevCols = /** @type {TableTabState | null} */ (tabs.find((t) => t.id === ownerTabId)?.state ?? null)?.columns ?? []
+        const cols = nextColumns.length && !sameColumnShape(prevCols, nextColumns)
+          ? nextColumns
+          : (prevCols.length ? prevCols : nextColumns)
+        if (useWindow) {
+          // Finish the windowed load into the tab that started it: the sparse array
+          // (raw, outside the reactive tree) plus the window bookkeeping. Switching
+          // back then shows the rows immediately instead of re-running the fetch and
+          // the count - which is the whole point of leaving a huge table loading.
+          const arr = new Array(viewCount)
+          if (probeUsable) {
+            for (let i = 0; i < fetched.length && i < viewCount; i++) arr[i] = fetched[i]
+          }
+          _liveRowsByTab.set(ownerTabId, arr)
+          patchTableTab(ownerTabId ?? '', {
+            columns: cols,
+            ...meta,
+            rows: [],
+            windowedHead: true,
+            // The probe covers only whole windows it filled completely; a partly
+            // covered one is refetched so no row is left silently missing.
+            windowedLoaded: probeUsable ? windowsFullyCovered(fetched.length, probeRows) : [],
+            windowRows: probeRows,
+            windowBase: viewBase,
+            windowCount: viewCount,
+            windowBytesPerRow: bytesPerRow,
+            windowOrder,
+            total: windowTotal,
+            queryMs: ranMs,
+            loadingRows: false,
+            error: '',
+          })
+          return
+        }
+        let landed = fetched
+        if (wantsWindow && viewCount > fetched.length) {
+          const restData = await getTableRows(ownerSchema, ownerTable, Math.min(viewCount - fetched.length, MAX_PAGE_SIZE), viewBase + fetched.length, { ...ownerQuery, includeMeta: false, includeCount: false })
+          if (!live()) return
+          landed = [...fetched, ...(restData.rows ?? [])]
+        }
+        _liveRowsByTab.set(ownerTabId, landed)
+        patchTableTab(ownerTabId ?? '', {
+          columns: cols,
+          ...meta,
+          rows: landed,
+          windowedHead: false,
+          windowedLoaded: [],
+          total: wantsWindow ? windowTotal : Number(data.total ?? 0),
+          queryMs: ranMs,
+          loadingRows: false,
+          error: '',
+        })
+        return
+      }
+
       // Update column shape whenever it actually changes (e.g. a column was
       // added/dropped) even on a metadata-skipping fetch; otherwise keep the
       // richer existing columns (which carry enum/nullable info).
       if (nextColumns.length && !sameColumnShape(columns, nextColumns)) columns = nextColumns
       if (includeMeta) {
-        if (activeTable) {
-          lruSet(tableColumnsCache, `${activeSchema}.${activeTable}`, columns)
-        }
         primaryKey = data.primaryKey ?? data.primary_key ?? []
         foreignKeys = normalizeForeignKeys(data.foreignKeys ?? data.foreign_keys)
       }
-      const fetched = data.rows ?? []
-      const windowTotal = wantsWindow ? Number(data.total ?? 0) : 0
-      if (wantsWindow && windowTotal > WINDOW_THRESHOLD) {
-        // Sparse windowed array: length = total, only window 0 loaded so far.
-        _windowSeq++
-        _windowLoaded = new Set([0])
-        _windowFetching = new Set()
-        windowed = true
-        const arr = new Array(windowTotal)
-        for (let i = 0; i < fetched.length; i++) arr[i] = fetched[i]
+      if (useWindow) {
+        // Sparse windowed array: one slot per row of this view, holding only the
+        // probe's rows so far. Window size came from measuring those rows.
+        beginWindowing(viewBase, viewCount, probeRows, bytesPerRow, windowOrder)
+        const arr = new Array(viewCount)
+        // Only rows that came from the view's own ordering may stay - see probeUsable.
+        if (probeUsable) {
+          for (let i = 0; i < fetched.length && i < viewCount; i++) arr[i] = fetched[i]
+          for (const w of windowsFullyCovered(fetched.length, probeRows)) _windowLoaded.add(w)
+        }
         rows = arr
         _infiniteRows = []
         total = windowTotal
         dataVersion++
+        // Warm the windows the probe didn't cover, before the first scroll asks.
+        const firstGap = _windowLoaded.size
+        for (let w = firstGap; w <= firstGap + WINDOW_PREFETCH; w++) _windowQueue.push(w)
+        pumpWindowQueue()
       } else if (wantsWindow) {
-        // Below the windowing bar after counting - load the remainder in full.
+        // Past the limit bar but small and light after measuring - load the rest.
         resetWindowing()
         total = windowTotal
-        // Paint the first window NOW, before going back for the rest. The
-        // remainder is a second round-trip over tens of thousands of rows, and
-        // holding `rows` empty until it lands leaves the grid blank for all of
-        // it — with the columns already drawn, which reads as "this table is
-        // empty" rather than "this is still loading". Every table between
-        // WINDOW_FETCH and WINDOW_THRESHOLD rows opened on "All" comes through
-        // here, so that was the common case, not the rare one.
+        // Paint the probe NOW, before going back for the rest. The remainder is a
+        // second round-trip over tens of thousands of rows, and holding `rows`
+        // empty until it lands leaves the grid blank for all of it — with the
+        // columns already drawn, which reads as "this table is empty" rather than
+        // "this is still loading".
         rows = fetched
         _infiniteRows = fetched
-        if (windowTotal > fetched.length) {
-          const restData = await getTableRows(activeSchema, activeTable, Math.min(windowTotal - fetched.length, MAX_PAGE_SIZE), fetched.length, currentRowQuery(false))
-          if (seq !== _loadSeq) return
-          rows = [...fetched, ...(restData.rows ?? [])]
+        if (viewCount > fetched.length) {
+          const restData = await getTableRows(ownerSchema, ownerTable, Math.min(viewCount - fetched.length, MAX_PAGE_SIZE), viewBase + fetched.length, { ...ownerQuery, includeMeta: false, includeCount: false })
+          if (!live()) return
+          const all = [...fetched, ...(restData.rows ?? [])]
+          // The tab may have gone to the background during this second trip -
+          // then the rows belong to its own state, not to the visible grid.
+          if (!isActive()) {
+            _liveRowsByTab.set(ownerTabId, all)
+            patchTableTab(ownerTabId ?? '', { columns: nextColumns, rows: all, total: windowTotal, queryMs: ranMs, loadingRows: false, error: '', windowedHead: false, windowedLoaded: [] })
+            return
+          }
+          rows = all
           _infiniteRows = rows
         }
       } else {
@@ -4464,7 +4866,7 @@ let rowSearch = $state('')
         // return a real total here; refreshRowCount() then no-ops for them.
         total = Number(data.total ?? 0)
       }
-      queryMs = Number(data.queryMs ?? data.query_ms ?? 0)
+      queryMs = ranMs
       // Record this page's boundary key values so next/prev can build cursors.
       if (ksActive && _keyColIndex >= 0) {
         _pageFirstKey = rows.length ? rows[0]?.[_keyColIndex] : null
@@ -4479,42 +4881,57 @@ let rowSearch = $state('')
       }
       // Fire-and-forget: fill the total in the background so the count never
       // delays the rows. Windowed loads already have a real total from the fetch.
-      if (!windowed) void refreshRowCount(seq)
+      if (!windowed) void refreshRowCount(ownerTabId, seq, ownerSchema, ownerTable, ownerQuery)
+      // Mirror the landed result into the owning tab so the spinner in the tab
+      // strip stops and a later switch away/back doesn't refetch it.
+      patchTableTab(ownerTabId ?? '', { loadingRows: false, error: '' })
     } catch (e) {
-      if (seq !== _loadSeq) return
+      if (!live()) return
       const errStr = String(e)
       if (isNetworkError(errStr)) { connectionLost = true; void silentReconnect() }
-      error = errStr
-      resetWindowing()
-      columns = []
-      primaryKey = []
-      foreignKeys = []
-      rows = []
-      _infiniteRows = []
-      total = 0
-      recordActivity({ type: 'row_fetch', title: `Failed to load ${activeTable}`, schema: activeSchema, table: activeTable ?? undefined, success: false, error: errStr })
+      patchTableTab(ownerTabId ?? '', { loadingRows: false, error: errStr, columns: [], rows: [], total: 0 })
+      if (isActive()) {
+        error = errStr
+        resetWindowing()
+        columns = []
+        primaryKey = []
+        foreignKeys = []
+        rows = []
+        _infiniteRows = []
+        total = 0
+      }
+      recordActivity({ type: 'row_fetch', title: `Failed to load ${ownerTable}`, schema: ownerSchema, table: ownerTable ?? undefined, success: false, error: errStr })
     } finally {
-      if (seq === _loadSeq) loadingRows = false
+      // The newest load for a tab owns its loading flag - in the tab's own state
+      // (which is what the tab strip draws) and, while that tab is on screen, in
+      // the grid too. A superseded load clears neither: the load that replaced it
+      // will, when it reaches this same block.
+      if (seq === loadSeqOf(ownerTabId)) {
+        patchTableTab(ownerTabId ?? '', { loadingRows: false })
+        if (isActive()) loadingRows = false
+      }
     }
   }
 
   /**
    * Background row-count pass for the main grid. Runs after loadRows() has
    * already painted the rows, so COUNT(*) never blocks the initial view. The
-   * _loadSeq token drops results from a superseded load (fast tab/filter
+   * per-tab load token drops results from a superseded load (fast tab/filter
    * switches). Returns -1 on non-Postgres engines / failure - in which case the
-   * total set by loadRows() is kept untouched.
-   * @param {number} seq
+   * total set by loadRows() is kept untouched. Like the load itself, the count
+   * belongs to the tab that asked for it: it lands in that tab's state and only
+   * touches the visible total while that tab is still in front.
+   * @param {string | null} tabId @param {number} seq @param {string} schema
+   * @param {string} table @param {{ search?: string, searchIsRegex?: boolean, filters?: any[] }} query
    */
-  async function refreshRowCount(seq) {
-    if (!activeTable) return
+  async function refreshRowCount(tabId, seq, schema, table, query) {
+    if (!table) return
     try {
-      const n = await countTableRows(activeSchema, activeTable, {
-        ...apiSearch(rowSearch),
-        filters: filtersForApi(rowFilters, columns),
-      })
-      if (seq !== _loadSeq) return
+      const n = await countTableRows(schema, table, query)
+      if (seq !== loadSeqOf(tabId)) return
       if (typeof n === 'number' && n >= 0) {
+        patchTableTab(tabId ?? '', { total: n })
+        if (tabId !== activeTabId) return
         total = n
         const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
         if (page > maxPage) page = maxPage
@@ -4528,7 +4945,8 @@ let rowSearch = $state('')
     if (total >= 0 && _infiniteRows.length >= total) return
     if (_infiniteRows.length >= INFINITE_ROW_CAP) return
     loadingMore = true
-    const seq = _loadSeq
+    const ownerTabId = activeTabId
+    const seq = loadSeqOf(ownerTabId)
     try {
       const offset = _infiniteRows.length
       const { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
@@ -4539,7 +4957,9 @@ let rowSearch = $state('')
         sorts,
         filters: filtersForApi(rowFilters, columns),
       })
-      if (seq !== _loadSeq) return
+      // A superseded load, or a tab switch, means these rows no longer belong to
+      // what's on screen - appending them would splice one table into another.
+      if (seq !== loadSeqOf(ownerTabId) || ownerTabId !== activeTabId) return
       const fetched = data.rows ?? []
       if (!fetched.length) return
       // Append in place - spreading the whole accumulated array on every page was
@@ -4763,6 +5183,13 @@ let rowSearch = $state('')
     tabs = []
     _liveRowsByTab.clear()
     _tabRowsMru = []
+    _loadSeqByTab.clear()
+    fetchingTabIds.clear()
+    _sqlQueryIdByTab.clear()
+    _autoRefreshByTab.clear()
+    _autoRefreshTick += 1
+    _busyJobs.clear()
+    _busyTick += 1
     resetNav(_nav)
     syncNavFlags()
     // Redis has no relational catalog: skip schema/table loading entirely and
