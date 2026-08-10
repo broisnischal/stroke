@@ -776,17 +776,53 @@ export async function getColumnStats(schema, table, column) {
   return inv('pg_get_column_stats', { schema, table, column })
 }
 
-/** Cancel the currently-running SQL query (no-op if none is running). */
-export async function cancelQuery() {
-  return inv('cancel_query')
+/**
+ * @typedef {object} AdvisorFinding
+ * @property {string} checkId
+ * @property {'security'|'performance'|'schema'} category
+ * @property {'error'|'warning'|'info'} severity
+ * @property {string} title
+ * @property {string} entity
+ * @property {string} entityKind
+ * @property {string} description
+ * @property {string | null} detail
+ * @property {string | null} remediation
+ * @property {number} metric
+ */
+
+/**
+ * @typedef {object} AdvisorReport
+ * @property {string} engine
+ * @property {AdvisorFinding[]} findings
+ * @property {Array<{ id: string, title: string, category: string, status: string, findings: number, ms: number, error: string | null }>} checks
+ * @property {boolean} unsupported
+ */
+
+/**
+ * Run the Advisor's checks over the connected database. Catalog reads only - it
+ * never touches user rows and never writes.
+ * @returns {Promise<AdvisorReport>}
+ */
+export async function advisorScan() {
+  return inv('advisor_scan')
 }
 
-/** @param {string} sql */
-export async function executeSql(sql) {
+/**
+ * Cancel a running SQL query. With `queryId` only that run is cancelled - which
+ * is what lets two editor tabs run at once without one's Cancel killing the
+ * other's query. Without an id, everything in flight is cancelled.
+ * @param {string} [queryId]
+ */
+export async function cancelQuery(queryId) {
+  return inv('cancel_query', { queryId: queryId ?? null })
+}
+
+/** @param {string} sql @param {string} [queryId] */
+export async function executeSql(sql, queryId) {
   if (isWriteSql(sql)) assertWritable('run that statement')
   const _t0 = performance.now()
   try {
-    const r = await inv('pg_execute_sql', { sql })
+    const r = await inv('pg_execute_sql', { sql, queryId: queryId ?? null })
     recordQuery({ sql: r?.sql || sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), source: 'sql', success: true })
     return r
   } catch (err) {
@@ -795,10 +831,11 @@ export async function executeSql(sql) {
   }
 }
 
-/** Execute one or more SQL statements and return each result as a separate entry. */
-export async function executeSqlMulti(sql) {
+/** Execute one or more SQL statements and return each result as a separate entry.
+ *  @param {string} sql @param {string} [queryId] cancel handle for this run */
+export async function executeSqlMulti(sql, queryId) {
   if (isWriteSql(sql)) assertWritable('run that statement')
-  return await inv('pg_execute_sql_multi', { sql })
+  return await inv('pg_execute_sql_multi', { sql, queryId: queryId ?? null })
 }
 
 // ── Instance Insights (PostgreSQL + MySQL monitoring) ───────────────────────
