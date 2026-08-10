@@ -2425,14 +2425,21 @@ pub async fn execute_ddl(state: State<'_, DbState>, sql: String) -> Result<(), S
     }
 }
 
-pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
+pub async fn execute_sql(
+    state: State<'_, DbState>,
+    sql: String,
+    query_id: Option<String>,
+) -> Result<SqlResult, String> {
     let sql_str = sql.trim().to_string();
     if sql_str.is_empty() {
         return Err("Query is empty".into());
     }
     let conn = require_conn(&state)?;
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
-    *state.cancel_tx.lock().map_err(|e| e.to_string())? = Some(cancel_tx);
+    // Keyed by the caller's id so several editor tabs can run at once and each
+    // one's Cancel reaches its own query.
+    let cancel_key = query_id.unwrap_or_else(|| "default".to_string());
+    super::connection::register_cancel(&state, &cancel_key, cancel_tx);
     // Kept for the query log — the per-dialect executor runs `sql_str` (which is
     // moved into the cancellable branch below), so stamp the executed SQL onto
     // the result after the match.
@@ -2462,6 +2469,7 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
             _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
         },
     };
+    super::connection::unregister_cancel(&state, &cancel_key);
     if let Ok(r) = &mut result {
         r.sql = sql_out;
     }
@@ -2893,16 +2901,22 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, stmts: &[String]) -> Result<V
     Ok(results)
 }
 
-pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result<Vec<SqlResult>, String> {
+pub async fn execute_sql_multi(
+    state: State<'_, DbState>,
+    sql: String,
+    query_id: Option<String>,
+) -> Result<Vec<SqlResult>, String> {
     let sql_str = sql.trim().to_string();
     if sql_str.is_empty() {
         return Err("Query is empty".into());
     }
     let conn = require_conn(&state)?;
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
-    *state.cancel_tx.lock().map_err(|e| e.to_string())? = Some(cancel_tx);
+    let cancel_key = query_id.unwrap_or_else(|| "default".to_string());
+    super::connection::register_cancel(&state, &cancel_key, cancel_tx);
     let stmts = split_sql_statements(&sql_str);
     if stmts.is_empty() {
+        super::connection::unregister_cancel(&state, &cancel_key);
         return Err("Query is empty".into());
     }
     let result = tokio::select! {
@@ -2939,6 +2953,7 @@ pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result
         } => r,
         _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
     };
+    super::connection::unregister_cancel(&state, &cancel_key);
     result
 }
 

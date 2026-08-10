@@ -258,15 +258,35 @@ impl ActiveConnection {
 
 pub struct DbState {
     pub conn: Arc<Mutex<Option<ActiveConnection>>>,
-    pub cancel_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    /// Cancel handles for the queries currently in flight, keyed by the id the
+    /// caller sent. Keyed rather than a single slot because the UI runs several
+    /// queries at once (one per editor tab) - with one slot, the second run
+    /// overwrote the first's handle and "Cancel" hit whichever query registered
+    /// last instead of the one whose button was pressed.
+    pub cancels: Arc<Mutex<std::collections::HashMap<String, oneshot::Sender<()>>>>,
 }
 
 impl Default for DbState {
     fn default() -> Self {
         Self {
             conn: Arc::new(Mutex::new(None)),
-            cancel_tx: Arc::new(Mutex::new(None)),
+            cancels: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
+    }
+}
+
+/// Register a cancel handle for `id`, replacing (and dropping) any handle already
+/// stored under it.
+pub fn register_cancel(state: &State<'_, DbState>, id: &str, tx: oneshot::Sender<()>) {
+    if let Ok(mut map) = state.cancels.lock() {
+        map.insert(id.to_string(), tx);
+    }
+}
+
+/// Drop the cancel handle for `id` (query finished, cancelling it is meaningless).
+pub fn unregister_cancel(state: &State<'_, DbState>, id: &str) {
+    if let Ok(mut map) = state.cancels.lock() {
+        map.remove(id);
     }
 }
 
