@@ -113,6 +113,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Check from "@lucide/svelte/icons/check";
   import Loader from "@lucide/svelte/icons/loader";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
   import DateTimePicker from "./DateTimePicker.svelte";
   import ColumnStatsPanel from "./ColumnStatsPanel.svelte";
@@ -298,6 +299,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     windowed = false,
     /** Called (on change) with the currently visible row range in windowed mode. */
     onvisiblerange = /** @type {(start: number, end: number) => void} */ (() => {}),
+    /** Windowed mode: what the parent's window fetcher is doing, so the grid can
+     *  say what it is waiting for instead of shimmering silently.
+     *  @type {{ slow: boolean, failed: boolean } | null} */
+    windowStatus = null,
+    /** Retry the windows that gave up (the loading pill's Retry button). */
+    onretrywindows = /** @type {() => void} */ (() => {}),
     /** Infinite scroll mode - when true the table fires onloadmore near the bottom. */
     infiniteScroll = false,
     /** True while an incremental "load more" fetch is in flight. */
@@ -1000,6 +1007,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => { void dataVersion; scheduleDraw(); });
   let _emittedFirst = -1;
   let _emittedLast = -1;
+  // A reload that keeps the scroll position hands over a *fresh* rows array -
+  // for a windowed view, one holding nothing but its probe. The viewport has not
+  // moved, so the range is the same one the parent already heard and the dedupe
+  // below would swallow the emit, leaving every row under the viewport a
+  // skeleton until the user happened to scroll. Identity change = forget what
+  // was emitted, and let the next frame re-ask for the windows that matter.
+  $effect(() => {
+    void rows;
+    _emittedFirst = -1;
+    _emittedLast = -1;
+  });
   function emitVisibleRange(first, last) {
     if (!windowed) return;
     if (first === _emittedFirst && last === _emittedLast) return;
@@ -4017,6 +4035,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // skeleton row painted below; the tail uses it to decide whether to keep
     // animating, so a fully loaded grid schedules nothing at all.
     _sawSkeleton = false
+    _skelMin = -1
+    _skelMax = -1
+    _shimmerFill = null
     if (_shimmerOn) _shimmerPhase = (performance.now() % SHIMMER_PERIOD) / SHIMMER_PERIOD
 
     const W = _viewportWidth
@@ -4183,6 +4204,51 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         _shimmerTimer = setTimeout(() => { _shimmerTimer = 0; scheduleDraw() }, 32)
       }
     }
+    publishLoadingSpan()
+  }
+
+  // ── "What is it loading?" ─────────────────────────────────────────────────
+  // Skeleton bars say *that* rows are coming, never which ones or how far along,
+  // and on a million-row table a jump can leave a screenful of them up for a
+  // second with nothing to read. The rows being waited on are already known here
+  // - draw() paints them - so they're published to a pill instead of thrown away.
+  /** First/last skeleton row painted this frame. */
+  let _skelMin = -1
+  let _skelMax = -1
+  /** When the current run of skeleton frames began (0 = none on screen). */
+  let _skelSince = 0
+  let _spanPublished = 0
+  /** @type {ReturnType<typeof setTimeout> | 0} */
+  let _spanTimer = 0
+  /** Rows drawn as skeletons, for the pill. @type {{first:number,last:number}|null} */
+  let loadingSpan = $state(/** @type {{first:number,last:number}|null} */ (null))
+  /** A window that lands quickly must not flash a pill on its way past. */
+  const SPAN_SHOW_AFTER = 220
+  /** Reactivity budget: the pill re-reads at most this often, not per frame. */
+  const SPAN_PUBLISH_MS = 150
+
+  /** Push (or clear) the skeleton span for the pill. Called at the end of every
+   *  frame, so it stays off the per-cell path and costs one comparison. */
+  function publishLoadingSpan() {
+    if (!_sawSkeleton || !windowed) {
+      _skelSince = 0
+      if (loadingSpan) loadingSpan = null
+      return
+    }
+    const now = performance.now()
+    if (!_skelSince) _skelSince = now
+    if (now - _skelSince < SPAN_SHOW_AFTER) {
+      // Not yet worth showing. A repaint is already queued while the shimmer
+      // animates; with reduced motion nothing else would come back to check.
+      if (!_shimmerOn && !_spanTimer) {
+        _spanTimer = setTimeout(() => { _spanTimer = 0; scheduleDraw() }, SPAN_SHOW_AFTER)
+      }
+      return
+    }
+    if (now - _spanPublished < SPAN_PUBLISH_MS) return
+    _spanPublished = now
+    if (loadingSpan?.first === _skelMin && loadingSpan?.last === _skelMax) return
+    loadingSpan = { first: _skelMin, last: _skelMax }
   }
 
   /**
@@ -4206,6 +4272,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let _sawSkeleton = false
   let _shimmerPhase = 0
   let _lastShimmerFrame = 0
+  /** The frame's highlight gradient, built once and shared by every skeleton row.
+   *  @type {CanvasGradient | null} */
+  let _shimmerFill = null
   /** @type {ReturnType<typeof setTimeout> | 0} */
   let _shimmerTimer = 0
   /** Someone who asked for less motion gets static bars, not a sweep. */
@@ -4229,21 +4298,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillRect(0, ry, c.usedW, rh)
     }
     _sawSkeleton = true
+    if (_skelMin < 0 || idx < _skelMin) _skelMin = idx
+    if (idx > _skelMax) _skelMax = idx
     // Sit on the text's own band: cap height, centred where the glyphs will be, so
     // the bar and the value it becomes occupy the same pixels.
     const barH = Math.max(3, Math.round(rh * 0.28))
     const cy = ry + rh / 2
     const gut = geom.gutterWidth
-    const shimmerX = _shimmerPhase * (_viewportWidth + _viewportWidth * SHIMMER_BAND) - _viewportWidth * SHIMMER_BAND
-    const band = Math.max(1, _viewportWidth * SHIMMER_BAND)
     // Two passes so each opacity is one fill() for the whole row: the base bars,
-    // then a brighter overlay for the ones inside the shimmer band. Per-bar fills
-    // were the most expensive thing on screen in exactly the state that has to
-    // feel smooth, and a canvas gradient per row allocates.
+    // then the highlight over the same path. Per-bar fills were the most
+    // expensive thing on screen in exactly the state that has to feel smooth.
     ctx.beginPath()
     let any = false
-    /** @type {Array<[number, number]>} */
-    const lit = []
     for (let ci = 0; ci < geom.cols.length; ci++) {
       const col = geom.cols[ci]
       const x = colDrawnX(col, geom, _scrollLeft)
@@ -4259,16 +4325,44 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (bx + bw <= gut || bx >= _viewportWidth) continue
       roundRectPath(ctx, bx, cy - barH / 2, bw, barH, barH / 2)
       any = true
-      if (_shimmerOn && Math.abs(bx + bw / 2 - shimmerX) < band / 2) lit.push([bx, bw])
     }
     if (!any) return
     ctx.fillStyle = withAlpha(c.cMutedBg, 0.4)
     ctx.fill()
-    if (lit.length === 0) return
-    ctx.beginPath()
-    for (const [bx, bw] of lit) roundRectPath(ctx, bx, cy - barH / 2, bw, barH, barH / 2)
-    ctx.fillStyle = withAlpha(c.cMutedBg, 0.72)
+    if (!_shimmerOn) return
+    // Same path again under the sweep. The gradient is transparent outside the
+    // band, so bars away from it are untouched without testing them.
+    if (!_shimmerFill) _shimmerFill = buildShimmerFill(ctx, c.cMutedBg)
+    ctx.fillStyle = _shimmerFill
     ctx.fill()
+  }
+
+  /**
+   * The frame's sweep, as one gradient every skeleton row fills through.
+   *
+   * Per-bar hit-testing against a band was what made this read as flicker rather
+   * than shimmer: a bar was either lit or not, so it *stepped* between two
+   * opacities, and every row stepped on the same frame - a hard-edged column of
+   * bars blinking on and off. A gradient ramps each bar continuously instead, and
+   * costs one allocation per frame rather than one per row.
+   *
+   * The axis is tilted a little so the highlight crosses the grid on a diagonal;
+   * a perfectly vertical edge over aligned bars is what the eye reads as a seam.
+   */
+  function buildShimmerFill(ctx, mutedBg) {
+    const band = Math.max(1, _viewportWidth * SHIMMER_BAND)
+    // Travel a full band clear of both edges. The old sweep stopped with the band
+    // still half on screen and jumped back to the left, so the highlight vanished
+    // mid-grid once a period - a blink, exactly on the beat.
+    const cx = -band + _shimmerPhase * (_viewportWidth + band * 2)
+    const g = ctx.createLinearGradient(cx - band / 2, 0, cx + band / 2, band * 0.35)
+    const peak = 0.34
+    g.addColorStop(0, withAlpha(mutedBg, 0))
+    g.addColorStop(0.35, withAlpha(mutedBg, peak * 0.45))
+    g.addColorStop(0.5, withAlpha(mutedBg, peak))
+    g.addColorStop(0.65, withAlpha(mutedBg, peak * 0.45))
+    g.addColorStop(1, withAlpha(mutedBg, 0))
+    return g
   }
 
   /** Whether a skeleton bar should hug the right edge, matching where the real
@@ -5184,6 +5278,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // component, and pending retry timers would fire against a dead canvas.
     releaseCellImages()
     if (_shimmerTimer) { clearTimeout(_shimmerTimer); _shimmerTimer = 0 }
+    if (_spanTimer) { clearTimeout(_spanTimer); _spanTimer = 0 }
     // Remove any window resize listeners still attached from a drag in progress.
     clearActiveResizeListeners()
   })
@@ -6367,6 +6462,52 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   <Table2 class="size-8 text-muted-foreground/25" />
                   <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
                 {/if}
+              </div>
+            </div>
+          {/if}
+
+          <!-- Windowed mode: what the grid is waiting for.
+               Pinned to the viewport (sticky in both axes, zero-size, so it adds
+               nothing to the scroll extent) and only raised once the wait is long
+               enough to be worth reading - a window that lands in 40ms never
+               shows one. Says which rows, out of how many, and whether the fetch
+               is merely slow or has actually given up. -->
+          {#if windowed && loadingSpan}
+            <div style="position:sticky;bottom:0;left:0;width:0;height:0;overflow:visible;z-index:6;pointer-events:none" aria-live="polite">
+              <div style="position:absolute;bottom:14px;left:0;width:{_viewportWidth}px" class="flex justify-center">
+                <div
+                  class={cn(
+                    "flex items-center gap-2 rounded-full border bg-background px-3 py-1 elevate-2-rim",
+                    // Only the error state takes the pointer, for its Retry button.
+                    // A pill that merely reports progress must not eat clicks on
+                    // the rows it floats over.
+                    windowStatus?.failed ? "pointer-events-auto border-destructive/30" : "border-border/25",
+                  )}
+                >
+                  {#if windowStatus?.failed}
+                    <TriangleAlert class="size-3 shrink-0 text-destructive" />
+                    <span class="text-ui-2xs text-foreground/80">
+                      Couldn't load rows {(loadingSpan.first + 1).toLocaleString()}–{(loadingSpan.last + 1).toLocaleString()}
+                    </span>
+                    <button
+                      type="button"
+                      class="-mr-1 flex h-5 items-center gap-1 rounded-full px-1.5 text-ui-2xs text-primary hover:bg-muted/40"
+                      onclick={() => onretrywindows()}
+                    >
+                      <RotateCcw class="size-3 shrink-0" />
+                      Retry
+                    </button>
+                  {:else}
+                    <Loader class="size-3 shrink-0 animate-spin text-muted-foreground/60" />
+                    <span class="text-ui-2xs text-muted-foreground">
+                      Loading rows {(loadingSpan.first + 1).toLocaleString()}–{(loadingSpan.last + 1).toLocaleString()}
+                      <span class="text-muted-foreground/50">of {rows.length.toLocaleString()}</span>
+                    </span>
+                    {#if windowStatus?.slow}
+                      <span class="text-ui-2xs text-muted-foreground/50">· slow connection</span>
+                    {/if}
+                  {/if}
+                </div>
               </div>
             </div>
           {/if}

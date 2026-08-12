@@ -215,6 +215,7 @@
     WINDOW_THRESHOLD,
     measureRowBytes,
     pickWindowRows,
+    seekKeyFor,
     shouldWindow,
     stableWindowOrder,
     windowKeepCount,
@@ -1307,6 +1308,24 @@
   // reading ahead then queues more work than the scroll can consume.
   let _windowSlow = false
   const WINDOW_SLOW_MS = 400
+  /** Rolling mean window latency (EWMA), which is what _windowSlow now reads.
+   *  A single measurement latched it: one deep page on a big table (a 350ms
+   *  OFFSET scan, not a slow link) turned prefetch down to one window for the
+   *  rest of the view - on exactly the tables that need read-ahead most. */
+  let _windowMs = 0
+  /** Failed windows → attempts so far, and the ones that have given up.
+   *  A failed fetch used to be retried only by the next visible-range emit, so
+   *  stopping the scroll left those rows shimmering forever. @type {Map<number, number>} */
+  let _windowAttempts = new Map()
+  /** @type {Set<number>} */
+  let _windowFailed = new Set()
+  const WINDOW_RETRIES = 3
+  /** Set when a keyset window fetch errors - the view then stays on OFFSET. */
+  let _windowSeekOff = false
+  /** What the window fetcher is doing, for the grid's loading pill. Plain state
+   *  (not the hot-path sets, which stay non-reactive): assigned only when the
+   *  answer actually changes. */
+  let windowStatus = $state({ slow: false, failed: false })
 let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   /** Secondary sort keys for multi-column sort (primary is rowSort). @type {TableSort[]} */
@@ -4539,6 +4558,17 @@ let rowSearch = $state('')
     _windowRows = WINDOW_ROWS_DEFAULT
     _windowBytesPerRow = 0
     _windowOrder = null
+    forgetWindowFetchState()
+  }
+
+  /** Per-view fetch bookkeeping (latency, retries, seek fallback) - reset with
+   *  the view it describes, so a new table doesn't inherit the last one's. */
+  function forgetWindowFetchState() {
+    _windowMs = 0
+    _windowSeekOff = false
+    _windowAttempts.clear()
+    _windowFailed.clear()
+    syncWindowStatus()
   }
 
   /**
@@ -4563,6 +4593,7 @@ let rowSearch = $state('')
     // Same total order as before, so windows fetched after the switch back still
     // line up with the rows already resident.
     _windowOrder = s.windowOrder ? { ...s.windowOrder, sorts: (s.windowOrder.sorts ?? []).map((k) => ({ ...k })) } : null
+    forgetWindowFetchState()
     windowed = true
     dataVersion++
   }
@@ -4582,6 +4613,7 @@ let rowSearch = $state('')
     _windowOrder = order
     _lastFirstW = 0
     _lastDir = 1
+    forgetWindowFetchState()
     windowed = true
   }
 
@@ -4593,6 +4625,27 @@ let rowSearch = $state('')
     return { ...apiSearch(rowSearch), ...order, filters: filtersForApi(rowFilters, columns), includeMeta: false, includeCount }
   }
 
+  /** The key this view can seek by instead of paging with OFFSET (see
+   *  seekKeyFor), or null while the view has none / after one was refused. */
+  function windowSeek() {
+    if (!windowed || _windowSeekOff) return null
+    return seekKeyFor({
+      order: _windowOrder,
+      columns,
+      primaryKey,
+      dialect: connection?.type ?? '',
+    })
+  }
+
+  /** The row value window `w` can seek from (last row of the window before it),
+   *  or null when that row isn't resident and the window must use OFFSET. */
+  function windowAnchor(w, seek = windowSeek()) {
+    if (!seek || w <= 0) return null
+    const prev = rows[w * _windowRows - 1]
+    const v = prev ? prev[seek.index] : undefined
+    return v === undefined || v === null ? null : v
+  }
+
   /** Fetch one window and splice it into the sparse `rows` array in place.
    *  Window `w` covers view rows [w*_windowRows, …), which live at absolute table
    *  offset _windowBase + that - the view can be a page, not just the whole table. */
@@ -4602,24 +4655,62 @@ let rowSearch = $state('')
     if (start >= _windowCount) return
     const limit = Math.min(_windowRows, _windowCount - start)
     const seq = _windowSeq
+    const seek = windowSeek()
+    const anchor = windowAnchor(w, seek)
+    const keyset = anchor === null || !seek
+      ? null
+      : { column: seek.column, value: String(anchor), sqlType: seek.sqlType, after: true, desc: seek.desc }
     _windowFetching.add(w)
     _windowInFlight++
+    // Re-queued after giving up (a scroll, or the pill's Retry) - it's loading
+    // again, so the grid should say so rather than keep showing the error.
+    if (_windowFailed.delete(w)) syncWindowStatus()
     const t0 = performance.now()
     try {
-      const data = await getTableRows(activeSchema, activeTable, limit, _windowBase + start, currentRowQuery(false))
-      if (performance.now() - t0 > WINDOW_SLOW_MS) _windowSlow = true
+      const data = await getTableRows(activeSchema, activeTable, limit, _windowBase + start, { ...currentRowQuery(false), keyset })
+      // Rolling, so the measure tracks the connection rather than latching on the
+      // first deep page. Recorded even for a superseded fetch - the round-trip
+      // was just as slow whether or not its rows are still wanted.
+      const ms = performance.now() - t0
+      _windowMs = _windowMs ? _windowMs * 0.65 + ms * 0.35 : ms
+      _windowSlow = _windowMs > WINDOW_SLOW_MS
       if (seq !== _windowSeq) return // table / query changed while in flight
       const fetched = data.rows ?? []
       for (let i = 0; i < fetched.length; i++) rows[start + i] = fetched[i]
       _windowLoaded.add(w)
+      _windowAttempts.delete(w)
+      _windowFailed.delete(w)
       dataVersion++
     } catch {
-      // leave unloaded - the next visible-range emit retries
+      if (seq !== _windowSeq) return
+      if (keyset) {
+        // The cursor cast can be rejected for an exotic key type. Fall back for
+        // the whole view and retry this window on the offset path immediately -
+        // that path is always correct, just slower.
+        _windowSeekOff = true
+        _windowQueue.unshift(w)
+        return
+      }
+      // Retry with backoff. Without this a dropped connection left the rows
+      // shimmering until the user happened to scroll, since only a *change* of
+      // visible range re-queues anything.
+      const tries = (_windowAttempts.get(w) ?? 0) + 1
+      _windowAttempts.set(w, tries)
+      if (tries > WINDOW_RETRIES) {
+        _windowFailed.add(w)
+      } else {
+        setTimeout(() => {
+          if (!windowed || seq !== _windowSeq || _windowLoaded.has(w)) return
+          _windowQueue.unshift(w)
+          pumpWindowQueue()
+        }, 300 * 2 ** (tries - 1))
+      }
     } finally {
       _windowFetching.delete(w)
       // Clamped: a reset (new query) zeroes the counter while requests are still
       // in flight, and their finallys must not drive it negative.
       _windowInFlight = Math.max(0, _windowInFlight - 1)
+      syncWindowStatus()
       pumpWindowQueue()
     }
   }
@@ -4633,10 +4724,59 @@ let rowSearch = $state('')
   function pumpWindowQueue() {
     const cap = _windowSlow ? 1 : WINDOW_MAX_INFLIGHT
     while (windowed && _windowInFlight < cap && _windowQueue.length > 0) {
-      const w = /** @type {number} */ (_windowQueue.shift())
-      if (_windowLoaded.has(w) || _windowFetching.has(w)) continue
+      const i = nextStartableWindow()
+      if (i < 0) break
+      const w = _windowQueue.splice(i, 1)[0]
       void fetchWindow(w)
     }
+  }
+
+  /**
+   * Which queued window to start next, or -1 to wait for one in flight.
+   *
+   * The queue is built viewport-first, so its head is what the user is looking
+   * at and always starts. The rest is read-ahead, and on a seekable view (see
+   * windowSeek) read-ahead is worth *waiting* for: a window whose predecessor
+   * has landed is an index seek, while firing four deep-OFFSET queries in
+   * parallel is four full index walks for the same rows. Nothing can wait
+   * forever - with nothing in flight to produce an anchor, the head starts on
+   * the offset path.
+   */
+  function nextStartableWindow() {
+    const seek = windowSeek()
+    let head = -1
+    for (let i = 0; i < _windowQueue.length; i++) {
+      const w = _windowQueue[i]
+      if (_windowLoaded.has(w) || _windowFetching.has(w)) continue
+      if (head < 0) {
+        if (!seek || _windowInFlight === 0) return i
+        head = i
+        continue
+      }
+      if (windowAnchor(w, seek) !== null) return i
+    }
+    // head >= 0 here only while something is in flight, so waiting costs at most
+    // one round-trip - after which that fetch's anchor may make read-ahead cheap.
+    return seek ? -1 : head
+  }
+
+  /** Publish fetcher state for the grid's loading pill, only on a real change. */
+  function syncWindowStatus() {
+    const failed = _windowFailed.size > 0
+    if (windowStatus.slow !== _windowSlow || windowStatus.failed !== failed) {
+      windowStatus = { slow: _windowSlow, failed }
+    }
+  }
+
+  /** "Retry" in the grid's loading pill: re-queue every window that gave up. */
+  function retryFailedWindows() {
+    if (!windowed || _windowFailed.size === 0) return
+    const again = [..._windowFailed]
+    _windowFailed.clear()
+    for (const w of again) _windowAttempts.delete(w)
+    _windowQueue = [...again, ..._windowQueue]
+    syncWindowStatus()
+    pumpWindowQueue()
   }
 
   /** Evict resident windows far from the viewport so memory stays bounded. */
@@ -4947,9 +5087,16 @@ let rowSearch = $state('')
         total = windowTotal
         dataVersion++
         // Warm the windows the probe didn't cover, before the first scroll asks.
-        const firstGap = _windowLoaded.size
-        for (let w = firstGap; w <= firstGap + WINDOW_PREFETCH; w++) _windowQueue.push(w)
-        pumpWindowQueue()
+        // Only for a load that starts at the top: on a refresh that keeps the
+        // scroll position the viewport is somewhere else entirely, and queuing
+        // the head would put five windows the user cannot see in front of the
+        // one they are looking at. The grid re-emits its visible range as soon
+        // as the new array lands, which asks for the right ones.
+        if (!keepScroll) {
+          const firstGap = _windowLoaded.size
+          for (let w = firstGap; w <= firstGap + WINDOW_PREFETCH; w++) _windowQueue.push(w)
+          pumpWindowQueue()
+        }
       } else if (wantsWindow) {
         // Past the limit bar but small and light after measuring - load the rest.
         resetWindowing()
@@ -5796,10 +5943,23 @@ let rowSearch = $state('')
     // A manual refresh should also recover a dropped connection.
     if (connectionLost) await reconnectPool()
     _sqlHintsLoadedFor = '' // re-fetch enum/function hints on next SQL view
+    // Where the user was reading, captured before anything can move it. A
+    // refresh re-runs the SAME query in the same order on the same page, so the
+    // position is still meaningful - unlike a page / sort / filter change, which
+    // is a different view and rightly starts at the top.
+    const onTable = activeTab?.kind === 'table' && !!activeTable
+    const at = onTable ? (tableGetScroll?.() ?? { left: 0, top: 0 }) : null
     await loadSchemas()
     await loadTables({ force: true })
-    if (activeTab?.kind === 'table' && activeTable) {
-      await loadRows()
+    if (onTable) {
+      await loadRows({ keepScroll: true })
+      // Reasserted rather than merely left alone: reloading the schema and table
+      // lists on the way through re-applies the active tab's snapshot, and that
+      // restore lands whenever its tick fires - after this point, with whatever
+      // scroll the snapshot happened to hold. Setting it last is what makes the
+      // position survive the whole refresh, both axes.
+      await tick()
+      tableApplyScroll?.({ left: at?.left ?? 0, top: at?.top ?? 0 })
     }
   }
 
@@ -7258,7 +7418,9 @@ let rowSearch = $state('')
                 {reloadToken}
                 {dataVersion}
                 {windowed}
+                {windowStatus}
                 onvisiblerange={handleVisibleRange}
+                onretrywindows={retryFailedWindows}
                 columnWidthsKey={activeTable ? `${persistConnectionId}\x00${activeSchema}.${activeTable}` : undefined}
                 loading={loadingRows}
                 {loadingMore}
@@ -7408,12 +7570,15 @@ let rowSearch = $state('')
              shared baseline whether or not a tile carries a chord or wraps to
              two lines. Colors use solid tokens (not fractional alpha) - thinned
              strokes read as fuzzy against the dark panel. -->
-        {@const cell = 'group relative flex h-[5.25rem] flex-col justify-between rounded-lg border border-border/60 bg-card/50 p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
-        {@const proCell = 'group relative flex h-[5.25rem] cursor-not-allowed flex-col justify-between rounded-lg border border-border/40 bg-card/30 p-2.5 text-left transition-[background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.04]'}
+        <!-- min-h, not h: a label that wraps to two lines in a narrow pane grows
+             the tile instead of spilling out of it. min-w-0 + overflow-hidden
+             keep a long word inside the border when the column is tight. -->
+        {@const cell = 'group relative flex min-h-[5.25rem] min-w-0 flex-col justify-between overflow-hidden rounded-lg border border-border/60 bg-card/50 p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
+        {@const proCell = 'group relative flex min-h-[5.25rem] min-w-0 cursor-not-allowed flex-col justify-between overflow-hidden rounded-lg border border-border/40 bg-card/30 p-2.5 text-left transition-[background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.04]'}
         {@const iconCls = 'size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'}
         {@const proIconCls = 'size-4 shrink-0 text-muted-foreground/50'}
-        {@const labelCls = 'text-ui-2xs font-medium leading-[1.25] text-foreground/85 transition-colors group-hover:text-foreground'}
-        {@const proLabelCls = 'text-ui-2xs font-medium leading-[1.25] text-muted-foreground/60'}
+        {@const labelCls = 'text-ui-2xs font-medium leading-[1.25] text-foreground/85 transition-colors group-hover:text-foreground [overflow-wrap:anywhere]'}
+        {@const proLabelCls = 'text-ui-2xs font-medium leading-[1.25] text-muted-foreground/60 [overflow-wrap:anywhere]'}
 
         <!-- Shift is spelled out off macOS: the bundled UI/mono webfonts have no
              U+21E7, so "Ctrl⇧E" fell back mid-word and rendered as garbage.
@@ -7441,9 +7606,12 @@ let rowSearch = $state('')
             <!-- Label + chord anchored to the bottom. The chord row is always
                  present (empty when a tile has no shortcut) so every label in a
                  row lands on the same baseline, wrapped or not. -->
-            <span class="mt-auto flex w-full flex-col gap-1">
+            <span class="mt-auto flex w-full min-w-0 flex-col gap-1">
               <span class={locked ? proLabelCls : labelCls}>{label}</span>
-              <span class="flex h-[0.85rem] items-center">
+              <!-- A chord is a hint, not the point of the tile: when the column
+                   is too narrow for "Ctrl Shift E" it clips here rather than
+                   printing across the neighbouring tile. -->
+              <span class="flex h-[0.85rem] min-w-0 items-center overflow-hidden">
                 {#if opts.keys && !locked}{@render chord(opts.keys)}{/if}
               </span>
             </span>
@@ -7477,8 +7645,13 @@ let rowSearch = $state('')
             {/if}
           </div>
 
-          <!-- Action grid, max-w-md keeps all sections aligned -->
-          <div class="grid w-full max-w-md grid-cols-4 gap-2">
+          <!-- Action grid, max-w-md keeps all sections aligned. Column COUNT is
+               derived from the space available rather than fixed at 4: the pane
+               narrows whenever the sidebar is dragged wider, and four columns of
+               a 28rem grid squeezed into half that width is what pushed labels
+               and chords outside their tiles. At full width the track floor
+               still resolves to the same four columns. -->
+          <div class="grid w-full max-w-md grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-2">
 
             {#if isRedis}
               {@render tile(KeyRound, 'Keyspace', openRedisTab, {})}
@@ -7505,7 +7678,8 @@ let rowSearch = $state('')
 
             {#if !isRedis}
               {@render tile(Database, 'Insights', openInsightsTab, {})}
-              {@render tile(ShieldCheck, 'Advisor', openAdvisorTab, { hint: 'Advisor — security, performance and schema checks over this database' })}
+              <!-- Advisor is reachable from ⌘K and the page navigator only. Quick
+                   access is the short list, not every page. -->
               {@render tile(Boxes, 'Objects', openObjectsTab, {})}
               {@render tile(FileCode2, 'Codegen', openOrmSchemaTab, { pro: true, hint: 'Codegen — schema as Prisma or Drizzle code' })}
               {@render tile(BarChart2, 'Charts', openChartsTab, { pro: true })}

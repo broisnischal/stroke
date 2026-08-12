@@ -96,6 +96,59 @@ async fn fetch_table_column_flags(
     Ok(map)
 }
 
+/// Column flags for the keyset gate only, memoised for a few seconds.
+///
+/// The gate asks "is the ordering column NOT NULL?" before every keyset page,
+/// and a windowed scroll of a large table issues one page per window — so
+/// uncached it puts a catalog round-trip in front of each of them (nothing
+/// locally, a full RTT against a remote database, which is most of what the
+/// keyset fast path just saved). Deliberately *not* used by the `include_meta`
+/// path: what the insert row is told about a column stays exact. The worst a
+/// stale entry can do here is pick OFFSET over keyset, or take keyset on a
+/// column that became nullable seconds ago.
+static COLUMN_FLAGS_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<HashMap<String, (std::time::Instant, HashMap<String, ColumnFlags>)>>,
+> = std::sync::OnceLock::new();
+const COLUMN_FLAGS_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
+async fn cached_column_flags(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    table: &str,
+) -> Result<HashMap<String, ColumnFlags>, String> {
+    // Keyed by the database this pool is connected to as well as the table:
+    // two connections open on the same `public.users` are two different tables.
+    let opts = pool.connect_options();
+    let key = format!(
+        "{}:{}/{}\u{0}{schema}.{table}",
+        opts.get_host(),
+        opts.get_port(),
+        opts.get_database().unwrap_or_default()
+    );
+    let cache = COLUMN_FLAGS_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    // Scoped so the guard is dropped before the await below — never hold a lock
+    // across one.
+    {
+        if let Ok(map) = cache.lock() {
+            if let Some((at, flags)) = map.get(&key) {
+                if at.elapsed() < COLUMN_FLAGS_TTL {
+                    return Ok(flags.clone());
+                }
+            }
+        }
+    }
+    let flags = fetch_table_column_flags(pool, schema, table).await?;
+    if let Ok(mut map) = cache.lock() {
+        // Bounded: a session that browses thousands of tables shouldn't grow this
+        // forever, and everything dropped is a re-query at worst.
+        if map.len() > 256 {
+            map.retain(|_, (at, _)| at.elapsed() < COLUMN_FLAGS_TTL);
+        }
+        map.insert(key, (std::time::Instant::now(), flags.clone()));
+    }
+    Ok(flags)
+}
+
 fn apply_column_flags(columns: &mut [ColumnInfo], flags: &HashMap<String, ColumnFlags>) {
     for col in columns.iter_mut() {
         if let Some(f) = flags.get(&col.name) {
@@ -1529,7 +1582,7 @@ pub async fn get_table_rows(
     // fall back to OFFSET, which is always correct.
     let keyset_ok = match keyset_ok {
         Some(k) => {
-            let flags = fetch_table_column_flags(&pool, &schema, &table).await?;
+            let flags = cached_column_flags(&pool, &schema, &table).await?;
             // Require the column to be known AND non-nullable. Unknown column =>
             // don't fast-path (stay safe).
             match flags.get(&k.column).map(|f| f.nullable) {

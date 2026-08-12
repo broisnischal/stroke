@@ -5,6 +5,7 @@ import {
   WINDOW_ROWS_MIN,
   measureRowBytes,
   pickWindowRows,
+  seekKeyFor,
   shouldWindow,
   stableWindowOrder,
   windowKeepCount,
@@ -150,5 +151,58 @@ describe('windowKeepCount', () => {
 
   it('always keeps a few windows either side', () => {
     expect(windowKeepCount(1_000_000)).toBe(3)
+  })
+})
+
+describe('seekKeyFor', () => {
+  /** `events`: a bigint PK, ordered by it — the case windowing is built for. */
+  const eventsCols = [
+    { name: 'id', dataType: 'int8' },
+    { name: 'user_id', dataType: 'uuid' },
+    { name: 'kind', dataType: 'text' },
+  ]
+  const view = (over = {}) => ({
+    order: stableWindowOrder(null, [], ['id']),
+    columns: eventsCols,
+    primaryKey: ['id'],
+    dialect: 'postgres',
+    ...over,
+  })
+
+  it('seeks by the primary key, carrying its cast and column index', () => {
+    expect(seekKeyFor(view())).toEqual({ column: 'id', sqlType: 'int8', desc: false, index: 0 })
+  })
+
+  it('follows the direction the windows are ordered by', () => {
+    const desc = stableWindowOrder({ column: 'id', direction: 'desc' }, [], ['id'])
+    expect(seekKeyFor(view({ order: desc }))?.desc).toBe(true)
+  })
+
+  it('refuses a sort the key alone cannot resolve', () => {
+    // ORDER BY kind, id — the keyset predicate has no tiebreaker for `kind`.
+    expect(seekKeyFor(view({ order: stableWindowOrder({ column: 'kind' }, [], ['id']) }))).toBeNull()
+  })
+
+  it('refuses a composite primary key', () => {
+    expect(seekKeyFor(view({
+      order: stableWindowOrder(null, [], ['tenant', 'id']),
+      primaryKey: ['tenant', 'id'],
+      columns: [{ name: 'tenant', dataType: 'int8' }, { name: 'id', dataType: 'int8' }],
+    }))).toBeNull()
+  })
+
+  it('refuses a cast the backend would reject, rather than seeking pointlessly', () => {
+    expect(seekKeyFor(view({ columns: [{ name: 'id', dataType: 'varchar(...)' }] }))).toBeNull()
+    expect(seekKeyFor(view({ columns: [{ name: 'id', dataType: '' }] }))).toBeNull()
+  })
+
+  it('refuses engines that ignore the cursor', () => {
+    for (const dialect of ['mysql', 'sqlite', 'd1']) {
+      expect(seekKeyFor(view({ dialect }))).toBeNull()
+    }
+  })
+
+  it('refuses a view with no stable order at all', () => {
+    expect(seekKeyFor(view({ order: null }))).toBeNull()
   })
 })

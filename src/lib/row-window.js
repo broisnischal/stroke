@@ -105,6 +105,48 @@ export function windowKeepCount(rowsPerWindow) {
 }
 
 /**
+ * The key a windowed view can *seek* by instead of paging with OFFSET, or null.
+ *
+ * `LIMIT n OFFSET 995000` makes Postgres walk 995k index entries before it can
+ * return a row: measured at 345ms on a 1M-row table, where the same page by key
+ * (`WHERE id > $last ORDER BY id LIMIT n`) takes 1.5ms. Every window slices one
+ * total order (see stableWindowOrder), so the last row of the window before it
+ * is exactly the anchor that page needs - a window next to one already resident
+ * costs an index seek instead of a scan of everything before it.
+ *
+ * The conditions are narrow because being wrong here means missing rows, not
+ * slow ones:
+ * - one ordering column, and it is the whole primary key. The backend's keyset
+ *   predicate carries no tiebreaker, so a non-unique key would skip every row
+ *   sharing the anchor's value; a PK is also NOT NULL, which that predicate
+ *   likewise can't order around.
+ * - a cast the backend will accept. It rejects anything outside
+ *   `[A-Za-z0-9_ ]` - notably the `varchar(...)` label a text key reports - and
+ *   answers with the offset page instead, so taking the seek path there would
+ *   have read-ahead waiting on anchors that buy nothing.
+ * - Postgres. Other engines ignore the cursor entirely.
+ *
+ * @param {{
+ *   order: { sorts: Array<{ column: string, direction: string }> } | null,
+ *   columns: Array<{ name: string, dataType?: string, data_type?: string }>,
+ *   primaryKey: string[],
+ *   dialect: string,
+ * }} view
+ * @returns {{ column: string, sqlType: string, desc: boolean, index: number } | null}
+ */
+export function seekKeyFor({ order, columns, primaryKey, dialect }) {
+  if (dialect !== 'postgres') return null
+  if (!order || !Array.isArray(order.sorts) || order.sorts.length !== 1) return null
+  const key = order.sorts[0]
+  if (!Array.isArray(primaryKey) || primaryKey.length !== 1 || primaryKey[0] !== key.column) return null
+  const index = (columns ?? []).findIndex((c) => c?.name === key.column)
+  if (index < 0) return null
+  const sqlType = columns[index]?.dataType ?? columns[index]?.data_type ?? ''
+  if (!sqlType || !/^[A-Za-z0-9_ ]+$/.test(sqlType)) return null
+  return { column: key.column, sqlType, desc: key.direction === 'desc', index }
+}
+
+/**
  * A deterministic ORDER BY for a windowed view.
  *
  * This is not a nicety - it is what makes a windowed view *correct*. Every window
