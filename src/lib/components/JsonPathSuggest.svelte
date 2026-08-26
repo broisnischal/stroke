@@ -1,7 +1,7 @@
 <script>
   // The JSONPath suggestion list, shared by every JSON viewer.
   //
-  // There were three of these. The JSON tab had a good one — a colour dot per
+  // There were three of these. The JSON tab had a good one - a colour dot per
   // kind, the typed fragment highlighted, the type and a value preview. The SQL
   // and table views had a much poorer one that called `getCompletions`, which
   // throws away `kind`, `detail` and `preview`, and then rebuilt a worse version
@@ -101,6 +101,12 @@
 
           {#if item.detail}
             <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/40">{item.detail}</span>
+          {/if}
+          <!-- Whether the sample below is representative. A key whose value is
+               identical in every element says so, instead of leaving a preview
+               that never changes to imply it. -->
+          {#if item.spread}
+            <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/30">{item.spread}</span>
           {/if}
           <!-- The preview is what lets you pick by what is in the data rather
                than by name, so it shows on the armed row where it is being read. -->

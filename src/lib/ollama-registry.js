@@ -3,13 +3,13 @@
  *
  * The setup screen used to suggest a single hardcoded `ollama pull llama3.1:8b`.
  * Model lineups turn over fast enough that a literal in the source is wrong
- * within months — by the time this was written the registry was serving gemma4,
+ * within months - by the time this was written the registry was serving gemma4,
  * qwen3.5 and kimi-k2.6, and llama3.1 was not on it at all. A suggestion the
  * user pastes into a terminal has to be right, so it comes from the registry.
  *
  * `https://ollama.com/api/tags` is a public listing of the models available
  * through ollama.com. It is fetched only when the setup screen actually needs
- * it — the user is configuring Ollama at that moment — never on app start.
+ * it - the user is configuring Ollama at that moment - never on app start.
  */
 
 /**
@@ -17,7 +17,7 @@
  *
  * The suffix goes on the *tag*, not after it: `gpt-oss:120b` becomes
  * `gpt-oss:120b-cloud`, while an untagged `kimi-k2.6` becomes `kimi-k2.6:cloud`.
- * Verified against a live Ollama 0.24.0 — both forms return completions, and an
+ * Verified against a live Ollama 0.24.0 - both forms return completions, and an
  * untagged name with no suffix at all is rejected outright ("model
  * 'gemma4:31b' not found"), which is why the suffix cannot be skipped.
  * @param {string} id
@@ -35,7 +35,7 @@ const LOCAL_MAX_BYTES = 20e9
  * Split the registry into what a machine can hold and what it can't.
  *
  * Ollama addresses a cloud model from a local instance with a `:cloud` tag, so
- * the id offered for those is the tagged one — pasting the bare name would pull
+ * the id offered for those is the tagged one - pasting the bare name would pull
  * a 1.5 TB download instead of routing to the cloud.
  *
  * @param {Array<{ name?: string, size?: number }>} models
@@ -52,7 +52,7 @@ export function classifyOllamaModels(models) {
     if (!id) continue
     const bytes = Number(m?.size) || 0
     // A size of zero means the registry didn't report one, which is not a claim
-    // that it is small — treat unknown as cloud rather than tell someone to pull
+    // that it is small - treat unknown as cloud rather than tell someone to pull
     // something that might be a terabyte.
     const isLocal = bytes > 0 && bytes <= LOCAL_MAX_BYTES
     if (isLocal) {
@@ -63,7 +63,7 @@ export function classifyOllamaModels(models) {
     }
   }
 
-  // Smallest first, because size is the whole decision — but an unreported size
+  // Smallest first, because size is the whole decision - but an unreported size
   // sorts last rather than as zero, or the three models nobody can size lead a
   // list meant to start with the cheapest thing that works.
   const bySize = (/** @type {OllamaSuggestion} */ a, /** @type {OllamaSuggestion} */ b) =>
@@ -78,14 +78,14 @@ export function formatModelSize(bytes) {
 }
 
 /**
- * Fetch the registry. Returns empty lists on any failure — an offline user gets
+ * Fetch the registry. Returns empty lists on any failure - an offline user gets
  * the plain instructions rather than a stale name that fails in their terminal.
  * @param {number} [timeoutMs]
  */
 export async function fetchOllamaRegistry(timeoutMs = 8000) {
   try {
     // In the app this goes through Rust. ollama.com sends no
-    // `Access-Control-Allow-Origin`, so a webview fetch is refused outright —
+    // `Access-Control-Allow-Origin`, so a webview fetch is refused outright -
     // and the packaged origin differs per platform (`tauri://localhost` on
     // macOS, `http://tauri.localhost` on Windows and Linux), so a CORS
     // dependency would fail three different ways. The browser path below only

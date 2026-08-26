@@ -30,7 +30,7 @@ async fn open(cfg: &RedisConfig) -> Result<::redis::aio::MultiplexedConnection, 
         .map_err(|e| format!("Redis connection failed: {e}"))
 }
 
-/// Connectivity/credential check — issues a `PING`.
+/// Connectivity/credential check - issues a `PING`.
 pub async fn ping(cfg: &RedisConfig) -> Result<(), String> {
     let mut conn = open(cfg).await?;
     ::redis::cmd("PING")
@@ -89,7 +89,7 @@ pub struct ScanReply {
     pub keys: Vec<String>,
 }
 
-/// Non-blocking incremental key iteration via `SCAN` — unlike `KEYS *`, which
+/// Non-blocking incremental key iteration via `SCAN` - unlike `KEYS *`, which
 /// blocks the whole server on a large keyspace. Binary/control bytes in key
 /// names stay legible via `bytes_to_display`. Pass the returned `cursor` back to
 /// fetch the next page; `"0"` means iteration is complete.

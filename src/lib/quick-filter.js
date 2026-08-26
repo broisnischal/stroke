@@ -10,7 +10,7 @@
 //
 // Every item maps to an operator the filter backend already supports
 // (see table-query.js `FilterOp`), so applying one just appends a normal
-// TableFilter — there is no engine-specific quick-filter path.
+// TableFilter - there is no engine-specific quick-filter path.
 
 import {
   normalizeColumnType,

@@ -4,9 +4,12 @@
   import Icon from "./Icon.svelte";
   import SearchableMenu from "./SearchableMenu.svelte";
   import { listDatabases, canSwitchDatabase, currentDatabaseKey } from "$lib/databases.js";
+  import { dbAdminKind, dbActionBlocker } from "$lib/database-admin.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import DangerousActionDialog from "./DangerousActionDialog.svelte";
   import { readOnlyMode, guardWrite, READ_ONLY_HINT } from "$lib/stores/read-only.js";
+  import { appNativeScroll } from "$lib/stores/settings.js";
+  import { smoothScroll } from "$lib/smooth-scroll.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
   import PanelRight from "@lucide/svelte/icons/panel-right";
@@ -17,6 +20,7 @@
   import { cn } from "$lib/utils.js";
   import { t } from "$lib/i18n.js";
   import { formatTableRowCount } from "$lib/table-list.js";
+  import { virtualWindow, offsetWithin, measureRowStride, VIRT_THRESHOLD, VIRT_BUFFER } from "$lib/virtual-window.js";
   import {
     clampNavSidebarWidth,
     loadLayout,
@@ -74,6 +78,22 @@
     /** Switch the live connection to another database on the same server.
      *  @type {(entry: { key: string, label: string }) => void} */
     onswitchdatabase = () => {},
+    /** Open the Create database dialog. */
+    onnewdatabase = () => {},
+    /** Server-level database actions. Each takes the row's name, plus the full
+     *  list so the dialogs can check the new name against it.
+     *  @type {(args: { name: string, existing: string[] }) => void} */
+    onrenamedatabase = () => {},
+    /** @type {(args: { name: string, existing: string[] }) => void} */
+    onduplicatedatabase = () => {},
+    /** @type {(args: { name: string }) => void} */
+    ondropdatabase = () => {},
+    /** @type {(args: { name: string }) => void} */
+    ondatabaseinfo = () => {},
+    /** Close every other session on a database (Postgres). @type {(args: { name: string }) => void} */
+    onterminatedbsessions = () => {},
+    /** Bumped by the shell to force a refetch of the database list. */
+    databasesRefreshKey = 0,
     onviewddl = /** @type {(table: string) => void} */ (() => {}),
     onexportsql = /** @type {(table: string) => void} */ (() => {}),
     onexportdata = /** @type {(table: string) => void} */ (() => {}),
@@ -183,8 +203,28 @@
     dbEntriesError = ''
   })
 
+  // The shell bumps this after a create/rename/duplicate/drop, since the list it
+  // invalidated lives here. Refetch rather than patch: the statement may have
+  // failed halfway, and the server is the only honest source.
+  $effect(() => {
+    if (databasesRefreshKey === 0) return
+    databasesRefreshKey
+    untrack(() => { void loadDatabases() })
+  })
+
   const canSwitchDb = $derived(canSwitchDatabase(connection))
   const activeDbKey = $derived(currentDatabaseKey(connection))
+  const dbAdmin = $derived(dbAdminKind(connection))
+  /** Names of every listed database, for the dialogs' collision checks. */
+  const dbNames = $derived(dbEntries.map((d) => d.label))
+
+  /** Menu item state for one database row: enabled, or disabled with a reason.
+   *  @param {import('$lib/database-admin.js').AdminAction} action @param {boolean} isCurrent */
+  function dbItem(action, isCurrent) {
+    if ($readOnlyMode) return { disabled: true, title: READ_ONLY_HINT }
+    const blocker = dbActionBlocker(action, connection, { isCurrent })
+    return { disabled: !!blocker, title: blocker || undefined }
+  }
   $effect(() => { saveSidebarSection('tables', tablesOpen) })
   $effect(() => { saveSidebarSection('views', viewsOpen) })
   $effect(() => { saveSidebarSection('matViews', matViewsOpen) })
@@ -456,13 +496,10 @@
   const filteredMatViews = $derived(
     lf ? sortedMatViewsBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedMatViewsBase,
   );
-  // The views / materialized-views lists aren't windowed (unlike the tables
-  // list), so a schema with thousands of views would instantiate thousands of
-  // context-menu components. Render at most VIEW_RENDER_CAP and hint to search
-  // for the rest - only pathological schemas ever hit this.
-  const VIEW_RENDER_CAP = 500;
-  const viewsToRender = $derived(filteredViews.length > VIEW_RENDER_CAP ? filteredViews.slice(0, VIEW_RENDER_CAP) : filteredViews);
-  const matViewsToRender = $derived(filteredMatViews.length > VIEW_RENDER_CAP ? filteredMatViews.slice(0, VIEW_RENDER_CAP) : filteredMatViews);
+  // Views, materialized views and databases are windowed on the same maths as
+  // the tables list (see the virtual-list block below). They used to render a
+  // capped 500 rows instead, which both instantiated 500 context menus and hid
+  // whatever came after row 500 without saying so.
 
   // ── Counts for section badges ──────────────────────────────────────────────
   // The TABLES list draws from regular tables minus pins; use that as the "total"
@@ -492,14 +529,17 @@
   function setAllSections(/** @type {boolean} */ open) {
     recentOpen = open; tablesOpen = open; viewsOpen = open; matViewsOpen = open;
   }
-  // ── Virtual list (tables only) ───────────────────────────────────────────
-  const VIRT_THRESHOLD = 40   // kick in early - 40+ tables already benefits from virtualization
-  const VIRT_BUFFER = 12      // extra rows rendered above and below the viewport
-  // Row stride is MEASURED from the DOM, not assumed: row height scales with the
-  // app zoom / font-size (Linux even uses a 15px base), and any drift between an
-  // assumed constant and reality × hundreds of rows = phantom scroll space below
-  // the last table (the "keeps scrolling past the end" gutter). 27px is only the
-  // pre-measure fallback.
+  // ── Virtual lists (tables, views, materialized views, databases) ─────────
+  // The window maths lives in $lib/virtual-window.js; this block owns the two
+  // measurements only the DOM can answer - the row stride and where each list
+  // sits inside the scrolled content.
+  //
+  // Row stride is MEASURED, not assumed: row height scales with the app zoom /
+  // font-size (Linux even uses a 15px base), and any drift between an assumed
+  // constant and reality × hundreds of rows = phantom scroll space below the
+  // last row (the "keeps scrolling past the end" gutter). 27px is only the
+  // pre-measure fallback. Every list uses the same row chrome, so one stride
+  // covers all four.
   let rowH = $state(27)
   $effect(() => {
     const el = tableListEl
@@ -507,15 +547,14 @@
     if (!el || typeof ResizeObserver === 'undefined') return
     const measure = () => {
       // Spacer <li>s are aria-hidden - measure the stride between two real rows.
-      const rows = /** @type {NodeListOf<HTMLElement>} */ (el.querySelectorAll('li:not([aria-hidden])'))
-      if (rows.length >= 2) {
-        const stride = rows[1].offsetTop - rows[0].offsetTop
+      const stride = measureRowStride(el)
+      if (stride !== null) {
         // Read rowH untracked: this effect must NOT depend on the value it writes,
         // or setting rowH re-runs it, and a stride that doesn't settle in one pass
         // spins until Svelte's infinite-loop guard trips. The ResizeObserver still
         // re-measures on real layout changes.
         const cur = untrack(() => rowH)
-        if (stride > 10 && Math.abs(stride - cur) > 0.5) rowH = stride
+        if (Math.abs(stride - cur) > 0.5) rowH = stride
       }
       // Same observer covers the other half of the window maths: a layout change
       // in the list also means its offset in the scroll container may have moved.
@@ -530,10 +569,11 @@
     if (content) ro.observe(content)
     return () => ro.disconnect()
   })
-  // The window shifts one row at a time: `virtStart` is floored to ROW_H, so the
-  // derived already short-circuits (returns the same value) for every scroll event
-  // within a row - no re-render, no spacer resize until you actually cross a row
-  // boundary. That keeps each update tiny (±1 row) instead of a batched chunk hitch.
+  // The window shifts one row at a time: the start index is floored to the row
+  // stride, so the derived short-circuits (same value) for every scroll event
+  // within a row - no re-render, no spacer resize until a row boundary is
+  // actually crossed. Each update stays tiny (±1 row) instead of arriving as a
+  // batched chunk hitch.
 
   /** @type {HTMLElement | null} */
   let scrollContainerEl = $state(null)
@@ -550,27 +590,42 @@
     if (!scrollContainerEl) return
     sidebarScrollTop = scrollContainerEl.scrollTop
   }
-  /** Offset of the tables <ul> from the top of the scroll container. Re-measured
-   *  whenever sections above it open/close (recent, pinned) or refs change. */
+  /** Offset of each windowed <ul> from the top of the scroll container.
+   *  Re-measured whenever anything above one of them opens, closes or filters. */
   let tableListOffsetTop = $state(0)
+  let viewListOffsetTop = $state(0)
+  let matViewListOffsetTop = $state(0)
+  let dbListOffsetTop = $state(0)
+
+  /** @type {HTMLElement | null} */
+  let viewListEl = $state(null)
+  /** @type {HTMLElement | null} */
+  let matViewListEl = $state(null)
+  /** @type {HTMLElement | null} */
+  let dbListEl = $state(null)
 
   /**
-   * Distance from the top of the scrolled content to the tables <ul>.
+   * Re-measure where every windowed list sits in the scrolled content.
    *
-   * Measured from live rects rather than walked through `offsetParent`: that walk
+   * Read from live rects rather than walked through `offsetParent`: that walk
    * only terminated when an ancestor happened to be the scroll container, and it
    * ran off an enumerated list of "things above the list". Anything else that
    * grew above it - expanding the databases section, a filter that changes the
-   * pinned block - left the offset stale and small, which pushed `virtStart` far
+   * pinned block - left the offset stale and small, which pushed the window far
    * past the real first visible row: the list rendered its tail behind a giant
    * empty spacer (the black gap).
    */
   function measureListOffset() {
-    const el = tableListEl
     const container = scrollContainerEl
-    if (!el || !container) return
-    const off = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
-    if (Math.abs(off - tableListOffsetTop) > 0.5) tableListOffsetTop = off
+    if (!container) return
+    const tables = offsetWithin(tableListEl, container)
+    if (tables !== null && Math.abs(tables - tableListOffsetTop) > 0.5) tableListOffsetTop = tables
+    const views = offsetWithin(viewListEl, container)
+    if (views !== null && Math.abs(views - viewListOffsetTop) > 0.5) viewListOffsetTop = views
+    const matViews = offsetWithin(matViewListEl, container)
+    if (matViews !== null && Math.abs(matViews - matViewListOffsetTop) > 0.5) matViewListOffsetTop = matViews
+    const dbs = offsetWithin(dbListEl, container)
+    if (dbs !== null && Math.abs(dbs - dbListOffsetTop) > 0.5) dbListOffsetTop = dbs
   }
 
   // Re-measure whenever anything that can move the list re-renders. Cheap: two
@@ -580,25 +635,40 @@
     void visiblePinnedTables.length
     void showRecent
     void filteredRegularTables.length
+    void filteredViews.length
+    void filteredMatViews.length
+    void filteredDbEntries.length
     void tablesOpen
+    void viewsOpen
+    void matViewsOpen
+    void databasesOpen
     void tableListEl
+    void viewListEl
+    void matViewListEl
+    void dbListEl
     void scrollContainerEl
     measureListOffset()
   })
 
-  const shouldVirtualize = $derived(filteredRegularTables.length > VIRT_THRESHOLD)
+  /** @param {number} count @param {number} offsetTop */
+  function windowFor(count, offsetTop) {
+    return virtualWindow({
+      count,
+      scrollTop: sidebarScrollTop,
+      viewportHeight: sidebarHeight,
+      offsetTop,
+      rowH,
+    })
+  }
 
-  const virtStart = $derived.by(() => {
-    if (!shouldVirtualize) return 0
-    return Math.max(0, Math.floor((sidebarScrollTop - tableListOffsetTop) / rowH) - VIRT_BUFFER)
-  })
-  const virtEnd = $derived.by(() => {
-    if (!shouldVirtualize) return filteredRegularTables.length
-    const end = Math.ceil((sidebarScrollTop + sidebarHeight - tableListOffsetTop) / rowH) + VIRT_BUFFER
-    return Math.min(filteredRegularTables.length, end)
-  })
-  const virtTopPad  = $derived(shouldVirtualize ? virtStart * rowH : 0)
-  const virtBotPad  = $derived(shouldVirtualize ? Math.max(0, (filteredRegularTables.length - virtEnd) * rowH) : 0)
+  const tableWin = $derived(windowFor(filteredRegularTables.length, tableListOffsetTop))
+  const viewWin = $derived(windowFor(filteredViews.length, viewListOffsetTop))
+  const matViewWin = $derived(windowFor(filteredMatViews.length, matViewListOffsetTop))
+  const dbWin = $derived(windowFor(filteredDbEntries.length, dbListOffsetTop))
+
+  const viewsToRender = $derived(filteredViews.slice(viewWin.start, viewWin.end))
+  const matViewsToRender = $derived(filteredMatViews.slice(matViewWin.start, matViewWin.end))
+  const dbEntriesToRender = $derived(filteredDbEntries.slice(dbWin.start, dbWin.end))
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
@@ -865,6 +935,7 @@
           bind:clientHeight={sidebarHeight}
           class="app-scroll min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain [will-change:scroll-position]"
           role="none"
+          use:smoothScroll={{ enabled: !$appNativeScroll }}
           onscroll={onSidebarScroll}
           onclick={(e) => {
             if (selectedItems.size > 0 && !/** @type {Element} */(e.target).closest?.('li')) {
@@ -921,9 +992,20 @@
                   {/if}
                 </button>
                 {#if databasesOpen}
+                  {#if dbAdmin}
+                    <button
+                      type="button"
+                      class="ml-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground disabled:opacity-40"
+                      onclick={onnewdatabase}
+                      title={$readOnlyMode ? READ_ONLY_HINT : "New database"}
+                      disabled={$readOnlyMode}
+                    >
+                      <Icon name="plus" class="size-3" />
+                    </button>
+                  {/if}
                   <button
                     type="button"
-                    class="ml-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground"
+                    class={cn("inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground", !dbAdmin && "ml-auto")}
                     onclick={() => void loadDatabases()}
                     title="Refresh databases"
                     disabled={dbEntriesLoading}
@@ -942,30 +1024,78 @@
                     {!dbEntriesLoaded ? 'Loading…' : lf ? 'No matching databases' : 'No other databases'}
                   </p>
                 {:else}
-                  <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
-                    {#each filteredDbEntries as db (db.key)}
+                  <ul bind:this={dbListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                    {#if dbWin.topPad > 0}<li style="height:{dbWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
+                    {#each dbEntriesToRender as db (db.key)}
                       {@const isCurrent = db.key === activeDbKey}
                       <li>
-                        <button
-                          type="button"
-                          disabled={isCurrent}
-                          class={cn(
-                            "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
-                            isCurrent
-                              ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                              : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
-                          )}
-                          onclick={() => !isCurrent && onswitchdatabase(db)}
-                          title={isCurrent ? `${db.label} (current)` : `Switch to ${db.label}`}
-                        >
-                          <Icon name="database" class="size-3 shrink-0 opacity-50" />
-                          <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{db.label}</span>
-                          {#if isCurrent}
-                            <Icon name="check" class="size-3 shrink-0 text-success" />
-                          {/if}
-                        </button>
+                        <ContextMenu.Root>
+                          <ContextMenu.Trigger class="w-full">
+                            <button
+                              type="button"
+                              disabled={isCurrent}
+                              class={cn(
+                                "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                                isCurrent
+                                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                                  : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
+                              )}
+                              onclick={() => !isCurrent && onswitchdatabase(db)}
+                              title={isCurrent ? `${db.label} (current)` : `Switch to ${db.label}`}
+                            >
+                              <Icon name="database" class="size-3 shrink-0 opacity-50" />
+                              <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{db.label}</span>
+                              {#if isCurrent}
+                                <Icon name="check" class="size-3 shrink-0 text-success" />
+                              {/if}
+                            </button>
+                          </ContextMenu.Trigger>
+                          <ContextMenu.Content class="min-w-52 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                            {#if !isCurrent}
+                              <ContextMenu.Item onSelect={() => onswitchdatabase(db)}>
+                                <Icon name="arrow-right" />
+                                Switch to this database
+                              </ContextMenu.Item>
+                            {/if}
+                            <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(db.label) }}>
+                              <Icon name="copy" />
+                              Copy name
+                            </ContextMenu.Item>
+                            {#if dbAdmin}
+                              <ContextMenu.Item onSelect={() => ondatabaseinfo({ name: db.label })}>
+                                <Icon name="info" />
+                                Database info
+                              </ContextMenu.Item>
+                              <ContextMenu.Separator />
+                              {@const ren = dbItem('rename', isCurrent)}
+                              <ContextMenu.Item disabled={ren.disabled} title={ren.title} onSelect={() => onrenamedatabase({ name: db.label, existing: dbNames })}>
+                                <Icon name="pencil" />
+                                Rename…
+                              </ContextMenu.Item>
+                              {@const dup = dbItem('duplicate', isCurrent)}
+                              <ContextMenu.Item disabled={dup.disabled} title={dup.title} onSelect={() => onduplicatedatabase({ name: db.label, existing: dbNames })}>
+                                <Icon name="copy-plus" />
+                                Duplicate…
+                              </ContextMenu.Item>
+                              {@const term = dbItem('terminate', isCurrent)}
+                              {#if !term.disabled}
+                                <ContextMenu.Item onSelect={() => onterminatedbsessions({ name: db.label })}>
+                                  <Icon name="unplug" />
+                                  Close other sessions
+                                </ContextMenu.Item>
+                              {/if}
+                              <ContextMenu.Separator />
+                              {@const drp = dbItem('drop', isCurrent)}
+                              <ContextMenu.Item variant="destructive" disabled={drp.disabled} title={drp.title} onSelect={() => ondropdatabase({ name: db.label })}>
+                                <Icon name="trash-2" />
+                                Drop database…
+                              </ContextMenu.Item>
+                            {/if}
+                          </ContextMenu.Content>
+                        </ContextMenu.Root>
                       </li>
                     {/each}
+                    {#if dbWin.botPad > 0}<li style="height:{dbWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   </ul>
                 {/if}
               {/if}
@@ -1245,8 +1375,8 @@
                     No tables match
                   </li>
                 {:else}
-                  {#if virtTopPad > 0}<li style="height:{virtTopPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
-                  {#each filteredRegularTables.slice(virtStart, virtEnd) as table (table.name)}
+                  {#if tableWin.topPad > 0}<li style="height:{tableWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
+                  {#each filteredRegularTables.slice(tableWin.start, tableWin.end) as table (table.name)}
                     {@const isSelected = selectedItems.has(table.name)}
                     <li>
                       <ContextMenu.Root>
@@ -1268,7 +1398,7 @@
                             }}
                           >
                             <span
-                              class="relative size-3 shrink-0"
+                              class="relative size-3.5 shrink-0"
                               onclick={(e) => { e.stopPropagation(); selectItem(table.name, e.shiftKey) }}
                               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); selectItem(table.name, e.shiftKey); } }}
                               role="checkbox"
@@ -1276,10 +1406,10 @@
                               tabindex="-1"
                             >
                               {#if isSelected}
-                                <Icon name="square-check" class="size-3 text-primary" />
+                                <Icon name="square-check" class="size-3.5 text-primary" />
                               {:else}
-                                <Icon name="table-2" class="size-3 opacity-50 group-hover:hidden" />
-                                <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
+                                <Icon name="table-2" class="size-3.5 opacity-45 group-hover:hidden" />
+                                <Icon name="square" class="size-3.5 hidden opacity-40 group-hover:block" />
                               {/if}
                             </span>
                             <span class="flex min-w-0 items-center gap-1.5">
@@ -1289,26 +1419,16 @@
                               {/if}
                             </span>
                             {#if showRowCount}
-                            <!-- Fixed min-width so the column doesn't grow (shifting
-                                 every row) when lazy counts resolve from '…' to numbers. -->
+                            <!-- Fixed min-width so the column doesn't shift every
+                                 row sideways as lazy counts land. A count that has
+                                 not arrived draws nothing at all: a placeholder mark
+                                 on every row made a long list read as a column of
+                                 dashes, which says "empty" far louder than "counting". -->
                             <span
-                              class="flex min-w-[4ch] shrink-0 items-center justify-end font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground"
+                              class="flex min-w-[4ch] shrink-0 items-center justify-end font-mono text-ui-2xs leading-4 tabular-nums text-muted-foreground/55"
                               title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : "Counting rows…"}
                             >
-                              {#if table.rowCount == null}
-                                <!-- A pending count is one static mark, not motion.
-                                     A pulsing pill per row turned a long table list
-                                     into thirty things blinking out of sync, which
-                                     reads as the app struggling; the counts arrive
-                                     in under a second anyway. A literal "…" sat on
-                                     the text baseline and hung low against the
-                                     numbers beside it, so this is an underscore
-                                     rule on the digits' own baseline — it holds the
-                                     column width and stays quiet. -->
-                                <span class="h-px w-3 rounded-full bg-muted-foreground/30" aria-hidden="true"></span>
-                              {:else}
-                                {formatTableRowCount(table.rowCount)}
-                              {/if}
+                              {#if table.rowCount != null}{formatTableRowCount(table.rowCount)}{/if}
                             </span>
                             {/if}
                           </button>
@@ -1431,7 +1551,7 @@
                       </ContextMenu.Root>
                     </li>
                   {/each}
-                  {#if virtBotPad > 0}<li style="height:{virtBotPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
+                  {#if tableWin.botPad > 0}<li style="height:{tableWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                 {/if}
               </ul>
               </div>
@@ -1462,7 +1582,7 @@
                 {/if}
               </button>
               {#if viewsOpen}
-                <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                <ul bind:this={viewListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
                   {#if filteredViews.length === 0}
                     <li
                       class="px-3 py-3 text-center text-ui-xs text-muted-foreground"
@@ -1470,6 +1590,7 @@
                       No views match
                     </li>
                   {:else}
+                    {#if viewWin.topPad > 0}<li style="height:{viewWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                     {#each viewsToRender as view (view.name)}
                       {@const isSelected = selectedItems.has(view.name)}
                       <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
@@ -1527,11 +1648,7 @@
                         </ContextMenu.Root>
                       </li>
                     {/each}
-                    {#if filteredViews.length > VIEW_RENDER_CAP}
-                      <li class="px-3 py-2 text-center text-ui-2xs text-muted-foreground/60">
-                        +{filteredViews.length - VIEW_RENDER_CAP} more, search to narrow
-                      </li>
-                    {/if}
+                    {#if viewWin.botPad > 0}<li style="height:{viewWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   {/if}
                 </ul>
               {/if}
@@ -1590,7 +1707,7 @@
                 {/if}
               </button>
               {#if matViewsOpen}
-                <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                <ul bind:this={matViewListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
                   {#if filteredMatViews.length === 0}
                     <li
                       class="px-3 py-3 text-center text-ui-xs text-muted-foreground"
@@ -1598,6 +1715,7 @@
                       No materialized views match
                     </li>
                   {:else}
+                    {#if matViewWin.topPad > 0}<li style="height:{matViewWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                     {#each matViewsToRender as mv (mv.name)}
                       {@const isSelected = selectedItems.has(mv.name)}
                       <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
@@ -1657,11 +1775,7 @@
                         </ContextMenu.Root>
                       </li>
                     {/each}
-                    {#if filteredMatViews.length > VIEW_RENDER_CAP}
-                      <li class="px-3 py-2 text-center text-ui-2xs text-muted-foreground/60">
-                        +{filteredMatViews.length - VIEW_RENDER_CAP} more, search to narrow
-                      </li>
-                    {/if}
+                    {#if matViewWin.botPad > 0}<li style="height:{matViewWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   {/if}
                 </ul>
               {/if}

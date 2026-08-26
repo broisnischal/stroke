@@ -41,8 +41,8 @@
   let lastUpdated = $state(/** @type {number | null} */ (null))
   // $state.raw for every server payload: each one is replaced wholesale by its
   // refresh fn and only ever read, never mutated in place. Deep $state would
-  // proxy every row object and every field — `config` alone is 350+ rows on
-  // Postgres and 600+ on MySQL, and `stateData` carries the session/lock lists —
+  // proxy every row object and every field - `config` alone is 350+ rows on
+  // Postgres and 600+ on MySQL, and `stateData` carries the session/lock lists -
   // so the proxies cost more to build than the render they feed.
   let version = $state.raw(/** @type {any} */ (null))
   let activity = $state.raw(/** @type {any} */ (null))
@@ -183,13 +183,13 @@
   })
   const cur = $derived(rateHistory[rateHistory.length - 1] ?? null)
   const hasSeries = $derived(rateHistory.length > 1)
-  /** Short 24h clock — 12h "03:42:11 PM" ticks collide on a 40-sample axis. */
+  /** Short 24h clock - 12h "03:42:11 PM" ticks collide on a 40-sample axis. */
   const clock = (/** @type {number} */ t) => new Date(t).toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
   const timeLabels = $derived(rateHistory.map((r) => clock(r.t)))
 
   const num = (/** @type {number} */ n, /** @type {number} */ dp = 2) => (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })
   const big = (/** @type {number} */ n) => (n ?? 0).toLocaleString('en-US')
-  /** Cumulative counters run to the billions — 1.2B reads far more easily. */
+  /** Cumulative counters run to the billions - 1.2B reads far more easily. */
   const compact = (/** @type {number} */ n) => (n ?? 0).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 1 })
 
   // ── Theme-resolved chart palette ───────────────────────────────────────────
@@ -300,7 +300,7 @@
     if (!activity) return 'muted'
     return pct >= 99 ? 'ok' : pct >= 90 ? 'warn' : 'bad'
   })
-  /** Rollbacks as a share of transactions — a rising ratio means failing writes. */
+  /** Rollbacks as a share of transactions - a rising ratio means failing writes. */
   const rollbackPct = $derived(cur && cur.tps > 0 ? (cur.rollbacks / cur.tps) * 100 : 0)
 
   // ── Config browsing + editing ──────────────────────────────────────────────
@@ -351,7 +351,7 @@
   const configFiltering = $derived(configGroup !== 'all' || configStatus !== 'all' || !!configSearch.trim())
 
   /** Browsing the unfiltered list means 350+ rows; break it into labelled
-   *  category sections so it can be scanned. Filtered results stay flat — the
+   *  category sections so it can be scanned. Filtered results stay flat - the
    *  query is already the organising principle. */
   const configSections = $derived.by(() => {
     if (configGroup !== 'all' || configSearch.trim()) return [{ group: '', rows: configFiltered }]
@@ -381,7 +381,7 @@
   let configRenderLimit = $state(CONFIG_PAGE)
 
   // Fill the rest of the list in idle slots, one page per slot. This is the
-  // difference between "the first paint is cheap" and "the list is incomplete" —
+  // difference between "the first paint is cheap" and "the list is incomplete" -
   // only the former is wanted.
   $effect(() => {
     if (subtab !== 'config' || !active) return
@@ -687,7 +687,7 @@
 
         {#if !autoRefresh}
           <p class="mt-3 flex items-center gap-1.5 text-ui-2xs text-muted-foreground/70">
-            Rates are sampled per refresh — turn on <span class="font-medium text-foreground/80">Live</span> to watch them move.
+            Rates are sampled per refresh - turn on <span class="font-medium text-foreground/80">Live</span> to watch them move.
           </p>
         {/if}
 
@@ -744,7 +744,7 @@
           <div>
             {@render dataSection({
               title: 'Prepared transactions',
-              caption: 'Two-phase commits left open — these hold locks until resolved.',
+              caption: 'Two-phase commits left open - these hold locks until resolved.',
               rows: stateData?.preparedTransactions ?? [],
               empty: 'No prepared transactions.',
             })}
@@ -754,7 +754,7 @@
       <!-- ══ CONFIG ════════════════════════════════════════════════════════ -->
       {:else if subtab === 'config'}
         <!-- Sticky toolbar: search and filters stay reachable through a 350-row
-             list. The fill is fully opaque on purpose — a translucent header with
+             list. The fill is fully opaque on purpose - a translucent header with
              `backdrop-blur` ghosts the rows scrolling beneath it straight through
              the search field on WebKitGTK, and blurring a full-width strip over a
              379-row list costs a compositing layer for nothing.
@@ -763,7 +763,7 @@
              margin box, so a `-mt-5` pins the border box 20px below the scrollport
              top and list rows scroll visibly through the gap above it. The scroll
              container drops its top padding for this tab and the toolbar supplies
-             it via `pt-5` instead. `-mx-5` is fine — horizontal margins don't
+             it via `pt-5` instead. `-mx-5` is fine - horizontal margins don't
              affect a `top` offset. -->
         <div class="sticky top-0 z-20 -mx-5 mb-4 border-b border-border/40 bg-panel px-5 pb-3 pt-5">
           <div class="mb-2.5 flex items-center justify-between gap-3">
@@ -910,7 +910,7 @@
                           <div class="flex items-center gap-1.5">
                             <span class="truncate font-mono text-ui-xs font-medium text-foreground">{row.name}</span>
                             {#if modified}
-                              <span class="shrink-0 rounded bg-primary/12 px-1 py-px text-ui-3xs text-primary" title="Not the built-in default — set by {row.source}">modified</span>
+                              <span class="shrink-0 rounded bg-primary/12 px-1 py-px text-ui-3xs text-primary" title="Not the built-in default - set by {row.source}">modified</span>
                             {/if}
                             {#if row.pendingRestart}
                               <span class="inline-flex shrink-0 items-center gap-1 rounded bg-warning/12 px-1 py-px text-ui-3xs text-warning">
@@ -1014,7 +1014,7 @@
 
                           {#if row.editable === false}
                             <p class="mt-3 rounded-md bg-muted/40 px-2.5 py-1.5 text-ui-2xs text-muted-foreground">
-                              Compiled into the server — it can only change by rebuilding or re-initialising the cluster.
+                              Compiled into the server - it can only change by rebuilding or re-initialising the cluster.
                             </p>
                           {:else if $readOnlyMode}
                             <p class="mt-3 rounded-md bg-muted/40 px-2.5 py-1.5 text-ui-2xs text-muted-foreground">{READ_ONLY_HINT}</p>
@@ -1024,7 +1024,7 @@
                             </p>
                           {:else if isPg}
                             <p class="mt-3 text-ui-2xs text-muted-foreground/70">
-                              Written with <span class="font-mono">ALTER SYSTEM</span> and reloaded — persists across restarts. Needs a superuser role.{row.context && CONTEXT_HELP[row.context] ? ` ${CONTEXT_HELP[row.context]}.` : ''}
+                              Written with <span class="font-mono">ALTER SYSTEM</span> and reloaded - persists across restarts. Needs a superuser role.{row.context && CONTEXT_HELP[row.context] ? ` ${CONTEXT_HELP[row.context]}.` : ''}
                             </p>
                           {/if}
                         </div>
@@ -1054,7 +1054,7 @@
         <div class="mt-5">
           {@render dataSection({
             title: 'Replication slots',
-            caption: 'Slots reserve WAL for a consumer — an inactive slot grows disk usage until it is dropped.',
+            caption: 'Slots reserve WAL for a consumer - an inactive slot grows disk usage until it is dropped.',
             rows: replication?.slots ?? [],
             empty: 'No replication slots exist.',
           })}
@@ -1114,7 +1114,7 @@
     <!-- Row 3: trend -->
     <div class="mt-2">{@render sparkline(s.series ?? [], toneClass(s.tone))}</div>
 
-    <!-- Row 4: optional 0–100 meter, on cards where the number has a ceiling -->
+    <!-- Row 4: optional 0-100 meter, on cards where the number has a ceiling -->
     {#if s.meter != null}
       <div class="mt-1.5 h-1 overflow-hidden rounded-full bg-muted/60">
         <div
@@ -1155,7 +1155,7 @@
     {#if c.ready}
       <!-- mergeUpdates: these three options are built inline above from a fixed
            set of series with no conditional keys, and are rebuilt on every
-           refresh tick — exactly the case merging is for. -->
+           refresh tick - exactly the case merging is for. -->
       <div class="h-52"><EChartPanel option={c.option} mergeUpdates /></div>
     {:else}
       <div class="flex h-52 flex-col items-center justify-center gap-1 rounded-md bg-muted/20 text-center">

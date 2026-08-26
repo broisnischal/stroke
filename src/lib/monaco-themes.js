@@ -20,7 +20,7 @@ export function defineStrokeMonacoThemes() {
  * definition refreshed from the live CSS tokens first.
  *
  * The refresh is not optional. Both `monaco.editor.setTheme` and a `theme` in
- * `monaco.editor.create` options are *global* — they re-tint every editor in the
+ * `monaco.editor.create` options are *global* - they re-tint every editor in the
  * app, not just the one being created. So an editor mounting with the name of a
  * theme whose registered definition still holds the preset's hand-written hexes
  * dragged every other open editor back onto those hexes, undoing the live-CSS
@@ -46,8 +46,8 @@ export function monacoThemeId(themeId) {
  *
  * The presets carry hand-written hexes that drifted from the CSS tokens: the
  * dark Studio theme paints `oklch(0.132 0 0)` (#080808) while its preset said
- * #1c1c1c, so every editor — the JSON view most visibly, since it fills the
- * pane — sat a shade lighter than the app around it. CSS is the source of truth
+ * #1c1c1c, so every editor - the JSON view most visibly, since it fills the
+ * pane - sat a shade lighter than the app around it. CSS is the source of truth
  * for theming (DESIGN_SYSTEM §1), so read it instead of duplicating it, and
  * every theme stays matched with no per-preset upkeep.
  *
@@ -92,7 +92,7 @@ function cssColorToHex(css) {
     ctx.fillStyle = '#000'
     ctx.fillStyle = value
     // An unparseable value leaves fillStyle at the previous colour, so a miss
-    // reads as black rather than throwing — check before trusting it.
+    // reads as black rather than throwing - check before trusting it.
     if (ctx.fillStyle === '#000000' && !/^(#0{3,8}|black)$/i.test(value)) return null
     ctx.fillRect(0, 0, 1, 1)
     const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data
@@ -104,7 +104,7 @@ function cssColorToHex(css) {
 
 /**
  * Point Monaco's editor surface at the app's *live* background/foreground, then
- * activate the theme. Global by nature — every open editor follows.
+ * activate the theme. Global by nature - every open editor follows.
  *
  * @param {import('$lib/themes/registry.js').ThemeId} themeId
  */

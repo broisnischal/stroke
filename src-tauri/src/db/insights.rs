@@ -1,4 +1,4 @@
-//! Instance Insights — read-only database-monitoring snapshots.
+//! Instance Insights - read-only database-monitoring snapshots.
 //!
 //! Powers the frontend "Instance Insights" dashboard (Activity / State / Config /
 //! Replication tabs plus a cheap version header). Supported on PostgreSQL, MySQL,
@@ -7,7 +7,7 @@
 //! everything else at sensible defaults (0 / empty vec) rather than erroring.
 //!
 //! Design notes:
-//! - All queries are parameterless catalog reads — no user input, no injection surface.
+//! - All queries are parameterless catalog reads - no user input, no injection surface.
 //! - Every section degrades gracefully: a catalog view that is missing or
 //!   permission-denied yields empty rows / zeroed counters for that section rather
 //!   than failing the whole command. The dashboard must never hard-fail because,
@@ -74,7 +74,7 @@ async fn mysql_query_objects(pool: &MySqlPool, sql: &str) -> Vec<Value> {
 // (columns + `Vec<Vec<Value>>` rows) from their own driver modules, so these
 // helpers read cells positionally by column name off that shape.
 
-/// A JSON cell rendered as a plain string — unwrap the `String` variant (no
+/// A JSON cell rendered as a plain string - unwrap the `String` variant (no
 /// surrounding quotes) and map null to empty.
 fn json_string(v: &Value) -> String {
     match v {
@@ -104,7 +104,7 @@ fn sqlresult_scalar(r: &SqlResult) -> String {
 }
 
 /// Turn a `SqlResult` (ClickHouse / DuckDB shape) into one JSON object per row,
-/// keyed by column name — the generic row shape the State tab renders.
+/// keyed by column name - the generic row shape the State tab renders.
 fn sqlresult_to_objects(r: &SqlResult) -> Vec<Value> {
     r.rows
         .iter()
@@ -147,7 +147,7 @@ fn settings_to_config(
         .collect()
 }
 
-/// One synthetic config row — surfaces size/storage snapshots that have no
+/// One synthetic config row - surfaces size/storage snapshots that have no
 /// dedicated struct field (SQLite DB size, ClickHouse parts, DuckDB DB size).
 fn cfg_row(name: &str, value: impl Into<String>, unit: &str, category: &str) -> ConfigSetting {
     ConfigSetting {
@@ -328,7 +328,7 @@ pub struct SessionCounts {
 }
 
 /// Cumulative counters. The frontend diffs successive snapshots to derive
-/// per-second rates, so these are raw monotonic totals — do not reset them here.
+/// per-second rates, so these are raw monotonic totals - do not reset them here.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityCounters {
@@ -382,7 +382,7 @@ pub async fn instance_activity(state: State<'_, DbState>) -> Result<InstanceActi
 }
 
 async fn pg_activity(pool: &PgPool) -> InstanceActivity {
-    // Sessions — count total / active / idle from pg_stat_activity.
+    // Sessions - count total / active / idle from pg_stat_activity.
     let (total, active, idle) = match sqlx::query(
         "SELECT count(*) AS total,
                 count(*) FILTER (WHERE state = 'active') AS active,
@@ -446,7 +446,7 @@ async fn pg_activity(pool: &PgPool) -> InstanceActivity {
 }
 
 async fn mysql_activity(pool: &MySqlPool) -> InstanceActivity {
-    // Sessions — 'Sleep' command == idle connection.
+    // Sessions - 'Sleep' command == idle connection.
     let (total, active, idle) = match sqlx::query(
         "SELECT COUNT(*) AS total,
                 CAST(SUM(COMMAND <> 'Sleep') AS SIGNED) AS active,
@@ -683,7 +683,7 @@ pub struct ConfigSetting {
     pub enum_vals: Vec<String>,
     pub min_val: String,
     pub max_val: String,
-    /// Compiled-in default — what a reset returns to.
+    /// Compiled-in default - what a reset returns to.
     pub boot_val: String,
     /// Value a session reset would see (config file value, not the session override).
     pub reset_val: String,
@@ -917,11 +917,11 @@ pub async fn instance_set_config(
             let message = if value.is_none() {
                 format!("{name} reset to its default")
             } else if requires_restart {
-                format!("{name} written to postgresql.auto.conf — restart the server to apply it")
+                format!("{name} written to postgresql.auto.conf - restart the server to apply it")
             } else if reloaded {
                 format!("{name} is now {current}")
             } else {
-                format!("{name} written, but the config reload failed — reload manually")
+                format!("{name} written, but the config reload failed - reload manually")
             };
 
             Ok(SetConfigResult { name, value: current, requires_restart, reloaded, message })
@@ -961,7 +961,7 @@ pub async fn instance_set_config(
             } else if persisted {
                 format!("{name} is now {current} (persisted)")
             } else {
-                format!("{name} is now {current} — not persisted, it resets on restart")
+                format!("{name} is now {current} - not persisted, it resets on restart")
             };
 
             Ok(SetConfigResult {
@@ -1022,7 +1022,7 @@ pub async fn instance_replication(state: State<'_, DbState>) -> Result<InstanceR
         }
         // No replication catalog these engines can surface here: SQLite/DuckDB are
         // embedded, and ClickHouse replication (system.replicas) only exists for
-        // ReplicatedMergeTree tables and is out of scope — return empty, not error.
+        // ReplicatedMergeTree tables and is out of scope - return empty, not error.
         ActiveConnection::Sqlite(_) => {
             Ok(InstanceReplication { engine: "sqlite".into(), stats: Vec::new(), slots: Vec::new() })
         }

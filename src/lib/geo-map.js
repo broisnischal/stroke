@@ -5,8 +5,8 @@
  * outline and the data agree with what people expect a map to look like. All the
  * geometry here works in a *unit square*: longitude/latitude project into
  * `[0,1]²` once, and the viewport is only a scale and an offset on top of that.
- * That keeps zoom and pan to two numbers and makes the whole module pure — no
- * canvas, no DOM, no Svelte — which is why it can be tested directly.
+ * That keeps zoom and pan to two numbers and makes the whole module pure - no
+ * canvas, no DOM, no Svelte - which is why it can be tested directly.
  *
  * Screen coordinates are CSS pixels. Device pixel ratio is the canvas's problem,
  * not this module's.
@@ -62,7 +62,7 @@ export function toLonLat(x, y) {
  * @returns {View}
  */
 export function worldView(width, height) {
-  // The world is square in Mercator, so the smaller axis decides the scale — the
+  // The world is square in Mercator, so the smaller axis decides the scale - the
   // alternative crops one axis, and losing half the world by default is worse
   // than empty margins.
   return { scale: Math.max(1, Math.min(width, height)), x: 0.5, y: 0.5 }
@@ -95,7 +95,7 @@ export function fromScreen(view, width, height, px, py) {
 }
 
 /**
- * The longitude/latitude box currently visible — the bbox the server filters on.
+ * The longitude/latitude box currently visible - the bbox the server filters on.
  *
  * Zoomed far out the viewport is wider than the world; the result is clamped to
  * real coordinates so the query gets a box a database can use rather than
@@ -123,7 +123,7 @@ const MAX_SCALE = 1 << 26
 
 /**
  * Zoom about a fixed screen point, so the coordinate under the cursor stays
- * under the cursor. Anchoring on the centre instead is the classic mistake — it
+ * under the cursor. Anchoring on the centre instead is the classic mistake - it
  * makes wheel-zoom feel like the map is running away from the pointer.
  * @param {View} view @param {number} width @param {number} height
  * @param {number} factor @param {number} px @param {number} py
@@ -147,14 +147,14 @@ export function zoomAbout(view, width, height, factor, px, py) {
 /**
  * Keep the viewport over the world.
  *
- * There is nothing outside the unit square — no land, no rows, no grid. Letting
+ * There is nothing outside the unit square - no land, no rows, no grid. Letting
  * a pan or a zoom carry the viewport past its edge slides the map off into
  * blackness, which reads as the drag having broken rather than as having reached
  * the end of the world.
  *
  * When the world is larger than the viewport the centre is held far enough in
- * that the edges stay off screen. When it is smaller — zoomed out past a full
- * world — there is no freedom left on that axis, so it is pinned to the middle.
+ * that the edges stay off screen. When it is smaller - zoomed out past a full
+ * world - there is no freedom left on that axis, so it is pinned to the middle.
  *
  * @param {View} view @param {number} width @param {number} height
  * @returns {View}
@@ -191,7 +191,7 @@ export function panBy(view, dx, dy, width = 0, height = 0) {
 /**
  * The view that frames a `[minLon, minLat, maxLon, maxLat]` extent.
  *
- * A degenerate extent — one point, or a layer with a single distinct location —
+ * A degenerate extent - one point, or a layer with a single distinct location -
  * has no size to fit, so it gets a fixed neighbourhood-level scale instead of a
  * division by zero.
  * @param {[number, number, number, number]} extent
@@ -222,7 +222,7 @@ export function fitExtent(extent, width, height, padding = 32) {
 }
 
 /**
- * Degrees of longitude per screen pixel — the simplification tolerance to ask
+ * Degrees of longitude per screen pixel - the simplification tolerance to ask
  * the server for. Vertices closer together than this cannot be told apart on
  * screen, so dropping them costs nothing visible and is what makes a 30k-row
  * road layer render at all.
@@ -255,7 +255,7 @@ export function clusterCell(view) {
  * Walk a GeoJSON geometry, calling back with each ring of screen coordinates.
  *
  * One traversal serves points, lines, polygons and collections because they only
- * differ in nesting depth, and a `GeometryCollection` can hold any of them —
+ * differ in nesting depth, and a `GeometryCollection` can hold any of them -
  * including, from an untyped PostGIS column, a mix in a single feature.
  *
  * @param {any} geometry
@@ -330,7 +330,7 @@ export function distanceToSegmentSq(px, py, ax, ay, bx, by) {
 /**
  * The topmost feature within `tolerance` pixels of a point, or null.
  *
- * Searched back to front so the feature drawn last — the one visibly on top —
+ * Searched back to front so the feature drawn last - the one visibly on top -
  * is the one that gets picked, which is what a click on overlapping shapes means.
  *
  * @param {any[]} features

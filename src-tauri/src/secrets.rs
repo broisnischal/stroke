@@ -3,7 +3,7 @@ use std::sync::{Mutex, OnceLock};
 use tauri::Manager;
 
 // Session cache: once loaded (or written) it is authoritative for the process,
-// so a value is always readable immediately after it is stored — even if the OS
+// so a value is always readable immediately after it is stored - even if the OS
 // keychain read-back is flaky, unavailable, or (mis)configured as the mock store.
 // Durable persistence still goes to the keychain/file below; this only guarantees
 // read-after-write within a run.
@@ -13,7 +13,7 @@ fn cache() -> &'static Mutex<Option<HashMap<String, String>>> {
 }
 
 // All secrets (AI keys, provider OAuth tokens, Cloudflare tokens) live in a
-// single JSON blob stored in the OS keychain — macOS Keychain, Windows
+// single JSON blob stored in the OS keychain - macOS Keychain, Windows
 // Credential Manager, or Linux Secret Service. A legacy plaintext file
 // (`ai-keys.json`) is migrated in on first read and then deleted; it also
 // remains the fallback store if the keychain is unavailable, so credentials are
@@ -93,13 +93,13 @@ pub(crate) fn write_all(app: &tauri::AppHandle, map: &HashMap<String, String>) -
     // the new value regardless of what the durable backend does.
     *cache().lock().unwrap_or_else(|e| e.into_inner()) = Some(map.clone());
 
-    // Prefer the keychain, but only trust it — and drop the plaintext copy — once
+    // Prefer the keychain, but only trust it - and drop the plaintext copy - once
     // a read-back proves the data actually persisted.
     if write_keychain(map).is_ok() && keychain_holds(map) {
         let _ = std::fs::remove_file(legacy_path(app));
         return Ok(());
     }
-    // Keychain missing, mock, or not round-tripping — persist to the file so
+    // Keychain missing, mock, or not round-tripping - persist to the file so
     // secrets survive a restart.
     let path = legacy_path(app);
     if let Some(parent) = path.parent() {
@@ -115,7 +115,7 @@ pub(crate) fn write_all(app: &tauri::AppHandle, map: &HashMap<String, String>) -
 // the OS "<app> wants to use your confidential information" prompt on screen and
 // only returns once the user answers it. Tauri runs a command *without* `async`
 // on the main thread (see "Async Commands" in the Tauri docs), and blocking the
-// main thread stalls the event loop — the window stops compositing and shows an
+// main thread stalls the event loop - the window stops compositing and shows an
 // unpainted surface (pure white) for as long as the prompt is up. Inside an
 // async command the same call instead parks a runtime worker, stalling unrelated
 // queries.

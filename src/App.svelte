@@ -3,6 +3,7 @@
   import { Toaster } from '$lib/components/ui/sonner/index.js'
   import StudioShell from './lib/components/StudioShell.svelte'
   import LicenseGate from './lib/components/LicenseGate.svelte'
+  import AppLockGate from './lib/components/AppLockGate.svelte'
   import AppErrorBoundary from './lib/components/AppErrorBoundary.svelte'
   import GlobalTooltip from './lib/components/GlobalTooltip.svelte'
   import { loadSettings, applySettings, installZoomShortcuts } from '$lib/stores/settings.js'
@@ -67,15 +68,19 @@
 
     // Fade in the page now that theme + layout are ready. The window uses native
     // OS decorations and opens maximized via the Tauri builder, so the OS owns
-    // all window state — no JS show/maximize/geometry handling needed here.
+    // all window state - no JS show/maximize/geometry handling needed here.
     document.documentElement.style.opacity = '1'
   })
 </script>
 
 <Toaster position="top-right" offset={{ top: '52px', right: '12px' }} closeButton />
 <AppErrorBoundary>
-  <LicenseGate>
-    <StudioShell />
-  </LicenseGate>
+  <!-- The PIN sits outside the license gate: if the app is locked, nothing
+       behind it runs - not the license check, not a reconnect. -->
+  <AppLockGate>
+    <LicenseGate>
+      <StudioShell />
+    </LicenseGate>
+  </AppLockGate>
 </AppErrorBoundary>
 <GlobalTooltip />

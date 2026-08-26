@@ -1,11 +1,25 @@
 <script>
-  // Extensions sidebar panel - VSCode-style switchable panel listing built-in
-  // extensions with an inline Install / Installed toggle. There is no real
-  // install step: "Install" = enable the plugin, "Installed" (click) = disable.
+  // Extensions sidebar panel - VSCode-style switchable panel listing the
+  // built-in extensions with an inline Install / Installed toggle, plus whatever
+  // has been installed from a folder. For a built-in there is no install step:
+  // "Install" = enable it. An installed plugin is a folder on disk, so it also
+  // gets Reload (re-read the file) and Remove (delete the folder).
   import Icon from "./Icon.svelte";
   import { cn } from "$lib/utils.js";
   import { EXTENSIONS } from "$lib/plugins/registry.js";
   import { pluginState, pluginEnabledIn, setPluginEnabled } from "$lib/stores/plugins.js";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
+  import {
+    externalPlugins,
+    externalPluginErrors,
+    refreshExternalPlugins,
+    setExternalEnabled,
+    installExternalPlugin,
+    uninstallExternalPlugin,
+    reloadExternalPlugin,
+    externalPluginsDir,
+    pluginKey,
+  } from "$lib/plugins/external/host.js";
   // Per-extension glyphs - mirror ExtensionsPage's ICONS map so each extension
   // shows its own icon (not one shared per-kind glyph).
   import Clock from "@lucide/svelte/icons/clock";
@@ -33,6 +47,53 @@
   } = $props();
 
   let filter = $state("");
+  let installing = $state(false);
+  /** Folder installed plugins live in, shown in the empty state. */
+  let pluginsDir = $state("");
+
+  refreshExternalPlugins()
+  externalPluginsDir().then((d) => (pluginsDir = d))
+
+  const filteredExternal = $derived.by(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return $externalPlugins;
+    return $externalPlugins.filter(
+      (p) => p.name.toLowerCase().includes(q) || p.id.includes(q) || (p.description ?? "").toLowerCase().includes(q),
+    );
+  });
+
+  /** Pick a folder holding a manifest.json and copy it into the plugins directory. */
+  async function install() {
+    installing = true;
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({ directory: true, multiple: false, title: "Pick a plugin folder" });
+      if (typeof picked !== "string") return;
+      const installed = await installExternalPlugin(picked);
+      toast.success(`Installed ${installed.name}`, { description: "Turn it on to start using it." });
+    } catch (e) {
+      toast.error("Could not install that folder", { description: String(e) });
+    } finally {
+      installing = false;
+    }
+  }
+
+  /** @param {import('$lib/plugins/external/types.js').ExternalPluginInfo} p */
+  async function reload(p) {
+    const next = await reloadExternalPlugin(p.id);
+    if (next?.loadable) toast.success(`Reloaded ${next.name}`);
+    else toast.error(`${p.name} did not load`, { description: next?.error || "See the plugin's error below." });
+  }
+
+  /** @param {import('$lib/plugins/external/types.js').ExternalPluginInfo} p */
+  async function remove(p) {
+    try {
+      await uninstallExternalPlugin(p.id);
+      toast.success(`Removed ${p.name}`);
+    } catch (e) {
+      toast.error(`Could not remove ${p.name}`, { description: String(e) });
+    }
+  }
 
   const filtered = $derived.by(() => {
     const q = filter.trim().toLowerCase();
@@ -83,6 +144,25 @@
     <span class="min-w-0 flex-1 truncate text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/50">
       Extensions
     </span>
+    <button
+      type="button"
+      class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40"
+      title="Install a plugin from a folder"
+      aria-label="Install a plugin from a folder"
+      onclick={install}
+      disabled={installing}
+    >
+      <Icon name={installing ? "loader-2" : "plus"} class={cn("size-3.5", installing && "animate-spin")} />
+    </button>
+    <button
+      type="button"
+      class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-accent/40 hover:text-foreground"
+      title="Rescan the plugins folder"
+      aria-label="Rescan the plugins folder"
+      onclick={() => void refreshExternalPlugins()}
+    >
+      <Icon name="refresh-cw" class="size-3.5" />
+    </button>
   </div>
 
   <!-- Filter -->
@@ -104,6 +184,92 @@
 
   <!-- List -->
   <div class="app-scroll min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain px-1.5 pb-2">
+
+    <!-- ── Installed from a folder ──────────────────────────────────────────
+         Third-party plugins. Each runs in its own Worker with the network
+         globals removed, so the worst a broken one can do is stop formatting. -->
+    {#if filteredExternal.length > 0}
+      <p class="px-2.5 pt-1 pb-1 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/40">
+        Installed
+      </p>
+      {#each filteredExternal as p (p.id)}
+        {@const on = pluginEnabledIn($pluginState, pluginKey(p.id))}
+        {@const err = $externalPluginErrors[p.id] ?? ""}
+        <div class="group/ext min-w-0 rounded-md transition-colors hover:bg-accent/20">
+          <div class="flex min-w-0 items-center">
+            <div class="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5">
+              <Icon name="blocks" class="size-4 shrink-0 text-muted-foreground" />
+              <span class="flex min-w-0 flex-1 flex-col">
+                <span class="truncate text-ui-sm font-medium text-sidebar-foreground">{p.name}</span>
+                <span class="truncate text-ui-2xs text-muted-foreground">
+                  {p.version ? `v${p.version} · ` : ""}{KIND_LABEL[p.kind] ?? "Extension"}{p.author ? ` · ${p.author}` : ""}
+                </span>
+              </span>
+            </div>
+            <div class="flex shrink-0 items-center gap-1 pr-1.5">
+              <button
+                type="button"
+                title="Reload from disk"
+                aria-label="Reload {p.name}"
+                onclick={() => void reload(p)}
+                class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-opacity hover:text-foreground group-hover/ext:opacity-100"
+              >
+                <Icon name="refresh-cw" class="size-3" />
+              </button>
+              <button
+                type="button"
+                title="Remove, deleting its folder"
+                aria-label="Remove {p.name}"
+                onclick={() => void remove(p)}
+                class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive group-hover/ext:opacity-100"
+              >
+                <Icon name="trash-2" class="size-3" />
+              </button>
+              {#if !p.loadable}
+                <span class="rounded-md bg-destructive/10 px-2 py-0.5 text-ui-2xs font-medium text-destructive">Broken</span>
+              {:else if on}
+                <button
+                  type="button"
+                  title="On, click to turn off"
+                  onclick={() => void setExternalEnabled(p.id, false)}
+                  class="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-ui-2xs font-medium text-primary transition-colors hover:bg-primary/20"
+                >
+                  <Icon name="check" class="size-3" />
+                  On
+                </button>
+              {:else}
+                <button
+                  type="button"
+                  title="Turn on {p.name}"
+                  onclick={() => void setExternalEnabled(p.id, true)}
+                  class="rounded-md border border-border bg-background/60 px-2 py-0.5 text-ui-2xs font-medium text-foreground transition-colors hover:bg-accent"
+                >
+                  Turn on
+                </button>
+              {/if}
+            </div>
+          </div>
+          {#if p.error || err}
+            <p class="px-2.5 pb-1.5 text-ui-2xs text-destructive/80">{p.error || err}</p>
+          {:else if p.permissions.length > 0}
+            <p class="px-2.5 pb-1.5 text-ui-2xs text-muted-foreground/50">Permissions: {p.permissions.join(", ")}</p>
+          {/if}
+        </div>
+      {/each}
+      <div class="my-1.5 h-px bg-border/40"></div>
+    {:else if !filter}
+      <div class="mx-1 my-1.5 rounded-md border border-dashed border-border/60 px-2.5 py-2">
+        <p class="text-ui-2xs text-muted-foreground/70">No plugins installed.</p>
+        <p class="mt-0.5 text-ui-2xs text-muted-foreground/40">
+          A plugin is a folder with a manifest.json and one .js file. Install one with +, or drop it in
+          {pluginsDir || "the plugins folder"}.
+        </p>
+      </div>
+    {/if}
+
+    <p class="px-2.5 pt-1 pb-1 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/40">
+      Built in
+    </p>
     {#if filtered.length === 0}
       <div class="flex flex-col items-center gap-2 px-4 py-10 text-center">
         <Icon name="blocks" class="size-5 text-muted-foreground/40" />

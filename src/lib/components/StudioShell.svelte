@@ -24,7 +24,8 @@
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
   import { IS_MAC } from '$lib/shortcuts.js'
   import { findSearchInput, isTypingTarget } from '$lib/focus-search.js'
-  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode, appAutoSaveQueries } from '$lib/stores/settings.js'
+  import { requireUnlock } from '$lib/stores/app-lock.js'
   import { isTextEntryTarget, setVimSubMode } from '$lib/vim/vim.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
   import {
@@ -78,12 +79,26 @@
   import QueryLogConsole from './QueryLogConsole.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
   import SwitchDatabaseDialog from './SwitchDatabaseDialog.svelte'
+  import CreateDatabaseDialog from './CreateDatabaseDialog.svelte'
+  import DatabaseNameDialog from './DatabaseNameDialog.svelte'
+  import DropDatabaseDialog from './DropDatabaseDialog.svelte'
+  import DatabaseInfoDialog from './DatabaseInfoDialog.svelte'
+  import { CatalogCache, catalogKey, connectionPrefix } from '$lib/catalog-cache.js'
+  import { refreshExternalPlugins, stopAllExternalPlugins } from '$lib/plugins/external/host.js'
+  import {
+    dbAdminKind,
+    createDatabaseSql,
+    dropDatabaseSql,
+    terminateSessionsSql,
+    databaseInfoSql,
+    databaseInfoRows,
+  } from '$lib/database-admin.js'
   import McpPanel from './McpPanel.svelte'
   // NotebookEditor (pulls Monaco via SqlCell + marked via MarkdownCell) is lazy-loaded
   // at its render site so notebooks don't drag those into the startup bundle.
   //
-  // The keep-alive tab pages — SearchPage, SchemaTimelinePage, SchemaPage,
-  // BackupPage, LogsPage, InstanceInsightsPage, ObjectsPage, RedisKeyspacePage —
+  // The keep-alive tab pages - SearchPage, SchemaTimelinePage, SchemaPage,
+  // BackupPage, LogsPage, InstanceInsightsPage, ObjectsPage, RedisKeyspacePage -
   // are lazy-loaded at their render sites for the same reason. Each is already
   // behind an `{#if …EverOpened}` guard, so a static import only ever meant
   // "ship this page's code to every user at boot whether or not they open it".
@@ -136,7 +151,9 @@
     createSecurityTab,
     createLogsTab,
     createInsightsTab,
+    createAdvisorTab,
     findInsightsTab,
+    findAdvisorTab,
     createObjectsTab,
     findObjectsTab,
     createRedisTab,
@@ -196,6 +213,7 @@
   import { humanizeDbError } from '$lib/ai.js'
   import {
     MAX_PAGE_SIZE,
+    fetchLimitFor,
     PAGE_SIZE_ALL,
     DEFAULT_PAGE_SIZE,
     saveDefaultPageSize,
@@ -207,6 +225,18 @@
     buildSelectSql,
     readRowsResponse,
   } from '$lib/table-query.js'
+  import {
+    WINDOW_PROBE,
+    WINDOW_ROWS_DEFAULT,
+    WINDOW_THRESHOLD,
+    measureRowBytes,
+    pickWindowRows,
+    seekKeyFor,
+    shouldWindow,
+    stableWindowOrder,
+    windowKeepCount,
+    windowsFullyCovered,
+  } from '$lib/row-window.js'
   import {
     buildForeignKeyFilters,
     buildReverseForeignKeyFilters,
@@ -260,6 +290,7 @@
     listQueryHistory,
     listSavedQueries,
     createSavedQuery,
+    saveQueryOnce,
   } from '$lib/stores/query-history.js'
   import { recordActivity } from '$lib/stores/activity-log.js'
   import { loadRecentTabs, pushRecentTab, removeRecentTab, clearRecentTabs } from '$lib/stores/recent-tabs.js'
@@ -389,7 +420,7 @@
   /** Security (RLS, policies, roles) is PostgreSQL-only. */
   const hasSecurity = $derived(dbType === 'postgres' && !isRedis)
   /**
-   * PostGIS present on this connection — gates the Map view, which has nothing
+   * PostGIS present on this connection - gates the Map view, which has nothing
    * to show without it. Asked once per connection: it is a single indexed
    * catalog row, and the alternative (offering Map everywhere and dead-ending on
    * a non-spatial database) is worse than one cheap query.
@@ -532,7 +563,7 @@
    * Without it, moving around inside one table almost never records anything: the
    * row-gap threshold only fires past NAV_ROW_GAP rows, so clicking between two
    * nearby cells was unrecoverable and back/forward looked like it only worked
-   * across tabs. A click is aimed, so distance shouldn't decide — that threshold
+   * across tabs. A click is aimed, so distance shouldn't decide - that threshold
    * exists to stop *arrow-key roaming* filling the stack, and roaming still
    * refreshes in place.
    */
@@ -551,8 +582,8 @@
   let activeSchema = $state('public')
   // $state.raw: a large schema is thousands of table objects, and deep $state
   // proxies every one of them plus every field. Nothing mutates a table in
-  // place — the list is always replaced wholesale (including the rowCount
-  // backfill, which rebuilds it with .map) — so the proxies bought nothing and
+  // place - the list is always replaced wholesale (including the rowCount
+  // backfill, which rebuilds it with .map) - so the proxies bought nothing and
   // cost a walk of the whole list on load plus a proxy hop on every read from
   // Sidebar's and CommandPalette's filter/map passes.
   let tables = $state.raw([])
@@ -672,6 +703,7 @@
   let securityEverOpened = $state(false)
   let logsEverOpened = $state(false)
   let insightsEverOpened = $state(false)
+  let advisorEverOpened = $state(false)
   let objectsEverOpened = $state(false)
   let redisEverOpened = $state(false)
   let extensionsEverOpened = $state(false)
@@ -929,6 +961,7 @@
     if (activeTab?.kind === 'security') securityEverOpened = true
     if (activeTab?.kind === 'logs') logsEverOpened = true
     if (activeTab?.kind === 'insights') insightsEverOpened = true
+    if (activeTab?.kind === 'advisor') advisorEverOpened = true
     if (activeTab?.kind === 'objects') objectsEverOpened = true
     if (activeTab?.kind === 'redis') redisEverOpened = true
     if (activeTab?.kind === 'extensions') extensionsEverOpened = true
@@ -963,6 +996,7 @@
     { kind: 'security',        get: () => securityEverOpened,       set: (/** @type {boolean} */ v) => (securityEverOpened = v) },
     { kind: 'backup',          get: () => backupEverOpened,         set: (/** @type {boolean} */ v) => (backupEverOpened = v) },
     { kind: 'insights',        get: () => insightsEverOpened,       set: (/** @type {boolean} */ v) => (insightsEverOpened = v) },
+    { kind: 'advisor',         get: () => advisorEverOpened,        set: (/** @type {boolean} */ v) => (advisorEverOpened = v) },
     { kind: 'charts',          get: () => chartsEverOpened,         set: (/** @type {boolean} */ v) => (chartsEverOpened = v) },
     { kind: 'dashboard',       get: () => dashboardEverOpened,      set: (/** @type {boolean} */ v) => (dashboardEverOpened = v) },
     { kind: 'erd',             get: () => erdEverOpened,            set: (/** @type {boolean} */ v) => (erdEverOpened = v) },
@@ -1101,6 +1135,14 @@
   }
 
   // Confirm before quitting the app while table edits are still unsaved.
+  // Installed plugins are read once, at startup: scanning a folder and starting a
+  // Worker per enabled plugin has no business happening on a repaint. The panel
+  // rescans on demand.
+  onMount(() => {
+    void refreshExternalPlugins()
+    return () => stopAllExternalPlugins()
+  })
+
   onMount(() => {
     let unlisten = () => {}
     ;(async () => {
@@ -1205,6 +1247,11 @@
     if ($appPaginationMode === 'offset') return false
     if (!_keysetKeyCol || !_keysetKeyType) return false
     if (pageSize === PAGE_SIZE_ALL) return false
+    // A page big enough to be windowed can't be keyset-driven: the windows are
+    // fetched by offset, so a keyset-ordered first fetch and offset-ordered
+    // windows would be two different orderings spliced into one view. Keyset
+    // exists to make *small* deep pages cheap, which a 1M-row page isn't.
+    if (Number.isFinite(pageSize) && pageSize > WINDOW_THRESHOLD) return false
     if ((connection?.type ?? '') !== 'postgres') return false // keyset is Postgres-only
     if (rowSortMore.length > 0) return false                   // multi-sort → offset
     if (rowSort && rowSort.column !== _keysetKeyCol) return false // sorted by a non-key col → offset
@@ -1216,8 +1263,21 @@
   // top, so a reload never leaves the view stranded mid-table.
   let reloadToken = $state(0)
   // Monotonic id so an out-of-order / superseded row fetch can't clobber a
-  // newer one when the user pages rapidly.
-  let _loadSeq = 0
+  // newer one when the user pages rapidly. Kept PER TAB: a single global token
+  // meant starting a load in one tab silently invalidated a load still running
+  // in another, so a big table left fetching in the background was abandoned the
+  // moment you touched a second tab.
+  /** @type {Map<string, number>} */
+  const _loadSeqByTab = new Map()
+  /** @param {string | null} tabId */
+  const loadSeqOf = (tabId) => (tabId ? _loadSeqByTab.get(tabId) ?? 0 : 0)
+  /** @param {string | null} tabId */
+  function bumpLoadSeq(tabId) {
+    if (!tabId) return 0
+    const n = loadSeqOf(tabId) + 1
+    _loadSeqByTab.set(tabId, n)
+    return n
+  }
   // Infinite scroll - accumulated rows across all "load more" fetches. Plain
   // (non-reactive) array: handing a deep proxy to the grid would put get-traps
   // on every rows[r][c] read in the per-frame canvas draw (the scroll-lag
@@ -1240,16 +1300,56 @@
   // preserved (rows[i] is still row i), so selection / hit-testing / scroll are
   // untouched - only the *data* is windowed. dataVersion bumps trigger a grid
   // redraw after a window is spliced in (rows identity is unchanged).
-  const WINDOW_FETCH = 20_000     // rows per window request
-  const WINDOW_THRESHOLD = 200_000 // window only above this total
-  const WINDOW_KEEP = 4           // windows kept resident on each side of the viewport
+  // Window size is measured, not fixed - see $lib/row-window.js for why and how.
+  const WINDOW_MAX_INFLIGHT = 3     // concurrent window requests (rest queue)
+  const WINDOW_PREFETCH = 4         // windows fetched ahead in the scroll direction
   let windowed = $state(false)
   let dataVersion = $state(0)
   let _windowSeq = 0
+  /** Rows per window for the current load (measured - see pickWindowRows). */
+  let _windowRows = WINDOW_ROWS_DEFAULT
+  /** Absolute row offset this windowed view starts at (page offset; 0 for "All"). */
+  let _windowBase = 0
+  /** How many rows this windowed view covers (the page, or the whole table). */
+  let _windowCount = 0
+  /** Measured payload per row, for sizing the export chunk too. */
+  let _windowBytesPerRow = 0
+  /** The one total order every window of this view slices - see stableWindowOrder.
+   *  @type {{ sortColumn: string, sortDirection: string, sorts: Array<{column:string,direction:string}> } | null} */
+  let _windowOrder = null
   /** @type {Set<number>} */
   let _windowLoaded = new Set()
   /** @type {Set<number>} */
   let _windowFetching = new Set()
+  /** Windows wanted but not yet started, nearest-to-viewport first. @type {number[]} */
+  let _windowQueue = []
+  let _windowInFlight = 0
+  /** Last visible window + travel direction, so prefetch runs ahead of the scroll. */
+  let _lastFirstW = 0
+  let _lastDir = 1
+  // Set when a window fetch still comes back slow despite the sizing above (a slow
+  // link, a sort the server can't index). Prefetch depth and concurrency drop to 1:
+  // reading ahead then queues more work than the scroll can consume.
+  let _windowSlow = false
+  const WINDOW_SLOW_MS = 400
+  /** Rolling mean window latency (EWMA), which is what _windowSlow now reads.
+   *  A single measurement latched it: one deep page on a big table (a 350ms
+   *  OFFSET scan, not a slow link) turned prefetch down to one window for the
+   *  rest of the view - on exactly the tables that need read-ahead most. */
+  let _windowMs = 0
+  /** Failed windows → attempts so far, and the ones that have given up.
+   *  A failed fetch used to be retried only by the next visible-range emit, so
+   *  stopping the scroll left those rows shimmering forever. @type {Map<number, number>} */
+  let _windowAttempts = new Map()
+  /** @type {Set<number>} */
+  let _windowFailed = new Set()
+  const WINDOW_RETRIES = 3
+  /** Set when a keyset window fetch errors - the view then stays on OFFSET. */
+  let _windowSeekOff = false
+  /** What the window fetcher is doing, for the grid's loading pill. Plain state
+   *  (not the hot-path sets, which stay non-reactive): assigned only when the
+   *  answer actually changes. */
+  let windowStatus = $state({ slow: false, failed: false })
 let rowSearch = $state('')
   let rowSort = $state(/** @type {TableSort | null} */ (null))
   /** Secondary sort keys for multi-column sort (primary is rowSort). @type {TableSort[]} */
@@ -1275,8 +1375,103 @@ let rowSearch = $state('')
   })
 
 
-  /** Tracks which tab IDs currently have an in-flight background fetch. */
+  /** Tracks which tab IDs have an in-flight background fetch (re-entry guard). */
   const fetchingTabIds = new Set()
+
+  // ── Per-tab auto-refresh ──────────────────────────────────────────────────
+  // An interval per tab, not one global setting: the table you're watching should
+  // re-poll while the one you're editing stays still. Only the tab on screen
+  // actually polls - a background tab re-fetches when you return to it anyway, so
+  // ticking there would spend queries on nothing.
+  /** @type {Map<string, number>} */
+  const _autoRefreshByTab = new Map()
+  let _autoRefreshTick = $state(0)
+  const activeAutoRefreshMs = $derived.by(() => {
+    void _autoRefreshTick
+    return activeTabId ? _autoRefreshByTab.get(activeTabId) ?? 0 : 0
+  })
+  /** @param {number} ms */
+  function setActiveAutoRefresh(ms) {
+    if (!activeTabId) return
+    if (ms > 0) _autoRefreshByTab.set(activeTabId, ms)
+    else _autoRefreshByTab.delete(activeTabId)
+    _autoRefreshTick += 1
+  }
+  // The timer is torn down and rebuilt whenever the interval or the active tab
+  // changes, so exactly one is ever running and it always belongs to what's on
+  // screen. Effects run after init, so the deriveds read here are live by then.
+  $effect(() => {
+    const ms = activeAutoRefreshMs
+    const tabId = activeTabId
+    if (!ms || !tabId) return
+    if (activeTab?.kind !== 'table') return
+    const timer = setInterval(() => {
+      // Never stack a refresh on a load still running, and never pull rows out
+      // from under an open cell editor or an in-flight save.
+      if (!activeTable || isTabBusy(tabId) || editingCell || savingCell) return
+      // keepScroll: this is a background update, not navigation - it must not jump
+      // the grid to the top or close the row inspector.
+      void loadRows({ keepScroll: true })
+    }, ms)
+    return () => clearInterval(timer)
+  })
+  /** Cancel handle of the run in flight per tab (`Stop` targets just that query). @type {Map<string, string>} */
+  const _sqlQueryIdByTab = new Map()
+  let _sqlRunSeq = 0
+  /** Cancel handle for the tab on screen, handed to SqlConsole's Stop button. */
+  const activeSqlQueryId = $derived.by(() => {
+    void _busyTick
+    return activeTabId ? _sqlQueryIdByTab.get(activeTabId) ?? null : null
+  })
+  // ── Per-tab busy accounting ───────────────────────────────────────────────
+  // A tab is busy while it owns an UNSETTLED PROMISE - not while a hand-written
+  // flag or counter says so. Both of those went wrong here: a flag let an older
+  // load clear a mark its successor still needed, and guarding the clear to fix
+  // that let a mark outlive its work, leaving the tab strip spinning forever
+  // after the rows had landed. A promise settles exactly once, and the runtime
+  // runs its continuation on every path - early return, throw, supersede - so
+  // the mark cannot leak or clear early.
+  /** @type {Map<string, Set<Promise<any>>>} */
+  const _busyJobs = new Map()
+  // Bumped on every change so consumers (activeSqlQueryId) recompute without the
+  // map itself having to be a reactive proxy. The tab-strip spinner deliberately
+  // does NOT read this: it draws from each tab's own loadingRows/sqlLoading, which
+  // is written in the same patch as the rows and so can't disagree with them.
+  let _busyTick = $state(0)
+  /**
+   * Mark `tabId` busy until `promise` settles. Returns the SAME promise, so
+   * callers keep their own error handling; the bookkeeping hangs off a separate
+   * continuation whose rejection is already handled here.
+   * @template T @param {string | null} tabId @param {Promise<T>} promise @returns {Promise<T>}
+   */
+  function trackBusy(tabId, promise) {
+    if (!tabId) return promise
+    let jobs = _busyJobs.get(tabId)
+    if (!jobs) { jobs = new Set(); _busyJobs.set(tabId, jobs) }
+    jobs.add(promise)
+    _busyTick += 1
+    const settled = () => {
+      jobs.delete(promise)
+      if (jobs.size === 0) _busyJobs.delete(tabId)
+      _busyTick += 1
+    }
+    promise.then(settled, settled)
+    return promise
+  }
+  /** Forget a tab's work entirely - the tab itself is gone. @param {string | null} tabId */
+  function clearBusy(tabId) {
+    if (tabId && _busyJobs.delete(tabId)) _busyTick += 1
+  }
+  /**
+   * Whether `tabId` really has work in flight *right now*. Snapshots store the
+   * loading flag so a tab you leave mid-query still reads as running, but a
+   * snapshot can outlive its query (duplicated tab, reconnect, restored session)
+   * - restoring it blindly would strand a spinner nothing ever clears.
+   * @param {string | null} tabId
+   */
+  function isTabBusy(tabId) {
+    return !!tabId && (_busyJobs.get(tabId)?.size ?? 0) > 0
+  }
   let error = $state('')
   /** Whether the error banner is showing the raw driver text. */
   let showRawError = $state(false)
@@ -1492,7 +1687,7 @@ let rowSearch = $state('')
 
   /**
    * Title-bar label for the current connection. A file-backed connection would
-   * otherwise show its whole path — and a D1 local database's miniflare path
+   * otherwise show its whole path - and a D1 local database's miniflare path
    * (`…/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite`) both
    * overflows the bar and says nothing. Prefer the SQL database name, then the
    * connection's own label, and only fall back to the file's basename.
@@ -1644,9 +1839,11 @@ let rowSearch = $state('')
 
   /** @returns {TableTabState} */
   function captureTableSnapshot() {
-    // A windowed result set holds a huge sparse array - never cache it into the
-    // tab. Store empty columns/rows so re-activation takes the refetch path
-    // (fetchRowsForTab → loadRows) and re-establishes windowing cleanly.
+    // A windowed result set holds a sparse array as long as the whole table, so it
+    // never goes into `tabs` (a $state proxy would then trap every rows[r][c] read
+    // in the draw loop). It's parked in _liveRowsByTab instead and handed back on
+    // re-activation together with the window bookkeeping below - so leaving a
+    // million-row table and coming back no longer re-runs the fetch and the count.
     return {
       schema: activeSchema,
       table: activeTable,
@@ -1656,13 +1853,23 @@ let rowSearch = $state('')
       rowSort: rowSort ? { ...rowSort } : null,
       rowSortMore: rowSortMore.map((s) => ({ ...s })),
       rowFilters: rowFilters.map((f) => ({ ...f })),
-      columns: windowed ? [] : columns,
+      columns,
       primaryKey,
       foreignKeys,
       rows: windowed ? [] : rows,
+      windowedHead: windowed,
+      windowedLoaded: windowed ? [..._windowLoaded] : [],
+      windowRows: windowed ? _windowRows : 0,
+      windowBase: windowed ? _windowBase : 0,
+      windowCount: windowed ? _windowCount : 0,
+      windowBytesPerRow: windowed ? _windowBytesPerRow : 0,
+      windowOrder: windowed ? _windowOrder : null,
       total,
       queryMs,
-      loadingRows: false,
+      // The real flag, not a hardcoded false: a table left mid-fetch has to read
+      // as still loading, or leaving the tab makes a 1M-row load look cancelled.
+      // applyTableSnapshot only trusts it while that tab is genuinely busy.
+      loadingRows,
       error,
       selected: new Set(selected),
       focusedRow,
@@ -1678,8 +1885,8 @@ let rowSearch = $state('')
     }
   }
 
-  /** @param {TableTabState} s */
-  function applyTableSnapshot(s) {
+  /** @param {TableTabState} s @param {string | null} [tabId] - owner, for the live-loading check */
+  function applyTableSnapshot(s, tabId = null) {
     page = s.page
     pageSize = s.pageSize ?? loadDefaultPageSize()
     rowSearch = s.rowSearch ?? ''
@@ -1691,8 +1898,11 @@ let rowSearch = $state('')
     foreignKeys = s.foreignKeys ?? []
     rows = s.rows
     total = s.total
+    // The snapshot's count and its filters were taken together, so the sig for
+    // the state just restored above is the one this total belongs to.
+    _totalSig = rowPredicateSig
     queryMs = s.queryMs
-    loadingRows = s.loadingRows ?? false
+    loadingRows = !!s.loadingRows && isTabBusy(tabId)
     error = s.error
     selected = new Set(s.selected)
     focusedRow = s.focusedRow
@@ -1729,14 +1939,14 @@ let rowSearch = $state('')
     }
   }
 
-  /** @param {SqlTabState} s */
-  function applySqlSnapshot(s) {
+  /** @param {SqlTabState} s @param {string | null} [tabId] - owner, for the live-running check */
+  function applySqlSnapshot(s, tabId = null) {
     sqlText = s.sqlText
     sqlColumns = s.sqlColumns
     sqlRows = s.sqlRows
     sqlQueryMs = s.sqlQueryMs
     sqlMessage = s.sqlMessage
-    sqlLoading = s.sqlLoading ?? false
+    sqlLoading = !!s.sqlLoading && isTabBusy(tabId)
     sqlError = s.sqlError
   }
 
@@ -1745,7 +1955,7 @@ let rowSearch = $state('')
    *
    * A run outlives the tab being in front of it: the editor is one shared
    * component driven by shell-level state, so switching tabs used to swap that
-   * state out from under an in-flight query — the spinner stopped, the results
+   * state out from under an in-flight query - the spinner stopped, the results
    * pane showed the other tab's snapshot, and whatever came back landed in
    * whichever tab happened to be active by then. The query itself never
    * stopped; only the UI lost track of it.
@@ -1759,6 +1969,22 @@ let rowSearch = $state('')
     const t = tabs[idx]
     const next = [...tabs]
     next[idx] = { ...t, state: cloneSqlTabState({ .../** @type {SqlTabState} */ (t.state), ...patch }) }
+    tabs = next
+  }
+
+  /**
+   * Write a partial update into a table tab's own state, whichever tab is in
+   * front. Same contract as patchSqlTab: a row fetch outlives the tab being
+   * visible, so its results (and its loading flag) belong to the tab that
+   * started it, never to whatever tab happens to be active when it lands.
+   * @param {string} tabId
+   * @param {Partial<TableTabState>} patch
+   */
+  function patchTableTab(tabId, patch) {
+    const i = tabs.findIndex((t) => t.id === tabId && t.kind === 'table')
+    if (i === -1) return
+    const next = [...tabs]
+    next[i] = { ...next[i], state: { .../** @type {TableTabState} */ (next[i].state), ...patch } }
     tabs = next
   }
 
@@ -1803,8 +2029,10 @@ let rowSearch = $state('')
     if (t.kind === 'table') {
       const state = cloneTableTabState(captureTableSnapshot())
       updated = { ...t, state, title: tableTabTitle(state) }
-      if (windowed) _liveRowsByTab.delete(activeTabId)
-      else _liveRowsByTab.set(activeTabId, rows)
+      // Windowed sets are cached the same way - the sparse array stays raw here
+      // and out of the reactive tree. evictColdTabRows drops it once the tab
+      // falls out of the recently-viewed window.
+      _liveRowsByTab.set(activeTabId, rows)
     } else if (t.kind === 'sql') {
       updated = { ...t, state: cloneSqlTabState(captureSqlSnapshot()) }
     }
@@ -1817,13 +2045,18 @@ let rowSearch = $state('')
 
   /** @param {StudioTab} tab */
   async function applyTabToEditor(tab) {
+    // Moving to a tab that isn't a SQL editor parks the editor's run state. A run
+    // that finishes while its own tab is in the background leaves the shared
+    // `sqlLoading` true (only the owning tab's state is patched), and the next
+    // snapshot of ANY sql tab would then capture that stale true as its own.
+    if (tab.kind !== 'sql') sqlLoading = false
     if (tab.kind === 'welcome' || tab.kind === 'ai' || tab.kind === 'schema' || tab.kind === 'orm' || tab.kind === 'ddl') {
       clearTableEditor()
       return
     }
     if (tab.kind === 'sql' && tab.state) {
       clearTableEditor()
-      applySqlSnapshot(cloneSqlTabState(/** @type {SqlTabState} */ (tab.state)))
+      applySqlSnapshot(cloneSqlTabState(/** @type {SqlTabState} */ (tab.state)), tab.id)
       return
     }
     if (tab.kind === 'table' && tab.state) {
@@ -1834,8 +2067,12 @@ let rowSearch = $state('')
       }
       if (raw.columns.length === 0) {
         // No cached data - apply lightweight snapshot (no need to clone rows)
-        applyTableSnapshot(raw)
-        if (raw.table && !fetchingTabIds.has(tab.id)) void startTabFetch(tab.id)
+        if (windowed) resetWindowing()
+        applyTableSnapshot(raw, tab.id)
+        // A fetch this tab already has in flight (including a windowed loadRows
+        // it started before you left) keeps running and lands here on its own -
+        // starting a second one would duplicate the work and fight over the grid.
+        if (raw.table && !isTabBusy(tab.id)) void startTabFetch(tab.id)
       } else {
         // Has cached data - clone Sets so mutations don't bleed between tabs, and
         // restore the RAW rows reference (not the proxied tab.state.rows) so the
@@ -1843,7 +2080,27 @@ let rowSearch = $state('')
         const snap = cloneTableTabState(raw)
         const rawRows = _liveRowsByTab.get(tab.id)
         if (rawRows) snap.rows = rawRows
-        applyTableSnapshot(snap)
+        // A windowed tab comes back with its sparse array and its resident window
+        // set intact, so the rows already fetched are still on screen and only new
+        // windows are requested. The length check is the consistency guard: without
+        // the cached array (evicted), fall through to a clean refetch.
+        if (raw.windowedHead) {
+          const want = raw.windowCount ?? raw.total
+          if (Array.isArray(rawRows) && want > 0 && rawRows.length === want) {
+            restoreWindowing(raw)
+          } else {
+            resetWindowing()
+            snap.rows = []
+            snap.columns = []
+            applyTableSnapshot(snap, tab.id)
+            if (raw.table && !isTabBusy(tab.id)) void startTabFetch(tab.id)
+            return
+          }
+        } else if (windowed) {
+          // Coming from a windowed tab into a normal one.
+          resetWindowing()
+        }
+        applyTableSnapshot(snap, tab.id)
       }
     }
   }
@@ -1963,7 +2220,7 @@ let rowSearch = $state('')
   // ⌘B / Ctrl+B is bound in the CAPTURE phase on window, not through
   // createHotkey. The hotkey layer listens on `document` in the BUBBLE phase, so
   // anything between the focused element and the document that calls
-  // stopPropagation eats the chord first — and the places you most want to hide
+  // stopPropagation eats the chord first - and the places you most want to hide
   // the sidebar from are exactly those: the Monaco editors, the grid canvas, and
   // the bits-ui overlays. That is why SqlEditor and OrmRunner had to be handed a
   // manual `onmodb` callback to forward the key back out; capture makes the one
@@ -1977,7 +2234,7 @@ let rowSearch = $state('')
     if (!modOnly || e.altKey || e.shiftKey) return
     if (e.key.toLowerCase() !== 'b') return
     // The connection dialog owns the screen while it's open, and it binds ⌘B to
-    // its own connections rail — toggling the workspace sidebar behind it would
+    // its own connections rail - toggling the workspace sidebar behind it would
     // be an invisible edit the user only discovers after closing the dialog.
     // Left un-stopped so the dialog's own handler still receives it.
     if (showConnectionModal) return
@@ -2367,7 +2624,7 @@ let rowSearch = $state('')
     return () => document.removeEventListener('keydown', onFullscreenKey)
   })
 
-  // "/" focuses the search box for whatever is on screen — the sidebar filter,
+  // "/" focuses the search box for whatever is on screen - the sidebar filter,
   // the settings search, a dialog's own field. It resolves its target from the
   // live DOM rather than being bound per field, so a search box added later is
   // reachable without anyone registering it. See $lib/focus-search.js.
@@ -2386,7 +2643,7 @@ let rowSearch = $state('')
   createHotkey('?', (e) => {
     if (commandOpen || showConnectionModal || showSettingsModal || showShortcutsModal) return
     // Was a tag check, which missed contenteditable and anything Monaco routes
-    // through a non-textarea — so "?" in those opened the shortcuts panel
+    // through a non-textarea - so "?" in those opened the shortcuts panel
     // mid-sentence.
     if (isTypingTarget(document.activeElement)) return
     e.preventDefault()
@@ -2626,6 +2883,13 @@ let rowSearch = $state('')
     _liveRowsByTab.clear()
     _tabRowsMru = []
     closedTabStack = []
+    _loadSeqByTab.clear()
+    fetchingTabIds.clear()
+    _sqlQueryIdByTab.clear()
+    _autoRefreshByTab.clear()
+    _autoRefreshTick += 1
+    _busyJobs.clear()
+    _busyTick += 1
     // Every tab id in the history just died with the tab list.
     resetNav(_nav)
     syncNavFlags()
@@ -2712,7 +2976,7 @@ let rowSearch = $state('')
   function openDdlTab(ddlText, title) {
     const existing = tabs.find((t) => t.kind === 'ddl' && t.title === title)
     if (existing) {
-      // Refresh in place — the object may have been altered since it was opened.
+      // Refresh in place - the object may have been altered since it was opened.
       tabs = tabs.map((t) => (t.id === existing.id ? { ...t, state: { ddlText } } : t))
       void activateTab(existing.id)
       return
@@ -2779,6 +3043,10 @@ let rowSearch = $state('')
 
   function openInsightsTab() {
     openSingletonTab({ find: findInsightsTab, create: createInsightsTab })
+  }
+
+  function openAdvisorTab() {
+    openSingletonTab({ find: findAdvisorTab, create: createAdvisorTab })
   }
 
   function openObjectsTab() {
@@ -2964,7 +3232,14 @@ let rowSearch = $state('')
     const evictable = (t) => {
       if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return false
       const st = /** @type {TableTabState} */ (t.state)
-      return !!st && Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD
+      if (!st) return false
+      if (Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD) return true
+      // Windowed tabs keep their (huge, sparse) array outside the reactive tree,
+      // so `st.rows` is empty and the check above can't see them. Measure the
+      // cached array instead, or an open million-row table would be retained for
+      // the whole session however cold it got.
+      const cached = _liveRowsByTab.get(t.id)
+      return Array.isArray(cached) && cached.length > TAB_EVICT_ROW_THRESHOLD
     }
     // Most switches evict nothing. Test first so the common path doesn't rebuild
     // the tabs array - that write invalidates every consumer of `tabs` (tab strip,
@@ -2974,7 +3249,9 @@ let rowSearch = $state('')
       if (!evictable(t)) return t
       _liveRowsByTab.delete(t.id)
       const st = /** @type {TableTabState} */ (t.state)
-      return { ...t, state: { ...st, rows: [], columns: [], selected: new Set() } }
+      // windowedHead cleared too: with the array gone the tab has to refetch, and
+      // the restore path must not look for a cache that no longer exists.
+      return { ...t, state: { ...st, rows: [], columns: [], selected: new Set(), windowedHead: false, windowedLoaded: [], windowCount: 0, loadingRows: false } }
     })
   }
 
@@ -3021,7 +3298,7 @@ let rowSearch = $state('')
     // Mid-travel: the cursor is being parked on an entry we already have.
     if (_navRestore > 0) return
     const cur = navCurrent(_nav)
-    // An aimed move inside the current tab is always a position worth keeping —
+    // An aimed move inside the current tab is always a position worth keeping -
     // unless it didn't actually move, which would just stack duplicates.
     const aimedJump =
       aimed && cur !== null && cur.tabId === tabId && row !== null && row !== cur.row
@@ -3173,6 +3450,14 @@ let rowSearch = $state('')
   function rememberClosedTab(tab) {
     if (!tab || tab.kind === 'welcome') return
     _liveRowsByTab.delete(tab.id)
+    // Anything still in flight for this tab is now orphaned: dropping its load
+    // token makes the in-flight result fail its own liveness check instead of
+    // being applied to whatever tab took its place.
+    _loadSeqByTab.delete(tab.id)
+    fetchingTabIds.delete(tab.id)
+    _sqlQueryIdByTab.delete(tab.id)
+    if (_autoRefreshByTab.delete(tab.id)) _autoRefreshTick += 1
+    clearBusy(tab.id)
     // Snapshot with a shallow state clone so later edits to the live tree can't
     // mutate what we'll restore. `id`/`pinned` are dropped - reopen mints fresh.
     const { id: _id, pinned: _pinned, ...rest } = tab
@@ -3185,9 +3470,14 @@ let rowSearch = $state('')
       state.rows = []
       state.columns = []
       state.selected = new Set()
+      state.loadingRows = false
+      state.windowedHead = false
+      state.windowedLoaded = []
+      state.windowCount = 0
     } else if (state && tab.kind === 'sql') {
       state.sqlRows = []
       state.sqlColumns = []
+      state.sqlLoading = false
     }
     const snapshot = { ...rest, state }
     closedTabStack = [...closedTabStack, snapshot].slice(-CLOSED_TAB_STACK_MAX)
@@ -3272,6 +3562,12 @@ let rowSearch = $state('')
       fresh.kind === 'table'
         ? cloneTableTabState(/** @type {TableTabState} */ (fresh.state))
         : cloneSqlTabState(/** @type {SqlTabState} */ (fresh.state))
+    // The copy owns no in-flight work, so it must not inherit the original's
+    // loading flags - nothing would ever clear them on the duplicate.
+    if (state) {
+      if (fresh.kind === 'table') /** @type {any} */ (state).loadingRows = false
+      else /** @type {any} */ (state).sqlLoading = false
+    }
     const copy = { id: crypto.randomUUID(), kind: fresh.kind, title: fresh.title, state }
     const idx = tabs.findIndex((t) => t.id === id)
     tabs = [...tabs.slice(0, idx + 1), copy, ...tabs.slice(idx + 1)]
@@ -3671,11 +3967,12 @@ let rowSearch = $state('')
     }
   }
 
-  async function loadIndexes() {
-    if (!activeSchema) { indexes = []; return }
+  /** @param {string} schema */
+  async function fetchIndexes(schema) {
+    if (!schema) return []
     try {
-      const list = await listIndexes(activeSchema)
-      indexes = list
+      const list = await listIndexes(schema)
+      return list
         .map((i) => ({
           name: i.name ?? '',
           tableName: i.tableName ?? i.table_name ?? '',
@@ -3688,7 +3985,7 @@ let rowSearch = $state('')
         }))
         .filter((i) => i.name)
     } catch {
-      indexes = []
+      return []
     }
   }
 
@@ -3837,24 +4134,26 @@ let rowSearch = $state('')
     }
   })
 
-  async function loadEnums() {
-    if (!activeSchema || !engineSupports('enums', connection?.type)) { enums = []; return }
+  /** @param {string} schema */
+  async function fetchEnums(schema) {
+    if (!schema || !engineSupports('enums', connection?.type)) return []
     try {
-      const list = await listEnums(activeSchema)
+      const list = await listEnums(schema)
       // Dedupe values defensively: enum labels are a set, but a bad introspection
       // join could return repeats, and the schema pages key their {#each} on the
       // value - a duplicate would crash the view (each_key_duplicate).
-      enums = list.map((e) => ({ name: e.name ?? '', values: [...new Set(e.values ?? [])] }))
+      return list.map((e) => ({ name: e.name ?? '', values: [...new Set(e.values ?? [])] }))
     } catch {
-      enums = []
+      return []
     }
   }
 
-  async function loadTriggers() {
-    if (!activeSchema || !engineSupports('triggers', connection?.type)) { triggers = []; return }
+  /** @param {string} schema */
+  async function fetchTriggers(schema) {
+    if (!schema || !engineSupports('triggers', connection?.type)) return []
     try {
-      const list = await listTriggers(activeSchema)
-      triggers = list.map((t) => ({
+      const list = await listTriggers(schema)
+      return list.map((t) => ({
         name: t.name ?? '',
         tableName: t.tableName ?? t.table_name ?? '',
         timing: t.timing ?? 'AFTER',
@@ -3863,15 +4162,16 @@ let rowSearch = $state('')
         enabled: t.enabled ?? true,
       })).filter((t) => t.name)
     } catch {
-      triggers = []
+      return []
     }
   }
 
-  async function loadSequences() {
-    if (!activeSchema || !engineSupports('sequences', connection?.type)) { sequences = []; return }
+  /** @param {string} schema */
+  async function fetchSequences(schema) {
+    if (!schema || !engineSupports('sequences', connection?.type)) return []
     try {
-      const list = await listSequences(activeSchema)
-      sequences = list.map((s) => ({
+      const list = await listSequences(schema)
+      return list.map((s) => ({
         name: s.name ?? '',
         dataType: s.dataType ?? s.data_type ?? 'bigint',
         startValue: s.startValue ?? s.start_value ?? 1,
@@ -3882,8 +4182,63 @@ let rowSearch = $state('')
         ownedBy: s.ownedBy ?? s.owned_by ?? null,
       })).filter((s) => s.name)
     } catch {
-      sequences = []
+      return []
     }
+  }
+
+  // ── Schema-level catalog ──────────────────────────────────────────────────
+  // Indexes, enums, triggers and sequences are four round trips that describe a
+  // whole schema, so they are fetched, cached and invalidated as one unit. The
+  // TTL is long compared with the table list's: none of these change without a
+  // DDL statement, and every path that runs DDL invalidates the connection.
+  const CATALOG_TTL_MS = 60_000
+
+  /** @typedef {{ indexes: any[], enums: any[], triggers: any[], sequences: any[] }} SchemaCatalog */
+
+  /** Push a catalog payload into the reactive state the pages read. @param {SchemaCatalog} c */
+  function applySchemaCatalog(c) {
+    indexes = c.indexes
+    enums = c.enums
+    triggers = c.triggers
+    sequences = c.sequences
+  }
+
+  /** @param {{ force?: boolean }} [opts] */
+  async function loadSchemaCatalog({ force = false } = {}) {
+    const schema = activeSchema
+    if (!schema) { applySchemaCatalog({ indexes: [], enums: [], triggers: [], sequences: [] }); return }
+    const key = catalogKey(persistConnectionId, 'catalog', schema)
+    if (force) _catalog.invalidate(key)
+    const hit = /** @type {SchemaCatalog | undefined} */ (_catalog.get(key, CATALOG_TTL_MS))
+    if (hit) { applySchemaCatalog(hit); return }
+    const [idx, enm, trg, seq] = await Promise.all([
+      fetchIndexes(schema), fetchEnums(schema), fetchTriggers(schema), fetchSequences(schema),
+    ])
+    // The schema can change while four requests are in flight; a late payload
+    // must not overwrite the catalog of wherever the user has since gone.
+    const payload = { indexes: idx, enums: enm, triggers: trg, sequences: seq }
+    _catalog.set(key, payload)
+    if (activeSchema === schema) applySchemaCatalog(payload)
+  }
+
+  /** Refresh one kind on its own (a page's own refresh button) and keep the
+   *  cached payload in step, so the next schema revisit does not undo it.
+   *  @param {'indexes' | 'enums' | 'triggers' | 'sequences'} kind */
+  async function reloadCatalogKind(kind) {
+    const schema = activeSchema
+    if (!schema) return
+    const fetched = kind === 'indexes' ? await fetchIndexes(schema)
+      : kind === 'enums' ? await fetchEnums(schema)
+      : kind === 'triggers' ? await fetchTriggers(schema)
+      : await fetchSequences(schema)
+    if (activeSchema !== schema) return
+    if (kind === 'indexes') indexes = fetched
+    else if (kind === 'enums') enums = fetched
+    else if (kind === 'triggers') triggers = fetched
+    else sequences = fetched
+    const key = catalogKey(persistConnectionId, 'catalog', schema)
+    const cached = /** @type {SchemaCatalog | undefined} */ (_catalog.get(key, CATALOG_TTL_MS))
+    if (cached) _catalog.set(key, { ...cached, [kind]: fetched })
   }
 
   // Table-list cache keyed by connection+schema. Rapid navigation (switching
@@ -3892,12 +4247,17 @@ let rowSearch = $state('')
   // move. A short TTL collapses those repeats while keeping counts near-live;
   // data-changing paths (connect, refresh, DDL) pass { force: true } to bypass it.
   const TABLE_LIST_TTL_MS = 3000
-  /** @type {Map<string, { tables: any[], at: number }>} */
-  let _tableListCache = new Map()
-  // Which connection+schema the catalog sub-state (indexes/enums/triggers/
-  // sequences) currently reflects - so a cached table-list hit never leaves it
-  // showing another schema's catalog.
-  let _catalogLoadedFor = ''
+  /** Every catalog read in one cache: table lists, schema catalogs, incoming FKs.
+   *  Keyed connection-first so one connection's DDL can drop only its own entries. */
+  const _catalog = new CatalogCache({ max: 128 })
+
+  /** Drop every cached catalog read for the live connection. Call after DDL, and
+   *  on any refresh the user asked for - they are asking because they expect the
+   *  catalog to have changed. */
+  function invalidateCatalog() {
+    _catalog.invalidate(connectionPrefix(persistConnectionId))
+    incomingFkCache = new Map()
+  }
 
   /** @param {{ force?: boolean }} [opts] */
   async function loadTables({ force = false } = {}) {
@@ -3909,10 +4269,11 @@ let rowSearch = $state('')
     // Captured once: activeSchema can change while the fetch is in flight, and
     // the background count pass must target the schema this list came from.
     const schemaAtCall = activeSchema
-    const key = `${persistConnectionId ?? ''}:${schemaAtCall}`
-    const cached = force ? null : _tableListCache.get(key)
-    if (cached && Date.now() - cached.at < TABLE_LIST_TTL_MS) {
-      tables = cached.tables
+    const key = catalogKey(persistConnectionId, 'tables', schemaAtCall)
+    if (force) invalidateCatalog()
+    const cached = force ? undefined : /** @type {any[] | undefined} */ (_catalog.get(key, TABLE_LIST_TTL_MS))
+    if (cached) {
+      tables = cached
       loadingTables = false
       if (activeTable && !tables.find((t) => t.name === activeTable)) {
         activeTable = tables[0]?.name ?? null
@@ -3930,9 +4291,7 @@ let rowSearch = $state('')
             rlsEnabled: t.rlsEnabled ?? null,
           }))
           .filter((t) => t.name)
-        _tableListCache.set(key, { tables, at: Date.now() })
-        // Bound growth: one entry per connection:schema visited over a session.
-        if (_tableListCache.size > 64) _tableListCache.delete(_tableListCache.keys().next().value)
+        _catalog.set(key, tables)
         if (activeTable && !tables.find((t) => t.name === activeTable)) {
           activeTable = tables[0]?.name ?? null
         }
@@ -3948,16 +4307,9 @@ let rowSearch = $state('')
     // Covers the cached path too - a list cached mid-resolve may still hold nulls.
     const unresolved = tables.filter((t) => t.rowCount === null).map((t) => t.name)
     if (unresolved.length > 0) void resolveRowCounts(key, schemaAtCall, unresolved)
-    // Reload the catalog sub-state only when it doesn't already reflect this
-    // connection+schema (or on a forced reload): revisiting a schema skips these
-    // four round-trips, but switching schemas still refreshes them.
-    if (force || _catalogLoadedFor !== key) {
-      _catalogLoadedFor = key
-      void loadIndexes()
-      void loadEnums()
-      void loadTriggers()
-      void loadSequences()
-    }
+    // The schema-level catalog rides the same cache, so returning to a schema
+    // costs nothing. A forced reload has already invalidated it above.
+    void loadSchemaCatalog()
   }
 
   /**
@@ -3969,17 +4321,29 @@ let rowSearch = $state('')
    * @param {string[]} names
    */
   async function resolveRowCounts(key, schema, names) {
-    try {
-      const counts = await getTableRowCounts(schema, names)
-      if (!counts?.length) return
+    // In chunks, in list order, so counts land in waves down the sidebar instead
+    // of all at the end. One request for the whole schema is all-or-nothing: on a
+    // 135-table production schema every COUNT(*) had to finish before a single
+    // number appeared, and a connection swapped or dropped part-way through threw
+    // the completed counts away with the rest - which is why the sidebar sat on a
+    // column of blanks. A chunk that fails now costs only its own tables.
+    const CHUNK = 12
+    for (let i = 0; i < names.length; i += CHUNK) {
       // Stale guard: the user may have switched connection/schema meanwhile.
-      if (`${persistConnectionId ?? ''}:${activeSchema}` !== key) return
-      const byName = new Map(counts.map((c) => [c.name, normalizeTableRowCount(c.rowCount ?? c.row_count)]))
-      tables = tables.map((t) => (byName.has(t.name) ? { ...t, rowCount: byName.get(t.name) ?? null } : t))
-      const cached = _tableListCache.get(key)
-      if (cached) _tableListCache.set(key, { tables, at: cached.at })
-    } catch {
-      /* ignore - counts fill in on the next refresh instead */
+      if (catalogKey(persistConnectionId, 'tables', activeSchema) !== key) return
+      try {
+        const counts = await getTableRowCounts(schema, names.slice(i, i + CHUNK))
+        if (!counts?.length) continue
+        if (catalogKey(persistConnectionId, 'tables', activeSchema) !== key) return
+        const byName = new Map(counts.map((c) => [c.name, normalizeTableRowCount(c.rowCount ?? c.row_count)]))
+        tables = tables.map((t) => (byName.has(t.name) ? { ...t, rowCount: byName.get(t.name) ?? null } : t))
+        // Patch the cached list in place. Re-setting stamps a new timestamp, which
+        // would extend the list's freshness window on every count that lands, so
+        // the entry is only patched when it is still there to patch.
+        if (_catalog.has(key)) _catalog.set(key, tables)
+      } catch {
+        /* ignore this chunk - its counts fill in on the next refresh instead */
+      }
     }
   }
 
@@ -4039,10 +4403,25 @@ let rowSearch = $state('')
     await reloadTableFromQuery(true)
   }
 
+  /**
+   * Identity of the WHERE a row count was taken under. "All" has no page size of
+   * its own, so it borrows `total` as the fetch limit - and that is only sound
+   * while `total` describes the view about to be fetched. Filter a table down to
+   * one row and then clear the filter: the count is still 1, so "All" asked for
+   * LIMIT 1 and drew a one-row grid under a footer reading "1-752 of 752".
+   * @param {Record<string, unknown>} search @param {TableFilter[]} filters
+   */
+  function predicateSig(search, filters) {
+    return JSON.stringify([search, filtersApiSignature(filters)])
+  }
+  /** The predicate `total` belongs to; '' until a count lands. */
+  let _totalSig = $state('')
+  const rowPredicateSig = $derived(predicateSig(apiSearch(rowSearch), rowFilters))
+  /** `total` was counted under the search + filters now on screen. */
+  const totalIsForThisView = $derived(total > 0 && _totalSig === rowPredicateSig)
+
   /** Resolve the effective fetch limit for the current pageSize. */
-  const effectivePageSize = $derived(
-    pageSize === PAGE_SIZE_ALL ? Math.min(total > 0 ? total : MAX_PAGE_SIZE, MAX_PAGE_SIZE) : pageSize,
-  )
+  const effectivePageSize = $derived(fetchLimitFor(pageSize, total, totalIsForThisView))
 
   /** @param {number} nextPage */
   async function handlePageChange(nextPage) {
@@ -4100,7 +4479,8 @@ let rowSearch = $state('')
       if (_tabFetches.get(tabId) === p) _tabFetches.delete(tabId)
     })
     _tabFetches.set(tabId, p)
-    return p
+    // The spinner lives exactly as long as this promise.
+    return trackBusy(tabId, p)
   }
 
   /** Resolve once nothing is fetching rows for `tabId`. @param {string} tabId */
@@ -4118,60 +4498,80 @@ let rowSearch = $state('')
   async function fetchRowsForTab(tabId) {
     if (fetchingTabIds.has(tabId)) return
     fetchingTabIds.add(tabId)
+    // Re-entry guard only - the tab-strip spinner is tied to this function's
+    // promise by startTabFetch, so `done` never has to be reached for it to stop.
+    let _settled = false
+    const done = () => {
+      if (_settled) return
+      _settled = true
+      fetchingTabIds.delete(tabId)
+    }
 
     const getTab = () => tabs.find((t) => t.id === tabId)
     const tab = getTab()
     if (!tab || tab.kind !== 'table' || !tab.state) {
-      fetchingTabIds.delete(tabId)
+      done()
       return
     }
     const s = /** @type {TableTabState} */ (tab.state)
     if (!s.table) {
-      fetchingTabIds.delete(tabId)
+      done()
       return
     }
     // A fresh fetch replaces the row set, so any row-index-keyed staged changes
     // cached for this table no longer line up - drop them.
     clearPendingChanges(`${s.schema}.${s.table}`)
 
-    // Single helper to patch the tab state - avoids multiple tabs.map() calls per fetch
+    // Patch this tab's own state (shared helper - one tabs write per call).
     /** @param {Partial<TableTabState>} patch */
-    function patchTab(patch) {
-      const i = tabs.findIndex((t) => t.id === tabId)
-      if (i === -1) return
-      const next = [...tabs]
-      next[i] = { ...next[i], state: { .../** @type {TableTabState} */ (next[i].state), ...patch } }
-      tabs = next
-    }
+    const patchTab = (patch) => patchTableTab(tabId, patch)
 
     // Mark loading - one tabs write
     patchTab({ loadingRows: true, error: '' })
     if (tabId === activeTabId) { loadingRows = true; error = '' }
 
-    // "All" on a large table would pull the whole set into this tab. Route the
-    // active tab through loadRows (which windows it) and skip prefetch entirely
-    // for large background tabs - they window on activation instead.
-    if (s.pageSize === PAGE_SIZE_ALL && (s.total > WINDOW_THRESHOLD || s.total <= 0)) {
-      fetchingTabIds.delete(tabId)
-      if (tabId === activeTabId) await loadRows()
+    // A big fetch limit must never be pulled whole into a tab - and especially not
+    // into a background one. Opening three tables with the page size on 1M used to
+    // fire three million-row requests at once and lock the app up for the duration.
+    // The active tab goes through loadRows (which probes, measures and windows);
+    // background tabs are left for activation.
+    const hugeLimit =
+      s.pageSize === PAGE_SIZE_ALL
+        ? (s.total > WINDOW_THRESHOLD || s.total <= 0)
+        : (Number.isFinite(s.pageSize) && s.pageSize > WINDOW_THRESHOLD)
+    if (hugeLimit) {
+      if (tabId === activeTabId) {
+        // loadRows takes over the loading flag (and clears it in its finally).
+        const p = loadRows()
+        done()
+        await p
+      } else {
+        // Nothing will fetch this tab until it's activated, so don't leave it
+        // marked as loading - that spinner would never stop.
+        patchTab({ loadingRows: false })
+        done()
+      }
       return
     }
 
     // Keyset/cursor/temporal: route the active tab's first page through loadRows
     // so it's ordered by the key column (page 1 and cursor pages share one order).
     if (tabId === activeTabId && _keysetActive) {
-      fetchingTabIds.delete(tabId)
       _keysetCursor = null
-      await loadRows()
+      const p = loadRows()
+      done()
+      await p
       return
     }
 
     try {
       // Resolve the "All" sentinel - and guard a corrupt/unset value - into a
       // real fetch limit; the backend rejects limit < 1. Mirrors effectivePageSize.
+      // A snapshot's count and its filters were taken together, so that count
+      // does describe the view being refetched here.
       const limit =
         s.pageSize === PAGE_SIZE_ALL
-          ? Math.min(s.total > 0 ? s.total : MAX_PAGE_SIZE, MAX_PAGE_SIZE)
+          ? fetchLimitFor(PAGE_SIZE_ALL, s.total, true)
           : (Number.isFinite(s.pageSize) && s.pageSize > 0 ? s.pageSize : DEFAULT_PAGE_SIZE)
       const offset = s.pageSize === PAGE_SIZE_ALL ? 0 : (s.page - 1) * limit
       const { sortColumn, sortDirection, sorts } = sortForApi(s.rowSort, s.rowSortMore)
@@ -4234,7 +4634,10 @@ let rowSearch = $state('')
           })
           if (typeof n === 'number' && n >= 0) {
             patchTab({ total: n })
-            if (tabId === activeTabId) total = n
+            if (tabId === activeTabId) {
+              total = n
+              _totalSig = predicateSig(apiSearch(s.rowSearch), s.rowFilters ?? [])
+            }
           }
         } catch { /* best-effort */ }
       })()
@@ -4252,7 +4655,7 @@ let rowSearch = $state('')
         total = 0
       }
     } finally {
-      fetchingTabIds.delete(tabId)
+      done()
     }
   }
 
@@ -4262,44 +4665,245 @@ let rowSearch = $state('')
     _windowSeq++
     _windowLoaded = new Set()
     _windowFetching = new Set()
+    _windowQueue = []
+    _windowInFlight = 0
+    _windowSlow = false
+    _windowBase = 0
+    _windowCount = 0
+    _windowRows = WINDOW_ROWS_DEFAULT
+    _windowBytesPerRow = 0
+    _windowOrder = null
+    forgetWindowFetchState()
   }
 
-  /** Build the shared row-query options for the current view (search/sort/filter). */
+  /** Per-view fetch bookkeeping (latency, retries, seek fallback) - reset with
+   *  the view it describes, so a new table doesn't inherit the last one's. */
+  function forgetWindowFetchState() {
+    _windowMs = 0
+    _windowSeekOff = false
+    _windowAttempts.clear()
+    _windowFailed.clear()
+    syncWindowStatus()
+  }
+
+  /**
+   * Re-establish windowing for a tab being restored from its snapshot: the sparse
+   * `rows` array is handed back by applyTabToEditor, and this restores the
+   * bookkeeping that says which windows it already holds, at the same window size
+   * the rows were fetched with. Bumping _windowSeq abandons any window still in
+   * flight for the tab we just left.
+   * @param {TableTabState} s
+   */
+  function restoreWindowing(s) {
+    _windowSeq++
+    _windowLoaded = new Set(s.windowedLoaded ?? [])
+    _windowFetching = new Set()
+    _windowQueue = []
+    _windowInFlight = 0
+    _windowSlow = false
+    _windowRows = s.windowRows && s.windowRows > 0 ? s.windowRows : WINDOW_ROWS_DEFAULT
+    _windowBase = s.windowBase ?? 0
+    _windowCount = s.windowCount ?? (Array.isArray(s.rows) ? s.rows.length : 0)
+    _windowBytesPerRow = s.windowBytesPerRow ?? 0
+    // Same total order as before, so windows fetched after the switch back still
+    // line up with the rows already resident.
+    _windowOrder = s.windowOrder ? { ...s.windowOrder, sorts: (s.windowOrder.sorts ?? []).map((k) => ({ ...k })) } : null
+    forgetWindowFetchState()
+    windowed = true
+    dataVersion++
+  }
+
+  /** Install a fresh windowed view over `count` rows starting at absolute `base`. */
+  function beginWindowing(base, count, rowsPerWindow, bytesPerRow = 0, order = null) {
+    _windowSeq++
+    _windowLoaded = new Set()
+    _windowFetching = new Set()
+    _windowQueue = []
+    _windowInFlight = 0
+    _windowSlow = false
+    _windowRows = rowsPerWindow
+    _windowBase = base
+    _windowCount = count
+    _windowBytesPerRow = bytesPerRow
+    _windowOrder = order
+    _lastFirstW = 0
+    _lastDir = 1
+    forgetWindowFetchState()
+    windowed = true
+  }
+
+  /** Build the shared row-query options for the current view (search/sort/filter).
+   *  A windowed view substitutes its stable order, so every window - and an export
+   *  reading the same view - slices one and the same total ordering. */
   function currentRowQuery(includeCount = false) {
-    const { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
-    return { ...apiSearch(rowSearch), sortColumn, sortDirection, sorts, filters: filtersForApi(rowFilters, columns), includeMeta: false, includeCount }
+    const order = (windowed && _windowOrder) ? _windowOrder : sortForApi(rowSort, rowSortMore)
+    return { ...apiSearch(rowSearch), ...order, filters: filtersForApi(rowFilters, columns), includeMeta: false, includeCount }
   }
 
-  /** Fetch one window and splice it into the sparse `rows` array in place. */
+  /** The key this view can seek by instead of paging with OFFSET (see
+   *  seekKeyFor), or null while the view has none / after one was refused. */
+  function windowSeek() {
+    if (!windowed || _windowSeekOff) return null
+    return seekKeyFor({
+      order: _windowOrder,
+      columns,
+      primaryKey,
+      dialect: connection?.type ?? '',
+    })
+  }
+
+  /** The row value window `w` can seek from (last row of the window before it),
+   *  or null when that row isn't resident and the window must use OFFSET. */
+  function windowAnchor(w, seek = windowSeek()) {
+    if (!seek || w <= 0) return null
+    const prev = rows[w * _windowRows - 1]
+    const v = prev ? prev[seek.index] : undefined
+    return v === undefined || v === null ? null : v
+  }
+
+  /** Fetch one window and splice it into the sparse `rows` array in place.
+   *  Window `w` covers view rows [w*_windowRows, …), which live at absolute table
+   *  offset _windowBase + that - the view can be a page, not just the whole table. */
   async function fetchWindow(w) {
     if (!windowed || w < 0 || _windowLoaded.has(w) || _windowFetching.has(w)) return
-    const offset = w * WINDOW_FETCH
-    if (offset >= total) return
+    const start = w * _windowRows
+    if (start >= _windowCount) return
+    const limit = Math.min(_windowRows, _windowCount - start)
     const seq = _windowSeq
+    const seek = windowSeek()
+    const anchor = windowAnchor(w, seek)
+    const keyset = anchor === null || !seek
+      ? null
+      : { column: seek.column, value: String(anchor), sqlType: seek.sqlType, after: true, desc: seek.desc }
     _windowFetching.add(w)
+    _windowInFlight++
+    // Re-queued after giving up (a scroll, or the pill's Retry) - it's loading
+    // again, so the grid should say so rather than keep showing the error.
+    if (_windowFailed.delete(w)) syncWindowStatus()
+    const t0 = performance.now()
     try {
-      const data = await getTableRows(activeSchema, activeTable, WINDOW_FETCH, offset, currentRowQuery(false))
+      const data = await getTableRows(activeSchema, activeTable, limit, _windowBase + start, { ...currentRowQuery(false), keyset })
+      // Rolling, so the measure tracks the connection rather than latching on the
+      // first deep page. Recorded even for a superseded fetch - the round-trip
+      // was just as slow whether or not its rows are still wanted.
+      const ms = performance.now() - t0
+      _windowMs = _windowMs ? _windowMs * 0.65 + ms * 0.35 : ms
+      _windowSlow = _windowMs > WINDOW_SLOW_MS
       if (seq !== _windowSeq) return // table / query changed while in flight
       const fetched = data.rows ?? []
-      for (let i = 0; i < fetched.length; i++) rows[offset + i] = fetched[i]
+      for (let i = 0; i < fetched.length; i++) rows[start + i] = fetched[i]
       _windowLoaded.add(w)
+      _windowAttempts.delete(w)
+      _windowFailed.delete(w)
       dataVersion++
     } catch {
-      // leave unloaded - the next visible-range emit retries
+      if (seq !== _windowSeq) return
+      if (keyset) {
+        // The cursor cast can be rejected for an exotic key type. Fall back for
+        // the whole view and retry this window on the offset path immediately -
+        // that path is always correct, just slower.
+        _windowSeekOff = true
+        _windowQueue.unshift(w)
+        return
+      }
+      // Retry with backoff. Without this a dropped connection left the rows
+      // shimmering until the user happened to scroll, since only a *change* of
+      // visible range re-queues anything.
+      const tries = (_windowAttempts.get(w) ?? 0) + 1
+      _windowAttempts.set(w, tries)
+      if (tries > WINDOW_RETRIES) {
+        _windowFailed.add(w)
+      } else {
+        setTimeout(() => {
+          if (!windowed || seq !== _windowSeq || _windowLoaded.has(w)) return
+          _windowQueue.unshift(w)
+          pumpWindowQueue()
+        }, 300 * 2 ** (tries - 1))
+      }
     } finally {
       _windowFetching.delete(w)
+      // Clamped: a reset (new query) zeroes the counter while requests are still
+      // in flight, and their finallys must not drive it negative.
+      _windowInFlight = Math.max(0, _windowInFlight - 1)
+      syncWindowStatus()
+      pumpWindowQueue()
     }
+  }
+
+  /**
+   * Start queued window fetches up to the concurrency cap. Bounded on purpose: a
+   * fast flick crosses many windows, and firing a request for each one at once
+   * both floods the pool and puts the rows the user is actually looking at behind
+   * a queue of windows already scrolled past.
+   */
+  function pumpWindowQueue() {
+    const cap = _windowSlow ? 1 : WINDOW_MAX_INFLIGHT
+    while (windowed && _windowInFlight < cap && _windowQueue.length > 0) {
+      const i = nextStartableWindow()
+      if (i < 0) break
+      const w = _windowQueue.splice(i, 1)[0]
+      void fetchWindow(w)
+    }
+  }
+
+  /**
+   * Which queued window to start next, or -1 to wait for one in flight.
+   *
+   * The queue is built viewport-first, so its head is what the user is looking
+   * at and always starts. The rest is read-ahead, and on a seekable view (see
+   * windowSeek) read-ahead is worth *waiting* for: a window whose predecessor
+   * has landed is an index seek, while firing four deep-OFFSET queries in
+   * parallel is four full index walks for the same rows. Nothing can wait
+   * forever - with nothing in flight to produce an anchor, the head starts on
+   * the offset path.
+   */
+  function nextStartableWindow() {
+    const seek = windowSeek()
+    let head = -1
+    for (let i = 0; i < _windowQueue.length; i++) {
+      const w = _windowQueue[i]
+      if (_windowLoaded.has(w) || _windowFetching.has(w)) continue
+      if (head < 0) {
+        if (!seek || _windowInFlight === 0) return i
+        head = i
+        continue
+      }
+      if (windowAnchor(w, seek) !== null) return i
+    }
+    // head >= 0 here only while something is in flight, so waiting costs at most
+    // one round-trip - after which that fetch's anchor may make read-ahead cheap.
+    return seek ? -1 : head
+  }
+
+  /** Publish fetcher state for the grid's loading pill, only on a real change. */
+  function syncWindowStatus() {
+    const failed = _windowFailed.size > 0
+    if (windowStatus.slow !== _windowSlow || windowStatus.failed !== failed) {
+      windowStatus = { slow: _windowSlow, failed }
+    }
+  }
+
+  /** "Retry" in the grid's loading pill: re-queue every window that gave up. */
+  function retryFailedWindows() {
+    if (!windowed || _windowFailed.size === 0) return
+    const again = [..._windowFailed]
+    _windowFailed.clear()
+    for (const w of again) _windowAttempts.delete(w)
+    _windowQueue = [...again, ..._windowQueue]
+    syncWindowStatus()
+    pumpWindowQueue()
   }
 
   /** Evict resident windows far from the viewport so memory stays bounded. */
   function evictFarWindows(firstW, lastW) {
     if (!windowed) return
     let evicted = false
+    const keep = windowKeepCount(_windowRows)
     for (const w of _windowLoaded) {
-      if (w < firstW - WINDOW_KEEP || w > lastW + WINDOW_KEEP) {
-        const offset = w * WINDOW_FETCH
-        const endI = Math.min(offset + WINDOW_FETCH, total)
-        for (let i = offset; i < endI; i++) rows[i] = undefined
+      if (w < firstW - keep || w > lastW + keep) {
+        const start = w * _windowRows
+        const endI = Math.min(start + _windowRows, _windowCount)
+        for (let i = start; i < endI; i++) rows[i] = undefined
         _windowLoaded.delete(w)
         evicted = true
       }
@@ -4308,31 +4912,61 @@ let rowSearch = $state('')
   }
 
   let _visRangeTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null)
-  /** DataTable reports its visible row range → load nearby windows, evict far ones.
-   *  Debounced so fast scrolling doesn't fire a fetch for every window flown past. */
+  /**
+   * DataTable reports its visible row range → load nearby windows, evict far ones.
+   *
+   * The windows under the viewport are requested immediately: those are the rows
+   * being drawn as skeletons right now, and the old 100ms debounce added that
+   * delay to every one of them. Only eviction waits for the scroll to settle -
+   * dropping windows mid-flick just re-fetches them a moment later.
+   */
   function handleVisibleRange(start, end) {
     if (!windowed) return
+    const firstW = Math.floor(start / _windowRows)
+    const lastW = Math.floor(end / _windowRows)
+    if (firstW !== _lastFirstW) {
+      _lastDir = firstW > _lastFirstW ? 1 : -1
+      _lastFirstW = firstW
+    }
+    // Priority order: what's on screen, then ahead in the direction of travel,
+    // then the window just behind (so a small scroll-back is already resident).
+    /** @type {number[]} */
+    const want = []
+    const ahead = _windowSlow ? 1 : WINDOW_PREFETCH
+    for (let w = firstW; w <= lastW; w++) want.push(w)
+    for (let i = 1; i <= ahead; i++) want.push(_lastDir >= 0 ? lastW + i : firstW - i)
+    want.push(_lastDir >= 0 ? firstW - 1 : lastW + 1)
+    // Rebuilt (not appended) every emit, so windows already scrolled past drop out
+    // of the queue instead of being fetched after the user has left them.
+    _windowQueue = want.filter(
+      (w) => w >= 0 && w * _windowRows < _windowCount && !_windowLoaded.has(w) && !_windowFetching.has(w),
+    )
+    pumpWindowQueue()
     if (_visRangeTimer) clearTimeout(_visRangeTimer)
     _visRangeTimer = setTimeout(() => {
       _visRangeTimer = null
-      if (!windowed) return
-      const firstW = Math.floor(start / WINDOW_FETCH)
-      const lastW = Math.floor(end / WINDOW_FETCH)
-      for (let w = firstW - 1; w <= lastW + 1; w++) void fetchWindow(w)
-      evictFarWindows(firstW, lastW)
-    }, 100)
+      if (windowed) evictFarWindows(firstW, lastW)
+    }, 300)
   }
 
-  /** Fetch the full ordered result set in chunks (windowed export/copy path). */
+  /** Fetch the full ordered result set in chunks (windowed export/copy path).
+   *  Chunked coarser than the scroll windows - nothing is being rendered meanwhile,
+   *  so throughput matters more than latency - but still by BYTES, since 50k rows
+   *  of a table with an embedding column is most of a gigabyte in one response. */
+  const EXPORT_CHUNK_MAX = 50_000
+  const EXPORT_TARGET_BYTES = 20_000_000
   async function fetchAllRows(onProgress) {
+    const chunk = _windowBytesPerRow > 0
+      ? Math.max(500, Math.min(EXPORT_CHUNK_MAX, Math.round(EXPORT_TARGET_BYTES / _windowBytesPerRow)))
+      : EXPORT_CHUNK_MAX
     /** @type {any[]} */
     const out = []
-    for (let off = 0; off < total; off += WINDOW_FETCH) {
-      const data = await getTableRows(activeSchema, activeTable, WINDOW_FETCH, off, currentRowQuery(false))
+    for (let off = 0; off < total; off += chunk) {
+      const data = await getTableRows(activeSchema, activeTable, chunk, off, currentRowQuery(false))
       const r = data.rows ?? []
       for (let i = 0; i < r.length; i++) out.push(r[i])
       onProgress?.(out.length)
-      if (r.length < WINDOW_FETCH) break
+      if (r.length < chunk) break
     }
     return out
   }
@@ -4343,7 +4977,16 @@ let rowSearch = $state('')
    *   sort, search, page from global state) but update rows in place without
    *   jumping the grid to the top or closing the row inspector.
    */
-  async function loadRows({ keepScroll = false } = {}) {
+  function loadRows(opts = {}) {
+    // The tab that owns this load, captured before anything can await. Every
+    // write inside is routed through it, so switching or closing tabs mid-fetch
+    // neither cancels the query nor drops its rows into whichever tab happens to
+    // be in front when they arrive - and the tab strip spins until it settles.
+    return trackBusy(activeTabId, runLoadRows(opts, activeTabId))
+  }
+
+  /** @param {{ keepScroll?: boolean }} opts @param {string | null} ownerTabId */
+  async function runLoadRows({ keepScroll = false } = {}, ownerTabId = null) {
     if (!activeTable) {
       columns = []
       rows = []
@@ -4351,7 +4994,14 @@ let rowSearch = $state('')
       total = 0
       return
     }
-    const seq = ++_loadSeq
+    const ownerSchema = activeSchema
+    const ownerTable = activeTable
+    const seq = bumpLoadSeq(ownerTabId)
+    /** Still the newest load for its tab, and that tab still exists. */
+    const live = () => seq === loadSeqOf(ownerTabId) && tabs.some((t) => t.id === ownerTabId)
+    /** Owner is on screen - only then may this load touch the shared editor state. */
+    const isActive = () => ownerTabId === activeTabId
+    patchTableTab(ownerTabId ?? '', { loadingRows: true, error: '' })
     _windowSeq++ // discard any window fetches in flight from a prior query
     loadingRows = true
     _infiniteRows = []
@@ -4390,70 +5040,206 @@ let rowSearch = $state('')
       // fetches (pagination, sort, filter, live) reuse what we already hold,
       // skipping several round-trips per fetch.
       const includeMeta = columns.length === 0
-      // Window only in "All" mode on a large set - fixed page sizes still
-      // paginate exactly as before. When windowing we cap the first fetch to one
-      // window and ask for the count up front (needed to size the sparse array).
-      const wantsWindow = pageSize === PAGE_SIZE_ALL && effectivePageSize > WINDOW_THRESHOLD
+      // A large fetch limit gets probed instead of pulled: 200 rows plus the count,
+      // then the rows are measured and either the rest is loaded normally (small,
+      // light result) or a windowed view is installed.
+      //
+      // Note this is NOT gated on the "All" sentinel. Page size 1M is an ordinary
+      // option in the toolbar, and taking it literally meant one request for a
+      // million rows - ~130MB of JSON decoded on the main thread, per tab, which
+      // froze the whole app. Any limit past the threshold is treated the same way
+      // now, whichever control produced it.
+      const wantsWindow = effectivePageSize > WINDOW_THRESHOLD
+      // A windowed view is assembled from many separate LIMIT/OFFSET queries, and
+      // those only line up if they all slice ONE total order - so the probe is
+      // ordered by the primary key too, whenever we already know it. On the very
+      // first load of a table the key arrives with this response, so the probe
+      // can't be ordered yet; its rows are then treated as provisional below.
+      const probeOrder = wantsWindow ? stableWindowOrder(rowSort, rowSortMore, primaryKey) : null
+      // Query shape frozen at call time. The remainder fetch below must not read
+      // it back off the globals - by then they may describe another tab.
+      const ownerQuery = {
+        ...apiSearch(rowSearch),
+        ...(probeOrder ?? { sortColumn, sortDirection, sorts }),
+        filters: filtersForApi(rowFilters, columns),
+      }
+      // Frozen with the query: the count this load produces belongs to THIS
+      // predicate, even if the user edits the filters while it is in flight.
+      const ownerSig = predicateSig(apiSearch(rowSearch), rowFilters)
       const data = await getTableRows(
-        activeSchema, activeTable,
-        wantsWindow ? WINDOW_FETCH : effectivePageSize,
-        wantsWindow ? 0 : offset,
-        {
-          ...apiSearch(rowSearch),
-          sortColumn,
-          sortDirection,
-          sorts,
-          filters: filtersForApi(rowFilters, columns),
+        ownerSchema, ownerTable,
+        wantsWindow ? WINDOW_PROBE : effectivePageSize,
+        offset,
+        { ...ownerQuery,
           keyset: keysetArg,
           includeMeta,
           // Don't wait on COUNT(*) - paint rows now, count streams in below.
           // Windowed loads need the total immediately to size the sparse array.
           includeCount: wantsWindow,
         })
-      if (seq !== _loadSeq) return
+      if (!live()) return
       const nextColumns = data.columns ?? []
+      const fetched = data.rows ?? []
+      const windowTotal = wantsWindow ? Number(data.total ?? 0) : 0
+      const ranMs = Number(data.queryMs ?? data.query_ms ?? 0)
+      // How long this view is, and how heavy: both decide whether to window.
+      // `articles` at 100k rows is small enough to load whole; `openai_docs` at
+      // 10k rows is not, because each row carries a ~17KB embedding.
+      const viewBase = wantsWindow ? offset : 0
+      // A windowed view has to know exactly how long it is - a sparse array sized
+      // from a guess would leave skeleton rows past the end of the table forever.
+      // Engines that can't count (total ≤ 0) therefore keep the old behaviour: load
+      // the requested limit in full.
+      const countKnown = windowTotal > 0
+      const viewCount = wantsWindow
+        ? (countKnown ? Math.max(0, Math.min(effectivePageSize, windowTotal - viewBase)) : effectivePageSize)
+        : fetched.length
+      const bytesPerRow = wantsWindow ? measureRowBytes(fetched) : 0
+      const probeRows = wantsWindow ? pickWindowRows(bytesPerRow) : WINDOW_ROWS_DEFAULT
+      // The order every window will slice. Recomputed here because the primary key
+      // may only just have arrived with this response.
+      const pkNow = includeMeta ? (data.primaryKey ?? data.primary_key ?? []) : primaryKey
+      const windowOrder = wantsWindow ? stableWindowOrder(rowSort, rowSortMore, pkNow) : null
+      // No stable order (a table with no primary key) means no windowing: a single
+      // query is internally consistent, many unordered ones are not. Such a table
+      // loads whole, as it did before.
+      const useWindow =
+        wantsWindow && !!windowOrder && shouldWindow({ rowCount: viewCount, bytesPerRow, countKnown })
+      // Probe rows belong in the sparse array only if they came from that same
+      // order. Otherwise they're a different slice of the table, and keeping them
+      // is exactly the "row 108 shows a different id each time" problem - so they
+      // are dropped and window 0 is fetched properly.
+      const probeUsable = !!probeOrder
+      if (includeMeta && nextColumns.length) {
+        lruSet(tableColumnsCache, `${ownerSchema}.${ownerTable}`, nextColumns)
+      }
+
+      // ── The owner moved to the background while this ran ────────────────────
+      // Commit into its own tab state and leave the visible editor untouched.
+      // (Before this branch existed, a 1M-row load landing after a tab switch
+      // overwrote whatever table was now on screen.)
+      if (!isActive()) {
+        const meta = includeMeta
+          ? {
+              primaryKey: data.primaryKey ?? data.primary_key ?? [],
+              foreignKeys: normalizeForeignKeys(data.foreignKeys ?? data.foreign_keys),
+            }
+          : {}
+        // Keep the columns the tab already holds when the shape is unchanged -
+        // they carry enum/nullable metadata a includeMeta:false fetch doesn't.
+        const prevCols = /** @type {TableTabState | null} */ (tabs.find((t) => t.id === ownerTabId)?.state ?? null)?.columns ?? []
+        const cols = nextColumns.length && !sameColumnShape(prevCols, nextColumns)
+          ? nextColumns
+          : (prevCols.length ? prevCols : nextColumns)
+        if (useWindow) {
+          // Finish the windowed load into the tab that started it: the sparse array
+          // (raw, outside the reactive tree) plus the window bookkeeping. Switching
+          // back then shows the rows immediately instead of re-running the fetch and
+          // the count - which is the whole point of leaving a huge table loading.
+          const arr = new Array(viewCount)
+          if (probeUsable) {
+            for (let i = 0; i < fetched.length && i < viewCount; i++) arr[i] = fetched[i]
+          }
+          _liveRowsByTab.set(ownerTabId, arr)
+          patchTableTab(ownerTabId ?? '', {
+            columns: cols,
+            ...meta,
+            rows: [],
+            windowedHead: true,
+            // The probe covers only whole windows it filled completely; a partly
+            // covered one is refetched so no row is left silently missing.
+            windowedLoaded: probeUsable ? windowsFullyCovered(fetched.length, probeRows) : [],
+            windowRows: probeRows,
+            windowBase: viewBase,
+            windowCount: viewCount,
+            windowBytesPerRow: bytesPerRow,
+            windowOrder,
+            total: windowTotal,
+            queryMs: ranMs,
+            loadingRows: false,
+            error: '',
+          })
+          return
+        }
+        let landed = fetched
+        if (wantsWindow && viewCount > fetched.length) {
+          const restData = await getTableRows(ownerSchema, ownerTable, Math.min(viewCount - fetched.length, MAX_PAGE_SIZE), viewBase + fetched.length, { ...ownerQuery, includeMeta: false, includeCount: false })
+          if (!live()) return
+          landed = [...fetched, ...(restData.rows ?? [])]
+        }
+        _liveRowsByTab.set(ownerTabId, landed)
+        patchTableTab(ownerTabId ?? '', {
+          columns: cols,
+          ...meta,
+          rows: landed,
+          windowedHead: false,
+          windowedLoaded: [],
+          total: wantsWindow ? windowTotal : Number(data.total ?? 0),
+          queryMs: ranMs,
+          loadingRows: false,
+          error: '',
+        })
+        return
+      }
+
       // Update column shape whenever it actually changes (e.g. a column was
       // added/dropped) even on a metadata-skipping fetch; otherwise keep the
       // richer existing columns (which carry enum/nullable info).
       if (nextColumns.length && !sameColumnShape(columns, nextColumns)) columns = nextColumns
       if (includeMeta) {
-        if (activeTable) {
-          lruSet(tableColumnsCache, `${activeSchema}.${activeTable}`, columns)
-        }
         primaryKey = data.primaryKey ?? data.primary_key ?? []
         foreignKeys = normalizeForeignKeys(data.foreignKeys ?? data.foreign_keys)
       }
-      const fetched = data.rows ?? []
-      const windowTotal = wantsWindow ? Number(data.total ?? 0) : 0
-      if (wantsWindow && windowTotal > WINDOW_THRESHOLD) {
-        // Sparse windowed array: length = total, only window 0 loaded so far.
-        _windowSeq++
-        _windowLoaded = new Set([0])
-        _windowFetching = new Set()
-        windowed = true
-        const arr = new Array(windowTotal)
-        for (let i = 0; i < fetched.length; i++) arr[i] = fetched[i]
+      if (useWindow) {
+        // Sparse windowed array: one slot per row of this view, holding only the
+        // probe's rows so far. Window size came from measuring those rows.
+        beginWindowing(viewBase, viewCount, probeRows, bytesPerRow, windowOrder)
+        const arr = new Array(viewCount)
+        // Only rows that came from the view's own ordering may stay - see probeUsable.
+        if (probeUsable) {
+          for (let i = 0; i < fetched.length && i < viewCount; i++) arr[i] = fetched[i]
+          for (const w of windowsFullyCovered(fetched.length, probeRows)) _windowLoaded.add(w)
+        }
         rows = arr
         _infiniteRows = []
         total = windowTotal
+        _totalSig = ownerSig
         dataVersion++
+        // Warm the windows the probe didn't cover, before the first scroll asks.
+        // Only for a load that starts at the top: on a refresh that keeps the
+        // scroll position the viewport is somewhere else entirely, and queuing
+        // the head would put five windows the user cannot see in front of the
+        // one they are looking at. The grid re-emits its visible range as soon
+        // as the new array lands, which asks for the right ones.
+        if (!keepScroll) {
+          const firstGap = _windowLoaded.size
+          for (let w = firstGap; w <= firstGap + WINDOW_PREFETCH; w++) _windowQueue.push(w)
+          pumpWindowQueue()
+        }
       } else if (wantsWindow) {
-        // Below the windowing bar after counting - load the remainder in full.
+        // Past the limit bar but small and light after measuring - load the rest.
         resetWindowing()
         total = windowTotal
-        // Paint the first window NOW, before going back for the rest. The
-        // remainder is a second round-trip over tens of thousands of rows, and
-        // holding `rows` empty until it lands leaves the grid blank for all of
-        // it — with the columns already drawn, which reads as "this table is
-        // empty" rather than "this is still loading". Every table between
-        // WINDOW_FETCH and WINDOW_THRESHOLD rows opened on "All" comes through
-        // here, so that was the common case, not the rare one.
+        _totalSig = ownerSig
+        // Paint the probe NOW, before going back for the rest. The remainder is a
+        // second round-trip over tens of thousands of rows, and holding `rows`
+        // empty until it lands leaves the grid blank for all of it - with the
+        // columns already drawn, which reads as "this table is empty" rather than
+        // "this is still loading".
         rows = fetched
         _infiniteRows = fetched
-        if (windowTotal > fetched.length) {
-          const restData = await getTableRows(activeSchema, activeTable, Math.min(windowTotal - fetched.length, MAX_PAGE_SIZE), fetched.length, currentRowQuery(false))
-          if (seq !== _loadSeq) return
-          rows = [...fetched, ...(restData.rows ?? [])]
+        if (viewCount > fetched.length) {
+          const restData = await getTableRows(ownerSchema, ownerTable, Math.min(viewCount - fetched.length, MAX_PAGE_SIZE), viewBase + fetched.length, { ...ownerQuery, includeMeta: false, includeCount: false })
+          if (!live()) return
+          const all = [...fetched, ...(restData.rows ?? [])]
+          // The tab may have gone to the background during this second trip -
+          // then the rows belong to its own state, not to the visible grid.
+          if (!isActive()) {
+            _liveRowsByTab.set(ownerTabId, all)
+            patchTableTab(ownerTabId ?? '', { columns: nextColumns, rows: all, total: windowTotal, queryMs: ranMs, loadingRows: false, error: '', windowedHead: false, windowedLoaded: [] })
+            return
+          }
+          rows = all
           _infiniteRows = rows
         }
       } else {
@@ -4463,8 +5249,9 @@ let rowSearch = $state('')
         // total = -1 means "counting" (Postgres, non-blocking). Other engines
         // return a real total here; refreshRowCount() then no-ops for them.
         total = Number(data.total ?? 0)
+        _totalSig = ownerSig
       }
-      queryMs = Number(data.queryMs ?? data.query_ms ?? 0)
+      queryMs = ranMs
       // Record this page's boundary key values so next/prev can build cursors.
       if (ksActive && _keyColIndex >= 0) {
         _pageFirstKey = rows.length ? rows[0]?.[_keyColIndex] : null
@@ -4479,43 +5266,59 @@ let rowSearch = $state('')
       }
       // Fire-and-forget: fill the total in the background so the count never
       // delays the rows. Windowed loads already have a real total from the fetch.
-      if (!windowed) void refreshRowCount(seq)
+      if (!windowed) void refreshRowCount(ownerTabId, seq, ownerSchema, ownerTable, ownerQuery, ownerSig)
+      // Mirror the landed result into the owning tab so the spinner in the tab
+      // strip stops and a later switch away/back doesn't refetch it.
+      patchTableTab(ownerTabId ?? '', { loadingRows: false, error: '' })
     } catch (e) {
-      if (seq !== _loadSeq) return
+      if (!live()) return
       const errStr = String(e)
       if (isNetworkError(errStr)) { connectionLost = true; void silentReconnect() }
-      error = errStr
-      resetWindowing()
-      columns = []
-      primaryKey = []
-      foreignKeys = []
-      rows = []
-      _infiniteRows = []
-      total = 0
-      recordActivity({ type: 'row_fetch', title: `Failed to load ${activeTable}`, schema: activeSchema, table: activeTable ?? undefined, success: false, error: errStr })
+      patchTableTab(ownerTabId ?? '', { loadingRows: false, error: errStr, columns: [], rows: [], total: 0 })
+      if (isActive()) {
+        error = errStr
+        resetWindowing()
+        columns = []
+        primaryKey = []
+        foreignKeys = []
+        rows = []
+        _infiniteRows = []
+        total = 0
+      }
+      recordActivity({ type: 'row_fetch', title: `Failed to load ${ownerTable}`, schema: ownerSchema, table: ownerTable ?? undefined, success: false, error: errStr })
     } finally {
-      if (seq === _loadSeq) loadingRows = false
+      // The newest load for a tab owns its loading flag - in the tab's own state
+      // (which is what the tab strip draws) and, while that tab is on screen, in
+      // the grid too. A superseded load clears neither: the load that replaced it
+      // will, when it reaches this same block.
+      if (seq === loadSeqOf(ownerTabId)) {
+        patchTableTab(ownerTabId ?? '', { loadingRows: false })
+        if (isActive()) loadingRows = false
+      }
     }
   }
 
   /**
    * Background row-count pass for the main grid. Runs after loadRows() has
    * already painted the rows, so COUNT(*) never blocks the initial view. The
-   * _loadSeq token drops results from a superseded load (fast tab/filter
+   * per-tab load token drops results from a superseded load (fast tab/filter
    * switches). Returns -1 on non-Postgres engines / failure - in which case the
-   * total set by loadRows() is kept untouched.
-   * @param {number} seq
+   * total set by loadRows() is kept untouched. Like the load itself, the count
+   * belongs to the tab that asked for it: it lands in that tab's state and only
+   * touches the visible total while that tab is still in front.
+   * @param {string | null} tabId @param {number} seq @param {string} schema
+   * @param {string} table @param {{ search?: string, searchIsRegex?: boolean, filters?: any[] }} query
    */
-  async function refreshRowCount(seq) {
-    if (!activeTable) return
+  async function refreshRowCount(tabId, seq, schema, table, query, sig = '') {
+    if (!table) return
     try {
-      const n = await countTableRows(activeSchema, activeTable, {
-        ...apiSearch(rowSearch),
-        filters: filtersForApi(rowFilters, columns),
-      })
-      if (seq !== _loadSeq) return
+      const n = await countTableRows(schema, table, query)
+      if (seq !== loadSeqOf(tabId)) return
       if (typeof n === 'number' && n >= 0) {
+        patchTableTab(tabId ?? '', { total: n })
+        if (tabId !== activeTabId) return
         total = n
+        _totalSig = sig
         const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
         if (page > maxPage) page = maxPage
       }
@@ -4528,7 +5331,8 @@ let rowSearch = $state('')
     if (total >= 0 && _infiniteRows.length >= total) return
     if (_infiniteRows.length >= INFINITE_ROW_CAP) return
     loadingMore = true
-    const seq = _loadSeq
+    const ownerTabId = activeTabId
+    const seq = loadSeqOf(ownerTabId)
     try {
       const offset = _infiniteRows.length
       const { sortColumn, sortDirection, sorts } = sortForApi(rowSort, rowSortMore)
@@ -4539,7 +5343,9 @@ let rowSearch = $state('')
         sorts,
         filters: filtersForApi(rowFilters, columns),
       })
-      if (seq !== _loadSeq) return
+      // A superseded load, or a tab switch, means these rows no longer belong to
+      // what's on screen - appending them would splice one table into another.
+      if (seq !== loadSeqOf(ownerTabId) || ownerTabId !== activeTabId) return
       const fetched = data.rows ?? []
       if (!fetched.length) return
       // Append in place - spreading the whole accumulated array on every page was
@@ -4549,6 +5355,7 @@ let rowSearch = $state('')
       for (let i = 0; i < fetched.length; i++) _infiniteRows.push(fetched[i])
       rows = _infiniteRows.slice()
       total = Number(data.total ?? total)
+      _totalSig = rowPredicateSig
     } catch (e) {
       error = String(e)
     } finally {
@@ -4665,7 +5472,14 @@ let rowSearch = $state('')
    * ⌘R), only that statement runs; otherwise the whole editor buffer runs.
    * @param {string} [overrideSql]
    */
-  async function runSql(overrideSql) {
+  function runSql(overrideSql) {
+    // The owning tab spins until the run settles, wherever the user has navigated
+    // to in the meantime.
+    return trackBusy(activeTabId, runSqlOnTab(overrideSql))
+  }
+
+  /** @param {string} [overrideSql] */
+  async function runSqlOnTab(overrideSql) {
     track('sql_run')
     const sqlRan = typeof overrideSql === 'string' && overrideSql.trim() ? overrideSql : sqlText
     if (!connection || !sqlRan.trim()) return
@@ -4678,6 +5492,10 @@ let rowSearch = $state('')
     // nor drops the answer into whatever tab is in front when it arrives.
     const runTabId = activeTabId
     const stillHere = () => activeTabId === runTabId
+    // Cancel handle for this run, keyed to its tab: several tabs can be running
+    // at once, and Stop has to reach the query belonging to the tab you're on.
+    const queryId = `sql-${runTabId ?? 'none'}-${++_sqlRunSeq}`
+    if (runTabId) _sqlQueryIdByTab.set(runTabId, queryId)
     sqlLoading = true
     sqlError = ''
     sqlMessage = ''
@@ -4691,7 +5509,7 @@ let rowSearch = $state('')
     let ranError = ''
     let ranRowCount = 0
     try {
-      const results = await executeSqlMulti(sqlRan)
+      const results = await executeSqlMulti(sqlRan, queryId)
       const data = results.length > 0 ? results[results.length - 1] : {}
       const cols = data.columns ?? []
       const rws = data.rows ?? []
@@ -4718,6 +5536,7 @@ let rowSearch = $state('')
       }
       if (isNetworkError(ranError)) { connectionLost = true; void silentReconnect() }
     } finally {
+      if (runTabId && _sqlQueryIdByTab.get(runTabId) === queryId) _sqlQueryIdByTab.delete(runTabId)
       patchSqlTab(runTabId, { sqlLoading: false })
       if (stillHere()) sqlLoading = false
       recordActivity({ type: 'sql_exec', title: sqlRan.trim().slice(0, 80) + (sqlRan.trim().length > 80 ? '…' : ''), detail: sqlRan, durationMs: ranMs, rowCount: ranRowCount || undefined, success: !ranError, error: ranError || undefined })
@@ -4726,6 +5545,12 @@ let rowSearch = $state('')
           success: true,
           queryMs: ranMs,
         })
+        // Settings → Database → Auto-save executed queries. Only successful runs,
+        // and deduplicated by SQL, so re-running the statement you're iterating on
+        // doesn't push out the ones you saved deliberately.
+        if (get(appAutoSaveQueries)) {
+          await saveQueryOnce(persistConnectionId, sqlRan).catch(() => {})
+        }
         await refreshQueryStores()
       }
     }
@@ -4755,6 +5580,7 @@ let rowSearch = $state('')
     // going through clearConnectionState, so reset them in both places.
     tableColumnsCache = new Map()
     incomingFkCache = new Map()
+    _catalog.clear()
     // The connection is live: render the shell NOW (setting `connection` above
     // dropped the reconnect overlay) with the welcome tab open and the sidebar
     // in its skeleton state, and let the catalog stream in below. This is what
@@ -4763,6 +5589,13 @@ let rowSearch = $state('')
     tabs = []
     _liveRowsByTab.clear()
     _tabRowsMru = []
+    _loadSeqByTab.clear()
+    fetchingTabIds.clear()
+    _sqlQueryIdByTab.clear()
+    _autoRefreshByTab.clear()
+    _autoRefreshTick += 1
+    _busyJobs.clear()
+    _busyTick += 1
     resetNav(_nav)
     syncNavFlags()
     // Redis has no relational catalog: skip schema/table loading entirely and
@@ -4921,8 +5754,8 @@ let rowSearch = $state('')
     // fails with a message the user can act on. This race is only a last-resort guard
     // for a command that never returns AT ALL, so it has to sit above those deadlines.
     // At 5s it fired first and turned every slow-but-healthy wake-up into "not
-    // connected" — serverless Postgres (Neon, and Prisma/Supabase pooler cold starts)
-    // autosuspends and takes 3–15s to come back, which is why resuming one meant
+    // connected" - serverless Postgres (Neon, and Prisma/Supabase pooler cold starts)
+    // autosuspends and takes 3-15s to come back, which is why resuming one meant
     // reconnecting by hand on nearly every launch.
     /** @param {Promise<unknown>} p */
     const withTimeout = (p) => Promise.race([
@@ -5061,6 +5894,118 @@ let rowSearch = $state('')
     switchToDb(entry.label)
   }
 
+  // ── Manage databases (sidebar) ────────────────────────────────────────────
+  // Create, rename, duplicate, drop, and the read-only info panel. Every
+  // statement runs on the current pool, which is why none of them can target the
+  // database this session is attached to - `dbActionBlocker` in database-admin.js
+  // is what greys those items out, and the handlers below only ever see targets
+  // that passed it.
+  let showCreateDbDialog = $state(false)
+  /** Bumped after any change, so the sidebar refetches its list. */
+  let databasesRefreshKey = $state(0)
+  /** @type {{ mode: 'rename' | 'duplicate', source: string, existing: string[] } | null} */
+  let dbNameDialog = $state(null)
+  let dbNameDialogOpen = $state(false)
+  let dropDbName = $state('')
+  let dropDbSessions = $state('')
+  let showDropDbDialog = $state(false)
+  let dbInfoName = $state('')
+  let showDbInfoDialog = $state(false)
+  let dbInfoLoading = $state(false)
+  let dbInfoError = $state('')
+  /** @type {import('$lib/database-admin.js').DbInfoRow[]} */
+  let dbInfoRows = $state([])
+
+  const dbAdmin = $derived(dbAdminKind(connection))
+
+  /** @param {import('./CreateDatabaseDialog.svelte').CreateDbOptions} opts */
+  async function createDatabase(opts) {
+    const kind = dbAdmin ?? 'postgres'
+    await executeDdl(createDatabaseSql(kind, opts))
+    toast.success(`Database "${opts.name}" created`)
+    databasesRefreshKey++
+  }
+
+  /** @param {{ mode: 'rename' | 'duplicate', name: string, existing: string[] }} args */
+  function openDbNameDialog({ mode, name, existing }) {
+    dbNameDialog = { mode, source: name, existing }
+    dbNameDialogOpen = true
+  }
+
+  /** Shared by rename and duplicate - the dialog has already built the SQL.
+   *  Throwing keeps the dialog open with the server's message.
+   *  @param {{ sql: string, name: string }} args */
+  async function runDbNameStatement({ sql, name }) {
+    const mode = dbNameDialog?.mode
+    const source = dbNameDialog?.source ?? ''
+    await executeDdl(sql)
+    toast.success(mode === 'rename' ? `Renamed "${source}" to "${name}"` : `Copied "${source}" to "${name}"`)
+    databasesRefreshKey++
+  }
+
+  /** Look up how many sessions are on a database, for the drop dialog's warning.
+   *  Best effort: a failed count must not block the dialog. @param {string} name */
+  async function countDbSessions(name) {
+    if (dbAdmin !== 'postgres') return ''
+    try {
+      const r = await executeSql(`SELECT count(*) FROM pg_stat_activity WHERE datname = '${name.replace(/'/g, "''")}'`)
+      const n = Number(r?.rows?.[0]?.[0] ?? 0)
+      return n > 0 ? String(n) : ''
+    } catch {
+      return ''
+    }
+  }
+
+  /** @param {{ name: string }} args */
+  async function requestDropDatabase({ name }) {
+    dropDbName = name
+    dropDbSessions = ''
+    showDropDbDialog = true
+    dropDbSessions = await countDbSessions(name)
+  }
+
+  /** @param {{ sql: string, force: boolean }} args */
+  async function commitDropDatabase({ sql }) {
+    const name = dropDbName
+    try {
+      await executeDdl(sql)
+      toast.success(`Database "${name}" dropped`)
+      databasesRefreshKey++
+    } catch (e) {
+      toast.error(`Could not drop "${name}"`, { description: String(e) })
+    }
+  }
+
+  /** @param {{ name: string }} args */
+  async function terminateDbSessions({ name }) {
+    if (!dbAdmin) return
+    try {
+      const r = await executeSql(terminateSessionsSql(dbAdmin, name))
+      const closed = r?.rows?.length ?? 0
+      toast.success(closed === 0 ? `No other sessions on "${name}"` : `Closed ${closed} session(s) on "${name}"`)
+    } catch (e) {
+      toast.error(`Could not close sessions on "${name}"`, { description: String(e) })
+    }
+  }
+
+  /** @param {{ name: string }} args */
+  async function openDatabaseInfo({ name }) {
+    if (!dbAdmin) return
+    dbInfoName = name
+    dbInfoRows = []
+    dbInfoError = ''
+    dbInfoLoading = true
+    showDbInfoDialog = true
+    try {
+      const result = await executeSql(databaseInfoSql(dbAdmin, name))
+      dbInfoRows = databaseInfoRows(dbAdmin, result)
+    } catch (e) {
+      dbInfoError = String(e)
+    } finally {
+      dbInfoLoading = false
+    }
+  }
+
   /** Reset all connection-scoped UI state to blank. */
   function clearConnectionState() {
     schemas = []
@@ -5071,6 +6016,7 @@ let rowSearch = $state('')
     sequences = []
     tableColumnsCache = new Map()
     incomingFkCache = new Map()
+    _catalog.clear()
     _sqlHintsLoadedFor = ''
     activeSchema = 'public'
     activeTable = null
@@ -5157,7 +6103,7 @@ let rowSearch = $state('')
    */
   async function connectByType(conn) {
     // Which engines get used, never which servers. The event name is the whole
-    // payload — there is no field here that could carry a host or a database.
+    // payload - there is no field here that could carry a host or a database.
     track(`connect_${conn.type === 'cockroachdb' ? 'cockroachdb' : conn.type}`)
     if (conn.type === 'sqlite') await connectSqlite(conn)
     else if (conn.type === 'd1') await connectD1(conn)
@@ -5172,6 +6118,9 @@ let rowSearch = $state('')
 
   /** @param {import('$lib/stores/connections.js').SavedConnection} conn */
   async function handleSwitchDatabase(conn) {
+    // A deliberate switch is the other half of "PIN to open or reconnect".
+    // Resolves true immediately unless a PIN is set with the connect prompt on.
+    if (!(await requireUnlock('Unlock to connect to a database'))) return
     // Disconnect current before connecting to the new one to avoid the race
     // where set_conn(None) could fire after connect_* sets the new connection.
     await disconnectPostgres().catch(() => {})
@@ -5234,10 +6183,23 @@ let rowSearch = $state('')
     // A manual refresh should also recover a dropped connection.
     if (connectionLost) await reconnectPool()
     _sqlHintsLoadedFor = '' // re-fetch enum/function hints on next SQL view
+    // Where the user was reading, captured before anything can move it. A
+    // refresh re-runs the SAME query in the same order on the same page, so the
+    // position is still meaningful - unlike a page / sort / filter change, which
+    // is a different view and rightly starts at the top.
+    const onTable = activeTab?.kind === 'table' && !!activeTable
+    const at = onTable ? (tableGetScroll?.() ?? { left: 0, top: 0 }) : null
     await loadSchemas()
     await loadTables({ force: true })
-    if (activeTab?.kind === 'table' && activeTable) {
-      await loadRows()
+    if (onTable) {
+      await loadRows({ keepScroll: true })
+      // Reasserted rather than merely left alone: reloading the schema and table
+      // lists on the way through re-applies the active tab's snapshot, and that
+      // restore lands whenever its tick fires - after this point, with whatever
+      // scroll the snapshot happened to hold. Setting it last is what makes the
+      // position survive the whole refresh, both axes.
+      await tick()
+      tableApplyScroll?.({ left: at?.left ?? 0, top: at?.top ?? 0 })
     }
   }
 
@@ -5570,6 +6532,35 @@ let rowSearch = $state('')
   currentName={connection?.database ?? connection?.name ?? ''}
   onconfirm={commitDatabaseSwitch}
 />
+<CreateDatabaseDialog
+  bind:open={showCreateDbDialog}
+  connType={dbAdmin ?? connection?.type ?? 'postgres'}
+  oncreate={createDatabase}
+/>
+{#if dbNameDialog}
+  <DatabaseNameDialog
+    bind:open={dbNameDialogOpen}
+    mode={dbNameDialog.mode}
+    kind={dbAdmin ?? 'postgres'}
+    source={dbNameDialog.source}
+    existing={dbNameDialog.existing}
+    onsubmit={runDbNameStatement}
+  />
+{/if}
+<DropDatabaseDialog
+  bind:open={showDropDbDialog}
+  kind={dbAdmin ?? 'postgres'}
+  name={dropDbName}
+  sessions={dropDbSessions}
+  onconfirm={(args) => void commitDropDatabase(args)}
+/>
+<DatabaseInfoDialog
+  bind:open={showDbInfoDialog}
+  name={dbInfoName}
+  rows={dbInfoRows}
+  loading={dbInfoLoading}
+  error={dbInfoError}
+/>
 <DisconnectDialog bind:open={showDisconnectDialog} connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''} ondisconnect={handleDisconnect} />
 <CreateTableDialog
   bind:open={showCreateTableDialog}
@@ -5699,6 +6690,7 @@ let rowSearch = $state('')
   onopensecurity={() => { if (aiMode) exitAiMode(); openSecurityTab() }}
   onopenlogs={() => { if (aiMode) exitAiMode(); openLogsTab() }}
   onopeninsights={() => { if (aiMode) exitAiMode(); openInsightsTab() }}
+  onopenadvisor={() => { if (aiMode) exitAiMode(); openAdvisorTab() }}
   onopenobjects={() => { if (aiMode) exitAiMode(); openObjectsTab() }}
   onopenormschema={() => { if (aiMode) exitAiMode(); openOrmSchemaTab() }}
   ontogglequerylog={() => { commandOpen = false; queryLogOpen = !queryLogOpen }}
@@ -5730,7 +6722,7 @@ let rowSearch = $state('')
 />
 
 
-<!-- Capture phase, deliberately — see onWindowKeydownCapture. -->
+<!-- Capture phase, deliberately - see onWindowKeydownCapture. -->
 <svelte:window onkeydowncapture={onWindowKeydownCapture} />
 
 {#if autoConnecting && !connection}
@@ -5839,6 +6831,13 @@ let rowSearch = $state('')
         onrefresh={handleRefresh}
         {connection}
         onswitchdatabase={requestDatabaseSwitch}
+        onnewdatabase={() => (showCreateDbDialog = true)}
+        onrenamedatabase={({ name, existing }) => openDbNameDialog({ mode: 'rename', name, existing })}
+        onduplicatedatabase={({ name, existing }) => openDbNameDialog({ mode: 'duplicate', name, existing })}
+        ondropdatabase={(args) => void requestDropDatabase(args)}
+        ondatabaseinfo={(args) => void openDatabaseInfo(args)}
+        onterminatedbsessions={(args) => void terminateDbSessions(args)}
+        {databasesRefreshKey}
         onnewtable={() => (showCreateTableDialog = true)}
         onnewschema={() => (showCreateSchemaDialog = true)}
         ontruncatetable={handleTruncateTable}
@@ -6119,6 +7118,21 @@ let rowSearch = $state('')
           <svelte:boundary failed={tabError}>
             {#await import('./InstanceInsightsPage.svelte')}<TabLoading />{:then { default: InstanceInsightsPage }}
               <InstanceInsightsPage active={activeTab?.kind === 'insights'} connectionName={connection?.name ?? connection?.database ?? ''} {dbType} />
+            {/await}
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- Advisor tab - mount once, keep alive. Teardown-eligible: it re-scans on
+           reopen, so nothing the user typed is lost by unmounting it. -->
+      {#if advisorEverOpened}
+        <div
+          class={activeTab?.kind === 'advisor' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'advisor' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./AdvisorPage.svelte')}<TabLoading />{:then { default: AdvisorPage }}
+              <AdvisorPage connectionId={persistConnectionId} />
             {/await}
           </svelte:boundary>
         </div>
@@ -6433,6 +7447,7 @@ let rowSearch = $state('')
             queryMs={sqlQueryMs}
             message={sqlMessage}
             loading={sqlLoading}
+            runningQueryId={activeSqlQueryId}
             error={sqlError}
             multiResults={sqlMultiResults}
             schemaHints={sqlSchemaHints}
@@ -6483,7 +7498,7 @@ let rowSearch = $state('')
             <!-- ── SQL / application error, compact banner ── -->
             <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
               <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
-              <!-- Drivers wrap the cause in transport noise — D1 returns its whole
+              <!-- Drivers wrap the cause in transport noise - D1 returns its whole
                    HTTP envelope around a five-word message. Show the cause; the
                    raw text stays one click away and in the query log. -->
               <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">
@@ -6565,7 +7580,7 @@ let rowSearch = $state('')
                 {enums}
                 columnSearch={structureSearch}
                 loading={loadingStructure}
-                onrefresh={() => { void loadStructure(); void loadTriggers() }}
+                onrefresh={() => { void loadStructure(); void reloadCatalogKind('triggers') }}
               />
             {/await}
           {:else}
@@ -6594,6 +7609,8 @@ let rowSearch = $state('')
             hasPrimaryKey={primaryKey.length > 0}
             deleting={deletingRows}
                         onrefresh={loadRows}
+            autoRefreshMs={activeAutoRefreshMs}
+            onautorefreshchange={setActiveAutoRefresh}
             onsearchchange={handleRowSearchChange}
             onfilterschange={(f) => void handleRowFiltersChange(f)}
             onsortchange={(s) => void handleRowSortChange(s)}
@@ -6677,7 +7694,9 @@ let rowSearch = $state('')
                 {reloadToken}
                 {dataVersion}
                 {windowed}
+                {windowStatus}
                 onvisiblerange={handleVisibleRange}
+                onretrywindows={retryFailedWindows}
                 columnWidthsKey={activeTable ? `${persistConnectionId}\x00${activeSchema}.${activeTable}` : undefined}
                 loading={loadingRows}
                 {loadingMore}
@@ -6827,12 +7846,15 @@ let rowSearch = $state('')
              shared baseline whether or not a tile carries a chord or wraps to
              two lines. Colors use solid tokens (not fractional alpha) - thinned
              strokes read as fuzzy against the dark panel. -->
-        {@const cell = 'group relative flex h-[5.25rem] flex-col justify-between rounded-lg border border-border/60 bg-card/50 p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
-        {@const proCell = 'group relative flex h-[5.25rem] cursor-not-allowed flex-col justify-between rounded-lg border border-border/40 bg-card/30 p-2.5 text-left transition-[background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.04]'}
+        <!-- min-h, not h: a label that wraps to two lines in a narrow pane grows
+             the tile instead of spilling out of it. min-w-0 + overflow-hidden
+             keep a long word inside the border when the column is tight. -->
+        {@const cell = 'group relative flex min-h-[5.25rem] min-w-0 flex-col justify-between overflow-hidden rounded-lg border border-border/60 bg-card/50 p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
+        {@const proCell = 'group relative flex min-h-[5.25rem] min-w-0 cursor-not-allowed flex-col justify-between overflow-hidden rounded-lg border border-border/40 bg-card/30 p-2.5 text-left transition-[background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.04]'}
         {@const iconCls = 'size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'}
         {@const proIconCls = 'size-4 shrink-0 text-muted-foreground/50'}
-        {@const labelCls = 'text-ui-2xs font-medium leading-[1.25] text-foreground/85 transition-colors group-hover:text-foreground'}
-        {@const proLabelCls = 'text-ui-2xs font-medium leading-[1.25] text-muted-foreground/60'}
+        {@const labelCls = 'text-ui-2xs font-medium leading-[1.25] text-foreground/85 transition-colors group-hover:text-foreground [overflow-wrap:anywhere]'}
+        {@const proLabelCls = 'text-ui-2xs font-medium leading-[1.25] text-muted-foreground/60 [overflow-wrap:anywhere]'}
 
         <!-- Shift is spelled out off macOS: the bundled UI/mono webfonts have no
              U+21E7, so "Ctrl⇧E" fell back mid-word and rendered as garbage.
@@ -6850,7 +7872,7 @@ let rowSearch = $state('')
           <button
             type="button"
             {onclick}
-            title={opts.hint ? `${opts.hint}${locked ? ' — Pro' : ''}` : locked ? `${label} — Pro` : label}
+            title={opts.hint ? `${opts.hint}${locked ? ' - Pro' : ''}` : locked ? `${label} - Pro` : label}
             class={locked ? proCell : cell}
           >
             <span class="flex w-full items-center justify-between gap-1.5">
@@ -6860,9 +7882,12 @@ let rowSearch = $state('')
             <!-- Label + chord anchored to the bottom. The chord row is always
                  present (empty when a tile has no shortcut) so every label in a
                  row lands on the same baseline, wrapped or not. -->
-            <span class="mt-auto flex w-full flex-col gap-1">
+            <span class="mt-auto flex w-full min-w-0 flex-col gap-1">
               <span class={locked ? proLabelCls : labelCls}>{label}</span>
-              <span class="flex h-[0.85rem] items-center">
+              <!-- A chord is a hint, not the point of the tile: when the column
+                   is too narrow for "Ctrl Shift E" it clips here rather than
+                   printing across the neighbouring tile. -->
+              <span class="flex h-[0.85rem] min-w-0 items-center overflow-hidden">
                 {#if opts.keys && !locked}{@render chord(opts.keys)}{/if}
               </span>
             </span>
@@ -6896,8 +7921,13 @@ let rowSearch = $state('')
             {/if}
           </div>
 
-          <!-- Action grid, max-w-md keeps all sections aligned -->
-          <div class="grid w-full max-w-md grid-cols-4 gap-2">
+          <!-- Action grid, max-w-md keeps all sections aligned. Column COUNT is
+               derived from the space available rather than fixed at 4: the pane
+               narrows whenever the sidebar is dragged wider, and four columns of
+               a 28rem grid squeezed into half that width is what pushed labels
+               and chords outside their tiles. At full width the track floor
+               still resolves to the same four columns. -->
+          <div class="grid w-full max-w-md grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-2">
 
             {#if isRedis}
               {@render tile(KeyRound, 'Keyspace', openRedisTab, {})}
@@ -6924,8 +7954,10 @@ let rowSearch = $state('')
 
             {#if !isRedis}
               {@render tile(Database, 'Insights', openInsightsTab, {})}
+              <!-- Advisor is reachable from ⌘K and the page navigator only. Quick
+                   access is the short list, not every page. -->
               {@render tile(Boxes, 'Objects', openObjectsTab, {})}
-              {@render tile(FileCode2, 'Codegen', openOrmSchemaTab, { pro: true, hint: 'Codegen — schema as Prisma or Drizzle code' })}
+              {@render tile(FileCode2, 'Codegen', openOrmSchemaTab, { pro: true, hint: 'Codegen - schema as Prisma or Drizzle code' })}
               {@render tile(BarChart2, 'Charts', openChartsTab, { pro: true })}
               {@render tile(GitBranch, 'Diagrams', openDiagramsTab, { pro: true })}
               {@render tile(History, 'Timeline', openSchemaTimelineTab, { pro: true })}
@@ -7066,25 +8098,7 @@ let rowSearch = $state('')
   onopenpages={() => { commandPage = 'pages'; commandOpen = true }}
   bind:readonly={tableReadonly}
   ondisconnect={requestDisconnect}
-  oncreatedatabase={async ({ name, owner, encoding, lcCollate, lcCtype, template, connectionLimit }) => {
-    const escaped = name.replace(/"/g, '""')
-    let sql
-    if (dbType === 'mysql') {
-      sql = `CREATE DATABASE \`${name.replace(/`/g, '``')}\``
-      if (encoding) sql += ` CHARACTER SET ${encoding}`
-      if (lcCollate) sql += ` COLLATE ${lcCollate}`
-    } else {
-      sql = `CREATE DATABASE "${escaped}"`
-      if (encoding) sql += `\n  ENCODING '${encoding}'`
-      if (template) sql += `\n  TEMPLATE ${template}`
-      if (lcCollate) sql += `\n  LC_COLLATE '${lcCollate}'`
-      if (lcCtype) sql += `\n  LC_CTYPE '${lcCtype}'`
-      if (owner) sql += `\n  OWNER "${owner.replace(/"/g, '""')}"`
-      if (connectionLimit != null && connectionLimit !== -1) sql += `\n  CONNECTION LIMIT ${connectionLimit}`
-    }
-    await executeDdl(sql)
-    toast.success(`Database "${name}" created`)
-  }}
+  oncreatedatabase={createDatabase}
 />
 {/if}
 

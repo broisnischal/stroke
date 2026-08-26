@@ -36,6 +36,8 @@
     setLastConnectionId,
   } from "$lib/stores/connections.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import PasswordInput from "./PasswordInput.svelte";
+  import { requireUnlock } from "$lib/stores/app-lock.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -222,7 +224,7 @@
 
   let saved = $state(loadSavedConnections().sort(byLastConnected));
   /** Filter over the saved rail. Matches the things you would recognise a
-   *  connection by — its name, its engine, and where it points. */
+   *  connection by - its name, its engine, and where it points. */
   let savedQuery = $state("");
   /** @type {HTMLInputElement | null} */
   let savedSearchEl = $state(null);
@@ -235,7 +237,7 @@
         .some((v) => String(v).toLowerCase().includes(q)),
     );
   });
-  /** What Enter in the filter acts on — same target the eye is already on. */
+  /** What Enter in the filter acts on - same target the eye is already on. */
   const firstSavedMatch = $derived(savedMatches[0] ?? null);
 
   /**
@@ -943,7 +945,7 @@
     )
       return {
         title: "The username or password was rejected",
-        hint: "The server answered, so the address is right — only the credentials were refused.",
+        hint: "The server answered, so the address is right - only the credentials were refused.",
         actionLabel: "Check password",
         action: () => focusField("cn-pass"),
       };
@@ -969,7 +971,7 @@
     )
       return {
         title: "That database doesn't exist on the server",
-        hint: 'Check the name — on PostgreSQL the default database is usually "postgres".',
+        hint: 'Check the name - on PostgreSQL the default database is usually "postgres".',
         actionLabel: "Edit database",
         action: () => focusField("cn-db"),
       };
@@ -1047,7 +1049,12 @@
   }
 
   /** Open `conn` with the driver its `type` calls for. */
-  function openConnection(conn) {
+  async function openConnection(conn) {
+    // Every connect from this dialog is user-initiated, so it is exactly what
+    // the "ask when connecting" PIN setting is about. A no-op when no PIN is set.
+    if (!(await requireUnlock("Unlock to connect to a database"))) {
+      throw new Error("Cancelled - the PIN was not entered.");
+    }
     if (conn.type === "sqlite") return connectSqlite(conn);
     if (conn.type === "d1") return connectD1(conn);
     if (conn.type === "libsql") return connectLibSql(conn);
@@ -1172,7 +1179,7 @@
   let localPhase = $state(/** @type {'idle'|'scanning'|'done'} */ ("idle"));
 
   /**
-   * ⌘R / Ctrl+R — rescan. Reloads the saved list as well as the local scan, so
+   * ⌘R / Ctrl+R - rescan. Reloads the saved list as well as the local scan, so
    * one key means "show me what is actually there now".
    * @param {KeyboardEvent} e
    */
@@ -1220,7 +1227,7 @@
       badge: `:${s.port}`,
       subtitle: built ? s.target : (s.reason ?? ""),
       hint: built
-        ? `${s.target} — from ${s.projectDir}/${s.source}`
+        ? `${s.target} - from ${s.projectDir}/${s.source}`
         : (s.reason ?? ""),
       conn: built && {
         ...built,
@@ -1281,7 +1288,7 @@
       title: m.name,
       badge: `:${m.port}`,
       subtitle: m.target,
-      hint: `${m.name} (pid ${m.pid}) — connects as ${m.user || "the default user"}`,
+      hint: `${m.name} (pid ${m.pid}) - connects as ${m.user || "the default user"}`,
       conn: {
         id: m.id,
         type: m.engine,
@@ -1395,7 +1402,7 @@
 
   /**
    * Open a local target. Nobody typed these credentials, but the connection
-   * still has to survive a disconnect and an app restart — so it joins the list
+   * still has to survive a disconnect and an app restart - so it joins the list
    * under a stable id and becomes "last connection", and the normal resume path
    * brings it back even once the studio or container scan is stale.
    * @param {LocalTarget} t
@@ -1471,7 +1478,7 @@
 
   /**
    * Persist the form WITHOUT connecting. Same validation and payload as
-   * handleConnect, minus the connect round trip and the dialog close — so a
+   * handleConnect, minus the connect round trip and the dialog close - so a
    * connection can be filed away (or an edit corrected) while the current
    * session stays live. Re-stamps `baseline` so the "Unsaved" dot clears and the
    * close guard stops treating the form as dirty.
@@ -1670,7 +1677,7 @@
      preventDefault matters: without it the webview reloads the whole app. -->
 <!-- ⌘R is registered in the CAPTURE phase, deliberately.
      `svelte:window onkeydown` listens on the bubble, so any handler between the
-     focused element and window that calls stopPropagation swallows it — and the
+     focused element and window that calls stopPropagation swallows it - and the
      dialog is full of inputs and a bits-ui overlay that do exactly that. Capture
      runs before any of them, which is also the only way to be sure preventDefault
      lands before the webview treats ⌘R as "reload the app". -->
@@ -1996,7 +2003,7 @@
             <!-- Search. Four connections fit on screen; forty do not, and the
                  rail is the fastest way in for someone who already knows which
                  database they want.
-                 Shown from two connections up — the point at which there is
+                 Shown from two connections up - the point at which there is
                  something to tell apart. It used to appear only past five, so
                  the control materialised out of nowhere as the list grew, and
                  the people most likely to reach for it were the ones who had
@@ -2023,7 +2030,7 @@
                     oninput={() => (savedStagger = false)}
                     onkeydown={(e) => {
                       if (e.key === "Escape" && savedQuery) {
-                        // Clear first, close the dialog second — Escape on a
+                        // Clear first, close the dialog second - Escape on a
                         // non-empty filter should undo the filter, not the dialog.
                         e.preventDefault();
                         e.stopPropagation();
@@ -2295,7 +2302,7 @@
                 {/if}
               </div>
               <!-- The rescan already existed as a size-3 glyph at 35% opacity beside a
-                   section heading — findable only if you knew it was there. This is the
+                   section heading - findable only if you knew it was there. This is the
                    same action, where you would look for it. -->
               <button
                 type="button"
@@ -2471,7 +2478,7 @@
                         <button
                           type="button"
                           disabled={off}
-                          title={off ? `${d.label} — coming soon` : d.desc}
+                          title={off ? `${d.label} - coming soon` : d.desc}
                           onclick={() => pickEngine(d.id)}
                           class={cn(
                             "group flex h-9 items-center gap-2 rounded-md border px-2.5 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out",
@@ -2699,10 +2706,9 @@
                               <div class="col-span-6 sm:col-span-3">
                                 <label for="cn-pass" class={lbl}>Password</label
                                 >
-                                <Input
+                                <PasswordInput
                                   id="cn-pass"
                                   bind:value={password}
-                                  type="password"
                                   autocomplete="current-password"
                                   class={cn(
                                     inp,
@@ -2811,10 +2817,9 @@
                                   >(optional)</span
                                 ></label
                               >
-                              <Input
+                              <PasswordInput
                                 id="cn-libsql-token"
                                 bind:value={libsqlToken}
-                                type="password"
                                 placeholder="eyJhbGciOiJFZERTQSJ9…"
                                 class={cn(inp, "font-mono text-ui-2xs")}
                               />
@@ -2931,10 +2936,9 @@
                                 <label for="cn-ch-pass" class={lbl}
                                   >Password</label
                                 >
-                                <Input
+                                <PasswordInput
                                   id="cn-ch-pass"
                                   bind:value={password}
-                                  type="password"
                                   autocomplete="current-password"
                                   class={cn(
                                     inp,
@@ -3107,10 +3111,9 @@
                                 <label for="cn-mssql-pass" class={lbl}
                                   >Password</label
                                 >
-                                <Input
+                                <PasswordInput
                                   id="cn-mssql-pass"
                                   bind:value={password}
-                                  type="password"
                                   autocomplete="current-password"
                                   class={cn(
                                     inp,
@@ -3160,10 +3163,9 @@
                                   >(optional)</span
                                 ></label
                               >
-                              <Input
+                              <PasswordInput
                                 id="cn-redis-pass"
                                 bind:value={password}
-                                type="password"
                                 autocomplete="current-password"
                                 class={cn(
                                   inp,
@@ -3188,7 +3190,7 @@
                               <p
                                 class="mt-1 text-ui-3xs text-muted-foreground/30"
                               >
-                                Logical database number (0–15).
+                                Logical database number (0-15).
                               </p>
                             </div>
 
@@ -3315,10 +3317,9 @@
                             <label for="cn-d1-token" class={lbl}
                               >API token</label
                             >
-                            <Input
+                            <PasswordInput
                               id="cn-d1-token"
                               bind:value={apiToken}
-                              type="password"
                               class={inp}
                             />
                           </div>
@@ -3351,7 +3352,7 @@
                         ? "Everything stays on this machine"
                         : railOpen
                           ? "Or pick a saved connection on the left"
-                          : "Saved connections are hidden — reopen them from the top left"}
+                          : "Saved connections are hidden - reopen them from the top left"}
                     </span>
                   {:else if connecting}
                     <span

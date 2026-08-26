@@ -1,15 +1,15 @@
-//! Live mode — push table changes to the frontend so a viewed table refreshes
+//! Live mode - push table changes to the frontend so a viewed table refreshes
 //! itself when the underlying data changes.
 //!
 //! Both engines use cheap **polling** (a background task per watched table) so
 //! live mode needs no special privileges and works through connection poolers
 //! (pgbouncer, Supabase, etc.) that break trigger DDL / `LISTEN`:
 //!
-//! - **SQLite**: `PRAGMA data_version` — an in-memory counter that bumps whenever
+//! - **SQLite**: `PRAGMA data_version` - an in-memory counter that bumps whenever
 //!   *another* connection/process commits a change to the file.
 //! - **Postgres**: the `n_tup_ins + n_tup_upd + n_tup_del` counters from
-//!   `pg_stat_user_tables` — increments on every insert/update/delete, readable
-//!   by any role, no table scan. (A ~1–2s stats-flush lag is fine for live view.)
+//!   `pg_stat_user_tables` - increments on every insert/update/delete, readable
+//!   by any role, no table scan. (A ~1-2s stats-flush lag is fine for live view.)
 //!
 //! Only one table is watched at a time (the active tab). Starting a new watch
 //! tears the previous one down first.
@@ -85,7 +85,7 @@ pub fn stop(live: &LiveState) {
 }
 
 /// A watcher whose pool keeps failing is polling a connection that no longer
-/// exists (the app connected elsewhere without stopping live mode) — after this
+/// exists (the app connected elsewhere without stopping live mode) - after this
 /// many straight failures the task self-terminates instead of holding the
 /// closed pool alive and erroring every tick forever.
 const MAX_CONSECUTIVE_ERRORS: u32 = 10;
@@ -118,7 +118,7 @@ fn spawn_sqlite(
                     }
                     last = Some(v);
                 }
-                // Transient (pool busy) — retry next tick. But a run of straight
+                // Transient (pool busy) - retry next tick. But a run of straight
                 // failures means the pool is gone (connection switched away
                 // without live::stop): a closed pool fails instantly and
                 // permanently, so stop instead of erroring forever.
@@ -162,10 +162,10 @@ fn spawn_pg(
                     }
                     last = Some(v);
                 }
-                // No stats row yet (table never modified, or track_counts off) —
+                // No stats row yet (table never modified, or track_counts off) -
                 // keep polling; the row appears once activity is recorded.
                 Ok(None) => { consecutive_errors = 0; }
-                // See MAX_CONSECUTIVE_ERRORS — a permanently failing pool means
+                // See MAX_CONSECUTIVE_ERRORS - a permanently failing pool means
                 // the connection was switched away; stop polling it.
                 Err(_) => {
                     consecutive_errors += 1;

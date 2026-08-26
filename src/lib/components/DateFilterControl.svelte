@@ -51,8 +51,8 @@
   const label = $derived.by(() => {
     if (op === "between") {
       const [f, t] = (value || "").split(",");
-      if (f && t) return `${f} – ${t}`;
-      if (f) return `${f} – …`;
+      if (f && t) return `${f} - ${t}`;
+      if (f) return `${f} - …`;
       return "Pick range…";
     }
     if (op === "is_not_null") return "any date";

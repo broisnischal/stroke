@@ -1,7 +1,7 @@
 <script>
   // A geometry cell, read rather than dumped.
   //
-  // The generic editor showed `SRID=3857;POINT(-8252218.02 5023060.07)` — the
+  // The generic editor showed `SRID=3857;POINT(-8252218.02 5023060.07)` - the
   // value, but not the information. What you want from a geometry is where it
   // is and what shape it has: so the default view draws it, names the type and
   // CRS, and (for the SRIDs everyone actually uses) reads the position back as
@@ -51,7 +51,7 @@
   const proj = $derived(geom && !geom.empty ? projectGeometry(geom, W, H) : null)
   /**
    * The geometry as lon/lat, when it is on Earth. Non-null is what promotes the
-   * preview from an abstract plot to a real map — a projected local CRS has no
+   * preview from an abstract plot to a real map - a projected local CRS has no
    * place on one, so those keep the plot.
    */
   const geoShape = $derived(geom ? geoShapeOf(geom) : null)
@@ -246,7 +246,7 @@
             </div>
           {/if}
 
-          <!-- The human reading of where this is — the payoff line, always fully
+          <!-- The human reading of where this is - the payoff line, always fully
                visible rather than squeezed into a truncating tile. -->
           {#if position}
             <div class="mt-2.5 flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/10 px-2.5 py-1.5">
@@ -295,7 +295,7 @@
           {/each}
           {#if geom.vertexCount > coordsShown || coordParts.some((p) => p.vertices.length > COORD_CAP)}
             <p class="py-2 text-center text-ui-3xs text-muted-foreground/50">
-              Showing the first {COORD_CAP.toLocaleString()} vertices per part — the raw tab has all of them.
+              Showing the first {COORD_CAP.toLocaleString()} vertices per part - the raw tab has all of them.
             </p>
           {/if}
         </div>

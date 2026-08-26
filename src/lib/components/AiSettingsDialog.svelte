@@ -62,7 +62,7 @@
   // Selection styling shared by the provider and model grids, so the two steps read
   // as one system. An idle card is a hairline that firms up on hover; a selected one
   // is a soft tinted surface with an inset rim rather than a saturated stroke around
-  // a flat fill — the stroke was the loudest thing in the dialog.
+  // a flat fill - the stroke was the loudest thing in the dialog.
   const CARD_BASE =
     "flex w-full items-center gap-2.5 rounded-lg border text-left outline-none transition-[background-color,border-color,box-shadow] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40";
   const CARD_SELECTED =
@@ -118,12 +118,12 @@
   let localModels = $state(/** @type {string[]} */ ([]));
   let localModelsLoading = $state(false);
   let localModelsError = $state("");
-  /** The server answered and has nothing installed — an empty state, not a
+  /** The server answered and has nothing installed - an empty state, not a
    *  failure. Holds the command that fixes it, or "" when not applicable. */
   let localModelsEmpty = $state("");
   let emptyCopied = $state("");
   /** What ollama.com currently offers. Fetched only when the empty state is on
-   *  screen — the user is configuring Ollama at that moment — never at startup. */
+   *  screen - the user is configuring Ollama at that moment - never at startup. */
   let ollamaSuggestions = $state(/** @type {{ local: any[], cloud: any[] }} */ ({ local: [], cloud: [] }));
   let suggestionsLoading = $state(false);
   let cloudOpen = $state(false);
@@ -145,7 +145,7 @@
   let omniServing = $state(false);
   /** Last line the backend printed. `npm i -g` can run for a minute; a spinner
    *  with no output is indistinguishable from a hang, which is what it looked
-   *  like. The Rust side has been streaming these all along — nothing listened. */
+   *  like. The Rust side has been streaming these all along - nothing listened. */
   let omniLog = $state("");
   /** @type {(() => void) | null} */
   let omniUnlisten = null;
@@ -219,7 +219,7 @@
 
   // Latched, not guarded on the result. A failed fetch leaves the lists empty,
   // so a guard on emptiness re-enters the moment it settles and the spinner
-  // never stops — the same loop the Copilot model fetch had, a few lines up.
+  // never stops - the same loop the Copilot model fetch had, a few lines up.
   // One attempt per dialog session; Recheck is the retry.
   //
   // Runs for any Ollama setup rather than only the empty state: /v1/models
@@ -260,11 +260,11 @@
       localModels = ids;
       if (ids.length === 0) {
         // Answered, with nothing to offer. That is not a failure and must not be
-        // dressed as one — telling someone to start a server that just replied
+        // dressed as one - telling someone to start a server that just replied
         // is worse than saying nothing.
         // A marker, not a command: the suggestions below come from Ollama's
         // registry, and a model name written down here would be wrong within
-        // months — llama3.1:8b, which used to live on this line, is no longer
+        // months - llama3.1:8b, which used to live on this line, is no longer
         // on the registry at all.
         localModelsEmpty = isOllama ? "ollama" : isOmniroute ? "omniroute" : "server";
       } else if (!ids.includes(formModel)) {
@@ -394,7 +394,7 @@
       // so bouncing back to the list just asks for a second dismissal.
       if (isNew) open = false;
     } catch (e) {
-      // Stay on the form and surface the failure in the step-2 banner —
+      // Stay on the form and surface the failure in the step-2 banner -
       // otherwise the spinner just stops and the click appears to do nothing.
       testState = "error";
       testMsg = String(/** @type {any} */ (e)?.message ?? e).slice(0, 200);
@@ -709,7 +709,7 @@
                 {#if omniEnv && !omniEnv.node}
                   <p class="flex items-start gap-2 text-ui-3xs text-destructive">
                     <AlertTriangle class="mt-0.5 size-3 shrink-0" />
-                    <span>Node.js is not installed. OmniRoute runs on Node — install it from nodejs.org, then Recheck.</span>
+                    <span>Node.js is not installed. OmniRoute runs on Node - install it from nodejs.org, then Recheck.</span>
                   </p>
                   <button
                     type="button"
@@ -747,8 +747,8 @@
                 {/if}
 
                 <!-- `npm i -g` runs for tens of seconds. A spinner alone is
-                     indistinguishable from a hang — which is exactly what it
-                     looked like — so show what the process is actually saying.
+                     indistinguishable from a hang - which is exactly what it
+                     looked like - so show what the process is actually saying.
                      Reserved height, so lines arriving don't push the dialog. -->
                 {#if omniBusy === 'installing' || omniBusy === 'starting'}
                   <p class="min-h-4 truncate font-mono text-ui-3xs text-muted-foreground/50" title={omniLog}>
@@ -834,7 +834,7 @@
                         {#each ollamaSuggestions.cloud.slice(0, 5) as m (m.id)}{@render suggestionRow(m)}{/each}
                       </div>
                       <p class="text-ui-3xs text-muted-foreground/50">
-                        Cloud models need <code class="font-mono">ollama signin</code> once — no download, and they are far
+                        Cloud models need <code class="font-mono">ollama signin</code> once - no download, and they are far
                         larger than anything local.
                       </p>
                     {/if}
@@ -856,8 +856,8 @@
                 {/if}
               </div>
             {/if}
-            <!-- Cloud models never appear in /v1/models — Ollama only lists what
-                 is on disk — so without this there is no path to one from the
+            <!-- Cloud models never appear in /v1/models - Ollama only lists what
+                 is on disk - so without this there is no path to one from the
                  picker at all, however many local models exist. -->
             {#if isOllama && !localModelsEmpty && ollamaSuggestions.cloud.length > 0}
               <div class="mt-2 flex flex-col gap-1.5">
@@ -985,7 +985,7 @@
               <CopilotLogin onconnect={onCopilotConnect} ondisconnect={() => { testState = "idle"; testMsg = "" }} />
             {:else if isStroke}
               <p class="rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5 text-ui-xs text-muted-foreground">
-                No key needed — this is Stroke's own free tier, with a daily limit
+                No key needed - this is Stroke's own free tier, with a daily limit
                 per device. Add your own provider any time for unlimited use.
               </p>
             {:else if !isOllama}

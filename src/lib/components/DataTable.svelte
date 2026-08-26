@@ -5,7 +5,8 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight } from '$lib/stores/settings.js'
+  import { createSmoothScroll, wheelPixels } from '$lib/smooth-scroll.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -94,6 +95,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   } from "$lib/stores/pending-table-edits.js";
   import { formatCellValue, transformsFor, transformById, enabledGeneratorGroups, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
   import { pluginState, isPluginEnabled } from "$lib/stores/plugins.js";
+  import { externalFormatVersion } from "$lib/plugins/external/host.js";
   import { isImageUrl } from "$lib/plugins/extensions/cell-transforms.js";
   import { t } from "$lib/i18n.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
@@ -112,6 +114,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Check from "@lucide/svelte/icons/check";
   import Loader from "@lucide/svelte/icons/loader";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
   import DateTimePicker from "./DateTimePicker.svelte";
   import ColumnStatsPanel from "./ColumnStatsPanel.svelte";
@@ -124,6 +127,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     withAlpha,
     drawIcon,
     roundRect,
+    roundRectPath,
     drawCheckbox,
     computeColumnGeometry,
     colDrawnX,
@@ -296,6 +300,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     windowed = false,
     /** Called (on change) with the currently visible row range in windowed mode. */
     onvisiblerange = /** @type {(start: number, end: number) => void} */ (() => {}),
+    /** Windowed mode: what the parent's window fetcher is doing, so the grid can
+     *  say what it is waiting for instead of shimmering silently.
+     *  @type {{ slow: boolean, failed: boolean } | null} */
+    windowStatus = null,
+    /** Retry the windows that gave up (the loading pill's Retry button). */
+    onretrywindows = /** @type {() => void} */ (() => {}),
     /** Infinite scroll mode - when true the table fires onloadmore near the bottom. */
     infiniteScroll = false,
     /** True while an incremental "load more" fetch is in flight. */
@@ -610,7 +620,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // and the level persists via app settings.
 
   // All layout constants scale with canvasZoom so the entire canvas zooms together.
-  const ROW_HEIGHT = $derived(Math.round(24 * canvasZoom))
+  // The base height comes from Settings → Appearance → Row spacing; everything
+  // else in the grid (row tops, hit tests, the scroll spacer) is derived from
+  // ROW_HEIGHT, so changing it reflows the whole grid with no other edits.
+  const ROW_HEIGHT = $derived(Math.round(rowSpacingHeight($appRowSpacing) * canvasZoom))
 
   // `_scrollTop` is the VIRTUAL scroll offset used for all row math (content
   // space). `_physScrollTop` is the raw DOM scrollTop of the container, which is
@@ -935,6 +948,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const _vexprTextCache = new Map();
   /** @type {Map<number, Map<string, string>>} */
   const _colTfCache = new Map();
+  /** The row object each cached index was built from. The array-identity check
+   *  below misses one case: saving a cell swaps that ONE row for a new array and
+   *  leaves `rows` itself the same object (it is $state.raw - the parent bumps
+   *  dataVersion instead of replacing it), so the caches kept serving the
+   *  pre-edit text and an applied edit only appeared after a refresh.
+   *  @type {Map<number, unknown>} */
+  const _dispCacheRowRef = new Map();
   let _dispCacheRows = /** @type {unknown} */ (null);
   let _dispCacheVFns = /** @type {unknown} */ (null);
   let _dispCacheTFns = /** @type {unknown} */ (null);
@@ -944,12 +964,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_dispCacheRows !== rows) {
       _dispCacheRows = rows;
       _cellTextCache.clear(); _vexprTextCache.clear(); _colTfCache.clear();
+      _dispCacheRowRef.clear();
       // Keyed by the full vector literal (10-20KB each for big embeddings), so
       // stale entries from previous pages/tables must not accumulate.
       _vectorDisplayCache.clear();
     }
     if (_dispCacheVFns !== _vcolFns) { _dispCacheVFns = _vcolFns; _vexprTextCache.clear(); }
     if (_dispCacheTFns !== _colTransformFns) { _dispCacheTFns = _colTransformFns; _colTfCache.clear(); }
+  }
+  /** Drop one row's cached text when the row behind it was replaced in place.
+   *  Called once per row per frame from drawBodyRow - not per cell, which would
+   *  put a Map lookup on every drawn cell for a check that can only change per row. */
+  function syncRowDisplayCache(/** @type {number} */ idx) {
+    const row = rows[idx];
+    if (_dispCacheRowRef.get(idx) === row) return;
+    if (_dispCacheRowRef.size >= _DISP_CACHE_MAX) _dispCacheRowRef.clear();
+    _dispCacheRowRef.set(idx, row);
+    _cellTextCache.delete(idx);
+    _vexprTextCache.delete(idx);
+    _colTfCache.delete(idx);
   }
   function cellDisplayText(/** @type {number} */ idx, /** @type {number} */ actualIdx, /** @type {unknown} */ value) {
     let arr = _cellTextCache.get(idx);
@@ -982,7 +1015,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Whether any formatter/linkifier is enabled - gates the per-cell directive
   // lookup so the scroll hot path does zero extension work in the common case.
-  const _extActive = $derived.by(() => { void $pluginState; return anyDisplayExtEnabled(); });
+  const _extActive = $derived.by(() => { void $pluginState; void $externalFormatVersion; return anyDisplayExtEnabled(); });
   // Reused per-cell stats context - formatters read `.stats` synchronously and
   // don't retain it, so one scratch object avoids an allocation per drawn cell
   // while a stats-dependent extension (heatmap / annotator) is enabled.
@@ -995,6 +1028,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => { void dataVersion; scheduleDraw(); });
   let _emittedFirst = -1;
   let _emittedLast = -1;
+  // A reload that keeps the scroll position hands over a *fresh* rows array -
+  // for a windowed view, one holding nothing but its probe. The viewport has not
+  // moved, so the range is the same one the parent already heard and the dedupe
+  // below would swallow the emit, leaving every row under the viewport a
+  // skeleton until the user happened to scroll. Identity change = forget what
+  // was emitted, and let the next frame re-ask for the windows that matter.
+  $effect(() => {
+    void rows;
+    _emittedFirst = -1;
+    _emittedLast = -1;
+  });
   function emitVisibleRange(first, last) {
     if (!windowed) return;
     if (first === _emittedFirst && last === _emittedLast) return;
@@ -1005,14 +1049,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Repaint when extension settings or column stats change - both affect drawn
   // cell text, badges, tints, and the header annotator strip.
-  $effect(() => { void $pluginState; void _colStats; scheduleDraw(); });
+  // `externalFormatVersion` is the other half of the external-plugin contract:
+  // a plugin's directives arrive after the frame that asked for them, and this
+  // is what brings that frame back.
+  $effect(() => { void $pluginState; void $externalFormatVersion; void _colStats; scheduleDraw(); });
 
   // Resolved canvas-grid style preset (Settings → Appearance). Read once per frame
   // by draw() and passed into the row context, so it never adds per-cell reactivity.
-  const _tableStyle = $derived(TABLE_STYLES[normalizeTableStyle($appTableStyle)]);
-  // Repaint the grid the moment the user switches preset.
+  // The zebra flag is folded in here rather than checked per cell: the preset can
+  // bring its own alternating shading (Striped, Dots) and the standalone setting
+  // adds it to any other preset, so draw() only ever reads one boolean.
+  const _tableStyle = $derived.by(() => {
+    const preset = TABLE_STYLES[normalizeTableStyle($appTableStyle)]
+    const zebra = preset.zebra === true || $appZebraRows === true
+    return zebra === (preset.zebra === true) ? preset : { ...preset, zebra }
+  });
+  // Repaint the grid the moment the user switches preset, alignment, spacing or shading.
   $effect(() => { void $appTableStyle; scheduleDraw(); });
   $effect(() => { void $appTableAlign; scheduleDraw(); });
+  $effect(() => { void $appZebraRows; scheduleDraw(); });
 
   // ── Search-match highlighting ──────────────────────────────────────────────
   // The toolbar search filters rows server-side (ILIKE, case-insensitive);
@@ -1772,7 +1827,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (e.key === 'Tab' || e.key === 'Enter') {
       e.preventDefault()
       // Every column takes a value now, including generated ones, so Tab must
-      // be able to reach them — initial focus still skips them (see beginInsertRow),
+      // be able to reach them - initial focus still skips them (see beginInsertRow),
       // because overriding a sequence is the exception rather than the flow.
       const editableCols = columns
       if (!editableCols.length) return
@@ -2585,7 +2640,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Image / avatar cell thumbnails ───────────────────────────────────────────
   // When a column's transform is avatar / image-thumb, the cell renders the image
   // instead of text. Source images are routinely multi-megapixel, and a decoded
-  // 4000×3000 JPEG costs ~48 MB of RGBA regardless of how small it is drawn — so
+  // 4000×3000 JPEG costs ~48 MB of RGBA regardless of how small it is drawn - so
   // the loader is deliberately stingy:
   //   • only urls painted in the current frame are ever fetched (see _imgWanted),
   //   • at most _IMG_MAX_INFLIGHT decode at a time, the rest queue,
@@ -2599,7 +2654,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const _imgCache = new Map();
   /** @type {Map<string, number>} per-url transient-failure retry counter */
   const _imgRetry = new Map();
-  /** Urls waiting out a retry backoff — not cached, not queued. @type {Set<string>} */
+  /** Urls waiting out a retry backoff - not cached, not queued. @type {Set<string>} */
   const _imgBackoff = new Set();
   /** Pending retry timers, so a destroyed table cannot fire them. @type {Set<number>} */
   const _imgTimers = new Set();
@@ -2616,7 +2671,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /**
    * Center-crop and downscale a loaded image onto a small canvas. Used when
-   * createImageBitmap is unavailable or refuses the image — it rejects
+   * createImageBitmap is unavailable or refuses the image - it rejects
    * cross-origin sources that were not served with CORS headers, and canvas
    * drawing has no such restriction. Falling back here (rather than caching the
    * full-res element) is what keeps a remote image column from retaining
@@ -2660,7 +2715,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * Begin one decode. Remote avatar CDNs (lh3.googleusercontent.com,
    * avatars.githubusercontent.com) throttle bursts of parallel requests and
    * occasionally 403 on the app-origin Referer, so a single onerror is usually
-   * transient — retry with backoff before giving up rather than freezing the
+   * transient - retry with backoff before giving up rather than freezing the
    * cell as "broken image" permanently.
    * @param {string} url
    */
@@ -2752,7 +2807,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /**
-   * Thumbnail for a url if one is ready. Never starts a decode itself — the draw
+   * Thumbnail for a url if one is ready. Never starts a decode itself - the draw
    * path only registers interest, and pumpCellImages decides what actually runs.
    * @param {string} url
    * @returns {ImageBitmap | HTMLCanvasElement | 'error' | null}
@@ -2778,7 +2833,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (ready) {
       ctx.save();
       roundRect(ctx, ix, iy, size, size, radius); ctx.clip();
-      // Already a center-cropped square thumbnail — cheap blit, no per-frame resample.
+      // Already a center-cropped square thumbnail - cheap blit, no per-frame resample.
       ctx.drawImage(/** @type {CanvasImageSource} */ (thumb), ix, iy, size, size);
       ctx.restore();
     }
@@ -2811,7 +2866,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const MAX_VIRTUAL_COLS = 5
   /** Per-column logical width overrides for virtual rel columns, keyed by label (unset = auto). */
   let _vrelWidths = $state(/** @type {Record<string, number>} */ ({}))
-  // Auto width adapts to the longest label (8px/char estimate + padding), clamped 150–260px.
+  // Auto width adapts to the longest label (8px/char estimate + padding), clamped 150-260px.
   const _vrelBaseW = $derived.by(() => {
     if (!virtualRelCols.length) return 200
     const maxChars = Math.max(...virtualRelCols.map(v => v.label.length))
@@ -2938,7 +2993,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * bottom margin so the last row can be scrolled clear of the viewport edge.
    *
    * Embedded results get no margin. They are height-capped, not filled, so the
-   * margin never earns its keep there — it just left two empty row-heights
+   * margin never earns its keep there - it just left two empty row-heights
    * hanging under a short result (a one-row COUNT looked like a broken table).
    */
   const contentHeight = $derived(
@@ -3749,7 +3804,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Modified arrows belong to the app-level handler in StudioShell, not to the
     // cell cursor: Cmd/Ctrl+Arrow is table-level navigation (scroll to top/bottom,
     // first/last column, paginate) and Alt+Arrow is Go Back / Go Forward. Let them
-    // bubble untouched — the old double-handling (cursor jumped one cell AND the
+    // bubble untouched - the old double-handling (cursor jumped one cell AND the
     // view navigated) is what made both shortcuts feel broken.
     if (
       (e.ctrlKey || e.metaKey || e.altKey) &&
@@ -3969,7 +4024,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * it sideways. Reserving a fixed strip instead left a permanent dead gap down
    * the column.
    *
-   * Must stay in step with the draw pass below — this is the click target for
+   * Must stay in step with the draw pass below - this is the click target for
    * what that paints.
    */
   function cellButtonRects(cellX, w, ry, rh, { canExpand, alignRight = false }) {
@@ -3999,6 +4054,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // multiply the probe fonts by canvasZoom again - that double-scales them.
     if (!_fonts) _fonts = readFonts(colorProbe)
     syncDisplayCaches()
+    // Shimmer phase for skeleton rows, advanced from the clock so it moves at the
+    // same rate whatever the frame rate. _sawSkeleton is reset here and set by any
+    // skeleton row painted below; the tail uses it to decide whether to keep
+    // animating, so a fully loaded grid schedules nothing at all.
+    _sawSkeleton = false
+    _skelMin = -1
+    _skelMax = -1
+    _shimmerFill = null
+    if (_shimmerOn) _shimmerPhase = (performance.now() % SHIMMER_PERIOD) / SHIMMER_PERIOD
 
     const W = _viewportWidth
     const H = _viewportHeight
@@ -4025,7 +4089,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     ctx.imageSmoothingEnabled = false
     // The panel colour is opaque and covers the whole canvas, so this single
-    // fill also clears the previous frame — a separate clearRect would just be a
+    // fill also clears the previous frame - a separate clearRect would just be a
     // second full-surface pass (measurable on WebKitGTK's CPU-rendered canvas).
     ctx.fillStyle = cPanel
     ctx.fillRect(0, 0, W, H)
@@ -4151,25 +4215,186 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Now that the visible set is known, drop the backlog the viewport has moved
     // past and start whatever decodes fit in the remaining slots.
     if (_imgQueue.length) pumpCellImages()
+    // Keep the shimmer moving while skeleton rows are on screen, and only then.
+    // Capped at ~30fps: it's a slow sweep across a few grey bars, so half the
+    // frames look identical and the other half are free. The moment the windows
+    // land, _sawSkeleton stays false and this loop ends by itself.
+    if (_shimmerOn && _sawSkeleton) {
+      const now = performance.now()
+      if (now - _lastShimmerFrame > 32) {
+        _lastShimmerFrame = now
+        scheduleDraw()
+      } else if (!_shimmerTimer) {
+        _shimmerTimer = setTimeout(() => { _shimmerTimer = 0; scheduleDraw() }, 32)
+      }
+    }
+    publishLoadingSpan()
   }
 
-  /** Skeleton row for a window that hasn't loaded yet (windowed mode only). */
+  // ── "What is it loading?" ─────────────────────────────────────────────────
+  // Skeleton bars say *that* rows are coming, never which ones or how far along,
+  // and on a million-row table a jump can leave a screenful of them up for a
+  // second with nothing to read. The rows being waited on are already known here
+  // - draw() paints them - so they're published to a pill instead of thrown away.
+  /** First/last skeleton row painted this frame. */
+  let _skelMin = -1
+  let _skelMax = -1
+  /** When the current run of skeleton frames began (0 = none on screen). */
+  let _skelSince = 0
+  let _spanPublished = 0
+  /** @type {ReturnType<typeof setTimeout> | 0} */
+  let _spanTimer = 0
+  /** Rows drawn as skeletons, for the pill. @type {{first:number,last:number}|null} */
+  let loadingSpan = $state(/** @type {{first:number,last:number}|null} */ (null))
+  /** A window that lands quickly must not flash a pill on its way past. */
+  const SPAN_SHOW_AFTER = 220
+  /** Reactivity budget: the pill re-reads at most this often, not per frame. */
+  const SPAN_PUBLISH_MS = 150
+
+  /** Push (or clear) the skeleton span for the pill. Called at the end of every
+   *  frame, so it stays off the per-cell path and costs one comparison. */
+  function publishLoadingSpan() {
+    if (!_sawSkeleton || !windowed) {
+      _skelSince = 0
+      if (loadingSpan) loadingSpan = null
+      return
+    }
+    const now = performance.now()
+    if (!_skelSince) _skelSince = now
+    if (now - _skelSince < SPAN_SHOW_AFTER) {
+      // Not yet worth showing. A repaint is already queued while the shimmer
+      // animates; with reduced motion nothing else would come back to check.
+      if (!_shimmerOn && !_spanTimer) {
+        _spanTimer = setTimeout(() => { _spanTimer = 0; scheduleDraw() }, SPAN_SHOW_AFTER)
+      }
+      return
+    }
+    if (now - _spanPublished < SPAN_PUBLISH_MS) return
+    _spanPublished = now
+    if (loadingSpan?.first === _skelMin && loadingSpan?.last === _skelMax) return
+    loadingSpan = { first: _skelMin, last: _skelMax }
+  }
+
+  /**
+   * Deterministic 0..1 from a cell's coordinates.
+   *
+   * Deterministic matters twice over: a bar whose width changed between frames
+   * would flicker, and a skeleton that reshuffles on every scroll frame reads as
+   * the layout moving. Same cell, same width, every frame, until the real value
+   * replaces it.
+   */
+  function cellNoise(/** @type {number} */ row, /** @type {number} */ col) {
+    const h = Math.imul(row * 73856093 ^ col * 19349663, 0x45d9f3b)
+    return ((h >>> 8) & 0xffff) / 0xffff
+  }
+
+  /** Fraction of a frame's sweep the shimmer band covers, in viewport widths. */
+  const SHIMMER_BAND = 0.28
+  /** One full left-to-right pass, in ms. */
+  const SHIMMER_PERIOD = 1400
+  /** True while any skeleton row was painted this frame - drives the shimmer loop. */
+  let _sawSkeleton = false
+  let _shimmerPhase = 0
+  let _lastShimmerFrame = 0
+  /** The frame's highlight gradient, built once and shared by every skeleton row.
+   *  @type {CanvasGradient | null} */
+  let _shimmerFill = null
+  /** @type {ReturnType<typeof setTimeout> | 0} */
+  let _shimmerTimer = 0
+  /** Someone who asked for less motion gets static bars, not a sweep. */
+  const _shimmerOn =
+    typeof matchMedia !== 'function' || !matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  /**
+   * Skeleton row for a window that hasn't loaded yet (windowed mode only).
+   *
+   * Built to be replaced without anything appearing to move: each bar sits on the
+   * text baseline band, is as wide as a plausible value for that cell rather than a
+   * flat 50%, and is flush right in the columns whose values will be flush right.
+   * The old version drew identical half-width bars hard left in every column, so
+   * the moment real rows landed every number jumped to the other side of its cell -
+   * which is what read as the layout shifting.
+   */
   function drawLoadingRow(ctx, idx, ry, rh, c) {
     if (c.tableStyle.zebra && (idx & 1)) {
-      ctx.fillStyle = withAlpha(c.cMutedBg, 0.05)
+      // Softer than a loaded row's stripe: a skeleton row is already busy with bars.
+      ctx.fillStyle = withAlpha(c.cMutedBg, ZEBRA_ALPHA * 0.6)
       ctx.fillRect(0, ry, c.usedW, rh)
     }
+    _sawSkeleton = true
+    if (_skelMin < 0 || idx < _skelMin) _skelMin = idx
+    if (idx > _skelMax) _skelMax = idx
+    // Sit on the text's own band: cap height, centred where the glyphs will be, so
+    // the bar and the value it becomes occupy the same pixels.
+    const barH = Math.max(3, Math.round(rh * 0.28))
     const cy = ry + rh / 2
-    const barH = Math.max(4, Math.round(6 * canvasZoom))
     const gut = geom.gutterWidth
-    ctx.fillStyle = withAlpha(c.cMutedBg, 0.45)
-    for (const col of geom.cols) {
+    // Two passes so each opacity is one fill() for the whole row: the base bars,
+    // then the highlight over the same path. Per-bar fills were the most
+    // expensive thing on screen in exactly the state that has to feel smooth.
+    ctx.beginPath()
+    let any = false
+    for (let ci = 0; ci < geom.cols.length; ci++) {
+      const col = geom.cols[ci]
       const x = colDrawnX(col, geom, _scrollLeft)
       if (x + col.w <= gut || x >= _viewportWidth) continue
-      const bx = Math.max(x, gut) + CELL_PAD_X
-      const bw = Math.min(col.w - CELL_PAD_X * 2, Math.round(col.w * 0.5))
-      if (bw > 4) { roundRect(ctx, bx, cy - barH / 2, bw, barH, barH / 2); ctx.fill() }
+      const avail = col.w - CELL_PAD_X * 2
+      if (avail <= 4) continue
+      // 40-92% of the cell, stable per cell: text of varying length, not a barcode.
+      const bw = Math.max(6, Math.round(avail * (0.4 + cellNoise(idx, ci) * 0.52)))
+      const cellLeft = Math.max(x, gut)
+      const bx = _skeletonRightAligned(col)
+        ? x + col.w - CELL_PAD_X - bw
+        : cellLeft + CELL_PAD_X
+      if (bx + bw <= gut || bx >= _viewportWidth) continue
+      roundRectPath(ctx, bx, cy - barH / 2, bw, barH, barH / 2)
+      any = true
     }
+    if (!any) return
+    ctx.fillStyle = withAlpha(c.cMutedBg, 0.4)
+    ctx.fill()
+    if (!_shimmerOn) return
+    // Same path again under the sweep. The gradient is transparent outside the
+    // band, so bars away from it are untouched without testing them.
+    if (!_shimmerFill) _shimmerFill = buildShimmerFill(ctx, c.cMutedBg)
+    ctx.fillStyle = _shimmerFill
+    ctx.fill()
+  }
+
+  /**
+   * The frame's sweep, as one gradient every skeleton row fills through.
+   *
+   * Per-bar hit-testing against a band was what made this read as flicker rather
+   * than shimmer: a bar was either lit or not, so it *stepped* between two
+   * opacities, and every row stepped on the same frame - a hard-edged column of
+   * bars blinking on and off. A gradient ramps each bar continuously instead, and
+   * costs one allocation per frame rather than one per row.
+   *
+   * The axis is tilted a little so the highlight crosses the grid on a diagonal;
+   * a perfectly vertical edge over aligned bars is what the eye reads as a seam.
+   */
+  function buildShimmerFill(ctx, mutedBg) {
+    const band = Math.max(1, _viewportWidth * SHIMMER_BAND)
+    // Travel a full band clear of both edges. The old sweep stopped with the band
+    // still half on screen and jumped back to the left, so the highlight vanished
+    // mid-grid once a period - a blink, exactly on the beat.
+    const cx = -band + _shimmerPhase * (_viewportWidth + band * 2)
+    const g = ctx.createLinearGradient(cx - band / 2, 0, cx + band / 2, band * 0.35)
+    const peak = 0.34
+    g.addColorStop(0, withAlpha(mutedBg, 0))
+    g.addColorStop(0.35, withAlpha(mutedBg, peak * 0.45))
+    g.addColorStop(0.5, withAlpha(mutedBg, peak))
+    g.addColorStop(0.65, withAlpha(mutedBg, peak * 0.45))
+    g.addColorStop(1, withAlpha(mutedBg, 0))
+    return g
+  }
+
+  /** Whether a skeleton bar should hug the right edge, matching where the real
+   *  value will sit. Uses the same name→index map drawCell does, so it costs a
+   *  Map lookup rather than a scan of `columns` per bar per frame. @param {any} col */
+  function _skeletonRightAligned(col) {
+    const actualIdx = _nameToActualIdx.get(col.name) ?? -1
+    return actualIdx >= 0 && isRightAlignedColumn(actualIdx)
   }
 
   /**
@@ -4187,11 +4412,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (selected.has(idx)) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.18 : 0.13)
     if (focusedRow === idx) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.09 : 0.07)
     if (hoveredRow === idx) return withAlpha(c.cMutedBg, 0.18)
-    // Zebra striping - a soft tint on odd rows. Below every interactive state
-    // above so selection/hover/focus always win; O(1), no per-row allocation.
-    if (c.tableStyle.zebra && (idx & 1)) return withAlpha(c.cMutedBg, 0.07)
+    // Zebra striping - a tint on odd rows. Below every interactive state above so
+    // selection/hover/focus always win; O(1), no per-row allocation.
+    if (c.tableStyle.zebra && (idx & 1)) return withAlpha(c.cMutedBg, ZEBRA_ALPHA)
     return null
   }
+
+  /**
+   * Alpha of the alternating-row tint, over `--muted`.
+   *
+   * Was 0.07, which in a dark theme put `--muted` a couple of values away from
+   * `--panel` and made the stripe invisible - the Striped preset and the
+   * "Alternating row colours" setting both looked like they did nothing. One
+   * constant so the preset and the setting can never disagree.
+   */
+  const ZEBRA_ALPHA = 0.16
 
   /** Row tint for the row currently being drawn, hoisted so drawCell reads it for free. */
   let _rowBg = /** @type {string | null} */ (null)
@@ -4200,6 +4435,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function drawBodyRow(ctx, idx, ry, c) {
     const rh = ROW_HEIGHT
     if (windowed && rows[idx] === undefined) { _rowBg = null; drawLoadingRow(ctx, idx, ry, rh, c); return }
+    syncRowDisplayCache(idx)
     const isSel = selected.has(idx)
     const isPendingDelete = hasPendingDeletes && pendingDeletes.has(idx)
     _rowBg = rowBgStyle(idx, c)
@@ -4293,36 +4529,42 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const isVHov = hoveredRow === idx && hoveredColName === _vrelHoverKeys[vi]
       if (!_fonts) return
 
-      // Badge: compact tag style - no border at rest, border on hover/active.
+      // Badge: a quiet chip that is always a chip. It used to be a fully rounded
+      // capsule with no border at rest, so hovering conjured a lozenge out of
+      // what looked like plain text, and a long table name inside a full-radius
+      // pill read as a balloon. Now the shape never changes on hover - only its
+      // surface and border strength do - and the radius matches the app's
+      // rounded-md, not a capsule.
       const badgeFontPx = Math.max(10, _fonts.cellPx - 1)
-      const bPadX = 10
-      const bH = Math.round(badgeFontPx * 1.7)
-      const bR = Math.round(bH / 2) // pill - fully rounded, reads as a chip
+      const bPadX = Math.round(9 * canvasZoom)
+      const bH = Math.min(Math.round(badgeFontPx * 1.9), rh - Math.round(6 * canvasZoom))
+      const bR = Math.min(Math.round(6 * canvasZoom), Math.round(bH / 2))
       ctx.font = `500 ${badgeFontPx}px ${_fonts.family}`
 
-      // Consistent side gutters so the pill is centered with breathing room.
-      const gutter = Math.round(14 * canvasZoom)
+      // Consistent side gutters so the chip is centered with breathing room.
+      const gutter = Math.round(12 * canvasZoom)
       const maxLabelW = cw - gutter * 2 - bPadX * 2
       const labelTxt = truncText(ctx, vc.label, maxLabelW)
       const textW = textWidth(ctx, labelTxt)
       const bW = Math.min(textW + bPadX * 2, cw - gutter * 2)
-      const bX = cellX + (cw - bW) / 2
-      const bY = ry + (rh - bH) / 2
+      const bX = Math.round(cellX + (cw - bW) / 2)
+      const bY = Math.round(ry + (rh - bH) / 2)
 
       if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(cellX, ry, cw, rh) }
 
       ctx.fillStyle = isActive
-        ? withAlpha(c.cPrimary, 0.15)
-        : isVHov ? withAlpha(c.cMutedBg, 0.6) : withAlpha(c.cMutedBg, 0.3)
+        ? withAlpha(c.cPrimary, 0.12)
+        : isVHov ? withAlpha(c.cMutedBg, 0.55) : withAlpha(c.cMutedBg, 0.32)
       roundRect(ctx, bX, bY, bW, bH, bR); ctx.fill()
 
-      if (isActive || isVHov) {
-        ctx.strokeStyle = isActive ? withAlpha(c.cPrimary, 0.45) : withAlpha(c.cMuted, 0.25)
-        ctx.lineWidth = 1
-        roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
-      }
+      // Hairline at rest too, so the chip has an edge without shouting.
+      ctx.strokeStyle = isActive
+        ? withAlpha(c.cPrimary, 0.32)
+        : isVHov ? withAlpha(c.cMuted, 0.28) : withAlpha(c.cBorder, 0.5)
+      ctx.lineWidth = 1
+      roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
 
-      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, 0.72)
+      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, isVHov ? 0.85 : 0.7)
       ctx.textBaseline = 'middle'; ctx.textAlign = 'center'
       ctx.fillText(labelTxt, bX + bW / 2, ry + rh / 2 + 0.5)
     }
@@ -4500,14 +4742,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       !dir?.badge && !dir?.swatch && !dir?.dot && isRightAlignedColumn(actualIdx)
 
     const warnW = dir?.warn ? Math.round(14 * canvasZoom) : 0
-    // The hover actions live on the side the value isn't using — right of
-    // left-aligned text, left of right-aligned text — so they occupy empty
+    // The hover actions live on the side the value isn't using - right of
+    // left-aligned text, left of right-aligned text - so they occupy empty
     // space in both cases. Only long values, the ones that would actually
     // collide, give up room, and only while the pointer is in the cell.
     const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
     // The same gap on both sides. Left-aligned text used to reserve 4px on the
-    // assumption that a value never reaches the right edge — but a *truncated*
+    // assumption that a value never reaches the right edge - but a *truncated*
     // value reaches it every time, which put the ellipsis hard against the column
     // divider and made every long column read as congested.
     const rightReserve = CELL_PAD_X + (alignRight ? 0 : hoverW) + fkW + warnW
@@ -4852,25 +5094,33 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
     const indReserve = indicators.length * 18
 
-    // Required marker - a red asterisk ahead of the name on NOT NULL columns.
-    // The same mark a required form field carries, so it reads without a legend,
-    // and it answers "will this row insert" from the header instead of from the
-    // column menu. Its width comes out of the name's budget rather than being
-    // painted over it, so a long name still truncates against the right edge.
+    // Required marker - a red asterisk on NOT NULL columns. The same mark a
+    // required form field carries, so it reads without a legend, and it answers
+    // "will this row insert" from the header instead of from the column menu. Its
+    // width comes out of the name's budget rather than being painted over it, so a
+    // long name still truncates against the right edge.
     ctx.font = _fonts.header
     const required = !!meta && !meta.nullable
     const reqW = required ? Math.ceil(textWidth(ctx, '*')) + Math.round(4 * canvasZoom) : 0
 
-    // Column name - primary, medium weight.
+    // Column name - primary, medium weight. ALWAYS starts at CELL_PAD_X, the same
+    // inset the cells below use, so every header lines up with every other header
+    // and with its own column's values.
     const nameMaxW = w - CELL_PAD_X - sortReserve - indReserve - reqW - 8
     const name = truncText(ctx, col.name, Math.max(0, nameMaxW))
+    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.9)
+    ctx.fillText(name, x + CELL_PAD_X, cy + 0.5)
+    let tx = x + CELL_PAD_X + textWidth(ctx, name)
+    // The asterisk TRAILS the name. Leading it - which is what this used to do -
+    // indented the name by its width on required columns only, so those headers
+    // sat a few pixels right of every other header, and right of the values
+    // underneath them. That mismatch is the misalignment; the mark itself is fine.
     if (required) {
       ctx.fillStyle = withAlpha(c.RED, 0.85)
-      ctx.fillText('*', x + CELL_PAD_X, cy + 0.5)
+      ctx.fillText('*', tx + Math.round(2 * canvasZoom), cy + 0.5)
+      tx += reqW
     }
-    ctx.fillStyle = withAlpha(c.cFg, sorted ? 1 : 0.9)
-    ctx.fillText(name, x + CELL_PAD_X + reqW, cy + 0.5)
-    let tx = x + CELL_PAD_X + reqW + textWidth(ctx, name) + 7
+    tx += 7
 
     // PK / FK glyphs (vertically centred, accent-coloured).
     for (const ind of indicators) {
@@ -5058,6 +5308,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Thumbnails hold GPU/heap memory that is not reclaimed by dropping the
     // component, and pending retry timers would fire against a dead canvas.
     releaseCellImages()
+    if (_shimmerTimer) { clearTimeout(_shimmerTimer); _shimmerTimer = 0 }
+    if (_spanTimer) { clearTimeout(_spanTimer); _spanTimer = 0 }
     // Remove any window resize listeners still attached from a drag in progress.
     clearActiveResizeListeners()
   })
@@ -5066,19 +5318,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // but bails out immediately on non-Shift events so the compositor waits <0.05ms.
   // Wheel handling is split so PLAIN vertical scrolling stays on the compositor
   // (buttery, no per-tick main-thread round-trip). A *non-passive* wheel listener
-  // — needed to preventDefault ctrl-zoom and shift-horizontal — otherwise forces
+  // - needed to preventDefault ctrl-zoom and shift-horizontal - otherwise forces
   // the browser to consult JS before every scroll tick, and while the redraw loop
   // is busy that round-trip lands late → the exact stutter reported even on tiny
   // tables. So the non-passive listener is attached ONLY while Ctrl/Shift is
   // physically held; the rest of the time there is no blocking wheel listener at
   // all and the OS scrolls the container directly.
+  // With eased scrolling on (the default - Settings → Appearance → Native
+  // scrolling), the listener has to be live for EVERY tick, because the offset is
+  // animated here rather than by the OS. That is the cost the setting exists to
+  // let people opt out of: turning native scrolling on removes this listener
+  // except while Ctrl/Shift is held, restoring the compositor-driven path exactly
+  // as described above.
   $effect(() => {
     const el = tableContainer
     if (!el) return
+    const easedScroll = !$appNativeScroll
     // Accumulates pinch/ctrl-wheel delta so many small gesture ticks map to whole
     // app-zoom steps instead of one step per event.
     let _zoomAccum = 0
     let _activeAttached = false
+    const scroller = easedScroll ? createSmoothScroll(el) : null
 
     function doZoom(/** @type {number} */ deltaY) {
       _zoomAccum += deltaY
@@ -5086,30 +5346,54 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       while (_zoomAccum >= 24) { decreaseZoom(); _zoomAccum -= 24 }
     }
 
-    // Non-passive: only live while a modifier that needs preventDefault is down.
+    // Non-passive: live for every tick under eased scrolling, otherwise only while
+    // a modifier that needs preventDefault is down.
     const onWheelActive = (/** @type {WheelEvent} */ e) => {
       if (e.ctrlKey) { e.preventDefault(); doZoom(e.deltaY); return }
-      if (!e.shiftKey) return
-      const delta = e.deltaY || e.deltaX
-      if (!delta) return
       // If the pointer is over a nested horizontally-scrollable panel (the FK
       // sub-view), scroll that instead of the main grid.
       const inner = e.target instanceof Element
         ? e.target.closest('[data-fk-subview-scroll]')
         : null
-      if (inner && inner !== el && inner.scrollWidth > inner.clientWidth) {
+      if (e.shiftKey) {
+        // Normalize FIRST. A mouse that reports deltaMode 1 (lines) sends ±1..3,
+        // and treating that as pixels moved the grid by three pixels a notch -
+        // horizontal scrolling looked broken under eased scrolling while native
+        // mode looked fine, because there the browser does this conversion itself.
+        const { dx, dy } = wheelPixels(e, el.clientWidth)
+        const delta = dy || dx // shift + vertical wheel IS horizontal movement
+        if (!delta) return
+        if (inner && inner !== el && inner.scrollWidth > inner.clientWidth) {
+          e.preventDefault()
+          inner.scrollLeft += delta
+          return
+        }
         e.preventDefault()
-        inner.scrollLeft += delta
+        if (scroller) scroller.push(delta, 0)
+        else el.scrollLeft += delta
         return
       }
-      e.preventDefault()
-      el.scrollLeft += delta
+      if (!scroller) return
+      // Plain wheel, eased: animate the offset ourselves. The rAF redraw loop
+      // still runs off the resulting `scroll` events, so nothing else changes.
+      if (inner && inner !== el) return
+      const { dx, dy } = wheelPixels(e, el.clientHeight)
+      if (!dy && !dx) return
+      // A trackpad's horizontal swipe arrives as plain deltaX (no Shift).
+      if (dy && el.scrollHeight > el.clientHeight) {
+        e.preventDefault()
+        scroller.push(0, dy)
+      }
+      if (dx && el.scrollWidth > el.clientWidth) {
+        e.preventDefault()
+        scroller.push(dx, 0)
+      }
     }
 
     // Passive fallback (always on, never blocks scroll): catches a trackpad pinch,
     // which arrives as a synthetic ctrl+wheel with NO physical Ctrl keydown, so the
     // gated listener above isn't attached for it. Drives the app's own zoom without
-    // preventDefault — native page-zoom is already blocked (macOS
+    // preventDefault - native page-zoom is already blocked (macOS
     // setAllowsMagnification / Tauri zoom_hotkeys_enabled=false). Skips when the
     // active listener is attached so a real Ctrl+wheel isn't handled twice.
     const onWheelPassive = (/** @type {WheelEvent} */ e) => {
@@ -5127,19 +5411,45 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       el.removeEventListener('wheel', onWheelActive)
       _activeAttached = false
     }
+    // Under eased scrolling the listener stays attached; the modifier gating below
+    // is what keeps it OFF the hot path when the OS is doing the scrolling.
     /** @param {KeyboardEvent} e */
-    const onKey = (e) => { if (e.ctrlKey || e.shiftKey) attach(); else detach() }
+    const onKey = (e) => {
+      if (easedScroll) return
+      if (e.ctrlKey || e.shiftKey) attach()
+      else detach()
+    }
+    // A keyboard scroll, scrollIntoView, or a scrollbar drag moved the element
+    // without us: adopt the new position so the next wheel tick eases from there.
+    const onScrollSync = () => { if (scroller && !scroller.animating()) scroller.sync() }
+    // Blur drops the modifier-gated listener because a keyup that happens while
+    // another window has focus never reaches us. Under eased scrolling the
+    // listener is not modifier-gated and must survive - detaching it there would
+    // leave the grid unable to scroll until the component remounted.
+    const onBlur = () => { if (!easedScroll) detach() }
+
+    // A press interrupts coasting - grabbing the scrollbar, or clicking a cell
+    // while the tail of an ease is still running, takes effect now.
+    const onInterrupt = () => { scroller?.stop(); scroller?.sync() }
 
     el.addEventListener('wheel', onWheelPassive, { passive: true })
+    if (easedScroll) {
+      attach()
+      el.addEventListener('scroll', onScrollSync, { passive: true })
+      el.addEventListener('pointerdown', onInterrupt, { passive: true })
+    }
     window.addEventListener('keydown', onKey, true)
     window.addEventListener('keyup', onKey, true)
-    window.addEventListener('blur', detach)
+    window.addEventListener('blur', onBlur)
     return () => {
+      scroller?.stop()
       detach()
+      el.removeEventListener('pointerdown', onInterrupt)
+      el.removeEventListener('scroll', onScrollSync)
       el.removeEventListener('wheel', onWheelPassive)
       window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('keyup', onKey, true)
-      window.removeEventListener('blur', detach)
+      window.removeEventListener('blur', onBlur)
     }
   })
 
@@ -5349,7 +5659,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         const vi = actualToVisColIdx(actualIdx)
         if (vi >= 0) focusedCol = vi
         // Clicking a cell is a deliberate jump, however short the distance, so it
-        // earns a back/forward entry. Arrow-key roaming deliberately does not —
+        // earns a back/forward entry. Arrow-key roaming deliberately does not -
         // that is what the parent's row-gap threshold is for.
         onjump()
         if (inspectorRow !== null) inspectorRow = idx
@@ -5789,7 +6099,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     {@const blankLabel = omit === 'default' ? 'default' : omit === 'null' ? 'NULL' : 'Required'}
                     <!-- Only a Required blank stops the insert, so only it is
                          worth noticing before you submit. The rest describe a
-                         value the database will supply and recede accordingly —
+                         value the database will supply and recede accordingly -
                          nothing is wrong yet, so nothing is coloured as wrong. -->
                     {@const blankClass = omit === 'required'
                       ? 'placeholder:text-muted-foreground/60'
@@ -5917,9 +6227,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 {#if rows[exIdx] !== undefined}
                   {#if _scrollScale === 1}
                     <!-- Normal table: content-space vertical (native scroll moves it,
-                         no per-frame re-render), sticky-left for the horizontal pin. -->
+                         no per-frame re-render), sticky-left for the horizontal pin.
+                         clip-path keeps it out of the header band: the panel sits above
+                         the canvas (it has to - the canvas paints an opaque background),
+                         so without the clip it drew straight over the sticky column
+                         header as soon as its row scrolled up behind it. Only panels
+                         actually touching the band pay anything, and only while they do. -->
+                    {@const clipTop = Math.max(0, HEADER_H - (rowDocTop(exIdx) + ROW_HEIGHT - _scrollTop))}
                     <div class="absolute z-10 left-0 right-0" style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px">
-                      <div style="position:sticky; left:0; width:{_viewportWidth}px" use:trackExpandHeight={exIdx}>
+                      <div
+                        style="position:sticky; left:0; width:{_viewportWidth}px{clipTop > 0 ? `; clip-path: inset(${clipTop}px 0 0 0)` : ''}"
+                        use:trackExpandHeight={exIdx}
+                      >
                         {@render expandBody(exIdx)}
                       </div>
                     </div>
@@ -5928,8 +6247,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                          would be tens of millions of px (past WebKit's layout range), and
                          a far-off-screen panel there would also blow out the scroll height,
                          so only render when the expanded row is near the viewport. -->
+                    {@const clipTopScaled = Math.max(0, HEADER_H - (rowViewportY(exIdx) + ROW_HEIGHT))}
                     <div style="position:sticky;top:0;left:0;width:0;height:0;overflow:visible;z-index:10">
-                      <div class="absolute left-0" style="top:{rowViewportY(exIdx) + ROW_HEIGHT}px; width:{_viewportWidth}px" use:trackExpandHeight={exIdx}>
+                      <div
+                        class="absolute left-0"
+                        style="top:{rowViewportY(exIdx) + ROW_HEIGHT}px; width:{_viewportWidth}px{clipTopScaled > 0 ? `; clip-path: inset(${clipTopScaled}px 0 0 0)` : ''}"
+                        use:trackExpandHeight={exIdx}
+                      >
                         {@render expandBody(exIdx)}
                       </div>
                     </div>
@@ -5951,7 +6275,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                      proved the cell is non-null. Committing an edit (date pick, enum
                      pick, boolean toggle) sets `editingCell = null` synchronously, and
                      these {@const}s are deriveds that a child's lazy prop getter can
-                     force to revalidate before the {#if} tears this branch down —
+                     force to revalidate before the {#if} tears this branch down -
                      `columns[editingCell.colIdx]` then throws "null is not an object".
                      Editing a `created_at`-style column reproduced exactly that. -->
                 {@const ecol = columns[editingCell?.colIdx ?? -1]}
@@ -6157,8 +6481,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <!-- "No rows" is a claim about the data, so it must never be shown
                  while a fetch is still running. The full-page skeleton above
                  only covers the first load (no columns yet); every later fetch
-                 that empties the grid — a re-query, or the second half of a
-                 windowed load — lands here, and without this it would assert
+                 that empties the grid - a re-query, or the second half of a
+                 windowed load - lands here, and without this it would assert
                  the table is empty for the whole of a multi-second read. -->
             <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
@@ -6169,6 +6493,52 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   <Table2 class="size-8 text-muted-foreground/25" />
                   <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
                 {/if}
+              </div>
+            </div>
+          {/if}
+
+          <!-- Windowed mode: what the grid is waiting for.
+               Pinned to the viewport (sticky in both axes, zero-size, so it adds
+               nothing to the scroll extent) and only raised once the wait is long
+               enough to be worth reading - a window that lands in 40ms never
+               shows one. Says which rows, out of how many, and whether the fetch
+               is merely slow or has actually given up. -->
+          {#if windowed && loadingSpan}
+            <div style="position:sticky;bottom:0;left:0;width:0;height:0;overflow:visible;z-index:6;pointer-events:none" aria-live="polite">
+              <div style="position:absolute;bottom:14px;left:0;width:{_viewportWidth}px" class="flex justify-center">
+                <div
+                  class={cn(
+                    "flex items-center gap-2 rounded-full border bg-background px-3 py-1 elevate-2-rim",
+                    // Only the error state takes the pointer, for its Retry button.
+                    // A pill that merely reports progress must not eat clicks on
+                    // the rows it floats over.
+                    windowStatus?.failed ? "pointer-events-auto border-destructive/30" : "border-border/25",
+                  )}
+                >
+                  {#if windowStatus?.failed}
+                    <TriangleAlert class="size-3 shrink-0 text-destructive" />
+                    <span class="text-ui-2xs text-foreground/80">
+                      Couldn't load rows {(loadingSpan.first + 1).toLocaleString()}-{(loadingSpan.last + 1).toLocaleString()}
+                    </span>
+                    <button
+                      type="button"
+                      class="-mr-1 flex h-5 items-center gap-1 rounded-full px-1.5 text-ui-2xs text-primary hover:bg-muted/40"
+                      onclick={() => onretrywindows()}
+                    >
+                      <RotateCcw class="size-3 shrink-0" />
+                      Retry
+                    </button>
+                  {:else}
+                    <Loader class="size-3 shrink-0 animate-spin text-muted-foreground/60" />
+                    <span class="text-ui-2xs text-muted-foreground">
+                      Loading rows {(loadingSpan.first + 1).toLocaleString()}-{(loadingSpan.last + 1).toLocaleString()}
+                      <span class="text-muted-foreground/50">of {rows.length.toLocaleString()}</span>
+                    </span>
+                    {#if windowStatus?.slow}
+                      <span class="text-ui-2xs text-muted-foreground/50">· slow connection</span>
+                    {/if}
+                  {/if}
+                </div>
               </div>
             </div>
           {/if}

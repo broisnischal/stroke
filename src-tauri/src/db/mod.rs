@@ -5,6 +5,7 @@ pub mod d1;
 pub mod duckdb;
 pub mod mssql;
 pub mod explain;
+pub mod advisor;
 pub mod insights;
 pub mod libsql;
 pub mod live;

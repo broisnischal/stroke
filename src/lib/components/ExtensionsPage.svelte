@@ -33,6 +33,21 @@
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import Bookmark from "@lucide/svelte/icons/bookmark";
   import Replace from "@lucide/svelte/icons/replace";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Loader2 from "@lucide/svelte/icons/loader-2";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
+  import {
+    externalPlugins,
+    externalPluginErrors,
+    refreshExternalPlugins,
+    setExternalEnabled,
+    installExternalPlugin,
+    uninstallExternalPlugin,
+    reloadExternalPlugin,
+    externalPluginsDir,
+    pluginKey,
+  } from "$lib/plugins/external/host.js";
 
   const ICONS = {
     "better-time": Clock,
@@ -69,6 +84,48 @@
     transforms: "Cell transform",
     workflow: "Workflow feature",
   };
+
+  // ── Plugins installed from a folder ────────────────────────────────────
+  // Third-party formatters. They have no config UI of their own yet, so their
+  // cards are not drill-in: a card is the plugin, its switch, and the two things
+  // you can do to a folder on disk.
+  let installing = $state(false);
+  let pluginsDir = $state("");
+
+  refreshExternalPlugins();
+  externalPluginsDir().then((d) => (pluginsDir = d));
+
+  async function installPlugin() {
+    installing = true;
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({ directory: true, multiple: false, title: "Pick a plugin folder" });
+      if (typeof picked !== "string") return;
+      const installed = await installExternalPlugin(picked);
+      toast.success(`Installed ${installed.name}`, { description: "Turn it on to start using it." });
+    } catch (e) {
+      toast.error("Could not install that folder", { description: String(e) });
+    } finally {
+      installing = false;
+    }
+  }
+
+  /** @param {import('$lib/plugins/external/types.js').ExternalPluginInfo} p */
+  async function reloadPlugin(p) {
+    const next = await reloadExternalPlugin(p.id);
+    if (next?.loadable) toast.success(`Reloaded ${next.name}`);
+    else toast.error(`${p.name} did not load`, { description: next?.error || "Check its manifest and entry file." });
+  }
+
+  /** @param {import('$lib/plugins/external/types.js').ExternalPluginInfo} p */
+  async function removePlugin(p) {
+    try {
+      await uninstallExternalPlugin(p.id);
+      toast.success(`Removed ${p.name}`);
+    } catch (e) {
+      toast.error(`Could not remove ${p.name}`, { description: String(e) });
+    }
+  }
 
   const CONFIGURABLE = new Set([
     "better-time", "number-format", "money-format", "duration-format",
@@ -234,6 +291,97 @@
       <p class="mt-1.5 text-ui-xs text-muted-foreground">
         Display formatters, linkifiers and cell tools for the data grid. Click a card to configure it.
       </p>
+
+      <!-- ── Installed from a folder ─────────────────────────────────────────
+           Plugins loaded off disk. Each runs in its own Worker with the network
+           globals removed, so a broken one stops formatting and nothing else. -->
+      <div class="mt-7 flex items-center gap-2">
+        <h3 class="px-0.5 text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/50">Installed</h3>
+        {#if $externalPlugins.length > 0}
+          <span class="text-ui-3xs tabular-nums text-muted-foreground/40">{$externalPlugins.length}</span>
+        {/if}
+        <button
+          type="button"
+          class="ml-auto inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-card px-2.5 text-ui-2xs font-medium text-foreground/80 transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground disabled:opacity-50"
+          onclick={installPlugin}
+          disabled={installing}
+        >
+          {#if installing}<Loader2 class="size-3.5 animate-spin" />{:else}<Plus class="size-3.5" />{/if}
+          Install from folder
+        </button>
+        <button
+          type="button"
+          class="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
+          title="Rescan the plugins folder"
+          aria-label="Rescan the plugins folder"
+          onclick={() => void refreshExternalPlugins()}
+        >
+          <RefreshCw class="size-3.5" />
+        </button>
+      </div>
+
+      {#if $externalPlugins.length === 0}
+        <div class="mt-2.5 rounded-lg border border-dashed border-border/60 bg-card/40 px-4 py-3.5">
+          <p class="text-ui-xs text-foreground/80">Nothing installed yet.</p>
+          <p class="mt-1 text-ui-2xs leading-relaxed text-muted-foreground/70">
+            A plugin is a folder holding a <code class="font-mono">manifest.json</code> and one
+            <code class="font-mono">.js</code> file. Install one above, or drop the folder in
+            {#if pluginsDir}<code class="font-mono text-muted-foreground">{pluginsDir}</code>{:else}the app's plugins folder{/if}
+            and hit rescan. See <code class="font-mono">docs/PLUGIN_API.md</code> for the contract.
+          </p>
+        </div>
+      {:else}
+        <div class="mt-2.5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {#each $externalPlugins as p (p.id)}
+            {@const on = pluginEnabledIn($pluginState, pluginKey(p.id))}
+            {@const err = $externalPluginErrors[p.id] ?? ""}
+            <div class="group relative flex h-full flex-col gap-2.5 rounded-lg border border-border/60 bg-card p-3">
+              <Blocks class={cn("size-4 shrink-0", on && p.loadable ? "text-success" : "text-muted-foreground")} />
+              <span class="flex min-w-0 flex-col">
+                <span class="truncate text-ui-xs font-medium leading-tight text-foreground/85" title={p.description || p.name}>{p.name}</span>
+                <span class="mt-0.5 truncate text-ui-3xs text-muted-foreground/60">
+                  {p.version ? `v${p.version}` : p.id}{p.author ? ` · ${p.author}` : ""}
+                </span>
+              </span>
+              {#if p.error || err}
+                <p class="text-ui-3xs leading-snug text-destructive/80">{p.error || err}</p>
+              {/if}
+              <div class="mt-auto flex items-center gap-1 pt-0.5">
+                <button
+                  type="button"
+                  class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground"
+                  title="Reload from disk"
+                  aria-label="Reload {p.name}"
+                  onclick={() => void reloadPlugin(p)}
+                >
+                  <RefreshCw class="size-3" />
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-destructive"
+                  title="Remove, deleting its folder"
+                  aria-label="Remove {p.name}"
+                  onclick={() => void removePlugin(p)}
+                >
+                  <Trash2 class="size-3" />
+                </button>
+                {#if p.permissions.length > 0}
+                  <span class="ml-auto truncate text-ui-3xs text-muted-foreground/35" title="Permissions: {p.permissions.join(', ')}">
+                    {p.permissions.length} permission{p.permissions.length === 1 ? "" : "s"}
+                  </span>
+                {/if}
+              </div>
+              <div class="absolute right-3 top-3">
+                {#if p.loadable}
+                  {@render toggle(on, () => void setExternalEnabled(p.id, !on), `Toggle ${p.name}`)}
+                {:else}
+                  <span class="rounded bg-destructive/10 px-1.5 py-0.5 text-ui-3xs font-medium text-destructive">Broken</span>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
 
       {#each SECTIONS as section (section.title)}
         {@const items = EXTENSIONS.filter((e) => section.kinds.includes(e.kind))}

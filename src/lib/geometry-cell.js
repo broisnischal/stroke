@@ -1,7 +1,7 @@
 // A geometry cell, read rather than dumped.
 //
 // PostGIS values arrive as EWKT (`SRID=4326;POINT(72.35 18.92)`). The grid and
-// the generic editor showed that string raw — technically the value,
+// the generic editor showed that string raw - technically the value,
 // practically unreadable past a point or two. These helpers parse EWKT/WKT
 // into something a viewer can draw and summarize. Parsing is tolerant of the
 // shapes PostGIS actually emits (Z/M modifiers, attached or spaced; EMPTY;
@@ -258,7 +258,7 @@ export function sridLabel(srid) {
   return `EPSG:${srid}`
 }
 
-/** `72.3500° E, 18.9219° N` — the way a human reads a WGS 84 coordinate. */
+/** `72.3500° E, 18.9219° N` - the way a human reads a WGS 84 coordinate. */
 export function formatLonLat(lon, lat) {
   const fmt = (v, pos, neg) => `${Math.abs(v).toFixed(4)}° ${v >= 0 ? pos : neg}`
   return `${fmt(lat, 'N', 'S')}, ${fmt(lon, 'E', 'W')}`
@@ -284,7 +284,7 @@ export function shortCoord(v) {
 
 /**
  * Short label for a grid cell, cheap enough for the canvas draw path: reads
- * only the EWKT header (plus the first pair, for points) — never a full parse.
+ * only the EWKT header (plus the first pair, for points) - never a full parse.
  * `Point · 4326 · 72.35 18.92` / `MultiPolygon · 4326 · …`
  * @param {unknown} raw
  */
@@ -319,7 +319,7 @@ export function projectGeometry(g, width, height, padding = 24) {
   const spanY = maxY - minY
   const innerW = width - padding * 2
   const innerH = height - padding * 2
-  // A single point (or an axis-aligned line) has a zero span — any positive
+  // A single point (or an axis-aligned line) has a zero span - any positive
   // scale centers it, so pick 1 to avoid dividing by zero.
   const scale = Math.min(
     spanX > 0 ? innerW / spanX : Infinity,
@@ -363,7 +363,7 @@ function inDegreeRange(/** @type {{minX:number,minY:number,maxX:number,maxY:numb
 }
 
 /**
- * The geometry as lon/lat, ready to draw on a world map — or null when the SRID
+ * The geometry as lon/lat, ready to draw on a world map - or null when the SRID
  * says it isn't on Earth (a local/engineering CRS, or a projected one we can't
  * invert without a projection database).
  *

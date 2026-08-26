@@ -44,8 +44,8 @@ function formatInvokeError(err) {
 
 // ── D1 auth self-heal ────────────────────────────────────────────────────────
 // A Cloudflare OAuth token is short-lived, and the backend keeps whichever one it
-// was handed at connect time. Once that one expires, EVERY later call — queries,
-// table lists, row counts — comes back 401 while the app still shows a live
+// was handed at connect time. Once that one expires, EVERY later call - queries,
+// table lists, row counts - comes back 401 while the app still shows a live
 // connection, so the session is permanently broken until the user reconnects by
 // hand. `connect_d1_db` and `test_d1` already refresh; the query path did not.
 // Replaying is safe: D1 rejects an unauthorized request at the edge, before any
@@ -65,7 +65,7 @@ async function healD1Auth(msg) {
   try {
     const fresh = await d1WithFreshToken(conn)
     // Same object back means there was no OAuth session to refresh from (a manually
-    // pasted token) — the 401 is real and belongs to the user, not to us.
+    // pasted token) - the 401 is real and belongs to the user, not to us.
     if (fresh === conn) return false
     await invoke('connect_d1_db', { config: fresh })
     return true
@@ -94,12 +94,12 @@ async function inv(command, args = {}) {
 
 // ── Connect retry ───────────────────────────────────────────────────────────
 // A connect attempt fails for one of two reasons:
-//   • TRANSIENT — a timeout, the server briefly unreachable, a momentarily
+//   • TRANSIENT - a timeout, the server briefly unreachable, a momentarily
 //     exhausted pool, a DNS/network blip. These usually succeed on an immediate
 //     second try, so we retry a few times with a short backoff for a smoother,
 //     self-healing connect.
-//   • PERMANENT — bad credentials (401/403), wrong host/database, a missing
-//     file. These NEVER succeed on retry, so we surface them at once — the user
+//   • PERMANENT - bad credentials (401/403), wrong host/database, a missing
+//     file. These NEVER succeed on retry, so we surface them at once - the user
 //     sees the real error (e.g. "Authentication error") with no extra delay.
 // Anything we can't confidently classify as transient is treated as permanent
 // (fail fast), so we never spin on an error the user needs to see and act on.
@@ -120,7 +120,7 @@ function isPermanentConnError(msg) {
 /**
  * Errors worth a fast retry: a server mid-restart, an exhausted pool, a socket
  * that died between attempts. Deliberately EXCLUDES the "nothing is there"
- * family — connection refused, no route, host unreachable, DNS failure, and the
+ * family - connection refused, no route, host unreachable, DNS failure, and the
  * backend's own "Can't reach …" preflight verdict. Those are definitive: the
  * backend already probed every resolved address concurrently, so a retry buys
  * nothing and only multiplies the delay before the user sees the real problem.
@@ -776,17 +776,53 @@ export async function getColumnStats(schema, table, column) {
   return inv('pg_get_column_stats', { schema, table, column })
 }
 
-/** Cancel the currently-running SQL query (no-op if none is running). */
-export async function cancelQuery() {
-  return inv('cancel_query')
+/**
+ * @typedef {object} AdvisorFinding
+ * @property {string} checkId
+ * @property {'security'|'performance'|'schema'} category
+ * @property {'error'|'warning'|'info'} severity
+ * @property {string} title
+ * @property {string} entity
+ * @property {string} entityKind
+ * @property {string} description
+ * @property {string | null} detail
+ * @property {string | null} remediation
+ * @property {number} metric
+ */
+
+/**
+ * @typedef {object} AdvisorReport
+ * @property {string} engine
+ * @property {AdvisorFinding[]} findings
+ * @property {Array<{ id: string, title: string, category: string, status: string, findings: number, ms: number, error: string | null }>} checks
+ * @property {boolean} unsupported
+ */
+
+/**
+ * Run the Advisor's checks over the connected database. Catalog reads only - it
+ * never touches user rows and never writes.
+ * @returns {Promise<AdvisorReport>}
+ */
+export async function advisorScan() {
+  return inv('advisor_scan')
 }
 
-/** @param {string} sql */
-export async function executeSql(sql) {
+/**
+ * Cancel a running SQL query. With `queryId` only that run is cancelled - which
+ * is what lets two editor tabs run at once without one's Cancel killing the
+ * other's query. Without an id, everything in flight is cancelled.
+ * @param {string} [queryId]
+ */
+export async function cancelQuery(queryId) {
+  return inv('cancel_query', { queryId: queryId ?? null })
+}
+
+/** @param {string} sql @param {string} [queryId] */
+export async function executeSql(sql, queryId) {
   if (isWriteSql(sql)) assertWritable('run that statement')
   const _t0 = performance.now()
   try {
-    const r = await inv('pg_execute_sql', { sql })
+    const r = await inv('pg_execute_sql', { sql, queryId: queryId ?? null })
     recordQuery({ sql: r?.sql || sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), source: 'sql', success: true })
     return r
   } catch (err) {
@@ -795,10 +831,11 @@ export async function executeSql(sql) {
   }
 }
 
-/** Execute one or more SQL statements and return each result as a separate entry. */
-export async function executeSqlMulti(sql) {
+/** Execute one or more SQL statements and return each result as a separate entry.
+ *  @param {string} sql @param {string} [queryId] cancel handle for this run */
+export async function executeSqlMulti(sql, queryId) {
   if (isWriteSql(sql)) assertWritable('run that statement')
-  return await inv('pg_execute_sql_multi', { sql })
+  return await inv('pg_execute_sql_multi', { sql, queryId: queryId ?? null })
 }
 
 // ── Instance Insights (PostgreSQL + MySQL monitoring) ───────────────────────
@@ -806,7 +843,7 @@ export async function executeSqlMulti(sql) {
 
 /**
  * Is this connection spatial, and what can be mapped? Never throws for a
- * non-spatial database — it answers `{ available: false, layers: [] }`, so the
+ * non-spatial database - it answers `{ available: false, layers: [] }`, so the
  * caller can ask on every connect without special-casing the engine.
  * @returns {Promise<{ available: boolean, version: string|null, layers: any[] }>}
  */

@@ -58,6 +58,83 @@ function valuePreview(v) {
   return ''
 }
 
+/**
+ * What one key looks like across the elements of an array. `sample` is the first
+ * non-null value, so a null first row cannot decide the type; `distinct` goes
+ * null once the key holds objects, which are not worth hashing on a keystroke.
+ * @typedef {{
+ *   sample: unknown,
+ *   types: Set<string>,
+ *   distinct: Set<string> | null,
+ *   capped: boolean,
+ *   count: number,
+ *   scanned: number,
+ *   total: number,
+ * }} KeyStats
+ */
+
+/** How many array elements a key's type and spread are measured over. Bounded
+ *  because completion runs on every keystroke, and a JSON column can hold tens
+ *  of thousands of rows. */
+const KEY_SCAN_LIMIT = 200
+/** Distinct values tracked per key before it just reports "many". */
+const DISTINCT_LIMIT = 64
+
+/**
+ * Measure every key across the elements of an array, for the completion list.
+ * @param {unknown[]} node
+ * @returns {Map<string, KeyStats>}
+ */
+function scanArrayKeys(node) {
+  /** @type {Map<string, KeyStats>} */
+  const stats = new Map()
+  const scanned = Math.min(node.length, KEY_SCAN_LIMIT)
+  for (let i = 0; i < scanned; i++) {
+    const item = node[i]
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    for (const [k, v] of Object.entries(/** @type {object} */ (item))) {
+      let st = stats.get(k)
+      if (!st) {
+        st = { sample: v, types: new Set(), distinct: new Set(), capped: false, count: 0, scanned, total: node.length }
+        stats.set(k, st)
+      }
+      st.count++
+      st.types.add(typeOf(v))
+      if ((st.sample === null || st.sample === undefined) && v !== null && v !== undefined) st.sample = v
+      if (st.distinct) {
+        // Objects and arrays are not worth hashing on a keystroke, so a key
+        // holding them stops reporting distinctness rather than guessing at it.
+        if (v !== null && typeof v === 'object') st.distinct = null
+        else if (st.distinct.size >= DISTINCT_LIMIT) st.capped = true
+        else st.distinct.add(`${typeOf(v)}:${String(v)}`)
+      }
+    }
+  }
+  return stats
+}
+
+/** `string`, or `string | null` when the key is not one type across the scan.
+ *  @param {KeyStats} st */
+function spreadTypeLabel(st) {
+  const types = [...st.types].filter((t) => t !== 'undefined')
+  return types.length > 1 ? types.sort().join(' | ') : typeLabel(st.sample)
+}
+
+/**
+ * What the rest of the elements do with this key, in three words or so. It is
+ * the honest answer to "why does this preview never change": either the value
+ * really is the same in every element, or it is one of many and the sample was
+ * only ever a sample.
+ * @param {KeyStats} st
+ */
+function spreadNote(st) {
+  if (st.count <= 1) return ''
+  const scope = st.scanned < st.total ? `first ${st.scanned.toLocaleString()}` : `all ${st.count.toLocaleString()}`
+  if (!st.distinct) return `${st.count.toLocaleString()} values`
+  if (st.distinct.size === 1 && !st.capped) return `same in ${scope}`
+  return `${st.distinct.size.toLocaleString()}${st.capped ? '+' : ''} distinct`
+}
+
 /** @param {unknown} node @param {string} key @returns {unknown[]} */
 function collectRecursive(node, key) {
   /** @type {unknown[]} */
@@ -279,13 +356,14 @@ export function evalJsonPath(root, path) {
  *   kind: 'object'|'array'|'string'|'number'|'boolean'|'null'|'wildcard'|'index'|'filter'|'slice',
  *   detail: string,
  *   preview: string,
+ *   spread?: string,
  * }} CompletionItem
  */
 
 /**
  * Split a typed path into the part that is settled and the fragment still being
  * typed. Exported so the completion widget can bold the characters you actually
- * typed inside each suggestion — matching without showing the match is what made
+ * typed inside each suggestion - matching without showing the match is what made
  * the old list read as unrelated noise.
  * @param {string} path @returns {{ prefix: string, token: string }}
  */
@@ -354,22 +432,22 @@ export function getCompletionItems(parsedJson, typedPath) {
       })
     }
 
-    // property keys from array items
-    const keyMap = /** @type {Map<string, unknown>} */ (new Map())
-    for (const item of node) {
-      if (item && typeof item === 'object' && !Array.isArray(item)) {
-        for (const [k, v] of Object.entries(/** @type {object} */ (item))) {
-          if (!keyMap.has(k)) keyMap.set(k, v)
-        }
-      }
-    }
-    for (const [k, v] of keyMap) {
+    // Property keys from array items. A key under an array prefix describes
+    // EVERY element, so reading element 0 alone was wrong twice over: it
+    // mislabelled the type whenever the first row happened to be null, and its
+    // preview never moved, which reads as "this value is the same for all of
+    // them" without ever having checked. Scan a bounded window instead and say
+    // what is actually true of the key across it.
+    const keyMap = scanArrayKeys(node)
+    for (const [k, st] of keyMap) {
+      const kind = typeOf(st.sample)
       items.push({
         insert: `.${k}`,
         label: k,
-        kind: typeOf(v) === 'undefined' ? 'null' : /** @type {any} */ (typeOf(v)),
-        detail: typeLabel(v),
-        preview: valuePreview(v),
+        kind: kind === 'undefined' ? 'null' : /** @type {any} */ (kind),
+        detail: spreadTypeLabel(st),
+        spread: spreadNote(st),
+        preview: valuePreview(st.sample),
       })
     }
 

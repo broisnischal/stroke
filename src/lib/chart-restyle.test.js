@@ -4,7 +4,7 @@ import { restyleSavedOption } from './chart-utils.js'
 /**
  * A saved chart is a JSON snapshot of a built ECharts option, so it carries the
  * theme it was built in. Saved in light mode and rendered on a dark dashboard,
- * its axis labels were dark text on a dark card — invisible, which is what
+ * its axis labels were dark text on a dark card - invisible, which is what
  * "the chart is broken" looked like.
  */
 const SAVED_IN_LIGHT = {
@@ -66,7 +66,7 @@ describe('restyleSavedOption', () => {
   })
 
   it('restores the formatter JSON.stringify dropped from a timestamp axis', () => {
-    // The shape the app actually stores — the same strings the axis in a saved
+    // The shape the app actually stores - the same strings the axis in a saved
     // dashboard chart shows.
     const withTimestamps = {
       ...SAVED_IN_LIGHT,

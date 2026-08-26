@@ -18,7 +18,7 @@ import { getWorldGeoJson } from '$lib/geo.js'
  *
  * The rest are raster tiles from public providers, so choosing one starts
  * fetching images from that host. Satellite and street detail cannot be shipped
- * offline — the imagery is terabytes — so this is the trade being offered, and
+ * offline - the imagery is terabytes - so this is the trade being offered, and
  * it is offered explicitly rather than made the default.
  */
 export const BASEMAPS = [
@@ -95,7 +95,7 @@ export function loadWorldOutline() {
     worldPromise = getWorldGeoJson()
       .then((data) => (indexedWorld = indexWorld(data)))
       .catch((e) => {
-        // A failed load must not poison the cache — the next map retries.
+        // A failed load must not poison the cache - the next map retries.
         worldPromise = null
         throw e
       })
@@ -111,7 +111,7 @@ const TILE_CACHE_MAX = 320
 /**
  * A bounded image cache for one map instance.
  *
- * `get` returns the tile if it is decoded, or null and starts loading it — a
+ * `get` returns the tile if it is decoded, or null and starts loading it - a
  * map that waits for its slowest tile stutters on every pan. A failed tile stays
  * in the cache as a permanent miss, so a dead host is requested once per tile
  * rather than every frame forever, and the failure count is exposed: an online
@@ -221,7 +221,7 @@ export function resolveColor(raw) {
  * Normally the theme's accent, so the map belongs to the rest of the app. But
  * several themes resolve `--primary` to a near-white with no chroma at all
  * (`oklch(0.985 0 0)`), and white data over a neutral basemap on a black canvas
- * is indistinguishable from the basemap — which is the one thing the map exists
+ * is indistinguishable from the basemap - which is the one thing the map exists
  * to show. When the accent has no colour to give, fall back to the app's chart
  * lead, which always does.
  * @param {string} rgb "r,g,b"

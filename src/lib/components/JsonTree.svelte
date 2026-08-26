@@ -206,7 +206,7 @@
 
       {#if isContainer && expanded}
         <!-- Indent guide sits just inside the opening bracket (ml-1.5), so it
-             reads as this object's own tree rail — never colliding with the
+             reads as this object's own tree rail - never colliding with the
              table's gutter separator the way a chevron-aligned line did. pl-3
              indents child rows one clean step past it. -->
         <div class="ml-1.5 border-l border-border/40 pl-3">

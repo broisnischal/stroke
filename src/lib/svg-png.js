@@ -108,7 +108,7 @@ export async function copyPngToClipboard(blob) {
  * Save a blob to disk under `filename`.
  *
  * Inside the desktop shell this opens a native save dialog and writes through
- * the backend — WKWebView ignores `<a download>` on a blob URL, so the anchor
+ * the backend - WKWebView ignores `<a download>` on a blob URL, so the anchor
  * path below silently did nothing there. It stays as the browser-dev fallback.
  *
  * @returns {Promise<string | null>} the chosen path, '' when the browser

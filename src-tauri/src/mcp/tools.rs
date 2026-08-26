@@ -237,7 +237,7 @@ const WRITE_KEYWORDS: &[&str] = &[
 ];
 
 /// Returns true if the SQL is read-only (SELECT, WITH, EXPLAIN, SHOW, DESCRIBE,
-/// PRAGMA) — used to enforce MCP read-only mode.
+/// PRAGMA) - used to enforce MCP read-only mode.
 pub fn is_read_only_sql(sql: &str) -> bool {
     // Strip leading whitespace and block/line comments, then check the first keyword.
     let s = sql.trim();
@@ -465,7 +465,7 @@ async fn execute_sql_mysql(
     sql: &str,
     max_rows: usize,
 ) -> Result<String, String> {
-    // Stream rows instead of fetch_all — caps memory at max_rows regardless of result size.
+    // Stream rows instead of fetch_all - caps memory at max_rows regardless of result size.
     let mut stream = sqlx::query(sql).fetch(pool);
     let mut columns: Vec<String> = Vec::new();
     let mut data: Vec<Vec<serde_json::Value>> = Vec::with_capacity(max_rows.min(256));
@@ -494,7 +494,7 @@ async fn execute_sql_pg(
     sql: &str,
     max_rows: usize,
 ) -> Result<String, String> {
-    // Stream rows — never materialises more than max_rows rows in memory.
+    // Stream rows - never materialises more than max_rows rows in memory.
     let mut stream = sqlx::query(sql).fetch(pool);
     let mut columns: Vec<String> = Vec::new();
     let mut data: Vec<Vec<Value>> = Vec::with_capacity(max_rows.min(256));
@@ -524,7 +524,7 @@ async fn execute_sql_sqlite(
     sql: &str,
     max_rows: usize,
 ) -> Result<String, String> {
-    // Stream rows — never materialises more than max_rows rows in memory.
+    // Stream rows - never materialises more than max_rows rows in memory.
     let mut stream = sqlx::query(sql).fetch(pool);
     let mut columns: Vec<String> = Vec::new();
     let mut data: Vec<Vec<Value>> = Vec::with_capacity(max_rows.min(256));
@@ -1519,7 +1519,7 @@ fn pg_cell(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     try_str!(Uuid);
     if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
         return match v {
-            // Cap oversized text the same way the grid does — a multi-MB cell
+            // Cap oversized text the same way the grid does - a multi-MB cell
             // in an MCP response floods the calling AI tool's context.
             Some(s) if s.len() > crate::db::sql_util::CELL_VALUE_CAP => {
                 crate::db::sql_util::oversize_cell(

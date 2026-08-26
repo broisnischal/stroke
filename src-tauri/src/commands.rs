@@ -4,7 +4,7 @@ use tauri::Emitter;
 // ── Shared HTTP client for AI requests ────────────────────────────────────────
 // One client for the whole process lifetime. reqwest maintains an internal
 // connection pool, so subsequent requests to the same host reuse the TLS
-// session and avoid the ~300–700 ms handshake on every call.
+// session and avoid the ~300-700 ms handshake on every call.
 static AI_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 fn ai_http_client() -> &'static reqwest::Client {
@@ -50,9 +50,9 @@ pub fn ai_fetch_cancel(request_id: String) {
 /// bypassing WebView CORS restrictions for local AI models (Ollama, LM Studio, etc.).
 ///
 /// For streaming requests, response chunks are emitted as Tauri events:
-///   `ai-stream-{request_id}`       — text chunk payload
-///   `ai-stream-done-{request_id}`  — stream finished
-///   `ai-stream-error-{request_id}` — error message payload
+///   `ai-stream-{request_id}`       - text chunk payload
+///   `ai-stream-done-{request_id}`  - stream finished
+///   `ai-stream-error-{request_id}` - error message payload
 #[tauri::command]
 pub async fn ai_fetch(
     app: tauri::AppHandle,
@@ -140,7 +140,7 @@ pub fn ai_device_id() -> String {
 /// The models ollama.com currently offers, name and size.
 ///
 /// Fetched here rather than from the webview because ollama.com sends no
-/// `Access-Control-Allow-Origin`, so a browser fetch fails outright — and the
+/// `Access-Control-Allow-Origin`, so a browser fetch fails outright - and the
 /// packaged app's origin differs per platform (`tauri://localhost` on macOS,
 /// `http://tauri.localhost` on Windows and Linux), which would make a CORS
 /// dependency fail differently on each. Going through Rust removes the question
@@ -166,7 +166,7 @@ pub async fn ollama_registry() -> Result<serde_json::Value, String> {
     response.json().await.map_err(|e| e.to_string())
 }
 
-/// The models a server actually has, so the picker never guesses a tag —
+/// The models a server actually has, so the picker never guesses a tag -
 /// a hardcoded preset like `llama3.1` fails against an install that has
 /// `llama3.1:8b`. Goes through Rust for the same reason `ai_fetch` does: the
 /// WebView can't reach localhost cross-origin.
@@ -186,7 +186,7 @@ pub async fn ai_list_models(url: String, api_key: Option<String>) -> Result<Vec<
         // reqwest's chained source text is unreadable in a dialog; the two cases a
         // user can act on are "nothing is listening" and "it timed out".
         if e.is_connect() {
-            format!("Could not reach {url} — is the server running?")
+            format!("Could not reach {url} - is the server running?")
         } else if e.is_timeout() {
             format!("Timed out reaching {url}")
         } else {
@@ -226,7 +226,7 @@ pub async fn save_file(path: String, content: String) -> Result<(), String> {
 /// produce bytes (PNG diagrams) come through here instead.
 ///
 /// Payload is base64 rather than `Vec<u8>`: the IPC bridge has no binary channel,
-/// so raw bytes would cross it as a JSON array — one number per byte, roughly 4x
+/// so raw bytes would cross it as a JSON array - one number per byte, roughly 4x
 /// the payload for a multi-megabyte image.
 #[tauri::command]
 pub async fn save_file_bytes(path: String, base64: String) -> Result<(), String> {
@@ -253,13 +253,13 @@ pub async fn ai_fetch_page(url: String) -> Result<String, String> {
     crate::web_search::fetch_page(url).await
 }
 
-/// Read a text file from disk — used by the notebook open flow.
+/// Read a text file from disk - used by the notebook open flow.
 #[tauri::command]
 pub async fn read_file(path: String) -> Result<String, String> {
     tokio::fs::read_to_string(&path).await.map_err(|e| e.to_string())
 }
 
-/// Restart the application — called after an update is installed.
+/// Restart the application - called after an update is installed.
 #[tauri::command]
 pub fn restart_app(app: tauri::AppHandle) {
     app.restart();
@@ -481,8 +481,8 @@ fn explain_rows_to_lines(res: &SqlResult) -> Vec<String> {
         .collect()
 }
 
-/// Turn a SQL Server SHOWPLAN_XML document into indented plan lines — one line
-/// per `<RelOp>` operator, indented by its RelOp-nesting depth — so the shared
+/// Turn a SQL Server SHOWPLAN_XML document into indented plan lines - one line
+/// per `<RelOp>` operator, indented by its RelOp-nesting depth - so the shared
 /// `explain_from_text_lines` builder produces the same `{Node Type, Plans}` tree
 /// the renderer already draws for other engines. Uses a lightweight tag scan
 /// (no XML crate is available) that only tracks `<RelOp>` open/close: the
@@ -510,7 +510,7 @@ fn mssql_plan_lines(xml: &str) -> Vec<String> {
             depth = depth.saturating_sub(1);
         } else if let Some(after) = tag.strip_prefix("RelOp") {
             // Opening RelOp tag (the name is followed by whitespace before its
-            // attributes, or nothing at all) — not `RelOpXyz` or a comment.
+            // attributes, or nothing at all) - not `RelOpXyz` or a comment.
             if after.is_empty() || after.starts_with(char::is_whitespace) {
                 let phys = attr(tag, "PhysicalOp");
                 let logi = attr(tag, "LogicalOp");
@@ -549,7 +549,7 @@ pub async fn pg_explain_sql(
             Ok(explain_from_text_lines(explain_rows_to_lines(&res), "clickhouse"))
         }
         ActiveConnection::D1(cfg) => {
-            // D1 is SQLite over HTTP — EXPLAIN QUERY PLAN returns the same
+            // D1 is SQLite over HTTP - EXPLAIN QUERY PLAN returns the same
             // (id, parent, notused, detail) rows the SQLite path builds its tree from.
             let res = crate::db::d1::query(&cfg, &format!("EXPLAIN QUERY PLAN {sql}"), vec![]).await?;
             Ok(explain_from_sqlite_plan(&res, "d1"))
@@ -557,7 +557,7 @@ pub async fn pg_explain_sql(
         ActiveConnection::Mssql(h) => {
             // SHOWPLAN_XML is session state: turning it ON makes the *next* query
             // return its plan as an XML column instead of executing it. All three
-            // statements must therefore run on the same tiberius session — and it
+            // statements must therefore run on the same tiberius session - and it
             // is a single persistent connection (no pool), so holding the guard
             // across the sequence keeps them on that session with no interleaving.
             // `SET SHOWPLAN_XML ON` must also be alone in its batch, which each
@@ -571,7 +571,7 @@ pub async fn pg_explain_sql(
             };
             let mut client = h.lock().await;
 
-            // Bail before running the query if plan capture can't be enabled —
+            // Bail before running the query if plan capture can't be enabled -
             // otherwise the query would execute for real (e.g. a DML statement).
             match client.simple_query("SET SHOWPLAN_XML ON").await {
                 Ok(stream) => {
@@ -584,7 +584,7 @@ pub async fn pg_explain_sql(
                 Ok(stream) => stream.into_results().await,
                 Err(e) => Err(e),
             };
-            // Restore session state no matter what — this connection is reused
+            // Restore session state no matter what - this connection is reused
             // for every later query, so it must not stay in plan-only mode.
             if let Ok(off) = client.simple_query("SET SHOWPLAN_XML OFF").await {
                 let _ = off.into_results().await;
@@ -655,7 +655,7 @@ pub async fn pg_get_table_column_structure(
     get_table_column_structure(state, schema, table).await
 }
 
-/// Column structure for every table in one schema — one call instead of one per
+/// Column structure for every table in one schema - one call instead of one per
 /// table. Used by the ER diagram, which needs the whole schema up front.
 #[tauri::command]
 pub async fn pg_get_schema_column_structure(
@@ -757,14 +757,14 @@ pub async fn pg_get_table_rows(
     offset: i64,
     search: Option<String>,
     search_is_regex: Option<bool>,
-    // Optional — defaults to false. Case-sensitive substring search.
+    // Optional - defaults to false. Case-sensitive substring search.
     search_case_sensitive: Option<bool>,
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<crate::db::RowFilter>>,
-    // Optional — defaults to true (full metadata). Repeat fetches pass false.
+    // Optional - defaults to true (full metadata). Repeat fetches pass false.
     include_meta: Option<bool>,
-    // Optional — defaults to true. When false, the count is skipped (total = -1)
+    // Optional - defaults to true. When false, the count is skipped (total = -1)
     // and fetched separately via `pg_count_table_rows` so rows paint immediately.
     include_count: Option<bool>,
     // Multi-column sort keys (Postgres); overrides sort_column when non-empty.
@@ -903,6 +903,16 @@ pub async fn instance_set_config(
     crate::db::instance_set_config(state, name, value).await
 }
 
+/// Read-only lint pass over the connected database (Advisor tab). Catalog queries
+/// only - it never reads user rows and never writes.
+#[tauri::command]
+pub async fn advisor_scan(
+    state: State<'_, DbState>,
+) -> Result<crate::db::advisor::AdvisorReport, String> {
+    let conn = crate::db::connection::require_conn(&state)?;
+    crate::db::advisor::scan(&conn).await
+}
+
 #[tauri::command]
 pub async fn instance_replication(
     state: State<'_, DbState>,
@@ -910,14 +920,24 @@ pub async fn instance_replication(
     crate::db::instance_replication(state).await
 }
 
+/// `queryId` (optional) names this run so `cancel_query` can target it. Omitting
+/// it keeps the single-slot behaviour older callers relied on.
 #[tauri::command]
-pub async fn pg_execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
-    execute_sql(state, sql).await
+pub async fn pg_execute_sql(
+    state: State<'_, DbState>,
+    sql: String,
+    query_id: Option<String>,
+) -> Result<SqlResult, String> {
+    execute_sql(state, sql, query_id).await
 }
 
 #[tauri::command]
-pub async fn pg_execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result<Vec<SqlResult>, String> {
-    execute_sql_multi(state, sql).await
+pub async fn pg_execute_sql_multi(
+    state: State<'_, DbState>,
+    sql: String,
+    query_id: Option<String>,
+) -> Result<Vec<SqlResult>, String> {
+    execute_sql_multi(state, sql, query_id).await
 }
 
 /// Execute SQL against an arbitrary saved connection without switching the
@@ -997,11 +1017,25 @@ pub async fn pg_insert_table_row(
 
 // ── Cancel running query ──────────────────────────────────────────────────────
 
+/// Cancel one running query by the `queryId` it was started with. Without an id,
+/// cancels every query in flight (the old whole-app "stop" behaviour).
 #[tauri::command]
-pub async fn cancel_query(state: State<'_, DbState>) -> Result<(), String> {
-    if let Ok(mut guard) = state.cancel_tx.lock() {
-        if let Some(tx) = guard.take() {
-            let _ = tx.send(());
+pub async fn cancel_query(
+    state: State<'_, DbState>,
+    query_id: Option<String>,
+) -> Result<(), String> {
+    if let Ok(mut map) = state.cancels.lock() {
+        match query_id {
+            Some(id) => {
+                if let Some(tx) = map.remove(&id) {
+                    let _ = tx.send(());
+                }
+            }
+            None => {
+                for (_, tx) in map.drain() {
+                    let _ = tx.send(());
+                }
+            }
         }
     }
     Ok(())
@@ -1031,9 +1065,9 @@ pub async fn activate_license(
     let device_id = crate::license::device_id();
 
     // 2. Register with server. Blocks on seat_limit_exceeded / revoked.
-    //    On network failure api_activate returns Ok(None) — we allow offline activation.
+    //    On network failure api_activate returns Ok(None) - we allow offline activation.
     match crate::license::api_activate(&key, &device_id).await {
-        Ok(None) => {} // offline — proceed with local-only activation
+        Ok(None) => {} // offline - proceed with local-only activation
         Ok(Some(_)) => {} // server accepted
         Err(e) => {
             // Convert server error codes to user-friendly messages
@@ -1110,11 +1144,11 @@ pub async fn run_license_check(
                 let _ = crate::license::save_license(&dir, &lic);
             }
             Some(false) => {
-                // Server says invalid/revoked — remove local license
+                // Server says invalid/revoked - remove local license
                 let _ = crate::license::delete_license(&dir);
             }
             None => {
-                // Network unreachable — use local signature as offline grace
+                // Network unreachable - use local signature as offline grace
             }
         }
     }
@@ -1132,7 +1166,7 @@ pub async fn run_license_check(
 // ── License debug helpers (debug builds only) ─────────────────────────────────
 
 /// Backdate the trial file so the UI shows it as expired (or N days elapsed).
-/// Only compiled in debug mode — stripped from release builds entirely.
+/// Only compiled in debug mode - stripped from release builds entirely.
 #[cfg(debug_assertions)]
 #[tauri::command]
 pub fn debug_set_trial_days_ago(app: tauri::AppHandle, days_ago: u64) -> Result<(), String> {
@@ -1270,11 +1304,11 @@ async fn seed_sample_database(pool: &sqlx::SqlitePool) -> Result<(), String> {
             (1, 'Portable SSD 1TB',        79.99,  30, 'Fast NVMe external storage'),
             (2, 'Classic T-Shirt',         19.99, 200, 'Comfortable everyday cotton tee'),
             (2, 'Slim-Fit Jeans',          49.99,  75, 'Modern cut, stretch denim'),
-            (2, 'Hoodie – Charcoal',       39.99,  60, 'Warm fleece-lined pullover'),
+            (2, 'Hoodie - Charcoal',       39.99,  60, 'Warm fleece-lined pullover'),
             (2, 'Running Shorts',          24.99, 110, 'Lightweight moisture-wicking'),
-            (3, 'Clean Code',              35.00,  40, 'Robert C. Martin — software craftsmanship'),
-            (3, 'The Pragmatic Programmer',33.00,  38, 'Hunt & Thomas — timeless dev advice'),
-            (3, 'Designing Data-Intensive', 55.00,  25, 'Martin Kleppmann — distributed systems'),
+            (3, 'Clean Code',              35.00,  40, 'Robert C. Martin - software craftsmanship'),
+            (3, 'The Pragmatic Programmer',33.00,  38, 'Hunt & Thomas - timeless dev advice'),
+            (3, 'Designing Data-Intensive', 55.00,  25, 'Martin Kleppmann - distributed systems'),
             (4, 'Succulent Plant Set',     22.00,  90, 'Set of 4 low-maintenance succulents'),
             (4, 'Ceramic Pour-Over Kit',   45.00,  35, 'Elegant coffee brewing set'),
             (4, 'LED Desk Lamp',           38.50,  68, 'Adjustable colour temperature'),

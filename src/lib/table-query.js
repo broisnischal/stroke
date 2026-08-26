@@ -51,6 +51,26 @@ export function pageSizeLabel(n) {
 // new table tab. Stored in localStorage so it survives restarts.
 const DEFAULT_PAGE_SIZE_KEY = 'stroke:default-page-size'
 
+/**
+ * Rows to ask the backend for, given the page size the user picked.
+ *
+ * "All" has no number of its own, so it borrows the row count - and that is only
+ * sound while the count describes the view about to be fetched. Filter a table
+ * down to one row and then clear the filter: the count is still 1, and "All"
+ * would ask for LIMIT 1 and draw a one-row grid under a footer reading
+ * "1-752 of 752". When the count belongs to some other predicate, ask for the
+ * ceiling instead and let the probe/window path size the view from a fresh count.
+ *
+ * @param {number} pageSize the chosen size, or PAGE_SIZE_ALL
+ * @param {number} total last known row count (0 / -1 when unknown or counting)
+ * @param {boolean} totalIsForThisView `total` was counted under the search and
+ *   filters now applied
+ */
+export function fetchLimitFor(pageSize, total, totalIsForThisView) {
+  if (pageSize !== PAGE_SIZE_ALL) return pageSize
+  return totalIsForThisView && total > 0 ? Math.min(total, MAX_PAGE_SIZE) : MAX_PAGE_SIZE
+}
+
 /** Clamp an arbitrary input to a valid page size (or the "All" sentinel). */
 export function clampPageSize(/** @type {unknown} */ n) {
   const num = Number(n)

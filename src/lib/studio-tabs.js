@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license' | 'orm-schema' | 'map'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license' | 'orm-schema' | 'map' | 'advisor'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -35,6 +35,13 @@ import { loadDefaultPageSize } from '$lib/table-query.js'
  * @property {number} [scrollLeft]
  * @property {number} [scrollTop]
  * @property {number[]} [expandedRows] - row indices with an open inline detail panel; restored in background/snapshot panes
+ * @property {boolean} [windowedHead] - result set is browsed in windows (huge/heavy result); `rows` lives outside the reactive tree
+ * @property {number[]} [windowedLoaded] - window indices resident when the tab was last left
+ * @property {number} [windowRows] - rows per window, measured from the payload when the view was built
+ * @property {number} [windowBase] - absolute row offset the windowed view starts at
+ * @property {number} [windowCount] - rows the windowed view covers
+ * @property {number} [windowBytesPerRow] - measured payload per row
+ * @property {{ sortColumn: string, sortDirection: string, sorts: Array<{column:string,direction:string}> } | null} [windowOrder] - the one total order every window of this view slices
  */
 
 /** @typedef {object} SqlTabState
@@ -163,7 +170,7 @@ export function createSqlTab(sqlText, title = 'Query Editor') {
 /**
  * A read-only DDL view. Distinct from a `sql` tab on purpose: DDL is something
  * you read, so it gets a bare editor with no Run button, no query toolbar and no
- * results pane — none of which do anything useful for a CREATE TABLE you can't
+ * results pane - none of which do anything useful for a CREATE TABLE you can't
  * execute against the table it already describes.
  * @param {string} ddlText @param {string} title
  */
@@ -197,6 +204,7 @@ const SINGLETON_TAB_TITLES = {
   security: 'Security',
   logs: 'Activity Log',
   insights: 'Instance Insights',
+  advisor: 'Advisor',
   objects: 'Database Objects',
   redis: 'Redis',
   map: 'Map',
@@ -237,6 +245,7 @@ export const createOrmSchemaTab = () => createKindTab('orm-schema')
 export const createSecurityTab = () => createKindTab('security')
 export const createLogsTab = () => createKindTab('logs')
 export const createInsightsTab = () => createKindTab('insights')
+export const createAdvisorTab = () => createKindTab('advisor')
 export const createObjectsTab = () => createKindTab('objects')
 export const createRedisTab = () => createKindTab('redis')
 export const createMapTab = () => createKindTab('map')
@@ -267,6 +276,8 @@ export const findSecurityTab = (tabs) => findTabByKind(tabs, 'security')
 export const findLogsTab = (tabs) => findTabByKind(tabs, 'logs')
 /** @type {(tabs: StudioTab[]) => StudioTab | null} */
 export const findInsightsTab = (tabs) => findTabByKind(tabs, 'insights')
+/** @type {(tabs: StudioTab[]) => StudioTab | null} */
+export const findAdvisorTab = (tabs) => findTabByKind(tabs, 'advisor')
 /** @type {(tabs: StudioTab[]) => StudioTab | null} */
 export const findObjectsTab = (tabs) => findTabByKind(tabs, 'objects')
 /** @type {(tabs: StudioTab[]) => StudioTab | null} */

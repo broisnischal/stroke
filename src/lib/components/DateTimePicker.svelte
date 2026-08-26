@@ -43,7 +43,7 @@
     const s = String(value ?? "").trim();
     if (!s) return null;
     try {
-      // Epoch numbers are not parseable as `s + "T00:00:00"` — that produced an
+      // Epoch numbers are not parseable as `s + "T00:00:00"` - that produced an
       // Invalid Date, so the calendar rendered "Pick a date…" for a row that
       // plainly held a timestamp, and picking a date overwrote it with ISO text.
       if (valueFormat === "epoch-ms" || valueFormat === "epoch-s") {
@@ -108,7 +108,7 @@
   });
 
   /**
-   * Serialise a picked date back into the format the column already stores —
+   * Serialise a picked date back into the format the column already stores -
    * see `valueFormat`. Emitting ISO into an epoch column is a silent data
    * corruption: the write succeeds and the timestamp is destroyed.
    */
@@ -121,7 +121,7 @@
     if (valueFormat === "epoch-ms" || valueFormat === "epoch-s") {
       // An epoch always carries a time component, so honour hh:mm even when the
       // picker is in date-only mode. Seconds/millis are carried over from the
-      // stored value rather than zeroed — the picker only edits down to the
+      // stored value rather than zeroed - the picker only edits down to the
       // minute, so it must not quietly drop precision it never showed.
       const ms = new Date(
         Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(mi),
@@ -146,7 +146,7 @@
 <Popover bind:open>
   <!-- Type or pick, not one or the other. A calendar is the wrong tool for
        "same as the row above but a year earlier", and typing is the wrong tool
-       for "some Tuesday in March" — the field does both, and the value is the
+       for "some Tuesday in March" - the field does both, and the value is the
        column's own text either way, so an epoch column stays editable as digits
        rather than being hidden behind a formatted label. -->
   <div class="relative flex w-full min-w-0 items-center gap-1.5">

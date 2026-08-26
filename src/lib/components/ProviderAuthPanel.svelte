@@ -9,7 +9,7 @@
    *
    * This is one block with four tones, and deliberately NOT a card: a bordered
    * box floating above the form it belongs to reads as an advert, not as the
-   * first step of the form. It is a section — icon, copy, one action, a rule —
+   * first step of the form. It is a section - icon, copy, one action, a rule -
    * flush with the fields below it and the same width as them. The rule doubles
    * as the progress track, so a long wait can show life without a bar appearing
    * out of nowhere and pushing everything down.
@@ -22,7 +22,7 @@
     tone = /** @type {'idle' | 'busy' | 'error'} */ ('idle'),
     title = '',
     subtitle = '',
-    /** Quiet third line — the reassurance, not the instruction. */
+    /** Quiet third line - the reassurance, not the instruction. */
     hint = '',
     /** Animate the rule, for a wait with no percentage to report. */
     progress = false,

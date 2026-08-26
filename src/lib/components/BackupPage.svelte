@@ -232,7 +232,7 @@
     const name = `backup_${dbLabel.toLowerCase().replace(/\s+/g, "_")}${schemaSlug}_${ts}.sql`;
     // Was an `<a download>` click followed by an unconditional success toast.
     // WKWebView ignores that anchor, so the app reported a saved backup when no
-    // file had been written — the worst possible place to be wrong.
+    // file had been written - the worst possible place to be wrong.
     try {
       const path = await saveExportAs(exportResult.sql, name, {
         name: "SQL",

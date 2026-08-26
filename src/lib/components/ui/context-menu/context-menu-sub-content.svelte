@@ -11,7 +11,7 @@
 
 <!-- Fade only, and fast. A submenu opens under a pointer that is already moving
      toward it, so a scale/slide stacked on the fade is exactly what reads as "the
-     menu lagged" — the panel is still growing into place when the eye expects it
+     menu lagged" - the panel is still growing into place when the eye expects it
      to be there. -->
 <ContextMenuPrimitive.SubContent
 	bind:ref

@@ -799,11 +799,11 @@ export const MONACO_THEME_SPECS = {
 /**
  * JSON token colours, derived from whatever the theme already says.
  *
- * Every preset here was written for SQL — `keyword`, `string`, `number`,
+ * Every preset here was written for SQL - `keyword`, `string`, `number`,
  * `identifier`. Monaco's JSON tokenizer emits its own scopes (`string.key.json`
  * for a property name, `string.value.json` for a string value, `keyword.json`
  * for true/false/null), and a theme that names none of them leaves the JSON
- * viewer to fall back to the editor foreground for nearly everything — a wall
+ * viewer to fall back to the editor foreground for nearly everything - a wall
  * of one colour, correctly indented and unreadable.
  *
  * Keys deliberately take the keyword colour rather than the string colour:

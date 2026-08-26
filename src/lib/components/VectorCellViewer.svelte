@@ -2,7 +2,7 @@
   // A vector cell, read rather than dumped.
   //
   // The generic text editor showed an embedding as 1,537 characters of
-  // `0.1,0.1,0.1,…` — technically the value, practically unreadable. What you
+  // `0.1,0.1,0.1,…` - technically the value, practically unreadable. What you
   // want from an embedding is its shape: how many dimensions, how the values are
   // distributed, whether it's unit-normalised (models return normalised vectors,
   // so a norm that isn't 1 means something), and where the extremes sit. So the
@@ -45,7 +45,7 @@
     histHovered = null
   })
 
-  // 96 bars is about one per 3px of dialog width — dense enough to read as a
+  // 96 bars is about one per 3px of dialog width - dense enough to read as a
   // distribution, coarse enough that each bar is clickable.
   const BARS = 96
   const bars = $derived(info ? vectorBars(info.values, BARS) : [])
@@ -54,7 +54,7 @@
   const perBar = $derived(info && bars.length ? info.values.length / bars.length : 1)
 
   // The strip is indexed by dimension; the histogram is indexed by value. A
-  // healthy embedding reads roughly gaussian around zero here — spikes and
+  // healthy embedding reads roughly gaussian around zero here - spikes and
   // heavy tails are the "something is wrong with this vector" signal.
   const HIST_BINS = 48
   const hist = $derived(info ? vectorHistogram(info.values, HIST_BINS) : { counts: [], from: 0, to: 0, max: 0 })
@@ -164,7 +164,7 @@
               {@const from = Math.floor(hovered * perBar)}
               {@const to = Math.min(info.values.length, Math.floor((hovered + 1) * perBar)) - 1}
               <div class="pointer-events-none absolute right-1.5 top-1.5 rounded bg-background/90 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground">
-                {from === to ? `[${from}]` : `[${from}–${to}]`} peak {short(bars[hovered])}
+                {from === to ? `[${from}]` : `[${from}-${to}]`} peak {short(bars[hovered])}
               </div>
             {/if}
           </div>

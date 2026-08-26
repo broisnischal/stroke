@@ -168,7 +168,7 @@ fn at_line_start(chars: &[char], i: usize) -> bool {
 /// emit, so bodies containing embedded semicolons survive a round-trip:
 ///   - single-quoted strings (`'…''…'`)
 ///   - double-quoted (`"…"`) and backtick (`` `…` ``) identifiers
-///   - PostgreSQL dollar-quoted strings (`$$ … $$`, `$tag$ … $tag$`) — used by
+///   - PostgreSQL dollar-quoted strings (`$$ … $$`, `$tag$ … $tag$`) - used by
 ///     `pg_get_functiondef`, trigger defs, and enum `DO $$ … $$` blocks
 ///   - line comments (`-- …`, stripped)
 ///   - MySQL `DELIMITER` directives (change the active terminator, e.g. `//`),
@@ -277,7 +277,7 @@ fn split_statements(sql: &str) -> Vec<String> {
                     current.push(ch); i += 1;
                 }
             }
-            // Line comment — stripped (replaced by a newline separator).
+            // Line comment - stripped (replaced by a newline separator).
             '-' if chars.get(i + 1) == Some(&'-') => {
                 while i < n && chars[i] != '\n' { i += 1; }
                 current.push('\n');
@@ -356,7 +356,7 @@ async fn export_sqlite(
             if is_cancelled() { break; }
             emit_log(app, "backup-log", "info", format!("  → {table}"));
             let q = format!("SELECT * FROM \"{}\"", table.replace('"', "\"\""));
-            // Stream rows one at a time — avoids loading the entire table into memory.
+            // Stream rows one at a time - avoids loading the entire table into memory.
             let mut stream = sqlx::query(&q).fetch(pool);
             let mut n = 0usize;
             let mut col_list = String::new();
@@ -377,7 +377,7 @@ async fn export_sqlite(
                 ));
             }
             total_rows += n;
-            emit_log(app, "backup-log", "ok", format!("  ✓ {table} — {n} rows"));
+            emit_log(app, "backup-log", "ok", format!("  ✓ {table} - {n} rows"));
         }
         out.push_str("\nCOMMIT;\nPRAGMA foreign_keys=ON;\n");
         emit_log(app, "backup-log", "ok", format!("Export complete: {} tables, {} rows", tables_to_dump.len(), total_rows));
@@ -421,7 +421,7 @@ async fn import_sqlite(app: &AppHandle, pool: &sqlx::SqlitePool, sql: &str) -> R
         if low.starts_with("pragma foreign_keys") { ok += 1; continue; }
         match sqlx::query(stmt).execute(pool).await {
             Ok(_) => { ok += 1; }
-            Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 60))),
+            Err(e) => errors.push(format!("{e} - near: {}…", truncate_chars(stmt, 60))),
         }
     }
 
@@ -438,8 +438,8 @@ async fn import_sqlite(app: &AppHandle, pool: &sqlx::SqlitePool, sql: &str) -> R
 
 /// Unwrap a secondary-object catalog query for the Postgres export. On failure
 /// (permission error, catalog incompatibility) the export continues without
-/// those objects, but says so — both in the log and as a WARNING line in the
-/// dump — instead of silently producing an incomplete backup.
+/// those objects, but says so - both in the log and as a WARNING line in the
+/// dump - instead of silently producing an incomplete backup.
 fn catalog_or_warn<T>(
     res: Result<Vec<T>, sqlx::Error>,
     app: &AppHandle,
@@ -506,7 +506,7 @@ async fn export_postgres(
 
             if !enums.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} enum(s) from {schema}…", enums.len()));
-                out.push_str(&format!("-- Custom enum types — {schema}\n"));
+                out.push_str(&format!("-- Custom enum types - {schema}\n"));
                 for (name, labels) in &enums {
                     let quoted: Vec<String> = labels.split(',').map(|l| format!("'{}'", l.replace('\'', "''"))).collect();
                     out.push_str(&format!(
@@ -535,7 +535,7 @@ async fn export_postgres(
 
             if !seqs.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} sequence(s) from {schema}…", seqs.len()));
-                out.push_str(&format!("-- Sequences — {schema}\n"));
+                out.push_str(&format!("-- Sequences - {schema}\n"));
                 for (name, dtype, start, min, max, inc, cycle) in &seqs {
                     let cycle_str = if *cycle { "CYCLE" } else { "NO CYCLE" };
                     out.push_str(&format!(
@@ -571,7 +571,7 @@ async fn export_postgres(
                             out.push_str(&ddl);
                             total_rows += rows;
                             total_tables += 1;
-                            emit_log(app, "backup-log", "ok", format!("  ✓ {table} — {rows} rows"));
+                            emit_log(app, "backup-log", "ok", format!("  ✓ {table} - {rows} rows"));
                         }
                         Err(e) => {
                             out.push_str(&format!("-- ERROR exporting {schema}.{table}: {e}\n\n"));
@@ -594,7 +594,7 @@ async fn export_postgres(
                 let fk_defs = catalog_or_warn(fk_res, app, &mut out, "foreign keys", schema);
 
                 if !fk_defs.is_empty() {
-                    out.push_str(&format!("-- Foreign keys — {schema}\n"));
+                    out.push_str(&format!("-- Foreign keys - {schema}\n"));
                     for fk in &fk_defs { out.push_str(fk); out.push_str(";\n"); }
                     out.push('\n');
                 }
@@ -615,7 +615,7 @@ async fn export_postgres(
 
             if !views.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} view(s) from {schema}…", views.len()));
-                out.push_str(&format!("-- Views — {schema}\n"));
+                out.push_str(&format!("-- Views - {schema}\n"));
                 for (name, def) in &views {
                     out.push_str(&format!(
                         "CREATE OR REPLACE VIEW \"{schema}\".\"{name}\" AS\n{def};\n"
@@ -639,7 +639,7 @@ async fn export_postgres(
 
             if !funcs.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} function(s)/procedure(s) from {schema}…", funcs.len()));
-                out.push_str(&format!("-- Functions & Procedures — {schema}\n"));
+                out.push_str(&format!("-- Functions & Procedures - {schema}\n"));
                 for (_, def) in &funcs {
                     // pg_get_functiondef already includes CREATE OR REPLACE FUNCTION
                     out.push_str(def.trim());
@@ -664,7 +664,7 @@ async fn export_postgres(
 
             if !triggers.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} trigger(s) from {schema}…", triggers.len()));
-                out.push_str(&format!("-- Triggers — {schema}\n"));
+                out.push_str(&format!("-- Triggers - {schema}\n"));
                 for trig in &triggers {
                     out.push_str(trig.trim());
                     out.push_str(";\n");
@@ -899,7 +899,7 @@ async fn import_postgres(app: &AppHandle, pool: &sqlx::PgPool, sql: &str) -> Res
             }
             Err(e) => {
                 sqlx::query("ROLLBACK TO SAVEPOINT stroke_sp").execute(&mut *tx).await.ok();
-                errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 80)));
+                errors.push(format!("{e} - near: {}…", truncate_chars(stmt, 80)));
             }
         }
     }
@@ -989,7 +989,7 @@ async fn export_mysql(
                         }
                         if n > 0 { out.push('\n'); }
                         total_rows += n;
-                        emit_log(app, "backup-log", "ok", format!("  ✓ {table} — {n} rows"));
+                        emit_log(app, "backup-log", "ok", format!("  ✓ {table} - {n} rows"));
                     } else {
                         emit_log(app, "backup-log", "ok", format!("  ✓ {table} (schema only)"));
                     }
@@ -1007,7 +1007,7 @@ async fn export_mysql(
 
             if !view_names.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} view(s) from {schema}…", view_names.len()));
-                out.push_str(&format!("-- Views — {schema}\n"));
+                out.push_str(&format!("-- Views - {schema}\n"));
                 for view in &view_names {
                     if let Ok(row) = sqlx::query(&format!("SHOW CREATE VIEW `{schema}`.`{view}`")).fetch_one(pool).await {
                         let create: String = row.try_get(1).unwrap_or_default();
@@ -1030,7 +1030,7 @@ async fn export_mysql(
 
             if !routines.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} function(s)/procedure(s) from {schema}…", routines.len()));
-                out.push_str(&format!("-- Functions & Procedures — {schema}\nDELIMITER //\n"));
+                out.push_str(&format!("-- Functions & Procedures - {schema}\nDELIMITER //\n"));
                 for (name, rtype) in &routines {
                     let keyword = if rtype == "FUNCTION" { "FUNCTION" } else { "PROCEDURE" };
                     if let Ok(row) = sqlx::query(&format!("SHOW CREATE {keyword} `{schema}`.`{name}`")).fetch_one(pool).await {
@@ -1054,7 +1054,7 @@ async fn export_mysql(
 
             if !trigger_names.is_empty() {
                 emit_log(app, "backup-log", "info", format!("  Exporting {} trigger(s) from {schema}…", trigger_names.len()));
-                out.push_str(&format!("-- Triggers — {schema}\nDELIMITER //\n"));
+                out.push_str(&format!("-- Triggers - {schema}\nDELIMITER //\n"));
                 for trig in &trigger_names {
                     if let Ok(row) = sqlx::query(&format!("SHOW CREATE TRIGGER `{schema}`.`{trig}`")).fetch_one(pool).await {
                         let create: String = row.try_get(2).unwrap_or_default();
@@ -1076,7 +1076,7 @@ fn mysql_val(row: &sqlx::mysql::MySqlRow, idx: usize) -> String {
     // DECIMAL/NEWDECIMAL must decode as an exact Decimal *first*: the generic
     // integer arm below would otherwise consume the value and keep only its
     // integer part (9.99 → 9), silently corrupting the dump (same warning as
-    // mysql.rs cell_to_json). DATETIME/DATE/TIME need their own arms too —
+    // mysql.rs cell_to_json). DATETIME/DATE/TIME need their own arms too -
     // they match none of the numeric/bytes decoders and used to export as NULL.
     let type_name = row.column(idx).type_info().name();
     if type_name.eq_ignore_ascii_case("DECIMAL") || type_name.eq_ignore_ascii_case("NEWDECIMAL") {
@@ -1087,7 +1087,7 @@ fn mysql_val(row: &sqlx::mysql::MySqlRow, idx: usize) -> String {
     if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
         return v.map_or_else(|| "NULL".into(), |n| n.to_string());
     }
-    // BIGINT UNSIGNED — the signed arm rejects the UNSIGNED flag.
+    // BIGINT UNSIGNED - the signed arm rejects the UNSIGNED flag.
     if let Ok(v) = row.try_get::<Option<u64>, _>(idx) {
         return v.map_or_else(|| "NULL".into(), |n| n.to_string());
     }
@@ -1129,7 +1129,7 @@ async fn import_mysql(app: &AppHandle, pool: &sqlx::MySqlPool, sql: &str) -> Res
     let mut errors: Vec<String> = Vec::new();
 
     // One connection for the whole restore: the dump carries per-schema `USE …;`
-    // directives, which are connection-scoped — on a pool, the USE and the
+    // directives, which are connection-scoped - on a pool, the USE and the
     // unqualified statements that depend on it could land on different
     // connections, restoring tables into the wrong database.
     let mut conn = pool
@@ -1146,7 +1146,7 @@ async fn import_mysql(app: &AppHandle, pool: &sqlx::MySqlPool, sql: &str) -> Res
                     emit_log(app, "restore-log", "info", format!("  {}/{} statements…", i + 1, total));
                 }
             }
-            Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 80))),
+            Err(e) => errors.push(format!("{e} - near: {}…", truncate_chars(stmt, 80))),
         }
     }
 
@@ -1258,7 +1258,7 @@ async fn export_d1(
                 }
             }
             total_rows += n;
-            emit_log(app, "backup-log", "ok", format!("  ✓ {table} — {n} rows"));
+            emit_log(app, "backup-log", "ok", format!("  ✓ {table} - {n} rows"));
         }
     }
 
@@ -1309,7 +1309,7 @@ async fn import_d1(app: &AppHandle, cfg: &super::connection::D1Config, sql: &str
                     emit_log(app, "restore-log", "info", format!("  {}/{} statements…", i + 1, total));
                 }
             }
-            Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 60))),
+            Err(e) => errors.push(format!("{e} - near: {}…", truncate_chars(stmt, 60))),
         }
     }
 
@@ -1328,7 +1328,7 @@ async fn import_d1(app: &AppHandle, cfg: &super::connection::D1Config, sql: &str
 /// (schema.sql + load.sql + one file per table), not a single SQL script. The
 /// engine is embedded, so that directory lives on this client's filesystem.
 ///
-/// The whole database is exported — DuckDB has no per-table/schema `EXPORT`, so
+/// The whole database is exported - DuckDB has no per-table/schema `EXPORT`, so
 /// the schema/table selection used by the SQL-scripting engines doesn't apply.
 /// The export directory is derived next to the database file (a `:memory:`
 /// database falls back to the system temp dir). The returned "script" records
@@ -1427,7 +1427,7 @@ async fn import_duckdb(
         if low.starts_with("pragma foreign_keys") { ok += 1; continue; }
         match super::duckdb::execute_sql(handle, stmt).await {
             Ok(_) => { ok += 1; }
-            Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 60))),
+            Err(e) => errors.push(format!("{e} - near: {}…", truncate_chars(stmt, 60))),
         }
     }
 
@@ -1452,7 +1452,7 @@ async fn export_mssql(
 ) -> Result<ExportResult, String> {
     emit_log(app, "backup-log", "info", "Starting MS SQL Server export…");
 
-    // The database name comes from the live connection — the active-connection
+    // The database name comes from the live connection - the active-connection
     // handle carries the client, not the MssqlConfig.
     let db = mssql_current_db(handle).await?;
     let bak_file = format!("{db}_stroke_backup.bak");
@@ -1516,7 +1516,7 @@ async fn import_mssql(
         if is_cancelled() { break; }
         match super::mssql::execute_sql(handle, stmt).await {
             Ok(_) => { ok += 1; }
-            Err(e) => errors.push(format!("{e} — near: {}…", truncate_chars(stmt, 80))),
+            Err(e) => errors.push(format!("{e} - near: {}…", truncate_chars(stmt, 80))),
         }
     }
 

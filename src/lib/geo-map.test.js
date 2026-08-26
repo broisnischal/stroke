@@ -31,7 +31,7 @@ describe('projection', () => {
   })
 
   it('clamps past the Mercator cut instead of running to infinity', () => {
-    // Without the clamp this is where y becomes unusable — the whole reason
+    // Without the clamp this is where y becomes unusable - the whole reason
     // every web map cuts the world at ±85°.
     expect(Number.isFinite(toWorld(0, 90).y)).toBe(true)
     expect(toWorld(0, 90).y).toBeCloseTo(toWorld(0, MAX_LAT).y, 12)
@@ -96,7 +96,7 @@ describe('viewport', () => {
   })
 
   it('will not pan the viewport off the edge of the world', () => {
-    // Past the edge there is no land, no rows and no grid — just black. Reaching
+    // Past the edge there is no land, no rows and no grid - just black. Reaching
     // it reads as the drag having broken, not as the world having ended.
     const view = { scale: 4000, x: 0.5, y: 0.5 }
     const far = panBy(view, -100000, -100000, 800, 600)

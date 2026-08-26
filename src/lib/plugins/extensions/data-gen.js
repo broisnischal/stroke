@@ -68,11 +68,11 @@ export const dataGen = {
     { id: 'date-future', label: 'Random future date', hint: 'Within the next 2 years', group: 'Time', generate: () => new Date(Date.now() + randInt(1, 2 * 365) * DAY).toISOString() },
 
     // ── Numbers ──────────────────────────────────────────────────────────────
-    { id: 'int-100', label: 'Random int · 0–100', group: 'Numbers', generate: () => String(randInt(0, 100)) },
-    { id: 'int-1k', label: 'Random int · 0–1,000', group: 'Numbers', generate: () => String(randInt(0, 1000)) },
-    { id: 'int-1m', label: 'Random int · 0–1,000,000', group: 'Numbers', generate: () => String(randInt(0, 1_000_000)) },
-    { id: 'float', label: 'Random float · 0–1', group: 'Numbers', generate: () => Math.random().toFixed(6) },
-    { id: 'price', label: 'Random price', hint: '0.00 – 999.99', group: 'Numbers', generate: () => (randInt(0, 99999) / 100).toFixed(2) },
+    { id: 'int-100', label: 'Random int · 0-100', group: 'Numbers', generate: () => String(randInt(0, 100)) },
+    { id: 'int-1k', label: 'Random int · 0-1,000', group: 'Numbers', generate: () => String(randInt(0, 1000)) },
+    { id: 'int-1m', label: 'Random int · 0-1,000,000', group: 'Numbers', generate: () => String(randInt(0, 1_000_000)) },
+    { id: 'float', label: 'Random float · 0-1', group: 'Numbers', generate: () => Math.random().toFixed(6) },
+    { id: 'price', label: 'Random price', hint: '0.00 - 999.99', group: 'Numbers', generate: () => (randInt(0, 99999) / 100).toFixed(2) },
     { id: 'percent', label: 'Random percent', group: 'Numbers', generate: () => (Math.random() * 100).toFixed(2) },
     { id: 'bool', label: 'Random boolean', group: 'Numbers', generate: () => (Math.random() < 0.5 ? 'true' : 'false') },
     { id: 'bit', label: 'Random bit · 0/1', group: 'Numbers', generate: () => String(randInt(0, 1)) },

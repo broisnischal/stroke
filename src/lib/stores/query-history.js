@@ -161,6 +161,27 @@ export async function createSavedQuery(connectionId, name, sql) {
   return saved
 }
 
+/**
+ * File a query under Saved Queries unless the same SQL is already there.
+ *
+ * Used by the auto-save setting, where the same statement is typically run many
+ * times over a session: without the dedupe the list would fill with copies of
+ * whatever you were iterating on and become useless for the queries you kept on
+ * purpose. Returns the existing entry when there is one, so callers can't tell
+ * (or need to care) which happened.
+ *
+ * @param {string} connectionId @param {string} sql
+ * @returns {Promise<SavedQuery | null>}
+ */
+export async function saveQueryOnce(connectionId, sql) {
+  const trimmed = sql.trim()
+  if (!connectionId || !trimmed) return null
+  const existing = await listSavedQueries(connectionId)
+  const match = existing.find((q) => q.sql.trim() === trimmed)
+  if (match) return match
+  return createSavedQuery(connectionId, '', trimmed)
+}
+
 /** @param {string} connectionId @returns {Promise<SavedQuery[]>} */
 export async function listSavedQueries(connectionId) {
   if (!connectionId) return []

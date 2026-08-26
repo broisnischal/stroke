@@ -1,7 +1,7 @@
 /*!
- * Prisma Postgres adapter — Prisma's Management API OAuth (authorization-code,
+ * Prisma Postgres adapter - Prisma's Management API OAuth (authorization-code,
  * confidential client). Sign in, list projects, and connect using the direct
- * Postgres credentials (`ppgDirectConnection`) the API exposes — no pasted
+ * Postgres credentials (`ppgDirectConnection`) the API exposes - no pasted
  * connection string, and never the Accelerate `prisma+postgres://` form (which
  * a normal Postgres driver can't speak).
  */
@@ -11,12 +11,12 @@ use serde_json::Value;
 
 pub const OAUTH: OAuthConfig = OAuthConfig {
     // Public client_id (safe to embed). The client SECRET lives only on the
-    // stroke.click proxy as PRISMA_CLIENT_SECRET — never in this binary.
+    // stroke.click proxy as PRISMA_CLIENT_SECRET - never in this binary.
     client_id: "cmr8zjp5z012evvf7cycv88xn",
     auth_url: "https://auth.prisma.io/authorize",
     // token_url is used by the proxy, not the app (the app posts to TOKEN_PROXY).
     token_url: "https://auth.prisma.io/token",
-    // `offline_access` is REQUIRED to receive a refresh token — without it the
+    // `offline_access` is REQUIRED to receive a refresh token - without it the
     // access token dies after 1h and every Management-API call 401s (the app
     // still shows "connected" because the dead access token is on disk).
     scopes: "workspace:admin offline_access",
@@ -43,7 +43,7 @@ async fn get(token: &str, path: &str) -> Result<Value, String> {
 }
 
 /// Format a Management-API error. A 401 almost always means the stored token
-/// expired — tell the user to reconnect rather than showing "request failed".
+/// expired - tell the user to reconnect rather than showing "request failed".
 fn api_error(status: u16, body: &Value) -> String {
     let msg = body["message"]
         .as_str()
@@ -172,7 +172,7 @@ pub async fn build_connection(token: &str, project_id: &str) -> Result<ProviderC
 
     // A project's databases live at a separate endpoint; the read responses never
     // include the password (it's a secret shown once). Grab the database id, then
-    // CREATE a fresh connection — that call returns usable direct credentials.
+    // CREATE a fresh connection - that call returns usable direct credentials.
     let dbs = get(token, &format!("/projects/{project_id}/databases")).await?;
     let list = as_list(&dbs);
     let db = list.first().ok_or(

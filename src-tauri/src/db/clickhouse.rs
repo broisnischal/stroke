@@ -87,7 +87,7 @@ pub async fn query(config: &ClickhouseConfig, sql: &str) -> Result<SqlResult, St
     }
 
     if !read {
-        // INSERT / CREATE / ALTER / DROP — success, no result set.
+        // INSERT / CREATE / ALTER / DROP - success, no result set.
         return Ok(SqlResult {
             columns: vec![],
             rows: vec![],
@@ -116,7 +116,7 @@ pub async fn query(config: &ClickhouseConfig, sql: &str) -> Result<SqlResult, St
         .collect();
 
     let row_count = Some(parsed.data.len() as i64);
-    // Cap oversized cells — a multi-MB String/JSON value shipped whole freezes
+    // Cap oversized cells - a multi-MB String/JSON value shipped whole freezes
     // the webview (see sql_util::CELL_VALUE_CAP); small scalars pass through.
     let rows: Vec<Vec<Value>> = parsed
         .data
@@ -257,7 +257,7 @@ pub async fn get_table_rows(
         _ => String::new(),
     };
 
-    // Count (respecting filters) and page are independent — run the two HTTP
+    // Count (respecting filters) and page are independent - run the two HTTP
     // round-trips concurrently, matching the pg and D1 paths.
     let count_sql = format!("SELECT count() FROM {tq}{where_clause}");
     let data_sql = format!("SELECT * FROM {tq}{where_clause}{order} LIMIT {limit} OFFSET {offset}");

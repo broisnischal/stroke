@@ -6,10 +6,10 @@ use tokio::sync::oneshot;
 use crate::db::ActiveConnection;
 use tauri::{AppHandle, Manager, State};
 
-/// Port we always try first — stable so AI clients don't need reconfiguration.
+/// Port we always try first - stable so AI clients don't need reconfiguration.
 const PREFERRED_PORT: u16 = 39847;
 
-/// Credential-free metadata about a saved connection — safe to pass to the MCP layer.
+/// Credential-free metadata about a saved connection - safe to pass to the MCP layer.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConnMeta {
     pub id: String,
@@ -31,9 +31,9 @@ pub struct McpState {
     shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
     /// Actual bound port (0 = not yet started).
     pub port: Mutex<u16>,
-    /// Persistent token — loaded from disk once in `init_token`, never regenerated.
+    /// Persistent token - loaded from disk once in `init_token`, never regenerated.
     token: Mutex<String>,
-    /// Credential-free list of all saved connections — synced from frontend.
+    /// Credential-free list of all saved connections - synced from frontend.
     pub connections: Arc<Mutex<Vec<ConnMeta>>>,
     /// ID of the currently active connection (matches one entry in `connections`).
     pub active_conn_id: Arc<Mutex<Option<String>>>,
@@ -54,7 +54,7 @@ impl McpState {
         }
     }
 
-    /// Called once from `setup()` — loads or generates a stable token from disk.
+    /// Called once from `setup()` - loads or generates a stable token from disk.
     pub fn init_token(&self, app: &AppHandle) {
         let mut tok = self.token.lock().unwrap_or_else(|e| e.into_inner());
         if !tok.is_empty() {
@@ -101,7 +101,7 @@ pub struct McpStatus {
 
 #[tauri::command]
 pub async fn mcp_start(mcp: State<'_, McpState>) -> Result<McpStatus, String> {
-    // Already running — return current status.
+    // Already running - return current status.
     {
         let running = mcp.shutdown_tx.lock().map_err(|e| e.to_string())?.is_some();
         if running {
@@ -116,7 +116,7 @@ pub async fn mcp_start(mcp: State<'_, McpState>) -> Result<McpStatus, String> {
         }
     }
 
-    // Always try the preferred port first — fall back only if it's taken by another process.
+    // Always try the preferred port first - fall back only if it's taken by another process.
     let preferred = {
         let p = *mcp.port.lock().map_err(|e| e.to_string())?;
         if p > 0 { p } else { PREFERRED_PORT }
@@ -150,7 +150,7 @@ pub async fn mcp_stop(mcp: State<'_, McpState>) -> Result<(), String> {
     if let Some(tx) = mcp.shutdown_tx.lock().map_err(|e| e.to_string())?.take() {
         let _ = tx.send(());
     }
-    // Intentionally keep port and token stable — AI clients stay configured.
+    // Intentionally keep port and token stable - AI clients stay configured.
     Ok(())
 }
 
@@ -204,7 +204,7 @@ async fn find_free_port(preferred: u16) -> Result<u16, String> {
 
 fn generate_token() -> String {
     // Use OS-provided randomness (getrandom syscall on Linux/macOS, BCryptGenRandom
-    // on Windows) for a 128-bit token — far stronger than PID+nanos (~32 bits).
+    // on Windows) for a 128-bit token - far stronger than PID+nanos (~32 bits).
     let mut bytes = [0u8; 16];
     if getrandom::getrandom(&mut bytes).is_ok() {
         return bytes.iter().map(|b| format!("{b:02x}")).collect();

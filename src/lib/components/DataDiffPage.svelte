@@ -102,8 +102,8 @@
 
   const MONACO_OPTS = /** @type {monaco.editor.IStandaloneEditorConstructionOptions} */ ({
     language: 'sql',
-    // No hardcoded theme. `monaco.editor.setTheme` — and a `theme` in create
-    // options — is *global*: pinning this to 'vs-dark' re-tinted every other
+    // No hardcoded theme. `monaco.editor.setTheme` - and a `theme` in create
+    // options - is *global*: pinning this to 'vs-dark' re-tinted every other
     // editor in the app the moment this page mounted, and left a stock VS Code
     // dark editor sitting on a light app theme. The app theme is applied below.
     minimap: { enabled: false },

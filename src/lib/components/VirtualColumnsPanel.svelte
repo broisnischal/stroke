@@ -306,7 +306,7 @@
               <div class="min-w-0">
                 <p class="text-ui-sm font-medium text-foreground/60">No virtual columns yet</p>
                 <p class="mt-1 text-ui-2xs leading-relaxed text-muted-foreground/45">
-                  Build a column from the ones you already have — join a name, format a date, do the arithmetic once.
+                  Build a column from the ones you already have - join a name, format a date, do the arithmetic once.
                 </p>
               </div>
             </div>
@@ -367,7 +367,7 @@
       </div>
 
       {#if vcols.length > 0}
-        <!-- Footer: only when there is a list to add to — in the empty state the
+        <!-- Footer: only when there is a list to add to - in the empty state the
              same button already sits under the explanation. -->
         <div class="shrink-0 border-t border-border/50 px-3 py-2.5">
           <button

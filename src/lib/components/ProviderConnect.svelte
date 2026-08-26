@@ -279,7 +279,7 @@
     {:else}
       <ProviderAuthPanel
         title="Sign in with {meta?.name}"
-        subtitle="Opens your browser to authorize. Stroke receives a scoped token — your {meta?.name} password never passes through it."
+        subtitle="Opens your browser to authorize. Stroke receives a scoped token - your {meta?.name} password never passes through it."
         hint="Secure PKCE flow"
       >
         {#snippet mark()}<DbIcon id={provider} class="size-4 shrink-0" />{/snippet}

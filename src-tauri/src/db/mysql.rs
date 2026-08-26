@@ -26,7 +26,7 @@ pub fn cell_to_json(row: &sqlx::mysql::MySqlRow, idx: usize) -> Value {
     }
     // Fast path: route the common column types by name so a plain text/date cell
     // doesn't pay for a cascade of failed try_get attempts (each mismatch makes
-    // sqlx allocate a boxed "mismatched types" error — up to 9 per text cell).
+    // sqlx allocate a boxed "mismatched types" error - up to 9 per text cell).
     // A failed route falls through to the full chain below, so unmatched or
     // alias types behave exactly as before.
     match type_name {
@@ -109,7 +109,7 @@ pub fn cell_to_json(row: &sqlx::mysql::MySqlRow, idx: usize) -> Value {
     Value::Null
 }
 
-/// String cell, capped — a multi-MB cell shipped whole freezes the webview
+/// String cell, capped - a multi-MB cell shipped whole freezes the webview
 /// (see sql_util::CELL_VALUE_CAP).
 fn text_cell(row: &sqlx::mysql::MySqlRow, idx: usize, v: Option<String>) -> Value {
     match v {
@@ -158,7 +158,7 @@ struct WhereClause {
 }
 
 fn build_where(columns: &[String], search: Option<&str>, search_is_regex: bool, search_case_sensitive: bool, filters: &[RowFilter]) -> Result<WhereClause, String> {
-    // (conjunct — None for first condition, Some("AND"/"OR") for subsequent)
+    // (conjunct - None for first condition, Some("AND"/"OR") for subsequent)
     let mut cond_parts: Vec<(Option<&'static str>, String)> = Vec::new();
     let mut binds: Vec<String> = Vec::new();
 
@@ -220,7 +220,7 @@ fn build_where(columns: &[String], search: Option<&str>, search_is_regex: bool, 
             op => {
                 let v = f.value.as_deref().unwrap_or("").trim();
                 if v.is_empty() { continue; }
-                // Comparison operators: NO CAST — MySQL performs implicit type coercion
+                // Comparison operators: NO CAST - MySQL performs implicit type coercion
                 // from the string parameter to the column's actual type, which means the
                 // database can use indexes on typed columns (INT, DECIMAL, DATETIME, etc.).
                 // Only text-search ops (LIKE) need CAST since LIKE is inherently string-only.
@@ -287,7 +287,7 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
-    // When false, skip the primary-key/foreign-key catalog round-trips — the
+    // When false, skip the primary-key/foreign-key catalog round-trips - the
     // frontend already holds them for repeat fetches (pagination/sort/filter/live).
     include_meta: bool,
     nulls_order: Option<String>,
@@ -325,7 +325,7 @@ pub async fn get_table_rows(
             "desc" => "DESC",
             _ => "ASC",
         };
-        // Emulate NULLS FIRST/LAST — real MySQL (unlike MariaDB) rejects the
+        // Emulate NULLS FIRST/LAST - real MySQL (unlike MariaDB) rejects the
         // `NULLS FIRST/LAST` syntax. `ISNULL(col)` yields 0 for non-NULLs and 1
         // for NULLs: ordering it ASC keeps NULLs last, DESC puts NULLs first.
         let qc = bt(col);
@@ -339,7 +339,7 @@ pub async fn get_table_rows(
 
     let table_ref = format!("{}.{}", bt(schema), bt(table));
     // MySQL types COUNT(*) as BIGINT UNSIGNED, but MariaDB types it as signed
-    // BIGINT — decoding the wrong signedness is a hard type-mismatch in sqlx.
+    // BIGINT - decoding the wrong signedness is a hard type-mismatch in sqlx.
     // CAST(... AS SIGNED) normalizes both to i64, which comfortably holds any
     // real row count.
     let count_sql = format!("SELECT CAST(COUNT(*) AS SIGNED) FROM {table_ref}{}", where_clause.sql);
@@ -523,7 +523,7 @@ pub async fn execute_sql(
     if is_select {
         let mut stream = sqlx::query(sql).fetch(&mut *conn);
         // Convert each row to JSON as it streams in and drop the driver row
-        // immediately — retaining the full Vec<MySqlRow> alongside the JSON rows
+        // immediately - retaining the full Vec<MySqlRow> alongside the JSON rows
         // would double peak memory on a large result.
         let mut columns: Vec<ColumnInfo> = Vec::new();
         let mut data: Vec<Vec<Value>> = Vec::new();
@@ -560,7 +560,7 @@ pub async fn execute_sql(
             rows: data,
             row_count: Some(row_count),
             message: if capped {
-                Some(format!("Result capped at {EXECUTE_SQL_MAX_ROWS} rows — add a LIMIT clause to fetch a specific range."))
+                Some(format!("Result capped at {EXECUTE_SQL_MAX_ROWS} rows - add a LIMIT clause to fetch a specific range."))
             } else {
                 None
             },

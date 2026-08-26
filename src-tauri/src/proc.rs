@@ -1,7 +1,7 @@
 // Spawning child processes without showing the user a console window.
 //
 // On Windows a GUI process has no console, so when it starts a console program
-// the OS allocates one — and that console is a cmd.exe window that pops up in
+// the OS allocates one - and that console is a cmd.exe window that pops up in
 // front of the app. Every process this app runs is a background detail nobody
 // asked to watch: npm installs, docker, ssh tunnels, port scans. All of them go
 // through here.
@@ -9,7 +9,7 @@
 // Unix has no equivalent behaviour and no equivalent flag, so on those platforms
 // these are pass-throughs that the optimiser removes entirely.
 
-/// `CREATE_NO_WINDOW` — run the console program with no console at all.
+/// `CREATE_NO_WINDOW` - run the console program with no console at all.
 ///
 /// Not `SW_HIDE` via `STARTUPINFO`: that still allocates the console and merely
 /// starts it hidden, which leaves a taskbar entry and a window that anything can

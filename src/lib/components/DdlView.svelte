@@ -16,7 +16,7 @@
     /** @type {string} */ objectName = '',
   } = $props()
 
-  // Engines hand back DDL in whatever shape they stored it — SQLite returns the
+  // Engines hand back DDL in whatever shape they stored it - SQLite returns the
   // statement exactly as typed, so a one-line CREATE TABLE stays one line.
   // formatSql returns its input unchanged if it can't parse, so a dialect it
   // doesn't understand degrades to the raw DDL rather than to mangled DDL.

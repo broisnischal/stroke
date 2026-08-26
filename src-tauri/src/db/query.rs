@@ -29,7 +29,7 @@ pub struct ColumnInfo {
     pub has_default: bool,
 }
 
-/// What the catalog knows about a column beyond its type — the three facts the
+/// What the catalog knows about a column beyond its type - the three facts the
 /// insert row needs to decide between "required", "optional", and "don't ask".
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ColumnFlags {
@@ -58,7 +58,7 @@ async fn fetch_table_column_flags(
 ) -> Result<HashMap<String, ColumnFlags>, String> {
     // pg_attribute is much faster than information_schema.columns for this lookup.
     // `attidentity` covers GENERATED … AS IDENTITY, `attgenerated` covers stored
-    // generated columns, and a `nextval(` default is what `serial` actually is —
+    // generated columns, and a `nextval(` default is what `serial` actually is -
     // its data_type reads as `bigint`, so the type alone can never identify one.
     let rows = sqlx::query(
         r#"
@@ -96,6 +96,59 @@ async fn fetch_table_column_flags(
     Ok(map)
 }
 
+/// Column flags for the keyset gate only, memoised for a few seconds.
+///
+/// The gate asks "is the ordering column NOT NULL?" before every keyset page,
+/// and a windowed scroll of a large table issues one page per window - so
+/// uncached it puts a catalog round-trip in front of each of them (nothing
+/// locally, a full RTT against a remote database, which is most of what the
+/// keyset fast path just saved). Deliberately *not* used by the `include_meta`
+/// path: what the insert row is told about a column stays exact. The worst a
+/// stale entry can do here is pick OFFSET over keyset, or take keyset on a
+/// column that became nullable seconds ago.
+static COLUMN_FLAGS_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<HashMap<String, (std::time::Instant, HashMap<String, ColumnFlags>)>>,
+> = std::sync::OnceLock::new();
+const COLUMN_FLAGS_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
+async fn cached_column_flags(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    table: &str,
+) -> Result<HashMap<String, ColumnFlags>, String> {
+    // Keyed by the database this pool is connected to as well as the table:
+    // two connections open on the same `public.users` are two different tables.
+    let opts = pool.connect_options();
+    let key = format!(
+        "{}:{}/{}\u{0}{schema}.{table}",
+        opts.get_host(),
+        opts.get_port(),
+        opts.get_database().unwrap_or_default()
+    );
+    let cache = COLUMN_FLAGS_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    // Scoped so the guard is dropped before the await below - never hold a lock
+    // across one.
+    {
+        if let Ok(map) = cache.lock() {
+            if let Some((at, flags)) = map.get(&key) {
+                if at.elapsed() < COLUMN_FLAGS_TTL {
+                    return Ok(flags.clone());
+                }
+            }
+        }
+    }
+    let flags = fetch_table_column_flags(pool, schema, table).await?;
+    if let Ok(mut map) = cache.lock() {
+        // Bounded: a session that browses thousands of tables shouldn't grow this
+        // forever, and everything dropped is a re-query at worst.
+        if map.len() > 256 {
+            map.retain(|_, (at, _)| at.elapsed() < COLUMN_FLAGS_TTL);
+        }
+        map.insert(key, (std::time::Instant::now(), flags.clone()));
+    }
+    Ok(flags)
+}
+
 fn apply_column_flags(columns: &mut [ColumnInfo], flags: &HashMap<String, ColumnFlags>) {
     for col in columns.iter_mut() {
         if let Some(f) = flags.get(&col.name) {
@@ -111,7 +164,7 @@ async fn fetch_table_column_enums(
     schema: &str,
     table: &str,
 ) -> Result<HashMap<String, Vec<String>>, String> {
-    // pg_attribute is far faster than information_schema.columns here — the view
+    // pg_attribute is far faster than information_schema.columns here - the view
     // scans many system tables with multiple joins; pg_attribute is a direct heap scan.
     let rows = sqlx::query(
         r#"
@@ -206,7 +259,7 @@ fn pg_type_label(type_name: &str) -> String {
 
 /// Render a Postgres interval the way Postgres does: "1 year 2 mons 3 days 04:05:06".
 /// Units are kept separate rather than normalised into seconds because months and
-/// days are not fixed-length — collapsing them would change the value's meaning.
+/// days are not fixed-length - collapsing them would change the value's meaning.
 fn format_pg_interval(iv: &sqlx::postgres::types::PgInterval) -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -267,7 +320,7 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     }
 
     // Fast path: route the common built-in types by name so a cell doesn't pay
-    // for a cascade of failed try_get attempts — every mismatch makes sqlx
+    // for a cascade of failed try_get attempts - every mismatch makes sqlx
     // allocate a formatted "mismatched types" error, up to 12 per cell on a
     // text column. A failed route falls through to the full chain below, so
     // alias/unmatched types behave exactly as before.
@@ -332,7 +385,7 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     // (dimension/length header + element data) as lossy UTF-8 → garbage □ boxes.
     // Decode into a Vec and return a JSON array; the frontend renders it {a,b}-style.
     // sqlx validates the element PgType on each try_get, so only the matching arm
-    // returns — numeric arms are tried before the String arm so text[] isn't misread.
+    // returns - numeric arms are tried before the String arm so text[] isn't misread.
     if type_name.ends_with("[]") {
         macro_rules! try_arr {
             ($t:ty) => {
@@ -378,12 +431,12 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
                 None => Value::Null,
             };
         }
-        // Unknown element type (e.g. enum[]) — fall through to the raw branch.
+        // Unknown element type (e.g. enum[]) - fall through to the raw branch.
     }
 
     // INTERVAL has no text-compatible decode, so without this it reached the raw
     // branch below and Postgres's 16-byte binary interval (months/days/micros) was
-    // reinterpreted as UTF-8 — a row of NUL boxes plus whatever byte happened to be
+    // reinterpreted as UTF-8 - a row of NUL boxes plus whatever byte happened to be
     // printable ("□□□m"). Rebuild Postgres's own text rendering from the parts.
     if type_name == "INTERVAL" {
         if let Ok(v) = row.try_get::<Option<sqlx::postgres::types::PgInterval>, _>(idx) {
@@ -397,12 +450,12 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
     // Use raw wire-protocol bytes for all remaining types (TEXT, VARCHAR, enums, domains…).
     // Skipping try_get::<String>() avoids sqlx's runtime pg_catalog introspection for
     // custom/enum types, which would fire a `SELECT enumlabel FROM pg_enum WHERE …` query
-    // per unique enum OID encountered — each one a full network round-trip.
+    // per unique enum OID encountered - each one a full network round-trip.
     if let Ok(raw) = row.try_get_raw(idx) {
         if raw.is_null() {
             return Value::Null;
         }
-        // Oversize guard before allocating the String — text cells beyond the
+        // Oversize guard before allocating the String - text cells beyond the
         // cap ship as a sentinel + preview instead of the whole value. Non-UTF-8
         // payloads (bytea) fall through to the byte-count placeholder below.
         if let Ok(bytes) = raw.as_bytes() {
@@ -414,7 +467,7 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
         // strings. Their binary form is packed numbers, so the UTF-8 attempt
         // below can never reach them and the cell used to read `<VECTOR>`.
         // Both byte-level checks happen before `String::decode`, which consumes
-        // `raw` — and neither copies the payload.
+        // `raw` - and neither copies the payload.
         if let Ok(bytes) = raw.as_bytes() {
             if let Some(text) = super::pg_ext_types::decode_ext_type(type_name, bytes) {
                 return super::sql_util::cap_json_value(
@@ -628,7 +681,7 @@ impl PgColumnMeta {
             return Ok(format!(r#""{column}" = $1::{type_ref}"#));
         }
         // Array columns. PostgreSQL names every array type with a leading
-        // underscore (_varchar, _int4, _text, …) — that's what pg_type.typname
+        // underscore (_varchar, _int4, _text, …) - that's what pg_type.typname
         // returns here; information_schema instead reports the literal "ARRAY".
         // The editor sends a Postgres array literal ({"a","b"}); cast it to the
         // real array type so PostgreSQL parses it instead of rejecting it as text.
@@ -657,7 +710,7 @@ impl PgColumnMeta {
             let type_ref = pg_cast_type_ref(udt_schema, udt_name)?;
             return Ok(format!("${bind_idx}::{type_ref}"));
         }
-        // Array columns — cast the array-literal string to the real array type.
+        // Array columns - cast the array-literal string to the real array type.
         if let Some(arr) = self.array_cast_ref()? {
             return Ok(format!("${bind_idx}::{arr}"));
         }
@@ -779,7 +832,7 @@ pub(super) struct WhereClause {
 }
 
 struct QueryBuilder {
-    /// (conjunct, sql_fragment) — conjunct is None for the first condition.
+    /// (conjunct, sql_fragment) - conjunct is None for the first condition.
     /// Using &'static str avoids a String allocation per filter for "AND"/"OR".
     conditions: Vec<(Option<&'static str>, String)>,
     binds: Vec<String>,
@@ -846,7 +899,7 @@ struct TextOnlyColumn {
 /// True when a Postgres error is the driver asking for a binary value the server
 /// cannot produce. sqlx always requests binary results, so a single column of a
 /// type without `typsend` (PostGIS `raster`, `box2d`, `box3d`, `spheroid`, and
-/// plenty of other extension types) fails the *whole* `SELECT *` — the table
+/// plenty of other extension types) fails the *whole* `SELECT *` - the table
 /// refuses to open rather than showing the columns it could have decoded.
 fn is_missing_binary_output(err: &str) -> bool {
     err.contains("no binary output function available for type")
@@ -897,11 +950,11 @@ async fn fetch_text_only_columns(
 
 /// How to read a binary-less column as something a cell can hold.
 ///
-/// `::text` is the general answer — it is what psql shows and it round-trips.
+/// `::text` is the general answer - it is what psql shows and it round-trips.
 /// `raster` is the exception: its text form is the entire tile as WKB hex, which
 /// is megabytes for any real raster and useless in a grid either way, so it gets
 /// a description of the tile instead. That value is display-only, which costs
-/// nothing that wasn't already lost — a type with no binary output cannot be
+/// nothing that wasn't already lost - a type with no binary output cannot be
 /// edited through the grid regardless.
 fn text_projection(col: &TextOnlyColumn) -> Result<String, String> {
     let q = quoted_column(&col.name)?;
@@ -959,7 +1012,7 @@ async fn types_without_binary_output(pool: &sqlx::PgPool, names: &[String]) -> V
 /// text: `SELECT a, b::text AS b FROM (<stmt>) _stroke_text`. This is what lets
 /// a hand-written `SELECT * FROM tiles` return rows instead of an error.
 ///
-/// `None` when the statement can't be wrapped without changing what it means —
+/// `None` when the statement can't be wrapped without changing what it means -
 /// unnamed columns (`?column?`), duplicate names, or nothing needing a cast.
 /// The caller then surfaces the original error rather than a rewritten one.
 async fn text_safe_wrap(pool: &sqlx::PgPool, stmt: &str) -> Option<String> {
@@ -1058,7 +1111,7 @@ fn pg_param_cast(data_type: Option<&str>) -> &'static str {
 
 /// True for a bare `YYYY-MM-DD` value (no time-of-day). Such a value applied to
 /// a timestamp column must match the whole calendar day `[date, date+1)` rather
-/// than the midnight instant — otherwise `= '2026-07-06'` compiles to
+/// than the midnight instant - otherwise `= '2026-07-06'` compiles to
 /// `= '2026-07-06 00:00:00'` and never matches a real timestamp (the filter bug).
 fn is_date_only(s: &str) -> bool {
     let b = s.as_bytes();
@@ -1172,7 +1225,7 @@ fn build_filter_condition(
             let from = parts.next().unwrap_or("").trim().to_string();
             let to   = parts.next().unwrap_or("").trim().to_string();
             match (from.is_empty(), to.is_empty()) {
-                (true, true) => { /* both empty — nothing to filter on, skip */ }
+                (true, true) => { /* both empty - nothing to filter on, skip */ }
                 (false, true) => {
                     // only lower bound set
                     let p1 = builder.push_bind(from);
@@ -1411,7 +1464,7 @@ pub async fn get_table_rows(
     // When false, skip the catalog metadata queries (enums/nullable/pk/fk) and
     // return only rows + column types. Used for repeat fetches of the same table
     // (pagination, sort, filter, live refresh) where that metadata is unchanged
-    // and the frontend already holds it — cutting several round-trips per fetch.
+    // and the frontend already holds it - cutting several round-trips per fetch.
     include_meta: bool,
     // When false, skip the row count entirely and return total = -1 (unknown).
     // The frontend then fetches the count in the background via `count_table_rows`
@@ -1529,7 +1582,7 @@ pub async fn get_table_rows(
     // fall back to OFFSET, which is always correct.
     let keyset_ok = match keyset_ok {
         Some(k) => {
-            let flags = fetch_table_column_flags(&pool, &schema, &table).await?;
+            let flags = cached_column_flags(&pool, &schema, &table).await?;
             // Require the column to be known AND non-nullable. Unknown column =>
             // don't fast-path (stay safe).
             match flags.get(&k.column).map(|f| f.nullable) {
@@ -1598,7 +1651,7 @@ pub async fn get_table_rows(
     };
 
     // For an unfiltered listing, COUNT(*) on a large table is a full sequential
-    // scan that can take seconds — that's the "pause" when opening a big table.
+    // scan that can take seconds - that's the "pause" when opening a big table.
     // Use the planner's row estimate (pg_class.reltuples) instead, which is
     // instant, and only fall back to an exact COUNT when the table is small
     // (estimate < threshold, where an exact count is sub-millisecond) or has
@@ -1614,7 +1667,7 @@ pub async fn get_table_rows(
         rows_res = data_query.fetch_all(&pool).await;
         total = -1;
     } else if where_clause.sql.is_empty() {
-        // Estimate and data fetch are independent — run them together so the
+        // Estimate and data fetch are independent - run them together so the
         // planner estimate adds no extra round-trip in series.
         let estimate_query = sqlx::query_scalar::<_, i64>(
             "SELECT reltuples::bigint FROM pg_class WHERE oid = $1::regclass",
@@ -1632,7 +1685,7 @@ pub async fn get_table_rows(
                 .map_err(|e| format!("Failed to count rows: {e}"))?,
         };
     } else {
-        // COUNT and data SELECT are independent — run both in parallel.
+        // COUNT and data SELECT are independent - run both in parallel.
         let (total_result, page_res) = tokio::join!(
             count_query.fetch_one(&pool),
             data_query.fetch_all(&pool),
@@ -1645,7 +1698,7 @@ pub async fn get_table_rows(
     // friends) fails the whole `SELECT *`. Re-read the page with those columns
     // projected as text so the table opens with every other column intact,
     // rather than showing an error where the grid should be. Only reached on a
-    // table that actually has one — the common path never runs these queries.
+    // table that actually has one - the common path never runs these queries.
     let mut text_only: Vec<TextOnlyColumn> = Vec::new();
     let rows = match rows_res {
         Ok(rows) => rows,
@@ -1676,7 +1729,7 @@ pub async fn get_table_rows(
             .map(|c| ColumnInfo::new(c.name(), pg_type_label(c.type_info().name())))
             .collect()
     } else if !include_meta {
-        // Repeat fetch with an empty result page — frontend keeps its columns.
+        // Repeat fetch with an empty result page - frontend keeps its columns.
         Vec::new()
     } else {
         let meta = sqlx::query(
@@ -1721,14 +1774,14 @@ pub async fn get_table_rows(
         .iter()
         .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
         .collect();
-    // Backward keyset page was fetched in reverse order — flip it back to the
+    // Backward keyset page was fetched in reverse order - flip it back to the
     // table's display order.
     if keyset_reverse {
         data.reverse();
     }
 
     // Catalog metadata (enums/nullable/pk/fk) is stable per table, so only fetch
-    // it on the first load — repeat fetches (pagination/sort/filter/live) reuse
+    // it on the first load - repeat fetches (pagination/sort/filter/live) reuse
     // what the frontend already holds, saving four round-trips and connections.
     // Metadata was fired off above (concurrent with the row/count fetch); collect
     // it now that the columns are built so enum/nullable info can be applied.
@@ -1765,7 +1818,7 @@ pub async fn get_table_rows(
 /// return rows immediately (include_count = false) while the UI fills the total
 /// in asynchronously. Mirrors the count logic in `get_table_rows`: planner
 /// estimate for a large *unfiltered* table (instant), exact `COUNT(*)` otherwise
-/// (the WHERE clause bounds the scan). Non-Postgres engines return -1 — their
+/// (the WHERE clause bounds the scan). Non-Postgres engines return -1 - their
 /// `get_table_rows` already carries a real total, so the UI keeps that.
 pub async fn count_table_rows(
     state: State<'_, DbState>,
@@ -1817,7 +1870,7 @@ pub async fn count_table_rows(
     }
 
     // This runs in the background, so it must not inherit the session's
-    // 10-minute statement_timeout (see open_pg) — a filtered COUNT(*) on a big
+    // 10-minute statement_timeout (see open_pg) - a filtered COUNT(*) on a big
     // table would pin a pooled connection for minutes, the exact starvation the
     // sidebar counts guard against (schema.rs). Budget is larger than the
     // sidebar's 4s since this count is user-visible in the grid. SET LOCAL
@@ -2425,15 +2478,22 @@ pub async fn execute_ddl(state: State<'_, DbState>, sql: String) -> Result<(), S
     }
 }
 
-pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlResult, String> {
+pub async fn execute_sql(
+    state: State<'_, DbState>,
+    sql: String,
+    query_id: Option<String>,
+) -> Result<SqlResult, String> {
     let sql_str = sql.trim().to_string();
     if sql_str.is_empty() {
         return Err("Query is empty".into());
     }
     let conn = require_conn(&state)?;
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
-    *state.cancel_tx.lock().map_err(|e| e.to_string())? = Some(cancel_tx);
-    // Kept for the query log — the per-dialect executor runs `sql_str` (which is
+    // Keyed by the caller's id so several editor tabs can run at once and each
+    // one's Cancel reaches its own query.
+    let cancel_key = query_id.unwrap_or_else(|| "default".to_string());
+    super::connection::register_cancel(&state, &cancel_key, cancel_tx);
+    // Kept for the query log - the per-dialect executor runs `sql_str` (which is
     // moved into the cancellable branch below), so stamp the executed SQL onto
     // the result after the match.
     let sql_out = sql_str.clone();
@@ -2462,6 +2522,7 @@ pub async fn execute_sql(state: State<'_, DbState>, sql: String) -> Result<SqlRe
             _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
         },
     };
+    super::connection::unregister_cancel(&state, &cancel_key);
     if let Ok(r) = &mut result {
         r.sql = sql_out;
     }
@@ -2519,7 +2580,7 @@ pub async fn execute_sql_on_conn(
 }
 
 /// Row cap for ad-hoc SQL execution. Deliberately set beyond any realistic
-/// result (effectively uncapped — the user asked for these rows); it remains
+/// result (effectively uncapped - the user asked for these rows); it remains
 /// only as a last-resort circuit breaker whose "add a LIMIT" message tells the
 /// user what happened.
 const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
@@ -2539,7 +2600,7 @@ async fn execute_sql_pg(
     let started = std::time::Instant::now();
     let query_ms = || started.elapsed().as_millis() as u64;
 
-    // Split into individual statements — the extended query protocol rejects multi-statement input.
+    // Split into individual statements - the extended query protocol rejects multi-statement input.
     // Use the literal/comment/dollar-quote-aware splitter so `;` inside strings,
     // `--`/`/* */` comments, and `$$…$$` bodies don't cut a statement in half.
     let split = split_sql_statements(sql);
@@ -2588,11 +2649,11 @@ async fn execute_sql_pg(
 
     for (i, stmt) in stmts.iter().enumerate() {
         if i == last_idx && is_row_returning_sql(stmt) {
-            // Last statement returns rows — stream and return. `executed` is the
+            // Last statement returns rows - stream and return. `executed` is the
             // statement actually run: the user's, or a text-projecting rewrite of
             // it after a column turned out to have no binary output. Each row is
             // converted to JSON as it streams in and the driver row dropped
-            // immediately — retaining the full Vec<PgRow> alongside the JSON rows
+            // immediately - retaining the full Vec<PgRow> alongside the JSON rows
             // would double peak memory on a large result.
             let mut executed = stmt.to_string();
             let mut columns: Vec<ColumnInfo> = Vec::new();
@@ -2661,7 +2722,7 @@ async fn execute_sql_pg(
                 row_count: Some(row_count),
                 message: if capped {
                     Some(format!(
-                        "Result capped at {EXECUTE_SQL_MAX_ROWS} rows — add a LIMIT clause to fetch a specific range."
+                        "Result capped at {EXECUTE_SQL_MAX_ROWS} rows - add a LIMIT clause to fetch a specific range."
                     ))
                 } else {
                     None
@@ -2801,7 +2862,7 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 }
 
 async fn execute_sql_multi_pg(pool: &sqlx::PgPool, stmts: &[String]) -> Result<Vec<SqlResult>, String> {
-    // Single statement — delegate to existing path (avoids code duplication)
+    // Single statement - delegate to existing path (avoids code duplication)
     if stmts.len() == 1 {
         return execute_sql_pg(pool, &stmts[0], None).await.map(|r| vec![r]);
     }
@@ -2893,16 +2954,22 @@ async fn execute_sql_multi_pg(pool: &sqlx::PgPool, stmts: &[String]) -> Result<V
     Ok(results)
 }
 
-pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result<Vec<SqlResult>, String> {
+pub async fn execute_sql_multi(
+    state: State<'_, DbState>,
+    sql: String,
+    query_id: Option<String>,
+) -> Result<Vec<SqlResult>, String> {
     let sql_str = sql.trim().to_string();
     if sql_str.is_empty() {
         return Err("Query is empty".into());
     }
     let conn = require_conn(&state)?;
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
-    *state.cancel_tx.lock().map_err(|e| e.to_string())? = Some(cancel_tx);
+    let cancel_key = query_id.unwrap_or_else(|| "default".to_string());
+    super::connection::register_cancel(&state, &cancel_key, cancel_tx);
     let stmts = split_sql_statements(&sql_str);
     if stmts.is_empty() {
+        super::connection::unregister_cancel(&state, &cancel_key);
         return Err("Query is empty".into());
     }
     let result = tokio::select! {
@@ -2913,7 +2980,7 @@ pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result
             }
             // Other engines: execute sequentially, one result set per statement.
             // Cancellation happens at the outer select! (the future is dropped),
-            // so per-statement executors get no cancel receiver — same as the
+            // so per-statement executors get no cancel receiver - same as the
             // other diff/multi callers.
             let multi = stmts.len() > 1;
             let mut results: Vec<SqlResult> = Vec::with_capacity(stmts.len());
@@ -2939,6 +3006,7 @@ pub async fn execute_sql_multi(state: State<'_, DbState>, sql: String) -> Result
         } => r,
         _ = async { let _ = cancel_rx.await; } => Err("Query cancelled".to_string()),
     };
+    super::connection::unregister_cancel(&state, &cancel_key);
     result
 }
 
@@ -2976,7 +3044,7 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
     // When false, skip the PRAGMA round-trips (each is a full HTTPS request to
-    // Cloudflare/Turso) — the frontend already holds PK/FK metadata on repeat
+    // Cloudflare/Turso) - the frontend already holds PK/FK metadata on repeat
     // fetches (pagination/sort/filter/live) and keeps its cached values.
     include_meta: bool,
     nulls_order: Option<String>,
@@ -3052,7 +3120,7 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
     };
 
     // ── WHERE / ORDER build ───────────────────────────────────────────────────
-    // Each entry: (conjunct — None for first, Some("AND"/"OR") for rest, condition SQL)
+    // Each entry: (conjunct - None for first, Some("AND"/"OR") for rest, condition SQL)
     let mut cond_parts: Vec<(Option<&'static str>, String)> = vec![];
     let mut params: Vec<Value> = vec![];
 
@@ -3125,7 +3193,7 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
         format!("ORDER BY \"{}\" {dir} {nulls}", col.replace('"', "\"\""))
     } else { String::new() };
 
-    // ── Phase 2: COUNT + rows — run concurrently ─────────────────────────────
+    // ── Phase 2: COUNT + rows - run concurrently ─────────────────────────────
     let count_sql = format!("SELECT COUNT(*) FROM {tq} {where_clause}");
     let rows_sql  = format!("SELECT * FROM {tq} {where_clause} {order_clause} LIMIT ? OFFSET ?");
     let mut row_params = params.clone();
@@ -3288,7 +3356,7 @@ async fn delete_table_rows_remote<C: RemoteSqlite>(
 
     let tq = format!("\"{}\"", table.replace('"', "\"\""));
 
-    // Single-column PK: batch into `IN (…)` chunks — each request here is a full
+    // Single-column PK: batch into `IN (…)` chunks - each request here is a full
     // HTTPS round-trip to Cloudflare/Turso, so deleting N selected rows must not
     // cost N requests. Composite PKs keep the per-row loop.
     if pk.len() == 1 {
@@ -3376,7 +3444,7 @@ pub async fn get_column_stats(
     let is_numeric = !is_array && ["int","numeric","decimal","real","double","float","money","serial"]
         .iter().any(|t| data_type.contains(t));
 
-    // For array columns skip min/max/distinct/avg — PostgreSQL would return
+    // For array columns skip min/max/distinct/avg - PostgreSQL would return
     // array-literal strings like "{val1,val2}" which are meaningless here.
     if is_array {
         let count_sql = format!("SELECT COUNT(*) AS total, COUNT(*) - COUNT({col}) AS null_count FROM {tq}");
@@ -3454,7 +3522,7 @@ async fn column_stats_generic(
             };
             (t, quote_bracket(&column))
         }
-        // SQLite, D1, LibSQL, DuckDB — double-quoted, single-namespace (no
+        // SQLite, D1, LibSQL, DuckDB - double-quoted, single-namespace (no
         // PostgreSQL-style schema qualifier).
         _ => (quote_double(&table), quote_double(&column)),
     };
@@ -3499,7 +3567,7 @@ async fn column_stats_generic(
 
 /// Run a bounded read-only aggregate against a borrowed active connection (any
 /// engine). Mirrors `execute_sql`'s per-driver dispatch minus the cancellation
-/// plumbing — used by `column_stats_generic`, which needs to borrow the
+/// plumbing - used by `column_stats_generic`, which needs to borrow the
 /// connection (so it can retry with a fallback query) rather than move `State`.
 async fn dispatch_stats_sql(conn: &ActiveConnection, sql: &str) -> Result<SqlResult, String> {
     match conn {
@@ -3515,7 +3583,7 @@ async fn dispatch_stats_sql(conn: &ActiveConnection, sql: &str) -> Result<SqlRes
     }
 }
 
-/// Lightweight connection health check — runs `SELECT 1` against the active
+/// Lightweight connection health check - runs `SELECT 1` against the active
 /// connection. HTTP-based engines (D1, LibSQL, Clickhouse) are stateless so we
 /// return Ok immediately; a real request would validate their tokens but also
 /// incur network cost every 30 s.

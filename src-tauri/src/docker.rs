@@ -275,7 +275,7 @@ use serde_json::Value;
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DockerDatabase {
-    /// Container name — stable across restarts, unlike the id.
+    /// Container name - stable across restarts, unlike the id.
     pub name: String,
     pub container_id: String,
     pub image: String,
@@ -335,7 +335,7 @@ fn engine_for_image(image: &str) -> Option<&'static str> {
     None
 }
 
-/// Falls back to what the container listens on when the image name is useless —
+/// Falls back to what the container listens on when the image name is useless -
 /// a locally-built tag, or an image id like `cc4c61127125`.
 fn engine_for_ports(ports: &Value) -> Option<&'static str> {
     let map = ports.as_object()?;
@@ -367,7 +367,7 @@ fn env_map(env: &Value) -> std::collections::HashMap<String, String> {
 }
 
 /// The credentials the container was started with, straight out of its
-/// environment — the same values the compose file already spells out.
+/// environment - the same values the compose file already spells out.
 fn credentials(engine: &str, env: &std::collections::HashMap<String, String>) -> (String, String, String) {
     let get = |keys: &[&str]| keys.iter().find_map(|k| env.get(*k)).cloned();
     match engine {
@@ -412,7 +412,7 @@ fn credentials(engine: &str, env: &std::collections::HashMap<String, String>) ->
 }
 
 /// The host port this container's database is reachable on. Prefers the binding
-/// for the engine's own port — a Postgres container that also publishes an
+/// for the engine's own port - a Postgres container that also publishes an
 /// exporter on 9187 must not hand back the exporter.
 fn published_port(ports: &Value, engine: &str) -> Option<u16> {
     let map = ports.as_object()?;
@@ -465,7 +465,7 @@ fn database_from_inspect(c: &Value) -> Option<DockerDatabase> {
     let port = published_port(&ports, &engine);
     let reason = port.is_none().then(|| {
         format!(
-            "Not reachable from the host — this container publishes no port (run it with -p {}:{}).",
+            "Not reachable from the host - this container publishes no port (run it with -p {}:{}).",
             engine_port(&engine),
             engine_port(&engine)
         )
@@ -495,7 +495,7 @@ fn database_from_inspect(c: &Value) -> Option<DockerDatabase> {
 }
 
 /// Every database container running on this machine, with the credentials it was
-/// started with. Docker missing or not running is not an error — it just means
+/// started with. Docker missing or not running is not an error - it just means
 /// there is nothing to offer, and the connection screen stays quiet about it.
 #[tauri::command]
 pub async fn scan_docker_databases() -> Result<Vec<DockerDatabase>, String> {

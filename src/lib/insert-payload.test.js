@@ -32,8 +32,8 @@ describe('buildInsertPayload', () => {
   })
 
   it('sends a generated column the user typed into', () => {
-    // Overriding a sequence is legitimate — importing a row that must keep its
-    // key, backfilling a gap — and the field is writable precisely for that.
+    // Overriding a sequence is legitimate - importing a row that must keep its
+    // key, backfilling a gap - and the field is writable precisely for that.
     const r = buildInsertPayload(cols, ['id'], { id: '42', email: 'a@b.c', note: '', created_at: '' })
     expect(r.ok).toBe(true)
     expect(r.values?.id).toBe(42)

@@ -1,8 +1,8 @@
 /*!
  * Cloudflare OAuth 2.0 + PKCE flow for Stroke.
  *
- * Uses the same public client_id as the Wrangler CLI — Cloudflare's official
- * developer tool — which accepts localhost redirect URIs for desktop apps.
+ * Uses the same public client_id as the Wrangler CLI - Cloudflare's official
+ * developer tool - which accepts localhost redirect URIs for desktop apps.
  *
  * Flow:
  *   1. Generate PKCE verifier/challenge + random state
@@ -32,7 +32,7 @@ const CF_SCOPES: &str = "account:read user:read d1:write offline_access";
 // How long to wait for the user to authorize before giving up
 const AUTH_TIMEOUT_SECS: u64 = 300;
 // Cloudflare has pre-registered http://localhost:{PORT}/oauth/callback for this
-// client ID — the exact same ports Wrangler CLI uses. A random port is rejected.
+// client ID - the exact same ports Wrangler CLI uses. A random port is rejected.
 const CF_CALLBACK_PORTS: &[u16] = &[8976, 8977, 8978, 8979, 8980];
 
 // ── Keychain keys ─────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ async fn await_oauth_callback(
 ) -> Result<String, String> {
     let success_html = r#"<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Stroke — authorized</title>
+<head><meta charset="UTF-8"><title>Stroke - authorized</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d0d0d;color:#eee}
 .card{text-align:center;padding:48px;border-radius:16px;border:1px solid #333;background:#111}
 h2{color:#22c55e;margin-bottom:12px}p{color:#888;margin:0}</style></head>
@@ -132,7 +132,7 @@ h2{color:#22c55e;margin-bottom:12px}p{color:#888;margin:0}</style></head>
 
     let error_html = r#"<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Stroke — error</title>
+<head><meta charset="UTF-8"><title>Stroke - error</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d0d0d;color:#eee}
 .card{text-align:center;padding:48px;border-radius:16px;border:1px solid #4b1c1c;background:#1a0f0f}
 h2{color:#ef4444;margin-bottom:12px}p{color:#888;margin:0}</style></head>
@@ -211,7 +211,7 @@ h2{color:#ef4444;margin-bottom:12px}p{color:#888;margin:0}</style></head>
         let _ = stream
             .write_all(send_html(error_html).as_bytes())
             .await;
-        return Err("OAuth state mismatch — possible CSRF".to_string());
+        return Err("OAuth state mismatch - possible CSRF".to_string());
     }
 
     let _ = stream
@@ -332,7 +332,7 @@ async fn fetch_user_email(access_token: &str) -> Option<String> {
 
 // ── Token storage helpers ─────────────────────────────────────────────────────
 
-// `async` because the keychain is only ever touched off the caller's thread —
+// `async` because the keychain is only ever touched off the caller's thread -
 // see the module comment in secrets.rs.
 async fn store_tokens(
     app: &tauri::AppHandle,
@@ -404,7 +404,7 @@ pub async fn cloudflare_start_oauth(app: tauri::AppHandle) -> Result<CfOAuthStat
         await_oauth_callback(listener, &state),
     )
     .await
-    .map_err(|_| "Authorization timed out — please try again.".to_string())??;
+    .map_err(|_| "Authorization timed out - please try again.".to_string())??;
 
     let token = exchange_code(&code, &verifier, &redirect_uri).await?;
 
@@ -442,7 +442,7 @@ pub async fn cloudflare_oauth_status(app: tauri::AppHandle) -> CfOAuthStatus {
 /// Process-wide handle, set once at startup.
 ///
 /// The D1 driver needs to reach the token store when a request comes back 401,
-/// but it is handed only a `D1Config` — the whole `db` layer is deliberately
+/// but it is handed only a `D1Config` - the whole `db` layer is deliberately
 /// free of Tauri types. Rather than thread an `AppHandle` through every driver
 /// signature for this one case, the handle is parked here.
 static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
@@ -463,7 +463,7 @@ pub fn set_app_handle(app: tauri::AppHandle) {
 /// bookkeeping says.
 ///
 /// Returns None rather than an error because the caller's job is to report the
-/// *original* failure when no refresh is possible — "session expired" would be
+/// *original* failure when no refresh is possible - "session expired" would be
 /// a misleading thing to show someone using a manual API token.
 pub async fn refreshed_token() -> Option<String> {
     let app = APP.get()?.clone();
@@ -493,7 +493,7 @@ pub async fn cloudflare_get_valid_token(app: tauri::AppHandle) -> Result<String,
     let access = map.get(KEY_ACCESS).cloned().unwrap_or_default();
 
     if access.is_empty() {
-        return Err("Not connected to Cloudflare — please authorize first.".to_string());
+        return Err("Not connected to Cloudflare - please authorize first.".to_string());
     }
 
     let expires_at = map

@@ -23,7 +23,7 @@
   const mod = isMac ? "⌘" : "Ctrl";
 
   // The shortcut list lives in $lib/shortcuts.js. It used to be written out here
-  // as per-platform keycap arrays, which meant this dialog could — and did —
+  // as per-platform keycap arrays, which meant this dialog could - and did -
   // describe a binding the app no longer had. Groups now carry an icon NAME so
   // that module can stay plain data; the components stay here.
   /** @type {Record<string, any>} */
@@ -52,7 +52,7 @@
   let searchEl = $state(null);
 
   // The component stays mounted across opens, so clear the stale query each
-  // time — and focus the search box so the advertised ⌘F/Esc keys work without
+  // time - and focus the search box so the advertised ⌘F/Esc keys work without
   // first clicking inside the overlay. selectedGroup deliberately persists.
   $effect(() => {
     if (open) {

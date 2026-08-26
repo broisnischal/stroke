@@ -1,13 +1,13 @@
 <script>
   /**
-   * The insert row's field for a column with a known set of values — an enum, a
+   * The insert row's field for a column with a known set of values - an enum, a
    * boolean, anything the catalog can enumerate.
    *
    * It is an input first and a list second. A plain `<select>` makes you reach
    * for the mouse and hunt a list that can be sixty labels long, and it can't
    * express the one thing that matters most on an insert: leaving the field
    * alone so the database's own default applies. So: type to filter, arrows to
-   * move, Enter to take the highlighted row — and the empty value is a real,
+   * move, Enter to take the highlighted row - and the empty value is a real,
    * first-class row rather than a blank entry you have to guess at.
    */
   import { Popover, PopoverTrigger, PopoverContent } from '$lib/components/ui/popover/index.js'
@@ -19,11 +19,11 @@
     value = '',
     /** @type {string[]} */
     options = [],
-    /** What leaving the field empty does — shown as the first row's caption. */
+    /** What leaving the field empty does - shown as the first row's caption. */
     emptyLabel = 'NULL',
     /** Placeholder for the input when empty. */
     placeholder = '',
-    /** Extra placeholder styling — required blanks read louder than optional ones. */
+    /** Extra placeholder styling - required blanks read louder than optional ones. */
     placeholderClass = 'placeholder:text-muted-foreground/40',
     disabled = false,
     /** Grid wiring: identifies the field for focus restoration. */
@@ -40,7 +40,7 @@
 
   /**
    * Typing filters; not typing shows everything. `query` is only the *typed*
-   * text — a value chosen from the list doesn't then filter the list down to
+   * text - a value chosen from the list doesn't then filter the list down to
    * itself, which would hide every alternative the moment you picked one.
    */
   const filtered = $derived.by(() => {

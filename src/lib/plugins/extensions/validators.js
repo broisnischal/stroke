@@ -47,7 +47,7 @@ export const validators = {
     const n = Number(value)
     if (Number.isFinite(n)) {
       if (/(^|_)age($|_)/i.test(name) && (n < 0 || n > 150)) return { warn: 'Age out of range' }
-      if (/(percent|percentage|progress)/i.test(name) && (n < 0 || n > 100)) return { warn: 'Percent out of 0–100' }
+      if (/(percent|percentage|progress)/i.test(name) && (n < 0 || n > 100)) return { warn: 'Percent out of 0-100' }
     }
     return null
   },

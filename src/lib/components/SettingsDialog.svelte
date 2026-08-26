@@ -25,6 +25,7 @@
     ICON_SETS,
     TABLE_STYLES,
     TABLE_ALIGN_OPTIONS,
+    ROW_SPACINGS,
     DEFAULT_MAX_QUERY_HISTORY,
     DEFAULT_CONNECT_TIMEOUT_MS,
     DEFAULT_SOCKET_TIMEOUT_MS,
@@ -33,6 +34,12 @@
     AGENT_FONT_SIZES,
     THINKING_STYLES,
   } from "$lib/stores/settings.js";
+  import {
+    SQL_CASE_OPTIONS,
+    SQL_FORMAT_FIELDS,
+    SQL_TAB_WIDTHS,
+    normalizeSqlFormat,
+  } from "$lib/sql-format-options.js";
   import { aiProfiles, activeProfileId, setActiveProfile } from "$lib/stores/ai-settings.js";
   import PenTool from "@lucide/svelte/icons/pen-tool";
   import LucideSparkles from "@lucide/svelte/icons/sparkles";
@@ -46,6 +53,14 @@
     disableAutostart,
     getAutostartStatus,
   } from "$lib/api.js";
+  import PinSetupDialog from "./PinSetupDialog.svelte";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
+  import {
+    lockStatus,
+    refreshLockStatus,
+    setLockPrefs,
+    lockNow,
+  } from "$lib/stores/app-lock.js";
 
   let {
     open = $bindable(false),
@@ -93,9 +108,41 @@
     settings = loadSettings();
   }
 
+  // ── App PIN ──────────────────────────────────────────────────────────────
+  let pinDialogOpen = $state(false);
+  /** @type {'set' | 'change' | 'remove'} */
+  let pinDialogMode = $state('set');
+
+  /** @param {'set' | 'change' | 'remove'} mode */
+  function openPinDialog(mode) {
+    pinDialogMode = mode;
+    // Settings steps aside first, matching every other "open the real thing"
+    // row here - two stacked dialogs fight over the focus trap, and the PIN
+    // field must have it.
+    open = false;
+    pinDialogOpen = true;
+  }
+
+  const AUTO_LOCK_OPTIONS = [
+    { value: 0, label: 'Never' },
+    { value: 1, label: '1 min' },
+    { value: 5, label: '5 min' },
+    { value: 15, label: '15 min' },
+    { value: 60, label: '1 hr' },
+  ];
+
+  /** @param {{ requireOnConnect?: boolean, autoLockMinutes?: number }} prefs */
+  async function updateLockPrefs(prefs) {
+    try {
+      await setLockPrefs(prefs);
+    } catch (e) {
+      toast.error('Could not save the lock setting', { description: String(e) });
+    }
+  }
+
   /** @param {boolean} next */
   function handleOpenChange(next) {
-    if (next) { refreshSettings(); category = 'general'; query = ''; }
+    if (next) { refreshSettings(); category = 'general'; query = ''; void refreshLockStatus(); }
   }
 
   /** @param {import('$lib/themes/registry.js').ThemeId} themeId */
@@ -169,6 +216,47 @@
 
   function toggleJsonWordWrap() {
     settings = updateSettings({ jsonWordWrap: !settings.jsonWordWrap });
+  }
+
+  function toggleNativeScroll() {
+    settings = updateSettings({ nativeScroll: !settings.nativeScroll });
+  }
+
+  const rowSpacingEntries = Object.entries(ROW_SPACINGS);
+
+  /** @param {string | undefined} id */
+  function setRowSpacing(id) {
+    if (!id || id === settings.rowSpacing) return;
+    settings = updateSettings({ rowSpacing: /** @type {any} */ (id) });
+  }
+
+  function toggleZebraRows() {
+    settings = updateSettings({ zebraRows: !settings.zebraRows });
+  }
+
+  function toggleAutoSaveQueries() {
+    settings = updateSettings({ autoSaveQueries: !settings.autoSaveQueries });
+  }
+
+  // ── SQL formatting ────────────────────────────────────────────────────────
+  // Collapsed by default - see the section comment in databaseContent.
+  let sqlFmtOpen = $state(false);
+  // Read through the normalizer, never straight off `settings`. Settings persisted
+  // by a build that predates this option set can be partial (or absent), and one
+  // `undefined[key]` in a row would throw the whole pane into the error boundary.
+  const sqlFmt = $derived(/** @type {any} */ (normalizeSqlFormat(settings.sqlFormat)));
+
+  /** @param {string} key @param {unknown} value */
+  function setSqlFormat(key, value) {
+    const next = { ...sqlFmt, [key]: value };
+    settings = updateSettings({ sqlFormat: normalizeSqlFormat(next) });
+  }
+  /** @param {{ key: string, min?: number, max?: number, step?: number }} field @param {number} dir */
+  function bumpSqlFormat(field, dir) {
+    const step = field.step ?? 1;
+    const cur = Number(sqlFmt[field.key]);
+    const next = Math.min(field.max ?? 999, Math.max(field.min ?? 0, cur + dir * step));
+    if (next !== cur) setSqlFormat(field.key, next);
   }
 
   function toggleCmdkAi() {
@@ -388,6 +476,8 @@
   </Dialog.Content>
 </Dialog.Root>
 
+<PinSetupDialog bind:open={pinDialogOpen} mode={pinDialogMode} />
+
 <!-- ── Content snippets ──────────────────────────────────────────── -->
 {#snippet secLabel(/** @type {string} */ text)}
   {#if !searching}
@@ -556,6 +646,102 @@
   {#if show($t('settings.timezone'), $t('settings.timezone.desc'))}
     {@render textRow($t('settings.timezone'), $t('settings.timezone.desc'), 'sessionTimezone', DEFAULT_SESSION_TIMEZONE)}
   {/if}
+
+  {#if show('Auto-save executed queries', 'File every successful run under Saved Queries, not just Query History')}
+    {@render switchRow(
+      'Auto-save executed queries',
+      'File every successful run under Saved Queries as well as Query History, deduplicated by its SQL so re-running the same statement adds one entry, not fifty.',
+      settings.autoSaveQueries,
+      toggleAutoSaveQueries,
+    )}
+  {/if}
+
+  <!-- SQL formatting: nine options, so it opens COLLAPSED. Mounting nine popover
+       selects just to show the Database tab is what made this pane feel slow, and
+       these are settings you touch once. Search still reaches them - a query
+       expands the section, because a setting you can't find may as well not exist. -->
+  {@render secLabel('SQL formatting')}
+  {#if !searching}
+    <button
+      type="button"
+      class="{rowCls} w-full text-left"
+      aria-expanded={sqlFmtOpen}
+      onclick={() => (sqlFmtOpen = !sqlFmtOpen)}
+    >
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">Formatting options</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Casing, indentation and wrapping for Format (⇧⌥F) in every editor and for the DDL viewer.
+        </p>
+      </div>
+      <Icon name={sqlFmtOpen ? 'chevron-up' : 'chevron-down'} class="size-3.5 shrink-0 text-muted-foreground" />
+    </button>
+  {/if}
+  {#if sqlFmtOpen || searching}
+    <!-- One row per sql-formatter option, rendered from SQL_FORMAT_FIELDS so the
+         list can't drift from what the formatter actually reads. -->
+    {#each SQL_FORMAT_FIELDS as field (field.key)}
+      {#if show(field.label, field.desc)}
+        {#if field.kind === 'bool'}
+          {@render switchRow(field.label, field.desc, sqlFmt[field.key] === true, () => setSqlFormat(field.key, !sqlFmt[field.key]))}
+        {:else}
+          <div class={rowCls}>
+            <div class="min-w-0">
+              <p class="text-ui-sm font-medium text-foreground">{field.label}</p>
+              <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">{field.desc}</p>
+            </div>
+            {#if field.kind === 'case'}
+              {@render segmented(field.label, SQL_CASE_OPTIONS.map((o) => ({ value: o.id, label: o.label })), sqlFmt[field.key], (v) => setSqlFormat(field.key, v))}
+            {:else if field.kind === 'tabWidth'}
+              {@render segmented(field.label, SQL_TAB_WIDTHS.map((n) => ({ value: n, label: String(n) })), sqlFmt.tabWidth, (v) => setSqlFormat('tabWidth', v))}
+            {:else if field.kind === 'operatorNewline'}
+              {@render segmented(field.label, [{ value: 'before', label: 'Before' }, { value: 'after', label: 'After' }], sqlFmt.logicalOperatorNewline, (v) => setSqlFormat('logicalOperatorNewline', v))}
+            {:else}
+              <div class="flex items-center gap-1">
+                <Button type="button" variant="ghost" size="icon" class="size-7" aria-label={`Decrease ${field.label}`} onclick={() => bumpSqlFormat(field, -1)}>
+                  <Minus class="size-3.5" />
+                </Button>
+                <span class="min-w-10 text-center font-mono text-ui-xs tabular-nums text-foreground">{sqlFmt[field.key]}</span>
+                <Button type="button" variant="ghost" size="icon" class="size-7" aria-label={`Increase ${field.label}`} onclick={() => bumpSqlFormat(field, 1)}>
+                  <Plus class="size-3.5" />
+                </Button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      {/if}
+    {/each}
+  {/if}
+{/snippet}
+
+<!-- Inline choice control for two-to-three short options. A popover select costs a
+     floating layer, a focus trap and a search box; for "Upper / Lower / Preserve"
+     the choices fit on screen, so the whole row is cheaper AND quicker to read. -->
+{#snippet segmented(
+  /** @type {string} */ ariaLabel,
+  /** @type {Array<{ value: any, label: string }>} */ options,
+  /** @type {any} */ value,
+  /** @type {(v: any) => void} */ onpick,
+)}
+  <div role="radiogroup" aria-label={ariaLabel} class="inline-flex shrink-0 items-stretch overflow-hidden rounded-md border border-border/60">
+    {#each options as o, i (o.value)}
+      <button
+        type="button"
+        role="radio"
+        aria-checked={value === o.value}
+        class={cn(
+          'h-7 px-2.5 text-ui-xs transition-colors',
+          i > 0 && 'border-l border-border/60',
+          value === o.value
+            ? 'bg-muted/70 font-medium text-foreground'
+            : 'text-muted-foreground hover:bg-muted/30 hover:text-foreground',
+        )}
+        onclick={() => onpick(o.value)}
+      >
+        {o.label}
+      </button>
+    {/each}
+  </div>
 {/snippet}
 
 {#snippet agentContent()}
@@ -630,7 +816,7 @@
   {#if show('Web access', 'Let the agent search the web and read pages')}
     {@render switchRow(
       'Web access',
-      'Let the agent search the web and read pages for things your database cannot answer — error codes, function syntax, current docs. Your search terms leave your machine when it does.',
+      'Let the agent search the web and read pages for things your database cannot answer: error codes, function syntax, current docs. Your search terms leave your machine when it does.',
       settings.agentWebAccess,
       toggleAgentWebAccess,
     )}
@@ -657,7 +843,7 @@
     {@render switchRow($t('settings.previewSql'), $t('settings.previewSql.desc'), settings.previewDmlBeforeApply, togglePreviewDml)}
   {/if}
   {#if show('Wrap JSON', 'Soft-wrap long values in every JSON viewer instead of scrolling sideways')}
-    {@render switchRow('Wrap JSON', 'Soft-wrap long values — embeddings, document chunks — in every JSON view instead of running off the right edge. Off keeps the structure easier to scan.', settings.jsonWordWrap, toggleJsonWordWrap)}
+    {@render switchRow('Wrap JSON', 'Soft-wrap long values (embeddings, document chunks) in every JSON view instead of running off the right edge. Off keeps the structure easier to scan.', settings.jsonWordWrap, toggleJsonWordWrap)}
   {/if}
   {#if show('Vim mode', 'Experimental modal keyboard navigation across the app, the data grid, and the SQL editor')}
     {@render switchRow('Vim mode', 'Experimental: modal keyboard navigation (hjkl, gg/G, i/Esc) across the grid, the SQL editor, and tabs', settings.vimMode, toggleVimMode)}
@@ -672,13 +858,64 @@
     {@render switchRow($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'), settings.mcpAutoStart, toggleMcpAutoStart)}
   {/if}
 
+  {@render secLabel('Security')}
+  {#if show('App PIN', 'Require a PIN to open Stroke and to connect to a database')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="flex items-center gap-2 text-ui-sm font-medium text-foreground">
+          App PIN
+          <span class="rounded-full border px-1.5 py-px text-ui-3xs font-medium leading-4 {$lockStatus.enabled ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border/60 text-muted-foreground'}">
+            {$lockStatus.enabled ? 'On' : 'Off'}
+          </span>
+        </p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          A {$lockStatus.pinLength}-digit PIN that locks Stroke on launch. Stored as a salted
+          hash in your OS keychain - there is no reset link, so pick one you will remember.
+        </p>
+      </div>
+      <div class="flex shrink-0 items-center gap-2">
+        {#if $lockStatus.enabled}
+          <Button type="button" variant="ghost" size="sm" onclick={() => openPinDialog('remove')}>Remove</Button>
+          <Button type="button" variant="outline" size="sm" onclick={() => openPinDialog('change')}>Change</Button>
+        {:else}
+          <Button type="button" variant="outline" size="sm" onclick={() => openPinDialog('set')}>Set PIN</Button>
+        {/if}
+      </div>
+    </div>
+  {/if}
+  {#if $lockStatus.enabled}
+    {#if show('Ask when connecting', 'Confirm the PIN before opening or reconnecting to a database')}
+      {@render switchRow(
+        'Ask when connecting',
+        'Confirm the PIN before opening or reconnecting to a database. The reconnect right after you unlock the app is exempt - you just proved who you are.',
+        $lockStatus.requireOnConnect,
+        () => void updateLockPrefs({ requireOnConnect: !$lockStatus.requireOnConnect }),
+      )}
+    {/if}
+    {#if show('Auto-lock', 'Lock again after a stretch of inactivity')}
+      <div class={rowCls}>
+        <div class="min-w-0">
+          <p class="text-ui-sm font-medium text-foreground">Auto-lock</p>
+          <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+            Lock again after this much inactivity. Open tabs and queries are kept - the
+            screen goes over the session, not through it.
+          </p>
+        </div>
+        {@render segmented('Auto-lock after', AUTO_LOCK_OPTIONS, $lockStatus.autoLockMinutes, (v) => void updateLockPrefs({ autoLockMinutes: v }))}
+      </div>
+    {/if}
+    {#if show('Lock now', 'Lock Stroke immediately')}
+      {@render actionRow('Lock now', 'Lock Stroke immediately, without waiting for the auto-lock.', 'Lock', () => { open = false; lockNow(); })}
+    {/if}
+  {/if}
+
   <!-- Privacy lives in General, not Agent: this switch covers the whole app, and
        under Agent it read as if it were about the AI features alone. -->
   {@render secLabel('Privacy')}
   {#if show('Anonymous usage data', 'Help decide what to build next')}
     {@render switchRow(
       'Anonymous usage data',
-      'Sends which features you use, how often, the app version and your OS — nothing else. No queries, no table or database names, no connection details, and nothing about the data you browse. Turning it off takes effect immediately.',
+      'Sends which features you use, how often, the app version and your OS. Nothing else. No queries, no table or database names, no connection details, and nothing about the data you browse. Turning it off takes effect immediately.',
       settings.telemetry,
       toggleTelemetry,
     )}
@@ -830,6 +1067,30 @@
       </SelectMenu>
     </div>
   {/if}
+  {#if show('Row spacing', 'Vertical space each row of the data grid takes')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">Row spacing</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Vertical space each row of the data grid takes. Compact fits about a third more rows on screen; relaxed is easier to track across a wide table.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="Row spacing"
+        value={settings.rowSpacing}
+        onValueChange={setRowSpacing}
+        items={rowSpacingEntries.map(([id, s]) => ({ value: id, label: s.label, keywords: [s.label] }))}
+      />
+    </div>
+  {/if}
+  {#if show('Alternating row colors', 'Shade every other grid row')}
+    {@render switchRow(
+      'Alternating row colors',
+      'Shade every other row so a long row stays readable across the full width. The Striped and Dots grid styles already do this as part of their look.',
+      settings.zebraRows,
+      toggleZebraRows,
+    )}
+  {/if}
   {#if show('Cell alignment', 'Which side grid cell text sits on')}
     <div class={rowCls}>
       <div class="min-w-0">
@@ -845,6 +1106,15 @@
         items={TABLE_ALIGN_OPTIONS.map((o) => ({ value: o.id, label: o.label, keywords: [o.label] }))}
       />
     </div>
+  {/if}
+
+  {#if show('Native scrolling', 'Let the OS scroll the grid and the sidebar instead of the app\'s eased scrolling')}
+    {@render switchRow(
+      'Native scrolling',
+      "Hand the data grid and the sidebar back to the OS scroller. Off (the default) the app eases each wheel tick to its destination, which reads as smoother on mice that scroll in big jumps; on, scrolling behaves exactly like the rest of your desktop (including its own momentum) and nothing of ours sits in front of the wheel.",
+      settings.nativeScroll,
+      toggleNativeScroll,
+    )}
   {/if}
 
   {@render secLabel($t('settings.sec.display'))}

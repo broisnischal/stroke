@@ -1,0 +1,12 @@
+{
+  "id": "traffic-light",
+  "name": "Traffic Light",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "formatter",
+  "entry": "main.js",
+  "description": "Colours latency, score and percentage columns green, amber or red.",
+  "author": "Stroke",
+  "homepage": "https://github.com/broisnischal/stroke-app",
+  "permissions": ["cells:read"]
+}

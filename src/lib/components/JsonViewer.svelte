@@ -22,7 +22,7 @@
      * Passing it skips a full `JSON.parse` of `json`. The callers build these
      * objects, stringify them for the editor, and this component used to parse
      * that string straight back into the same shape purely so JSONPath had
-     * something to walk — a third pass over the whole payload, and a second
+     * something to walk - a third pass over the whole payload, and a second
      * copy of it in memory, to recover data the caller was already holding.
      */
     data = /** @type {any} */ (undefined),
@@ -71,7 +71,7 @@
 
   // The rich items, not just their insert strings. `kind`, `detail` and
   // `preview` were being computed and then thrown away, which is why every row
-  // read `.key auth_name .auth_name` — the widget was reconstructing a worse
+  // read `.key auth_name .auth_name` - the widget was reconstructing a worse
   // version of data it already had.
   const completions = $derived.by(() => {
     if (!pathFocused || parsedJson === null) return []
@@ -153,7 +153,7 @@
       lineNumbers: 'on',
       // 4 (not 3) so the right-aligned numbers get a character of inset instead
       // of sitting flush against the editor edge, and 6px (not Monaco's default
-      // 10) of decoration space on the other side — the two together make the
+      // 10) of decoration space on the other side - the two together make the
       // gutter read as evenly padded rather than shoved left.
       lineNumbersMinChars: 4,
       lineDecorationsWidth: 6,

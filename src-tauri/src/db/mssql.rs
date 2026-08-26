@@ -82,7 +82,7 @@ fn cell_to_json(row: &Row, i: usize) -> Value {
         };
     }
 
-    // Cap oversized strings (NVARCHAR(MAX) etc.) — a multi-MB cell shipped
+    // Cap oversized strings (NVARCHAR(MAX) etc.) - a multi-MB cell shipped
     // whole freezes the webview (see sql_util::CELL_VALUE_CAP).
     if let Ok(v) = row.try_get::<&str, usize>(i) {
         return v
@@ -535,7 +535,7 @@ pub async fn insert_table_row(
     let val_list = cols.iter().map(|c| sql_literal(&values[c])).collect::<Vec<_>>().join(", ");
     let tq = format!("{}.{}", quote_ident(schema), quote_ident(table));
     // OUTPUT INSERTED.* returns the full new row (including server-generated columns).
-    // This INSERT yields a result set, so it must go through simple_query — not
+    // This INSERT yields a result set, so it must go through simple_query - not
     // execute_sql, whose DML branch uses execute() and discards returned rows
     // (which left the grid showing an all-NULL row after insert).
     let sql = format!("INSERT INTO {tq} ({col_list}) OUTPUT INSERTED.* VALUES ({val_list})");
