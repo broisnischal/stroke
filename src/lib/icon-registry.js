@@ -28,6 +28,7 @@ import Trash2 from '@lucide/svelte/icons/trash-2'
 import Table2 from '@lucide/svelte/icons/table-2'
 import RefreshCw from '@lucide/svelte/icons/refresh-cw'
 import Copy from '@lucide/svelte/icons/copy'
+import CopyPlus from '@lucide/svelte/icons/copy-plus'
 import Loader2 from '@lucide/svelte/icons/loader-2'
 import KeyRound from '@lucide/svelte/icons/key-round'
 import ExternalLink from '@lucide/svelte/icons/external-link'
@@ -176,6 +177,7 @@ export const ICON_MAP = {
   'table-view':     { lucide: Eye,           huge: EyeIcon },
   'refresh-cw':     { lucide: RefreshCw,     huge: RefreshIcon },
   'copy':           { lucide: Copy,          huge: Copy01Icon },
+  'copy-plus':      { lucide: CopyPlus,      huge: Copy01Icon },
   'loader-2':       { lucide: Loader2,       huge: Loading03Icon },
   'key-round':      { lucide: KeyRound,      huge: Key01Icon },
   'external-link':  { lucide: ExternalLink,  huge: LinkSquare01Icon },
@@ -384,6 +386,7 @@ export const PHOSPHOR_MAP = {
   'table-view': PhEye,
   'refresh-cw': PhArrowsClockwise,
   'copy': PhCopy,
+  'copy-plus': PhCopy,
   'loader-2': PhCircleNotch,
   'key-round': PhKey,
   'external-link': PhArrowSquareOut,

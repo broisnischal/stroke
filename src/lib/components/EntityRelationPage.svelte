@@ -18,13 +18,17 @@
   import Check from '@lucide/svelte/icons/check'
   import LayoutGrid from '@lucide/svelte/icons/layout-grid'
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal'
+  import ListFilter from '@lucide/svelte/icons/list-filter'
+  import Crosshair from '@lucide/svelte/icons/crosshair'
+  import EyeOff from '@lucide/svelte/icons/eye-off'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js"
   import { svgStringToPngBlob, copyPngToClipboard } from '$lib/svg-png.js'
   import { Popover, PopoverTrigger, PopoverContent } from '$lib/components/ui/popover/index.js'
   import { isCurrentThemeDark } from '$lib/stores/settings.js'
-  import { loadErdSettings, saveErdSettings, SPACING_PRESETS, SCOPE_DEFAULTS } from '$lib/stores/erd-settings.js'
-  import { routeEdges, routeToSvgPath, MAX_ROUTED_NODES } from '$lib/erd-routing.js'
-  import { separateCards } from '$lib/erd-layout.js'
+  import { loadErdSettings, saveErdSettings, SPACING_PRESETS, SCOPE_DEFAULTS, DEFAULT_ERD_SETTINGS } from '$lib/stores/erd-settings.js'
+  import { routeEdges, routeToSvgPath, corridorPathOrtho, CLEAR, MAX_ROUTED_NODES } from '$lib/erd-routing.js'
+  import { separateCards, wrapTallRanks } from '$lib/erd-layout.js'
+  import { visibleTables, visibleRels, relatedTo, linkedTables, mergeParallelEdges } from '$lib/erd-filter.js'
   import { cn } from '$lib/utils.js'
 
   let {
@@ -64,6 +68,15 @@
   const HDR_H     = 42
   const PAD_B     = 10
   const WARN_MANY = 60
+  /**
+   * Above this many tables the whole-schema diagram waits to be asked for.
+   * Dagre, the edge router and the cards themselves are each seconds of work at
+   * that size, so drawing it unprompted reads as a hang - and nobody looks for
+   * anything in a thousand-card diagram anyway. The table filter is the way in.
+   */
+  const MAX_AUTO_TABLES = 240
+  /** Rows rendered in the table filter at once; the search box reaches the rest. */
+  const PICKER_ROWS = 200
 
   const cfg = { NODE_W, ROW_H, HDR_H, PAD_B }
 
@@ -92,22 +105,69 @@
    */
   const view = $derived.by(() => {
     const base = focusTable && scope !== 'all' ? SCOPE_DEFAULTS.focused : SCOPE_DEFAULTS.schema
+    // A wide schema opens keys-only. Full column lists make every card taller,
+    // and card height is what a layout pass and the edge router both pay for.
+    const wide = tableMeta.size > 120 && !(focusTable && scope !== 'all')
     return {
       ...settings,
+      columnMode: settings.touched.includes('columnMode')
+        ? settings.columnMode
+        : wide ? 'keys' : DEFAULT_ERD_SETTINGS.columnMode,
       spacing: settings.touched.includes('spacing') ? settings.spacing : base.spacing,
       routing: settings.touched.includes('routing') ? settings.routing : base.routing,
     }
   })
   const gaps = $derived(SPACING_PRESETS[view.spacing] ?? SPACING_PRESETS.comfortable)
+  /**
+   * Tables the user picked by hand. Empty means "no filter" - the scope and the
+   * linked-only toggle decide instead. Session-only, per schema: a filter is
+   * something you set while reading one diagram, not a setting to inherit.
+   * Always replaced, never mutated, so the reads stay reactive.
+   * @type {Set<string>}
+   */
+  let picked      = $state(new Set())
+  /** Bumped on every pick change - the layout key can't diff a Set cheaply. */
+  let pickVersion = $state(0)
+  let pickerOpen  = $state(false)
+  let pickQuery   = $state('')
+  /** Set once the user asks for a schema too big to draw unprompted. */
+  let drawAll     = $state(false)
+  /** Table count the diagram is holding back on, 0 when it is drawing. */
+  let gatedCount  = $state(0)
+  /** Every foreign key in the schema, filter-independent. @type {any[]} */
+  let allRels     = $state(/** @type {any[]} */ ([]))
   /** @type {string|null} */
   let selectedTable = $state(null)
   /** @type {Map<string, TableMeta>} */
-  let tableMeta     = $state(new Map())
+  // Raw as well, and for the same reason as `nodes` below: every card's columns
+  // and key sets are read straight out of here into the node data the canvas
+  // draws from, so a proxy here reaches the per-row hot path no matter what the
+  // node array is. Both writers below mutate and then replace the Map, which is
+  // what makes reactivity fire either way.
+  let tableMeta     = $state.raw(new Map())
 
+  // Raw, not deep-reactive. These arrays are the canvas renderer's hot data: it
+  // reads n.position, n.data.columns[i].name and friends for every card and every
+  // row of every frame. Behind a $state proxy each of those reads is a trap, and
+  // every nested column object gets its own proxy allocated the first time it is
+  // touched - which is most of what made panning a large ER diagram stutter.
+  // Nothing here is ever mutated in place; every write below replaces the whole
+  // array, so the raw form loses no reactivity.
   /** @type {any[]} */
-  let nodes = $state([])
+  let nodes = $state.raw([])
   /** @type {any[]} */
-  let edges = $state([])
+  let edges = $state.raw([])
+  /** Foreign keys actually drawn - a merged line stands for several of them. */
+  const fkCount = $derived(edges.reduce((n, e) => n + (e.mergedCount ?? 1), 0))
+  /**
+   * Edge id → the polyline the layout reserved for it. Present only for layouts
+   * that route their own edges (Dagre does); empty otherwise, and the renderer
+   * falls back to its own line.
+   * @type {Map<string, {x:number,y:number}[]>}
+   */
+  // Raw for the same reason: the renderer looks a hint up per edge, and a proxied
+  // Map puts a trap on every one of those. Replaced wholesale, never mutated.
+  let routeHints = $state.raw(new Map())
 
   /** @type {Map<string, {x: number, y: number}>} */
   const _posCache = new Map()
@@ -230,7 +290,7 @@
    * neighbours are far enough apart for the relationship lines between them to
    * have somewhere to run. Dagre reserves that space for the cards it places,
    * but a hand-dragged card, a re-flowed rank or a card that changed size since
-   * the layout ran can all break it — so the check happens here, once, on
+   * the layout ran can all break it - so the check happens here, once, on
    * whatever the layout produced.
    * @param {any[]} laid @param {string} [pin] a card that must not move
    */
@@ -239,19 +299,149 @@
     const pos = separateCards(
       laid.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y, w: NODE_W, h: hOf(n) })),
       {
-        // Wide enough for the routed lanes plus their clearance on both sides.
-        gapX: Math.max(gaps.colGap, 128),
-        gapY: Math.max(gaps.rowGap, 88),
+        // Wide enough for a routed lane plus its clearance on both sides, and no
+        // wider: this runs over grids that are already clear by construction (a
+        // folded rank, the orphan block), and a floor above the gaps they were
+        // built with would have it pull every one of those rows apart again.
+        gapX: Math.max(gaps.colGap, 2 * CLEAR + 12),
+        gapY: Math.max(gaps.rowGap, 2 * CLEAR + 8),
         fixed: pin ? new Set([pin]) : undefined,
       },
     )
     return laid.map((n) => ({ ...n, position: pos.get(n.id) ?? n.position }))
   }
 
+  /**
+   * Split the graph into connected components, each with its own edges.
+   * Union-find rather than a walk: it is one pass over the edges and the result
+   * does not depend on which node happens to come first.
+   * @param {any[]} ns @param {any[]} es
+   * @returns {{ nodes: any[], edges: any[] }[]}
+   */
+  function componentsOf(ns, es) {
+    /** @type {Map<string,string>} */
+    const up = new Map(ns.map(n => [n.id, n.id]))
+    /** @param {string} a */
+    const find = (a) => {
+      let r = a
+      while (up.get(r) !== r) r = up.get(r) ?? r
+      while (up.get(a) !== r) { const nx = up.get(a) ?? r; up.set(a, r); a = nx }
+      return r
+    }
+    for (const e of es) {
+      if (!up.has(e.source) || !up.has(e.target)) continue
+      const ra = find(e.source), rb = find(e.target)
+      if (ra !== rb) up.set(ra, rb)
+    }
+    /** @type {Map<string, {nodes:any[], edges:any[]}>} */
+    const groups = new Map()
+    for (const n of ns) {
+      const r = find(n.id)
+      let g = groups.get(r)
+      if (!g) { g = { nodes: [], edges: [] }; groups.set(r, g) }
+      g.nodes.push(n)
+    }
+    for (const e of es) {
+      if (!up.has(e.source)) continue
+      groups.get(find(e.source))?.edges.push(e)
+    }
+    return [...groups.values()]
+  }
+
+  /**
+   * Dagre one component, normalised to its own top-left corner.
+   *
+   * The bounding box covers the edge corridors as well as the cards, because a
+   * corridor that leaves the cards' box would otherwise be packed on top of the
+   * next component.
+   *
+   * A rank taller than the page is folded into sub-columns afterwards (see
+   * wrapTallRanks): one rank per column is what turns a hub schema into a 1:10
+   * vertical strip. A component that had to fold reports `wrapped`, and gives up
+   * its corridors with it - the space they were reserved in has moved, so the
+   * caller has to route those lines instead of following them.
+   * @param {any[]} ns @param {any[]} es
+   */
+  function layoutComponent(ns, es) {
+    const g = new dagre.graphlib.Graph({ multigraph: true })
+    // edgesep is what keeps two foreign keys between the same pair of tables in
+    // separate corridors instead of one line drawn twice.
+    g.setGraph({
+      rankdir: 'LR', ranksep: gaps.rankSep, nodesep: gaps.nodeSep,
+      edgesep: Math.max(20, Math.round(gaps.nodeSep / 2)), marginx: 0, marginy: 0,
+    })
+    g.setDefaultEdgeLabel(() => ({}))
+    for (const n of ns) g.setNode(n.id, { width: NODE_W, height: hOf(n) })
+    // Named edges: unnamed ones collapse per pair, so two foreign keys between
+    // the same tables would share one corridor and one set of markers. Dagre
+    // needs a multigraph to accept a name.
+    for (const e of es) if (e.source !== e.target) g.setEdge(e.source, e.target, {}, e.id)
+    dagre.layout(g)
+
+    // Dagre centres; everything below works in top-left, like the cards do.
+    const laid = ns.map((n) => {
+      const p = g.node(n.id), h = hOf(n)
+      return { id: n.id, x: p.x - NODE_W / 2, y: p.y - h / 2, w: NODE_W, h }
+    })
+    // rowGap, not nodeSep: a folded diagram gives up the layout's corridors, so
+    // its own lines get routed - and a routed line needs a channel wider than
+    // twice the clearance it keeps from the cards either side of it.
+    const folded = wrapTallRanks(laid, { gapX: gaps.colGap, gapY: gaps.rowGap })
+    const at = (/** @type {string} */ id) =>
+      folded.pos.get(id) ?? { x: 0, y: 0 }
+
+    /** @type {Map<string, {x:number,y:number}[]>} */
+    const raw = new Map()
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const c of laid) {
+      const q = at(c.id)
+      minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x + c.w)
+      minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y + c.h)
+    }
+    if (!folded.moved) {
+      for (const e of es) {
+        if (e.source === e.target) continue
+        const pts = g.edge({ v: e.source, w: e.target, name: e.id })?.points
+        if (!pts || pts.length < 2) continue
+        raw.set(e.id, pts)
+        for (const q of pts) {
+          minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x)
+          minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y)
+        }
+      }
+    }
+
+    /** @type {Map<string, {x:number,y:number}>} */
+    const pos = new Map()
+    for (const c of laid) {
+      const q = at(c.id)
+      pos.set(c.id, { x: Math.round(q.x - minX), y: Math.round(q.y - minY) })
+    }
+    /** @type {Map<string, {x:number,y:number}[]>} */
+    const hints = new Map()
+    for (const [id, pts] of raw) {
+      hints.set(id, pts.map((/** @type {{x:number,y:number}} */ q) => ({
+        x: Math.round(q.x - minX), y: Math.round(q.y - minY),
+      })))
+    }
+    return {
+      pos, hints, ids: ns.map(n => n.id).sort(), wrapped: folded.moved,
+      w: Math.round(maxX - minX), h: Math.round(maxY - minY),
+    }
+  }
+
+  /**
+   * @param {any[]} ns @param {any[]} es
+   * @returns {{ nodes: any[], hints: Map<string, {x:number,y:number}[]> }}
+   */
   function layoutNodes(ns, es) {
+    /** @type {Map<string, {x:number,y:number}>} */
+    const placedConn = new Map()
+    /** @type {Map<string, {x:number,y:number}[]>} */
+    const hints = new Map()
     if (focusTable && scope === 'related' && ns.length > 1) {
       const laid = layoutFocus(ns, es, focusTable)
-      if (laid) return enforceSpacing(laid, focusTable)
+      if (laid) return { nodes: enforceSpacing(laid, focusTable), hints }
     }
     const linked = new Set()
     for (const e of es) { linked.add(e.source); linked.add(e.target) }
@@ -263,77 +453,61 @@
     let bottomY  = 0
 
     if (conn.length) {
-      const g = new dagre.graphlib.Graph()
-      g.setGraph({ rankdir: 'LR', ranksep: gaps.rankSep, nodesep: gaps.nodeSep, marginx: 80, marginy: 80 })
-      g.setDefaultEdgeLabel(() => ({}))
-      for (const n of conn) {
-        g.setNode(n.id, { width: NODE_W, height: hOf(n) })
-      }
-      for (const e of es) g.setEdge(e.source, e.target)
-      dagre.layout(g)
+      // One layout per connected component, packed onto shelves.
+      //
+      // A schema is rarely one graph: it is a few clusters plus a lot of small
+      // pairs. Laying them out together puts every cluster in the same rank
+      // columns, which is why the diagram came out mostly empty space with the
+      // cards small enough to be unreadable at fit-zoom. Graphviz calls this
+      // `pack`, and it is the difference between a wall and a page. Smaller
+      // graphs also lay out faster than one big one, since Dagre is superlinear.
+      const comps = componentsOf(conn, es).map(cp => layoutComponent(cp.nodes, cp.edges))
+      comps.sort((x, y) => y.h - x.h || y.w - x.w || (x.ids[0] < y.ids[0] ? -1 : 1))
+      // All or nothing on corridors. The renderer decides per diagram whether to
+      // follow the layout's lines or route its own around the cards, so a single
+      // folded component - whose corridors are stale - means every line gets
+      // routed. Which is the better half of the trade anyway: a folded diagram is
+      // compact enough for the router to be quick.
+      const keepHints = !comps.some(cp => cp.wrapped)
 
-      // Dagre already minimises edge crossings - so for a normal schema we trust
-      // its coordinates directly and the graph reads clean (few/no crossings).
-      // The one case it handles poorly is a single rank that fans into a huge
-      // vertical stack (a hub referenced by dozens of tables): there we re-flow
-      // that rank into height-capped sub-columns so it becomes a readable grid
-      // instead of one unreadable tall smear.
-      /** @type {Map<number, {n:any,y:number,h:number}[]>} */
-      const ranks = new Map()
-      for (const n of conn) {
-        const p = g.node(n.id)
-        const key = Math.round(p.x)
-        if (!ranks.has(key)) ranks.set(key, [])
-        ranks.get(key)?.push({ n, y: p.y, h: hOf(n) })
-      }
-      /** @type {Map<string, {x:number,y:number}>} */
-      const placed = new Map()
-      const MAX_STACK = 10
-      const oversized = [...ranks.values()].some((items) => items.length > MAX_STACK)
-
-      if (!oversized) {
-        // Honest Dagre layout: convert node centres → top-left and normalise so the
-        // graph begins a little in from the origin. This is what removes the
-        // crossings the sub-column re-pack used to introduce.
-        let minX = Infinity, minY = Infinity
-        for (const n of conn) {
-          const p = g.node(n.id)
-          const h = hOf(n)
-          minX = Math.min(minX, p.x - NODE_W / 2)
-          minY = Math.min(minY, p.y - h / 2)
-        }
-        for (const n of conn) {
-          const p = g.node(n.id)
-          const h = hOf(n)
-          placed.set(n.id, {
-            x: Math.round(p.x - NODE_W / 2 - minX + 40),
-            y: Math.round(p.y - h / 2 - minY + 40),
-          })
-        }
-      } else {
-        // Huge fan: re-flow each rank into sub-columns capped at TARGET_H so a hub
-        // spreads into a grid. Generous gaps keep cards from crowding and give
-        // edges room; RANK_GAP stays modest so a deep graph doesn't stretch into an
-        // unreadable sliver.
-        const TARGET_H = 2600
-        let cursorX = 40
-        for (const key of [...ranks.keys()].sort((a, b) => a - b)) {
-          const items = (ranks.get(key) ?? []).sort((a, b) => a.y - b.y)
-          const maxH = items.reduce((m, it) => Math.max(m, it.h), HDR_H)
-          const rows = Math.max(1, Math.floor(TARGET_H / (maxH + gaps.rowGap)))
-          const cols = Math.ceil(items.length / rows)
-          const colY = new Array(cols).fill(40) // per sub-column running Y (packs tight)
-          for (let i = 0; i < items.length; i++) {
-            const col = Math.floor(i / rows)
-            placed.set(items[i].n.id, { x: cursorX + col * (NODE_W + gaps.colGap), y: colY[col] })
-            colY[col] += items[i].h + gaps.rowGap
+      // Shelves of columns, aimed at a landscape page. Tallest component first
+      // sets the shelf height, and everything that follows stacks up its column
+      // while it fits - a plain row of components would leave the whole strip
+      // beside a tall cluster empty, which is most of the page on a schema with
+      // one big hub and a tail of small pairs.
+      const area = comps.reduce((sum, cp) => sum + (cp.w + gaps.colGap) * (cp.h + gaps.rowGap), 0)
+      const targetW = Math.max(comps[0]?.w ?? 0, Math.round(Math.sqrt(area * (16 / 9))))
+      const gapX = gaps.colGap * 2
+      const gapY = gaps.rowGap * 2
+      let shelfY = 40, shelfH = 0
+      let colX = 40, colY = 40, colW = 0
+      for (const cp of comps) {
+        if (colY > shelfY && colY + cp.h > shelfY + shelfH) {
+          // Column full: start the next one, or the next shelf if we are at the
+          // page's right edge.
+          colX += colW + gapX
+          colY = shelfY
+          colW = 0
+          if (colX > 40 && colX + cp.w > targetW) {
+            shelfY += shelfH + gapY
+            colX = 40
+            colY = shelfY
+            shelfH = 0
           }
-          cursorX += cols * (NODE_W + gaps.colGap) + gaps.rankSep
         }
+        for (const [id, q] of cp.pos) placedConn.set(id, { x: q.x + colX, y: q.y + colY })
+        if (keepHints) {
+          for (const [id, pts] of cp.hints) {
+            hints.set(id, pts.map(q => ({ x: q.x + colX, y: q.y + colY })))
+          }
+        }
+        colY += cp.h + gapY
+        colW = Math.max(colW, cp.w)
+        shelfH = Math.max(shelfH, colY - shelfY - gapY)
       }
 
       laidConn = conn.map(n => {
-        const pos = placed.get(n.id) ?? { x: 0, y: 0 }
+        const pos = placedConn.get(n.id) ?? { x: 0, y: 0 }
         bottomY = Math.max(bottomY, pos.y + hOf(n))
         return { ...n, position: pos }
       })
@@ -351,7 +525,11 @@
       },
     }))
 
-    return enforceSpacing([...laidConn, ...laidOrphans])
+    const combined = [...laidConn, ...laidOrphans]
+    // Dagre separates the cards it places, and the orphan grid below uses a
+    // uniform cell, so both are clear by construction. Nudging them now would
+    // move cards off the corridors their edge points describe.
+    return { nodes: hints.size ? combined : enforceSpacing(combined), hints }
   }
 
   // ── Edge list ─────────────────────────────────────────────────────────────
@@ -359,8 +537,6 @@
   function buildEdgeData(all) {
     /** @type {any[]} */
     const rawEdges = []
-    /** @type {Set<string>} */
-    const connected = new Set()
     for (const t of all) {
       for (const col of t.columns) {
         if (!col.foreignKey) continue
@@ -382,41 +558,46 @@
           many:         !unique,
           optional:     col.isNullable === true,
         })
-        connected.add(t.name)
-        connected.add(refTable)
       }
     }
-    return { rawEdges, connected }
+    return { rawEdges }
   }
 
   // ── Build graph ───────────────────────────────────────────────────────────
   /** @param {boolean} [forceLayout] */
   function buildGraph(forceLayout = false) {
     const all = [...tableMeta.values()]
-    const { rawEdges, connected } = buildEdgeData(all)
-    const scoped = focusTable && tableMeta.has(focusTable)
-    let visible
-    if (scoped && scope === 'self') {
-      visible = all.filter(t => t.name === focusTable)
-    } else if (scoped && scope === 'related') {
-      // Per-table ERD: the focused table + every table directly FK-connected to it.
-      const neighbors = new Set([focusTable])
-      for (const e of rawEdges) {
-        if (e.source === focusTable) neighbors.add(e.target)
-        if (e.target === focusTable) neighbors.add(e.source)
-      }
-      visible = all.filter(t => neighbors.has(t.name))
-    } else {
-      visible = all.filter(t => !connectedOnly || connected.has(t.name))
+    const { rawEdges } = buildEdgeData(all)
+    allRels = rawEdges
+    const pick = picked.size ? picked : null
+    const visibleIds = visibleTables({
+      tables: all.map(t => t.name),
+      rels: rawEdges,
+      focusTable,
+      scope,
+      connectedOnly,
+      picked: pick,
+    })
+
+    // A schema too wide to draw in one go waits for the user to narrow it or to
+    // ask for all of it. Bailing here is what keeps the app from spending the
+    // next ten seconds laying out a diagram nobody can read.
+    if (!pick && !drawAll && visibleIds.size > MAX_AUTO_TABLES) {
+      gatedCount = visibleIds.size
+      nodes = []
+      edges = []
+      return
     }
-    const visibleIds = new Set(visible.map(t => t.name))
-    let filteredEdges = rawEdges.filter(e => visibleIds.has(e.source) && visibleIds.has(e.target))
-    // In the per-table view, only the focused table's own relationships are drawn.
-    // Neighbour-to-neighbour FKs would add long runs across the whole canvas that
-    // say nothing about the table you opened.
-    if (scoped && scope === 'related') {
-      filteredEdges = filteredEdges.filter(e => e.source === focusTable || e.target === focusTable)
-    }
+    gatedCount = 0
+
+    const visible = all.filter(t => visibleIds.has(t.name))
+    // One line per pair, not one per foreign key column: see mergeParallelEdges.
+    // Merging before the layout runs also means Dagre and the router each have
+    // fewer edges to work through, which is the difference between a schema
+    // finishing its routing budget and running out of it.
+    const filteredEdges = mergeParallelEdges(
+      visibleRels(rawEdges, visibleIds, { focusTable, scope, picked: pick }),
+    )
 
     const keysOnly = view.columnMode === 'keys'
     const rawNodes = visible.map(t => {
@@ -445,8 +626,9 @@
     const needsLayout = forceLayout || visible.some(t => !_posCache.has(t.name))
     if (needsLayout) {
       const laid = layoutNodes(rawNodes, filteredEdges)
-      for (const n of laid) _posCache.set(n.id, n.position)
-      nodes = laid
+      for (const n of laid.nodes) _posCache.set(n.id, n.position)
+      nodes = laid.nodes
+      routeHints = laid.hints
     } else {
       nodes = rawNodes
     }
@@ -467,9 +649,11 @@
 
   // Scope / card geometry / gutters all change the shape of the graph, so they
   // need a fresh layout rather than a rebuild on cached positions.
-  let _shapeKey = untrack(() => `${scope}|${view.columnMode}|${view.spacing}|${connectedOnly}`)
+  const shapeKey = () =>
+    `${scope}|${view.columnMode}|${view.spacing}|${connectedOnly}|${pickVersion}|${drawAll}`
+  let _shapeKey = untrack(shapeKey)
   $effect(() => {
-    const key = `${scope}|${view.columnMode}|${view.spacing}|${connectedOnly}`
+    const key = shapeKey()
     if (key === _shapeKey) return
     _shapeKey = key
     if (tableMeta.size === 0) return
@@ -506,6 +690,12 @@
     const p = { x: Math.round(x), y: Math.round(y) }
     _posCache.set(id, p)
     nodes = nodes.map((n) => (n.id === id ? { ...n, position: p } : n))
+    // The layout's corridors described where this card used to be.
+    if (routeHints.size) {
+      const next = new Map(routeHints)
+      for (const e of edges) if (e.source === id || e.target === id) next.delete(e.id)
+      routeHints = next
+    }
   }
 
   // ── Load ──────────────────────────────────────────────────────────────────
@@ -515,12 +705,17 @@
     tableMeta   = new Map()
     nodes       = []
     edges       = []
+    // A filter belongs to the schema it was picked in.
+    picked      = new Set()
+    pickQuery   = ''
+    drawAll     = false
+    gatedCount  = 0
     _posCache.clear()
 
     try {
       // One call for the whole schema. This used to fan out one request per
       // table, which meant the diagram couldn't start drawing until N round
-      // trips had completed — the dominant cost on any non-trivial schema.
+      // trips had completed - the dominant cost on any non-trivial schema.
       const schemaCols = await getSchemaColumnStructure(activeSchema)
       autoConnected = schemaCols.length > WARN_MANY
 
@@ -539,6 +734,7 @@
       tableMeta = new Map(tableMeta)
       await tick()
       buildGraph(true)
+      _shapeKey = shapeKey()
       void refineKeys()
     } catch (e) {
       error = String(e)
@@ -635,6 +831,64 @@
     onopentable?.(activeSchema, name, duplicate ? { duplicate: true, viewMode: 'table' } : undefined)
   }
 
+  /**
+   * Apply a table filter. An empty set means no filter; a set naming every table
+   * is the same thing, so it collapses to empty rather than pinning the filter on
+   * with nothing filtered.
+   * @param {Iterable<string>} names
+   */
+  function setPicked(names) {
+    const next = new Set(names)
+    picked = next.size >= tableMeta.size ? new Set() : next
+    pickVersion += 1
+    // An explicit choice is the point the gate was waiting for.
+    if (picked.size) { drawAll = false; gatedCount = 0 }
+  }
+
+  /** @param {string} name */
+  function togglePicked(name) {
+    // From "no filter", the first tick means "just this one" - starting from
+    // every table selected and asking the user to untick 900 of them is not a
+    // filter, it's a chore.
+    if (!picked.size) { setPicked([name]); return }
+    const next = new Set(picked)
+    if (next.has(name)) next.delete(name)
+    else next.add(name)
+    if (!next.size) { picked = new Set(); pickVersion += 1; return }
+    setPicked(next)
+  }
+
+  /** Show only this table and whatever it is FK-linked to. @param {string} name */
+  function isolate(name) {
+    setPicked(relatedTo([name], allRels))
+    pickerOpen = false
+  }
+
+  /** Drop one table from the diagram. @param {string} name */
+  function hideTable(name) {
+    const base = picked.size ? picked : new Set(tableMeta.keys())
+    const next = new Set(base)
+    next.delete(name)
+    if (!next.size) return
+    setPicked(next)
+    if (selectedTable === name) selectedTable = null
+  }
+
+  /** Table rows for the filter, with the numbers that help pick: columns + FKs. */
+  const pickerRows = $derived.by(() => {
+    const q = pickQuery.trim().toLowerCase()
+    const rows = []
+    for (const t of tableMeta.values()) {
+      if (q && !t.name.toLowerCase().includes(q)) continue
+      rows.push({
+        name: t.name,
+        cols: t.columns.length,
+        fks: t.columns.filter(c => c.foreignKey).length,
+      })
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name))
+  })
+
   /** @param {Partial<import('$lib/stores/erd-settings.js').ErdSettings>} patch */
   function updateSettings(patch) {
     settings = saveErdSettings(patch)
@@ -658,7 +912,7 @@
   // ── Export / Download ─────────────────────────────────────────────────────
   // The export used to render on a fixed dark sheet with hardcoded ink, so a
   // diagram exported from a light theme came back as someone else's dark
-  // diagram. It samples the running theme instead — same tokens the canvas
+  // diagram. It samples the running theme instead - same tokens the canvas
   // resolves, so the file matches what's on screen.
   //
   // Ink that carries meaning (PK amber, FK blue, focus teal) stays authored here
@@ -785,38 +1039,71 @@
       const ti = tcols.findIndex(c => `tgt-${c.name}` === e.targetHandle)
       const rowY = (/** @type {number} */ y, /** @type {number} */ i) =>
         y + HDR_H + (i >= 0 ? i * ROW_H + ROW_H / 2 : -HDR_H / 2)
-      const leftToRight = tn.position.x >= sn.position.x
-      links.push({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sx: sn.position.x + dx + (leftToRight ? NODE_W : 0),
-        sy: rowY(sn.position.y + dy, ci),
-        tx: tn.position.x + dx + (leftToRight ? 0 : NODE_W),
-        ty: rowY(tn.position.y + dy, ti),
-        sdir: leftToRight ? 1 : -1,
-        tdir: leftToRight ? -1 : 1,
-      })
+      // Same rule as the canvas: a side port where the cards are separated
+      // horizontally, the near horizontal edge where they overlap.
+      const sx0 = sn.position.x + dx, tx0 = tn.position.x + dx
+      const sy0 = sn.position.y + dy, ty0 = tn.position.y + dy
+      const toRight = tx0 - (sx0 + NODE_W)
+      const toLeft = sx0 - (tx0 + NODE_W)
+      if (toRight >= 0 || toLeft >= 0) {
+        const leftToRight = toRight >= toLeft
+        links.push({
+          id: e.id, source: e.source, target: e.target,
+          sx: sx0 + (leftToRight ? NODE_W : 0), sy: rowY(sy0, ci),
+          tx: tx0 + (leftToRight ? 0 : NODE_W), ty: rowY(ty0, ti),
+          sdx: leftToRight ? 1 : -1, sdy: 0,
+          tdx: leftToRight ? -1 : 1, tdy: 0,
+        })
+      } else {
+        const down = ty0 >= sy0
+        links.push({
+          id: e.id, source: e.source, target: e.target,
+          sx: sx0 + NODE_W / 2, sy: down ? sy0 + nodeH(sn.data) : sy0,
+          tx: tx0 + NODE_W / 2, ty: down ? ty0 : ty0 + nodeH(tn.data),
+          sdx: 0, sdy: down ? 1 : -1,
+          tdx: 0, tdy: down ? -1 : 1,
+        })
+      }
     }
-    const routed = routeEdges(boxes, links)
+    // Same lines the canvas draws: the layout's own corridors where it routed
+    // them, an A* route where it didn't and the graph is small enough to afford
+    // one. An export that disagrees with the screen is worse than a plain one.
+    const hinted = routeHints.size > 0
+    const routed = hinted || links.length > MAX_ROUTED_NODES
+      ? new Map()
+      : routeEdges(boxes, links)
     // One path element for every line, so a crossing never paints twice as bright.
     const lineD = []
     const markD = []
+    /** @type {{x:number,y:number,n:number}[]} */
+    const countD = []
     for (const l of links) {
-      const pts = routed.get(l.id)
-      lineD.push(pts
-        ? routeToSvgPath(pts)
-        : `M${l.sx} ${l.sy} C${(l.sx + l.tx) / 2} ${l.sy} ${(l.sx + l.tx) / 2} ${l.ty} ${l.tx} ${l.ty}`)
-      const a0 = pts?.[0] ?? { x: l.sx, y: l.sy }
-      const a1 = pts?.[1] ?? { x: l.sx + l.sdir, y: l.sy }
-      const z0 = pts?.[pts.length - 1] ?? { x: l.tx, y: l.ty }
-      const z1 = pts?.[pts.length - 2] ?? { x: l.tx + l.tdir, y: l.ty }
+      const hint = routeHints.get(l.id)
+      const shifted = hint?.map(p => ({ x: p.x + dx, y: p.y + dy }))
+      const pts = routed.get(l.id) ?? corridorPathOrtho(l, shifted)
+      lineD.push(routeToSvgPath(pts))
+      const a0 = pts[0], a1 = pts[1] ?? a0
+      const z0 = pts[pts.length - 1], z1 = pts[pts.length - 2] ?? z0
       const edge = edges.find(e => e.id === l.id)
       markD.push(svgMarker(a0, a1, edge?.many === false ? 'bar' : 'fork', false))
       markD.push(svgMarker(z0, z1, 'bar', edge?.optional === true))
+      // Same chip the canvas draws, so a merged pair reads the same on paper.
+      const merged = edge?.mergedCount ?? 1
+      if (merged > 1) {
+        const m = Math.hypot(a1.x - a0.x, a1.y - a0.y) || 1
+        const cx = a0.x + ((a1.x - a0.x) / m) * 30
+        const cy = a0.y + ((a1.y - a0.y) / m) * 30 - (Math.abs(a1.y - a0.y) < 0.5 ? 10 : 0)
+        countD.push({ x: cx, y: cy, n: merged })
+      }
     }
     o.push(`<path d="${lineD.join(' ')}" fill="none" stroke="${c.edge}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>`)
     o.push(`<path d="${markD.join(' ')}" fill="none" stroke="${c.edge}" stroke-width="1.2" stroke-linecap="round"/>`)
+    for (const chip of countD) {
+      const label = `\u00d7${chip.n}`
+      const w = 9 + label.length * 5
+      o.push(`<rect x="${chip.x - w / 2}" y="${chip.y - 7}" width="${w}" height="14" rx="4" fill="${c.card}" stroke="${c.border}" stroke-width="1"/>`)
+      o.push(`<text x="${chip.x}" y="${chip.y + 3.5}" font-size="9" font-weight="600" font-family="${FONT}" fill="${c.muted}" text-anchor="middle">${label}</text>`)
+    }
 
     for (const n of vis) {
       const cols = n.data?.columns ?? []
@@ -1063,6 +1350,112 @@
       {/if}
     </div>
 
+    <!-- Table filter: which tables are on the diagram at all. -->
+    <Popover bind:open={pickerOpen}>
+      <PopoverTrigger
+        title="Choose which tables the diagram shows"
+        class={cn(
+          'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-ui-sm transition-colors focus:outline-none',
+          picked.size
+            ? 'border-primary/40 bg-primary/10 text-foreground'
+            : 'border-input bg-input/30 text-muted-foreground hover:bg-accent hover:text-foreground data-[state=open]:bg-accent',
+        )}
+      >
+        <ListFilter class="size-3.5 shrink-0" />
+        {#if picked.size}
+          <span class="font-mono text-ui-2xs tabular-nums">{picked.size}</span>
+        {/if}
+      </PopoverTrigger>
+      <PopoverContent class="w-72 p-0" align="start">
+        <div class="border-b border-border/40 p-2">
+          <div class="relative flex items-center">
+            <Search class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground/50" />
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              type="text"
+              autofocus
+              bind:value={pickQuery}
+              placeholder="Find a table…"
+              onkeydown={(e) => {
+                if (e.key === 'Enter' && pickerRows.length) { togglePicked(pickerRows[0].name); e.preventDefault() }
+              }}
+              class="h-7 w-full rounded-md border border-input bg-input/30 pl-7 pr-2 text-ui-sm outline-none placeholder:text-muted-foreground/45 focus:border-ring/55"
+            />
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1 border-b border-border/40 px-2 py-1.5">
+          {#each [
+            { label: 'All', title: 'Clear the filter', on: () => { picked = new Set(); pickVersion += 1 }, off: !picked.size },
+            { label: 'Linked', title: 'Only tables with a foreign key', on: () => setPicked(linkedTables(allRels)), off: false },
+            { label: '+ Related', title: 'Add everything the picked tables link to', on: () => setPicked(relatedTo(picked, allRels)), off: !picked.size },
+          ] as act (act.label)}
+            <button
+              type="button"
+              title={act.title}
+              disabled={act.off}
+              onclick={act.on}
+              class="inline-flex h-6 items-center rounded-md px-2 text-ui-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
+            >{act.label}</button>
+          {/each}
+          <span class="ml-auto pr-1 font-mono text-ui-3xs tabular-nums text-muted-foreground/50">
+            {picked.size || tableMeta.size}/{tableMeta.size}
+          </span>
+        </div>
+
+        <div class="max-h-72 overflow-y-auto py-1">
+          {#if !picked.size}
+            <p class="px-3 pb-1 pt-0.5 text-ui-3xs leading-snug text-muted-foreground/55">
+              No filter - every table the scope allows is on the diagram. Tick one to narrow it.
+            </p>
+          {/if}
+          {#each pickerRows.slice(0, PICKER_ROWS) as row (row.name)}
+            {@const on = picked.has(row.name)}
+            <div class="flex h-7 items-center gap-2 px-2">
+              <button
+                type="button"
+                onclick={() => togglePicked(row.name)}
+                class="flex min-w-0 flex-1 items-center gap-2 text-left"
+              >
+                <span
+                  class={cn(
+                    'flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border transition-colors',
+                    on ? 'border-primary bg-primary text-primary-foreground' : 'border-border',
+                  )}
+                >
+                  {#if on}
+                    <Check class="size-2.5" />
+                  {:else if !picked.size}
+                    <span class="size-1 rounded-full bg-muted-foreground/40"></span>
+                  {/if}
+                </span>
+                <span class={cn(
+                  'min-w-0 flex-1 truncate font-mono text-ui-2xs',
+                  picked.size && !on ? 'text-muted-foreground/45' : 'text-foreground/85',
+                )}>{row.name}</span>
+              </button>
+              {#if row.fks}
+                <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground/40" title="{row.fks} foreign keys">{row.fks} fk</span>
+              {/if}
+              <button
+                type="button"
+                title="Show only {row.name} and what it links to"
+                onclick={() => isolate(row.name)}
+                class="shrink-0 rounded px-1 text-ui-3xs text-muted-foreground/40 transition-colors hover:text-foreground"
+              >only</button>
+            </div>
+          {/each}
+          {#if pickerRows.length > PICKER_ROWS}
+            <p class="px-3 py-1.5 text-ui-3xs text-muted-foreground/50">
+              {pickerRows.length - PICKER_ROWS} more - narrow the search to reach them.
+            </p>
+          {:else if !pickerRows.length}
+            <p class="px-3 py-1.5 text-ui-3xs text-muted-foreground/50">No table matches “{pickQuery}”.</p>
+          {/if}
+        </div>
+      </PopoverContent>
+    </Popover>
+
     {#if focusTable}
       <!-- Scope: what the diagram covers, relative to the table it was opened for.
            Icons only - the table's name is already in the tab and on its card. -->
@@ -1102,8 +1495,19 @@
     <div class="ml-auto flex shrink-0 items-center gap-1.5">
       {#if tableMeta.size > 0 && !loading}
         <span class="whitespace-nowrap pr-1 font-mono text-ui-2xs tabular-nums text-muted-foreground/55">
-          {nodes.length}/{tableMeta.size} tables · {edges.length} fk
+          {nodes.length}/{tableMeta.size} tables · {fkCount} fk
         </span>
+        {#if picked.size}
+          <button
+            type="button"
+            title="Clear the table filter"
+            onclick={() => { picked = new Set(); pickVersion += 1 }}
+            class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 text-ui-2xs text-foreground transition-colors hover:bg-primary/20"
+          >
+            filtered
+            <X class="size-2.5" />
+          </button>
+        {/if}
       {/if}
 
       <div class="h-4 w-px shrink-0 bg-border/60"></div>
@@ -1146,14 +1550,14 @@
             <span class="text-ui-sm text-foreground">Relationships</span>
             {@render segmented(
               [
-                { value: 'smart', label: 'Routed', hint: 'Route lines around tables' },
-                { value: 'direct', label: 'Direct', hint: 'Straight elbows - faster on huge diagrams' },
+                { value: 'smart', label: 'Routed', hint: 'Follow the corridors the layout kept clear of the cards' },
+                { value: 'direct', label: 'Direct', hint: 'Straight lines - fastest on a huge diagram' },
               ],
               view.routing,
               (v) => updateSettings({ routing: /** @type {'smart'|'direct'} */ (v) }),
             )}
           </div>
-          {#if view.routing === 'smart' && nodes.length > MAX_ROUTED_NODES}
+          {#if view.routing === 'smart' && !routeHints.size && nodes.length > MAX_ROUTED_NODES}
             <p class="px-3 pb-2 text-ui-2xs leading-snug text-muted-foreground/70">
               Drawing direct lines: routing is capped at {MAX_ROUTED_NODES} tables and this view has {nodes.length}.
             </p>
@@ -1237,12 +1641,46 @@
         selectedId={selectedTable}
         {focusId}
         routing={view.routing}
+        hints={routeHints}
         showTypes={view.showTypes}
         grid={view.grid}
         onselect={(id) => (selectedTable = id)}
         onopen={(name) => openTable(name)}
         onnodemoved={onNodeMoved}
       />
+
+      {#if gatedCount > 0}
+        <!-- Too wide to draw unasked. Laying out and routing this many cards is
+             seconds of work, and the result is a wall nobody reads - so the
+             diagram waits for a filter, or for an explicit go-ahead. -->
+        <div class="absolute inset-0 flex items-center justify-center bg-background p-6">
+          <div class="max-w-sm rounded-xl border border-border/60 bg-panel p-5 text-center elevate-2-rim">
+            <Network class="mx-auto size-5 text-muted-foreground/40" />
+            <p class="mt-2.5 text-ui-sm font-medium text-foreground">
+              {gatedCount} tables in <span class="font-mono">{activeSchema}</span>
+            </p>
+            <p class="mt-1.5 text-ui-xs leading-relaxed text-muted-foreground/75">
+              A diagram this wide takes seconds to lay out and is hard to read once it lands.
+              Pick the tables worth seeing, or draw the whole schema anyway.
+            </p>
+            <div class="mt-4 flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onclick={() => (pickerOpen = true)}
+                class="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-transform duration-150 ease-out active:scale-[0.98]"
+              >
+                <ListFilter class="size-3.5 shrink-0" />
+                Pick tables
+              </button>
+              <button
+                type="button"
+                onclick={() => (drawAll = true)}
+                class="inline-flex h-8 items-center rounded-md border border-border/60 bg-input/20 px-3 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >Draw all {gatedCount}</button>
+            </div>
+          </div>
+        </div>
+      {/if}
 
       {#if tableMeta.size === 0 && !loading}
         <div class="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
@@ -1253,7 +1691,7 @@
       {/if}
 
       <!-- ── Legend ───────────────────────────────────────────────────────── -->
-      {#if tableMeta.size > 0}
+      {#if nodes.length > 0}
         <div class="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
           <div class="flex h-6 items-center gap-2.5 rounded-full border border-border/40 bg-panel/75 px-2.5 text-ui-3xs text-muted-foreground/60 backdrop-blur-sm">
             <span class="flex items-center gap-1"><span class="size-1.5 rounded-full" style="background:{ink.pk}"></span>PK</span>
@@ -1360,12 +1798,27 @@
         {/if}
       </div>
 
-      <div class="shrink-0 border-t border-border/60 p-2">
+      <div class="flex shrink-0 items-center gap-1.5 border-t border-border/60 p-2">
         <button
           type="button"
-          class="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-border/60 bg-input/20 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-accent active:scale-[0.99]"
+          class="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-border/60 bg-input/20 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-accent active:scale-[0.99]"
           onclick={() => openTable(selMeta.name)}
         >Open table</button>
+        <button
+          type="button"
+          title="Show only {selMeta.name} and what it links to"
+          class="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border/60 bg-input/20 text-muted-foreground transition-[background-color,color,transform] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97]"
+          onclick={() => isolate(selMeta.name)}
+        ><Crosshair class="size-3.5" /></button>
+        <button
+          type="button"
+          disabled={selMeta.name === focusTable}
+          title={selMeta.name === focusTable
+            ? 'This is the table the diagram belongs to'
+            : `Take ${selMeta.name} off the diagram`}
+          class="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border/60 bg-input/20 text-muted-foreground transition-[background-color,color,transform] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40"
+          onclick={() => hideTable(selMeta.name)}
+        ><EyeOff class="size-3.5" /></button>
       </div>
     </aside>
   {/if}

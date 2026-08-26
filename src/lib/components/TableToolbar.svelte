@@ -292,10 +292,7 @@
   /** Open the filter bar, seeding an empty filter row (hotkey from the parent). */
   export function openFilterMenu() {
     if (!columns.length) return;
-    if (!filterBarOpen) {
-      filterBarOpen = true;
-      if (rowFilters.length === 0) addFilter();
-    }
+    if (!filterBarOpen) openFilterBar();
   }
 
   /** Clear the row search and focus the input (Ctrl+T shortcut). */
@@ -304,18 +301,29 @@
     searchInputRef?.focus()
   }
 
-  /** Focus the value input of the last filter row (called after "Filter by this column"). */
+  /**
+   * Focus the value field of the last filter row. Scoped to that row rather than
+   * to the whole bar: a row whose value is a date picker or a true/false pair has
+   * no text input, and a flat query would then focus some earlier row's field.
+   */
   export function focusLastFilter() {
     // Defer so the filter bar DOM has rendered
     setTimeout(() => {
-      const inputs = document.querySelectorAll(
-        '.studio-filter-bar input[data-filter-value], .studio-filter-bar input:not([type="date"])',
+      const rows = document.querySelectorAll('.studio-filter-bar [data-filter-row]');
+      const row = rows[rows.length - 1];
+      const el = /** @type {HTMLInputElement | HTMLButtonElement | null} */ (
+        row?.querySelector('input[data-filter-value], [data-filter-value]') ?? null
       );
-      const last = /** @type {HTMLInputElement|null} */ (
-        inputs[inputs.length - 1]
-      );
-      last?.focus();
+      el?.focus();
+      if (el instanceof HTMLInputElement) el.select();
     }, 30);
+  }
+
+  /** Open the filter bar (seeding a row if empty) and land the caret in its value. */
+  function openFilterBar() {
+    filterBarOpen = true;
+    if (rowFilters.length === 0) addFilter();
+    focusLastFilter();
   }
 
   /** Page numbers shown in the page dropdown (windowed when many pages). */
@@ -329,6 +337,22 @@
 
   const iconBtn =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
+
+  // ── Filter row chrome ──────────────────────────────────────────────────────
+  // One border, one surface, one hover for every control in a filter row. Column,
+  // condition and value each had their own pairing before, so a clause that reads
+  // as one sentence was drawn as three unrelated boxes. `dark:` is repeated on the
+  // surface because the Input primitive sets its own dark background.
+  const fCtl =
+    "h-7 rounded-md border border-border/60 bg-background dark:bg-background text-ui-sm font-normal text-foreground shadow-none outline-none transition-[color,background-color,border-color,box-shadow]";
+  const fTrigger = cn(
+    fCtl,
+    "inline-flex items-center gap-1 px-2.5 hover:border-border hover:bg-muted/40 focus-visible:border-ring/60 focus-visible:ring-2 focus-visible:ring-ring/15 data-[state=open]:border-ring/60 data-[state=open]:bg-muted/40",
+  );
+  // Capped, not free-running: a value field stretched across the whole toolbar is
+  // an empty box the width of the window, and it dwarfs the two controls that say
+  // what it means.
+  const fValue = cn(fCtl, "min-w-[9rem] max-w-[22rem] flex-1 px-2.5");
 
   /** Auto-refresh intervals. Nothing shorter than 5s: a refresh re-runs the page
    *  query and its count, and a faster cadence would spend more time fetching than
@@ -565,6 +589,12 @@
     onfilterschange([...rowFilters, createFilter(col, op)]);
   }
 
+  /** "+ Add filter": a new row is only useful with the caret already in it. */
+  function addFilterAndFocus() {
+    addFilter();
+    focusLastFilter();
+  }
+
   /** @param {string} id */
   function removeFilter(id) {
     onfilterschange(rowFilters.filter((f) => f.id !== id));
@@ -628,7 +658,7 @@
     <div
       class={cn(
         // Shrinkable, deliberately. Everything else on this row is shrink-0, so
-        // with a fixed width here the row could only overflow — which is what
+        // with a fixed width here the row could only overflow - which is what
         // happened at high zoom: the ten container-query breakpoints below had
         // already hidden every optional control, and the search still demanded
         // its full 13rem, so the pager clipped off the right edge. A search
@@ -847,12 +877,8 @@
         title="Filter rows"
         disabled={loading || columns.length === 0}
         onclick={() => {
-          if (!filterBarOpen) {
-            filterBarOpen = true;
-            if (rowFilters.length === 0) addFilter();
-          } else {
-            filterBarOpen = false;
-          }
+          if (filterBarOpen) filterBarOpen = false;
+          else openFilterBar();
         }}
       >
         <Icon name="list-filter" class="size-3.5" />
@@ -1054,9 +1080,9 @@
         {#if total > 0 || counting}
           <span
             class="flex shrink-0 items-center gap-1 font-mono text-ui-xs tabular-nums @max-[600px]/tb:hidden"
-            title="{from.toLocaleString('en-US')}–{to.toLocaleString('en-US')} of {counting ? 'counting…' : total.toLocaleString('en-US') + ' rows'}{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
+            title="{from.toLocaleString('en-US')}-{to.toLocaleString('en-US')} of {counting ? 'counting…' : total.toLocaleString('en-US') + ' rows'}{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
-            <span class="text-foreground/65">{from.toLocaleString("en-US")}–{to.toLocaleString("en-US")}</span>
+            <span class="text-foreground/65">{from.toLocaleString("en-US")}-{to.toLocaleString("en-US")}</span>
             {#if live && !counting}
               <span class="text-muted-foreground/40">of <span class="inline-block tabular-nums" use:slotRoll={total.toLocaleString("en-US")}></span></span>
             {:else}
@@ -1452,7 +1478,8 @@
         {@const colOps = opsForCol(filter.column)}
         {@const enumOpts = enumOptionsFor(filter.column)}
         <div
-          class="flex items-center gap-2 border-b border-border/30 px-3 py-1.5 last:border-b-0"
+          data-filter-row
+          class="flex items-center gap-1.5 border-b border-border/30 px-3 py-1.5 last:border-b-0"
         >
           <button
             type="button"
@@ -1470,7 +1497,7 @@
           {:else}
             <button
               type="button"
-              class="inline-flex h-7 w-12 shrink-0 items-center justify-center rounded-md border border-border/50 bg-muted/25 font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/80 transition-[color,background-color,transform] hover:bg-muted/50 hover:text-foreground active:scale-[0.96]"
+              class="inline-flex h-7 w-12 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background dark:bg-background font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/80 transition-[color,background-color,border-color] hover:border-border hover:bg-muted/40 hover:text-foreground"
               title="Toggle AND / OR"
               onclick={() =>
                 patchFilter(filter.id, {
@@ -1490,7 +1517,7 @@
               <button
                 {...props}
                 type="button"
-                class="inline-flex h-7 w-32 shrink-0 items-center gap-1 rounded-md border border-border/50 bg-muted/25 px-2.5 text-ui-sm font-normal text-foreground shadow-none transition-colors hover:bg-muted/45"
+                class={cn(fTrigger, "w-36 shrink-0")}
                 title="Column"
               >
                 <span class="min-w-0 flex-1 truncate text-left">
@@ -1514,7 +1541,7 @@
               <button
                 {...props}
                 type="button"
-                class="inline-flex h-7 w-28 shrink-0 items-center gap-1 rounded-md border border-border/50 bg-muted/25 px-2.5 text-ui-sm font-normal text-foreground shadow-none transition-colors hover:bg-muted/45"
+                class={cn(fTrigger, "w-32 shrink-0")}
                 title="Condition"
               >
                 <span class="min-w-0 flex-1 truncate text-left">{filterOpLabel(filter.op)}</span>
@@ -1533,10 +1560,10 @@
                   <button
                     type="button"
                     class={cn(
-                      "inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-ui-sm transition-colors",
+                      "inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-ui-sm transition-[color,background-color,border-color]",
                       filter.value === opt.value
                         ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                        : "border-border/60 bg-background text-muted-foreground hover:border-border hover:bg-muted/40 hover:text-foreground",
                     )}
                     onclick={() => patchFilter(filter.id, { value: opt.value })}
                     >{opt.label}</button
@@ -1554,7 +1581,7 @@
                 type="text"
                 inputmode="decimal"
                 data-filter-value
-                class="h-7 min-w-[6rem] flex-1 rounded-md border border-border/50 bg-muted/25 dark:bg-muted/25 px-2.5 font-mono text-ui-sm shadow-none"
+                class={cn(fValue, "font-mono")}
                 value={filter.value}
                 placeholder="Number…"
                 oninput={(e) => {
@@ -1574,7 +1601,8 @@
                   <button
                     {...props}
                     type="button"
-                    class="inline-flex h-7 min-w-[8rem] flex-1 items-center gap-1 rounded-md border border-border/50 bg-muted/25 px-2.5 text-ui-sm font-normal shadow-none transition-colors hover:bg-muted/45"
+                    class={cn(fTrigger, "min-w-[9rem] max-w-[22rem] flex-1")}
+                    data-filter-value
                     title="Value"
                   >
                     <span class={cn("min-w-0 flex-1 truncate text-left font-mono", !filter.value && "font-sans text-muted-foreground")}>
@@ -1591,7 +1619,7 @@
             {:else}
               <Input
                 data-filter-value
-                class="h-7 min-w-[6rem] flex-1 rounded-md border border-border/50 bg-muted/25 dark:bg-muted/25 px-2.5 text-ui-sm shadow-none"
+                class={fValue}
                 value={filter.value}
                 placeholder="Value…"
                 oninput={(e) =>
@@ -1607,7 +1635,7 @@
         <button
           type="button"
           class="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-ui-sm text-muted-foreground transition-[color,background-color,transform] hover:bg-accent hover:text-foreground active:scale-[0.97]"
-          onclick={addFilter}
+          onclick={addFilterAndFocus}
         >
           <Icon name="plus" class="size-3.5" />
           Add filter

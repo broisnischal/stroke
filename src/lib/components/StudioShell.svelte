@@ -25,6 +25,7 @@
   import { IS_MAC } from '$lib/shortcuts.js'
   import { findSearchInput, isTypingTarget } from '$lib/focus-search.js'
   import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode, appAutoSaveQueries } from '$lib/stores/settings.js'
+  import { requireUnlock } from '$lib/stores/app-lock.js'
   import { isTextEntryTarget, setVimSubMode } from '$lib/vim/vim.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
   import {
@@ -78,12 +79,26 @@
   import QueryLogConsole from './QueryLogConsole.svelte'
   import DisconnectDialog from './DisconnectDialog.svelte'
   import SwitchDatabaseDialog from './SwitchDatabaseDialog.svelte'
+  import CreateDatabaseDialog from './CreateDatabaseDialog.svelte'
+  import DatabaseNameDialog from './DatabaseNameDialog.svelte'
+  import DropDatabaseDialog from './DropDatabaseDialog.svelte'
+  import DatabaseInfoDialog from './DatabaseInfoDialog.svelte'
+  import { CatalogCache, catalogKey, connectionPrefix } from '$lib/catalog-cache.js'
+  import { refreshExternalPlugins, stopAllExternalPlugins } from '$lib/plugins/external/host.js'
+  import {
+    dbAdminKind,
+    createDatabaseSql,
+    dropDatabaseSql,
+    terminateSessionsSql,
+    databaseInfoSql,
+    databaseInfoRows,
+  } from '$lib/database-admin.js'
   import McpPanel from './McpPanel.svelte'
   // NotebookEditor (pulls Monaco via SqlCell + marked via MarkdownCell) is lazy-loaded
   // at its render site so notebooks don't drag those into the startup bundle.
   //
-  // The keep-alive tab pages — SearchPage, SchemaTimelinePage, SchemaPage,
-  // BackupPage, LogsPage, InstanceInsightsPage, ObjectsPage, RedisKeyspacePage —
+  // The keep-alive tab pages - SearchPage, SchemaTimelinePage, SchemaPage,
+  // BackupPage, LogsPage, InstanceInsightsPage, ObjectsPage, RedisKeyspacePage -
   // are lazy-loaded at their render sites for the same reason. Each is already
   // behind an `{#if …EverOpened}` guard, so a static import only ever meant
   // "ship this page's code to every user at boot whether or not they open it".
@@ -198,6 +213,7 @@
   import { humanizeDbError } from '$lib/ai.js'
   import {
     MAX_PAGE_SIZE,
+    fetchLimitFor,
     PAGE_SIZE_ALL,
     DEFAULT_PAGE_SIZE,
     saveDefaultPageSize,
@@ -404,7 +420,7 @@
   /** Security (RLS, policies, roles) is PostgreSQL-only. */
   const hasSecurity = $derived(dbType === 'postgres' && !isRedis)
   /**
-   * PostGIS present on this connection — gates the Map view, which has nothing
+   * PostGIS present on this connection - gates the Map view, which has nothing
    * to show without it. Asked once per connection: it is a single indexed
    * catalog row, and the alternative (offering Map everywhere and dead-ending on
    * a non-spatial database) is worse than one cheap query.
@@ -547,7 +563,7 @@
    * Without it, moving around inside one table almost never records anything: the
    * row-gap threshold only fires past NAV_ROW_GAP rows, so clicking between two
    * nearby cells was unrecoverable and back/forward looked like it only worked
-   * across tabs. A click is aimed, so distance shouldn't decide — that threshold
+   * across tabs. A click is aimed, so distance shouldn't decide - that threshold
    * exists to stop *arrow-key roaming* filling the stack, and roaming still
    * refreshes in place.
    */
@@ -566,8 +582,8 @@
   let activeSchema = $state('public')
   // $state.raw: a large schema is thousands of table objects, and deep $state
   // proxies every one of them plus every field. Nothing mutates a table in
-  // place — the list is always replaced wholesale (including the rowCount
-  // backfill, which rebuilds it with .map) — so the proxies bought nothing and
+  // place - the list is always replaced wholesale (including the rowCount
+  // backfill, which rebuilds it with .map) - so the proxies bought nothing and
   // cost a walk of the whole list on load plus a proxy hop on every read from
   // Sidebar's and CommandPalette's filter/map passes.
   let tables = $state.raw([])
@@ -1119,6 +1135,14 @@
   }
 
   // Confirm before quitting the app while table edits are still unsaved.
+  // Installed plugins are read once, at startup: scanning a folder and starting a
+  // Worker per enabled plugin has no business happening on a repaint. The panel
+  // rescans on demand.
+  onMount(() => {
+    void refreshExternalPlugins()
+    return () => stopAllExternalPlugins()
+  })
+
   onMount(() => {
     let unlisten = () => {}
     ;(async () => {
@@ -1663,7 +1687,7 @@ let rowSearch = $state('')
 
   /**
    * Title-bar label for the current connection. A file-backed connection would
-   * otherwise show its whole path — and a D1 local database's miniflare path
+   * otherwise show its whole path - and a D1 local database's miniflare path
    * (`…/.wrangler/state/v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite`) both
    * overflows the bar and says nothing. Prefer the SQL database name, then the
    * connection's own label, and only fall back to the file's basename.
@@ -1874,6 +1898,9 @@ let rowSearch = $state('')
     foreignKeys = s.foreignKeys ?? []
     rows = s.rows
     total = s.total
+    // The snapshot's count and its filters were taken together, so the sig for
+    // the state just restored above is the one this total belongs to.
+    _totalSig = rowPredicateSig
     queryMs = s.queryMs
     loadingRows = !!s.loadingRows && isTabBusy(tabId)
     error = s.error
@@ -1928,7 +1955,7 @@ let rowSearch = $state('')
    *
    * A run outlives the tab being in front of it: the editor is one shared
    * component driven by shell-level state, so switching tabs used to swap that
-   * state out from under an in-flight query — the spinner stopped, the results
+   * state out from under an in-flight query - the spinner stopped, the results
    * pane showed the other tab's snapshot, and whatever came back landed in
    * whichever tab happened to be active by then. The query itself never
    * stopped; only the UI lost track of it.
@@ -2193,7 +2220,7 @@ let rowSearch = $state('')
   // ⌘B / Ctrl+B is bound in the CAPTURE phase on window, not through
   // createHotkey. The hotkey layer listens on `document` in the BUBBLE phase, so
   // anything between the focused element and the document that calls
-  // stopPropagation eats the chord first — and the places you most want to hide
+  // stopPropagation eats the chord first - and the places you most want to hide
   // the sidebar from are exactly those: the Monaco editors, the grid canvas, and
   // the bits-ui overlays. That is why SqlEditor and OrmRunner had to be handed a
   // manual `onmodb` callback to forward the key back out; capture makes the one
@@ -2207,7 +2234,7 @@ let rowSearch = $state('')
     if (!modOnly || e.altKey || e.shiftKey) return
     if (e.key.toLowerCase() !== 'b') return
     // The connection dialog owns the screen while it's open, and it binds ⌘B to
-    // its own connections rail — toggling the workspace sidebar behind it would
+    // its own connections rail - toggling the workspace sidebar behind it would
     // be an invisible edit the user only discovers after closing the dialog.
     // Left un-stopped so the dialog's own handler still receives it.
     if (showConnectionModal) return
@@ -2597,7 +2624,7 @@ let rowSearch = $state('')
     return () => document.removeEventListener('keydown', onFullscreenKey)
   })
 
-  // "/" focuses the search box for whatever is on screen — the sidebar filter,
+  // "/" focuses the search box for whatever is on screen - the sidebar filter,
   // the settings search, a dialog's own field. It resolves its target from the
   // live DOM rather than being bound per field, so a search box added later is
   // reachable without anyone registering it. See $lib/focus-search.js.
@@ -2616,7 +2643,7 @@ let rowSearch = $state('')
   createHotkey('?', (e) => {
     if (commandOpen || showConnectionModal || showSettingsModal || showShortcutsModal) return
     // Was a tag check, which missed contenteditable and anything Monaco routes
-    // through a non-textarea — so "?" in those opened the shortcuts panel
+    // through a non-textarea - so "?" in those opened the shortcuts panel
     // mid-sentence.
     if (isTypingTarget(document.activeElement)) return
     e.preventDefault()
@@ -2949,7 +2976,7 @@ let rowSearch = $state('')
   function openDdlTab(ddlText, title) {
     const existing = tabs.find((t) => t.kind === 'ddl' && t.title === title)
     if (existing) {
-      // Refresh in place — the object may have been altered since it was opened.
+      // Refresh in place - the object may have been altered since it was opened.
       tabs = tabs.map((t) => (t.id === existing.id ? { ...t, state: { ddlText } } : t))
       void activateTab(existing.id)
       return
@@ -3271,7 +3298,7 @@ let rowSearch = $state('')
     // Mid-travel: the cursor is being parked on an entry we already have.
     if (_navRestore > 0) return
     const cur = navCurrent(_nav)
-    // An aimed move inside the current tab is always a position worth keeping —
+    // An aimed move inside the current tab is always a position worth keeping -
     // unless it didn't actually move, which would just stack duplicates.
     const aimedJump =
       aimed && cur !== null && cur.tabId === tabId && row !== null && row !== cur.row
@@ -3940,11 +3967,12 @@ let rowSearch = $state('')
     }
   }
 
-  async function loadIndexes() {
-    if (!activeSchema) { indexes = []; return }
+  /** @param {string} schema */
+  async function fetchIndexes(schema) {
+    if (!schema) return []
     try {
-      const list = await listIndexes(activeSchema)
-      indexes = list
+      const list = await listIndexes(schema)
+      return list
         .map((i) => ({
           name: i.name ?? '',
           tableName: i.tableName ?? i.table_name ?? '',
@@ -3957,7 +3985,7 @@ let rowSearch = $state('')
         }))
         .filter((i) => i.name)
     } catch {
-      indexes = []
+      return []
     }
   }
 
@@ -4106,24 +4134,26 @@ let rowSearch = $state('')
     }
   })
 
-  async function loadEnums() {
-    if (!activeSchema || !engineSupports('enums', connection?.type)) { enums = []; return }
+  /** @param {string} schema */
+  async function fetchEnums(schema) {
+    if (!schema || !engineSupports('enums', connection?.type)) return []
     try {
-      const list = await listEnums(activeSchema)
+      const list = await listEnums(schema)
       // Dedupe values defensively: enum labels are a set, but a bad introspection
       // join could return repeats, and the schema pages key their {#each} on the
       // value - a duplicate would crash the view (each_key_duplicate).
-      enums = list.map((e) => ({ name: e.name ?? '', values: [...new Set(e.values ?? [])] }))
+      return list.map((e) => ({ name: e.name ?? '', values: [...new Set(e.values ?? [])] }))
     } catch {
-      enums = []
+      return []
     }
   }
 
-  async function loadTriggers() {
-    if (!activeSchema || !engineSupports('triggers', connection?.type)) { triggers = []; return }
+  /** @param {string} schema */
+  async function fetchTriggers(schema) {
+    if (!schema || !engineSupports('triggers', connection?.type)) return []
     try {
-      const list = await listTriggers(activeSchema)
-      triggers = list.map((t) => ({
+      const list = await listTriggers(schema)
+      return list.map((t) => ({
         name: t.name ?? '',
         tableName: t.tableName ?? t.table_name ?? '',
         timing: t.timing ?? 'AFTER',
@@ -4132,15 +4162,16 @@ let rowSearch = $state('')
         enabled: t.enabled ?? true,
       })).filter((t) => t.name)
     } catch {
-      triggers = []
+      return []
     }
   }
 
-  async function loadSequences() {
-    if (!activeSchema || !engineSupports('sequences', connection?.type)) { sequences = []; return }
+  /** @param {string} schema */
+  async function fetchSequences(schema) {
+    if (!schema || !engineSupports('sequences', connection?.type)) return []
     try {
-      const list = await listSequences(activeSchema)
-      sequences = list.map((s) => ({
+      const list = await listSequences(schema)
+      return list.map((s) => ({
         name: s.name ?? '',
         dataType: s.dataType ?? s.data_type ?? 'bigint',
         startValue: s.startValue ?? s.start_value ?? 1,
@@ -4151,8 +4182,63 @@ let rowSearch = $state('')
         ownedBy: s.ownedBy ?? s.owned_by ?? null,
       })).filter((s) => s.name)
     } catch {
-      sequences = []
+      return []
     }
+  }
+
+  // ── Schema-level catalog ──────────────────────────────────────────────────
+  // Indexes, enums, triggers and sequences are four round trips that describe a
+  // whole schema, so they are fetched, cached and invalidated as one unit. The
+  // TTL is long compared with the table list's: none of these change without a
+  // DDL statement, and every path that runs DDL invalidates the connection.
+  const CATALOG_TTL_MS = 60_000
+
+  /** @typedef {{ indexes: any[], enums: any[], triggers: any[], sequences: any[] }} SchemaCatalog */
+
+  /** Push a catalog payload into the reactive state the pages read. @param {SchemaCatalog} c */
+  function applySchemaCatalog(c) {
+    indexes = c.indexes
+    enums = c.enums
+    triggers = c.triggers
+    sequences = c.sequences
+  }
+
+  /** @param {{ force?: boolean }} [opts] */
+  async function loadSchemaCatalog({ force = false } = {}) {
+    const schema = activeSchema
+    if (!schema) { applySchemaCatalog({ indexes: [], enums: [], triggers: [], sequences: [] }); return }
+    const key = catalogKey(persistConnectionId, 'catalog', schema)
+    if (force) _catalog.invalidate(key)
+    const hit = /** @type {SchemaCatalog | undefined} */ (_catalog.get(key, CATALOG_TTL_MS))
+    if (hit) { applySchemaCatalog(hit); return }
+    const [idx, enm, trg, seq] = await Promise.all([
+      fetchIndexes(schema), fetchEnums(schema), fetchTriggers(schema), fetchSequences(schema),
+    ])
+    // The schema can change while four requests are in flight; a late payload
+    // must not overwrite the catalog of wherever the user has since gone.
+    const payload = { indexes: idx, enums: enm, triggers: trg, sequences: seq }
+    _catalog.set(key, payload)
+    if (activeSchema === schema) applySchemaCatalog(payload)
+  }
+
+  /** Refresh one kind on its own (a page's own refresh button) and keep the
+   *  cached payload in step, so the next schema revisit does not undo it.
+   *  @param {'indexes' | 'enums' | 'triggers' | 'sequences'} kind */
+  async function reloadCatalogKind(kind) {
+    const schema = activeSchema
+    if (!schema) return
+    const fetched = kind === 'indexes' ? await fetchIndexes(schema)
+      : kind === 'enums' ? await fetchEnums(schema)
+      : kind === 'triggers' ? await fetchTriggers(schema)
+      : await fetchSequences(schema)
+    if (activeSchema !== schema) return
+    if (kind === 'indexes') indexes = fetched
+    else if (kind === 'enums') enums = fetched
+    else if (kind === 'triggers') triggers = fetched
+    else sequences = fetched
+    const key = catalogKey(persistConnectionId, 'catalog', schema)
+    const cached = /** @type {SchemaCatalog | undefined} */ (_catalog.get(key, CATALOG_TTL_MS))
+    if (cached) _catalog.set(key, { ...cached, [kind]: fetched })
   }
 
   // Table-list cache keyed by connection+schema. Rapid navigation (switching
@@ -4161,12 +4247,17 @@ let rowSearch = $state('')
   // move. A short TTL collapses those repeats while keeping counts near-live;
   // data-changing paths (connect, refresh, DDL) pass { force: true } to bypass it.
   const TABLE_LIST_TTL_MS = 3000
-  /** @type {Map<string, { tables: any[], at: number }>} */
-  let _tableListCache = new Map()
-  // Which connection+schema the catalog sub-state (indexes/enums/triggers/
-  // sequences) currently reflects - so a cached table-list hit never leaves it
-  // showing another schema's catalog.
-  let _catalogLoadedFor = ''
+  /** Every catalog read in one cache: table lists, schema catalogs, incoming FKs.
+   *  Keyed connection-first so one connection's DDL can drop only its own entries. */
+  const _catalog = new CatalogCache({ max: 128 })
+
+  /** Drop every cached catalog read for the live connection. Call after DDL, and
+   *  on any refresh the user asked for - they are asking because they expect the
+   *  catalog to have changed. */
+  function invalidateCatalog() {
+    _catalog.invalidate(connectionPrefix(persistConnectionId))
+    incomingFkCache = new Map()
+  }
 
   /** @param {{ force?: boolean }} [opts] */
   async function loadTables({ force = false } = {}) {
@@ -4178,10 +4269,11 @@ let rowSearch = $state('')
     // Captured once: activeSchema can change while the fetch is in flight, and
     // the background count pass must target the schema this list came from.
     const schemaAtCall = activeSchema
-    const key = `${persistConnectionId ?? ''}:${schemaAtCall}`
-    const cached = force ? null : _tableListCache.get(key)
-    if (cached && Date.now() - cached.at < TABLE_LIST_TTL_MS) {
-      tables = cached.tables
+    const key = catalogKey(persistConnectionId, 'tables', schemaAtCall)
+    if (force) invalidateCatalog()
+    const cached = force ? undefined : /** @type {any[] | undefined} */ (_catalog.get(key, TABLE_LIST_TTL_MS))
+    if (cached) {
+      tables = cached
       loadingTables = false
       if (activeTable && !tables.find((t) => t.name === activeTable)) {
         activeTable = tables[0]?.name ?? null
@@ -4199,9 +4291,7 @@ let rowSearch = $state('')
             rlsEnabled: t.rlsEnabled ?? null,
           }))
           .filter((t) => t.name)
-        _tableListCache.set(key, { tables, at: Date.now() })
-        // Bound growth: one entry per connection:schema visited over a session.
-        if (_tableListCache.size > 64) _tableListCache.delete(_tableListCache.keys().next().value)
+        _catalog.set(key, tables)
         if (activeTable && !tables.find((t) => t.name === activeTable)) {
           activeTable = tables[0]?.name ?? null
         }
@@ -4217,16 +4307,9 @@ let rowSearch = $state('')
     // Covers the cached path too - a list cached mid-resolve may still hold nulls.
     const unresolved = tables.filter((t) => t.rowCount === null).map((t) => t.name)
     if (unresolved.length > 0) void resolveRowCounts(key, schemaAtCall, unresolved)
-    // Reload the catalog sub-state only when it doesn't already reflect this
-    // connection+schema (or on a forced reload): revisiting a schema skips these
-    // four round-trips, but switching schemas still refreshes them.
-    if (force || _catalogLoadedFor !== key) {
-      _catalogLoadedFor = key
-      void loadIndexes()
-      void loadEnums()
-      void loadTriggers()
-      void loadSequences()
-    }
+    // The schema-level catalog rides the same cache, so returning to a schema
+    // costs nothing. A forced reload has already invalidated it above.
+    void loadSchemaCatalog()
   }
 
   /**
@@ -4238,17 +4321,29 @@ let rowSearch = $state('')
    * @param {string[]} names
    */
   async function resolveRowCounts(key, schema, names) {
-    try {
-      const counts = await getTableRowCounts(schema, names)
-      if (!counts?.length) return
+    // In chunks, in list order, so counts land in waves down the sidebar instead
+    // of all at the end. One request for the whole schema is all-or-nothing: on a
+    // 135-table production schema every COUNT(*) had to finish before a single
+    // number appeared, and a connection swapped or dropped part-way through threw
+    // the completed counts away with the rest - which is why the sidebar sat on a
+    // column of blanks. A chunk that fails now costs only its own tables.
+    const CHUNK = 12
+    for (let i = 0; i < names.length; i += CHUNK) {
       // Stale guard: the user may have switched connection/schema meanwhile.
-      if (`${persistConnectionId ?? ''}:${activeSchema}` !== key) return
-      const byName = new Map(counts.map((c) => [c.name, normalizeTableRowCount(c.rowCount ?? c.row_count)]))
-      tables = tables.map((t) => (byName.has(t.name) ? { ...t, rowCount: byName.get(t.name) ?? null } : t))
-      const cached = _tableListCache.get(key)
-      if (cached) _tableListCache.set(key, { tables, at: cached.at })
-    } catch {
-      /* ignore - counts fill in on the next refresh instead */
+      if (catalogKey(persistConnectionId, 'tables', activeSchema) !== key) return
+      try {
+        const counts = await getTableRowCounts(schema, names.slice(i, i + CHUNK))
+        if (!counts?.length) continue
+        if (catalogKey(persistConnectionId, 'tables', activeSchema) !== key) return
+        const byName = new Map(counts.map((c) => [c.name, normalizeTableRowCount(c.rowCount ?? c.row_count)]))
+        tables = tables.map((t) => (byName.has(t.name) ? { ...t, rowCount: byName.get(t.name) ?? null } : t))
+        // Patch the cached list in place. Re-setting stamps a new timestamp, which
+        // would extend the list's freshness window on every count that lands, so
+        // the entry is only patched when it is still there to patch.
+        if (_catalog.has(key)) _catalog.set(key, tables)
+      } catch {
+        /* ignore this chunk - its counts fill in on the next refresh instead */
+      }
     }
   }
 
@@ -4308,10 +4403,25 @@ let rowSearch = $state('')
     await reloadTableFromQuery(true)
   }
 
+  /**
+   * Identity of the WHERE a row count was taken under. "All" has no page size of
+   * its own, so it borrows `total` as the fetch limit - and that is only sound
+   * while `total` describes the view about to be fetched. Filter a table down to
+   * one row and then clear the filter: the count is still 1, so "All" asked for
+   * LIMIT 1 and drew a one-row grid under a footer reading "1-752 of 752".
+   * @param {Record<string, unknown>} search @param {TableFilter[]} filters
+   */
+  function predicateSig(search, filters) {
+    return JSON.stringify([search, filtersApiSignature(filters)])
+  }
+  /** The predicate `total` belongs to; '' until a count lands. */
+  let _totalSig = $state('')
+  const rowPredicateSig = $derived(predicateSig(apiSearch(rowSearch), rowFilters))
+  /** `total` was counted under the search + filters now on screen. */
+  const totalIsForThisView = $derived(total > 0 && _totalSig === rowPredicateSig)
+
   /** Resolve the effective fetch limit for the current pageSize. */
-  const effectivePageSize = $derived(
-    pageSize === PAGE_SIZE_ALL ? Math.min(total > 0 ? total : MAX_PAGE_SIZE, MAX_PAGE_SIZE) : pageSize,
-  )
+  const effectivePageSize = $derived(fetchLimitFor(pageSize, total, totalIsForThisView))
 
   /** @param {number} nextPage */
   async function handlePageChange(nextPage) {
@@ -4457,9 +4567,11 @@ let rowSearch = $state('')
     try {
       // Resolve the "All" sentinel - and guard a corrupt/unset value - into a
       // real fetch limit; the backend rejects limit < 1. Mirrors effectivePageSize.
+      // A snapshot's count and its filters were taken together, so that count
+      // does describe the view being refetched here.
       const limit =
         s.pageSize === PAGE_SIZE_ALL
-          ? Math.min(s.total > 0 ? s.total : MAX_PAGE_SIZE, MAX_PAGE_SIZE)
+          ? fetchLimitFor(PAGE_SIZE_ALL, s.total, true)
           : (Number.isFinite(s.pageSize) && s.pageSize > 0 ? s.pageSize : DEFAULT_PAGE_SIZE)
       const offset = s.pageSize === PAGE_SIZE_ALL ? 0 : (s.page - 1) * limit
       const { sortColumn, sortDirection, sorts } = sortForApi(s.rowSort, s.rowSortMore)
@@ -4522,7 +4634,10 @@ let rowSearch = $state('')
           })
           if (typeof n === 'number' && n >= 0) {
             patchTab({ total: n })
-            if (tabId === activeTabId) total = n
+            if (tabId === activeTabId) {
+              total = n
+              _totalSig = predicateSig(apiSearch(s.rowSearch), s.rowFilters ?? [])
+            }
           }
         } catch { /* best-effort */ }
       })()
@@ -4948,6 +5063,9 @@ let rowSearch = $state('')
         ...(probeOrder ?? { sortColumn, sortDirection, sorts }),
         filters: filtersForApi(rowFilters, columns),
       }
+      // Frozen with the query: the count this load produces belongs to THIS
+      // predicate, even if the user edits the filters while it is in flight.
+      const ownerSig = predicateSig(apiSearch(rowSearch), rowFilters)
       const data = await getTableRows(
         ownerSchema, ownerTable,
         wantsWindow ? WINDOW_PROBE : effectivePageSize,
@@ -5085,6 +5203,7 @@ let rowSearch = $state('')
         rows = arr
         _infiniteRows = []
         total = windowTotal
+        _totalSig = ownerSig
         dataVersion++
         // Warm the windows the probe didn't cover, before the first scroll asks.
         // Only for a load that starts at the top: on a refresh that keeps the
@@ -5101,9 +5220,10 @@ let rowSearch = $state('')
         // Past the limit bar but small and light after measuring - load the rest.
         resetWindowing()
         total = windowTotal
+        _totalSig = ownerSig
         // Paint the probe NOW, before going back for the rest. The remainder is a
         // second round-trip over tens of thousands of rows, and holding `rows`
-        // empty until it lands leaves the grid blank for all of it — with the
+        // empty until it lands leaves the grid blank for all of it - with the
         // columns already drawn, which reads as "this table is empty" rather than
         // "this is still loading".
         rows = fetched
@@ -5129,6 +5249,7 @@ let rowSearch = $state('')
         // total = -1 means "counting" (Postgres, non-blocking). Other engines
         // return a real total here; refreshRowCount() then no-ops for them.
         total = Number(data.total ?? 0)
+        _totalSig = ownerSig
       }
       queryMs = ranMs
       // Record this page's boundary key values so next/prev can build cursors.
@@ -5145,7 +5266,7 @@ let rowSearch = $state('')
       }
       // Fire-and-forget: fill the total in the background so the count never
       // delays the rows. Windowed loads already have a real total from the fetch.
-      if (!windowed) void refreshRowCount(ownerTabId, seq, ownerSchema, ownerTable, ownerQuery)
+      if (!windowed) void refreshRowCount(ownerTabId, seq, ownerSchema, ownerTable, ownerQuery, ownerSig)
       // Mirror the landed result into the owning tab so the spinner in the tab
       // strip stops and a later switch away/back doesn't refetch it.
       patchTableTab(ownerTabId ?? '', { loadingRows: false, error: '' })
@@ -5188,7 +5309,7 @@ let rowSearch = $state('')
    * @param {string | null} tabId @param {number} seq @param {string} schema
    * @param {string} table @param {{ search?: string, searchIsRegex?: boolean, filters?: any[] }} query
    */
-  async function refreshRowCount(tabId, seq, schema, table, query) {
+  async function refreshRowCount(tabId, seq, schema, table, query, sig = '') {
     if (!table) return
     try {
       const n = await countTableRows(schema, table, query)
@@ -5197,6 +5318,7 @@ let rowSearch = $state('')
         patchTableTab(tabId ?? '', { total: n })
         if (tabId !== activeTabId) return
         total = n
+        _totalSig = sig
         const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
         if (page > maxPage) page = maxPage
       }
@@ -5233,6 +5355,7 @@ let rowSearch = $state('')
       for (let i = 0; i < fetched.length; i++) _infiniteRows.push(fetched[i])
       rows = _infiniteRows.slice()
       total = Number(data.total ?? total)
+      _totalSig = rowPredicateSig
     } catch (e) {
       error = String(e)
     } finally {
@@ -5457,6 +5580,7 @@ let rowSearch = $state('')
     // going through clearConnectionState, so reset them in both places.
     tableColumnsCache = new Map()
     incomingFkCache = new Map()
+    _catalog.clear()
     // The connection is live: render the shell NOW (setting `connection` above
     // dropped the reconnect overlay) with the welcome tab open and the sidebar
     // in its skeleton state, and let the catalog stream in below. This is what
@@ -5630,8 +5754,8 @@ let rowSearch = $state('')
     // fails with a message the user can act on. This race is only a last-resort guard
     // for a command that never returns AT ALL, so it has to sit above those deadlines.
     // At 5s it fired first and turned every slow-but-healthy wake-up into "not
-    // connected" — serverless Postgres (Neon, and Prisma/Supabase pooler cold starts)
-    // autosuspends and takes 3–15s to come back, which is why resuming one meant
+    // connected" - serverless Postgres (Neon, and Prisma/Supabase pooler cold starts)
+    // autosuspends and takes 3-15s to come back, which is why resuming one meant
     // reconnecting by hand on nearly every launch.
     /** @param {Promise<unknown>} p */
     const withTimeout = (p) => Promise.race([
@@ -5770,6 +5894,118 @@ let rowSearch = $state('')
     switchToDb(entry.label)
   }
 
+  // ── Manage databases (sidebar) ────────────────────────────────────────────
+  // Create, rename, duplicate, drop, and the read-only info panel. Every
+  // statement runs on the current pool, which is why none of them can target the
+  // database this session is attached to - `dbActionBlocker` in database-admin.js
+  // is what greys those items out, and the handlers below only ever see targets
+  // that passed it.
+  let showCreateDbDialog = $state(false)
+  /** Bumped after any change, so the sidebar refetches its list. */
+  let databasesRefreshKey = $state(0)
+  /** @type {{ mode: 'rename' | 'duplicate', source: string, existing: string[] } | null} */
+  let dbNameDialog = $state(null)
+  let dbNameDialogOpen = $state(false)
+  let dropDbName = $state('')
+  let dropDbSessions = $state('')
+  let showDropDbDialog = $state(false)
+  let dbInfoName = $state('')
+  let showDbInfoDialog = $state(false)
+  let dbInfoLoading = $state(false)
+  let dbInfoError = $state('')
+  /** @type {import('$lib/database-admin.js').DbInfoRow[]} */
+  let dbInfoRows = $state([])
+
+  const dbAdmin = $derived(dbAdminKind(connection))
+
+  /** @param {import('./CreateDatabaseDialog.svelte').CreateDbOptions} opts */
+  async function createDatabase(opts) {
+    const kind = dbAdmin ?? 'postgres'
+    await executeDdl(createDatabaseSql(kind, opts))
+    toast.success(`Database "${opts.name}" created`)
+    databasesRefreshKey++
+  }
+
+  /** @param {{ mode: 'rename' | 'duplicate', name: string, existing: string[] }} args */
+  function openDbNameDialog({ mode, name, existing }) {
+    dbNameDialog = { mode, source: name, existing }
+    dbNameDialogOpen = true
+  }
+
+  /** Shared by rename and duplicate - the dialog has already built the SQL.
+   *  Throwing keeps the dialog open with the server's message.
+   *  @param {{ sql: string, name: string }} args */
+  async function runDbNameStatement({ sql, name }) {
+    const mode = dbNameDialog?.mode
+    const source = dbNameDialog?.source ?? ''
+    await executeDdl(sql)
+    toast.success(mode === 'rename' ? `Renamed "${source}" to "${name}"` : `Copied "${source}" to "${name}"`)
+    databasesRefreshKey++
+  }
+
+  /** Look up how many sessions are on a database, for the drop dialog's warning.
+   *  Best effort: a failed count must not block the dialog. @param {string} name */
+  async function countDbSessions(name) {
+    if (dbAdmin !== 'postgres') return ''
+    try {
+      const r = await executeSql(`SELECT count(*) FROM pg_stat_activity WHERE datname = '${name.replace(/'/g, "''")}'`)
+      const n = Number(r?.rows?.[0]?.[0] ?? 0)
+      return n > 0 ? String(n) : ''
+    } catch {
+      return ''
+    }
+  }
+
+  /** @param {{ name: string }} args */
+  async function requestDropDatabase({ name }) {
+    dropDbName = name
+    dropDbSessions = ''
+    showDropDbDialog = true
+    dropDbSessions = await countDbSessions(name)
+  }
+
+  /** @param {{ sql: string, force: boolean }} args */
+  async function commitDropDatabase({ sql }) {
+    const name = dropDbName
+    try {
+      await executeDdl(sql)
+      toast.success(`Database "${name}" dropped`)
+      databasesRefreshKey++
+    } catch (e) {
+      toast.error(`Could not drop "${name}"`, { description: String(e) })
+    }
+  }
+
+  /** @param {{ name: string }} args */
+  async function terminateDbSessions({ name }) {
+    if (!dbAdmin) return
+    try {
+      const r = await executeSql(terminateSessionsSql(dbAdmin, name))
+      const closed = r?.rows?.length ?? 0
+      toast.success(closed === 0 ? `No other sessions on "${name}"` : `Closed ${closed} session(s) on "${name}"`)
+    } catch (e) {
+      toast.error(`Could not close sessions on "${name}"`, { description: String(e) })
+    }
+  }
+
+  /** @param {{ name: string }} args */
+  async function openDatabaseInfo({ name }) {
+    if (!dbAdmin) return
+    dbInfoName = name
+    dbInfoRows = []
+    dbInfoError = ''
+    dbInfoLoading = true
+    showDbInfoDialog = true
+    try {
+      const result = await executeSql(databaseInfoSql(dbAdmin, name))
+      dbInfoRows = databaseInfoRows(dbAdmin, result)
+    } catch (e) {
+      dbInfoError = String(e)
+    } finally {
+      dbInfoLoading = false
+    }
+  }
+
   /** Reset all connection-scoped UI state to blank. */
   function clearConnectionState() {
     schemas = []
@@ -5780,6 +6016,7 @@ let rowSearch = $state('')
     sequences = []
     tableColumnsCache = new Map()
     incomingFkCache = new Map()
+    _catalog.clear()
     _sqlHintsLoadedFor = ''
     activeSchema = 'public'
     activeTable = null
@@ -5866,7 +6103,7 @@ let rowSearch = $state('')
    */
   async function connectByType(conn) {
     // Which engines get used, never which servers. The event name is the whole
-    // payload — there is no field here that could carry a host or a database.
+    // payload - there is no field here that could carry a host or a database.
     track(`connect_${conn.type === 'cockroachdb' ? 'cockroachdb' : conn.type}`)
     if (conn.type === 'sqlite') await connectSqlite(conn)
     else if (conn.type === 'd1') await connectD1(conn)
@@ -5881,6 +6118,9 @@ let rowSearch = $state('')
 
   /** @param {import('$lib/stores/connections.js').SavedConnection} conn */
   async function handleSwitchDatabase(conn) {
+    // A deliberate switch is the other half of "PIN to open or reconnect".
+    // Resolves true immediately unless a PIN is set with the connect prompt on.
+    if (!(await requireUnlock('Unlock to connect to a database'))) return
     // Disconnect current before connecting to the new one to avoid the race
     // where set_conn(None) could fire after connect_* sets the new connection.
     await disconnectPostgres().catch(() => {})
@@ -6292,6 +6532,35 @@ let rowSearch = $state('')
   currentName={connection?.database ?? connection?.name ?? ''}
   onconfirm={commitDatabaseSwitch}
 />
+<CreateDatabaseDialog
+  bind:open={showCreateDbDialog}
+  connType={dbAdmin ?? connection?.type ?? 'postgres'}
+  oncreate={createDatabase}
+/>
+{#if dbNameDialog}
+  <DatabaseNameDialog
+    bind:open={dbNameDialogOpen}
+    mode={dbNameDialog.mode}
+    kind={dbAdmin ?? 'postgres'}
+    source={dbNameDialog.source}
+    existing={dbNameDialog.existing}
+    onsubmit={runDbNameStatement}
+  />
+{/if}
+<DropDatabaseDialog
+  bind:open={showDropDbDialog}
+  kind={dbAdmin ?? 'postgres'}
+  name={dropDbName}
+  sessions={dropDbSessions}
+  onconfirm={(args) => void commitDropDatabase(args)}
+/>
+<DatabaseInfoDialog
+  bind:open={showDbInfoDialog}
+  name={dbInfoName}
+  rows={dbInfoRows}
+  loading={dbInfoLoading}
+  error={dbInfoError}
+/>
 <DisconnectDialog bind:open={showDisconnectDialog} connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''} ondisconnect={handleDisconnect} />
 <CreateTableDialog
   bind:open={showCreateTableDialog}
@@ -6453,7 +6722,7 @@ let rowSearch = $state('')
 />
 
 
-<!-- Capture phase, deliberately — see onWindowKeydownCapture. -->
+<!-- Capture phase, deliberately - see onWindowKeydownCapture. -->
 <svelte:window onkeydowncapture={onWindowKeydownCapture} />
 
 {#if autoConnecting && !connection}
@@ -6562,6 +6831,13 @@ let rowSearch = $state('')
         onrefresh={handleRefresh}
         {connection}
         onswitchdatabase={requestDatabaseSwitch}
+        onnewdatabase={() => (showCreateDbDialog = true)}
+        onrenamedatabase={({ name, existing }) => openDbNameDialog({ mode: 'rename', name, existing })}
+        onduplicatedatabase={({ name, existing }) => openDbNameDialog({ mode: 'duplicate', name, existing })}
+        ondropdatabase={(args) => void requestDropDatabase(args)}
+        ondatabaseinfo={(args) => void openDatabaseInfo(args)}
+        onterminatedbsessions={(args) => void terminateDbSessions(args)}
+        {databasesRefreshKey}
         onnewtable={() => (showCreateTableDialog = true)}
         onnewschema={() => (showCreateSchemaDialog = true)}
         ontruncatetable={handleTruncateTable}
@@ -7222,7 +7498,7 @@ let rowSearch = $state('')
             <!-- ── SQL / application error, compact banner ── -->
             <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
               <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
-              <!-- Drivers wrap the cause in transport noise — D1 returns its whole
+              <!-- Drivers wrap the cause in transport noise - D1 returns its whole
                    HTTP envelope around a five-word message. Show the cause; the
                    raw text stays one click away and in the query log. -->
               <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">
@@ -7304,7 +7580,7 @@ let rowSearch = $state('')
                 {enums}
                 columnSearch={structureSearch}
                 loading={loadingStructure}
-                onrefresh={() => { void loadStructure(); void loadTriggers() }}
+                onrefresh={() => { void loadStructure(); void reloadCatalogKind('triggers') }}
               />
             {/await}
           {:else}
@@ -7596,7 +7872,7 @@ let rowSearch = $state('')
           <button
             type="button"
             {onclick}
-            title={opts.hint ? `${opts.hint}${locked ? ' — Pro' : ''}` : locked ? `${label} — Pro` : label}
+            title={opts.hint ? `${opts.hint}${locked ? ' - Pro' : ''}` : locked ? `${label} - Pro` : label}
             class={locked ? proCell : cell}
           >
             <span class="flex w-full items-center justify-between gap-1.5">
@@ -7681,7 +7957,7 @@ let rowSearch = $state('')
               <!-- Advisor is reachable from ⌘K and the page navigator only. Quick
                    access is the short list, not every page. -->
               {@render tile(Boxes, 'Objects', openObjectsTab, {})}
-              {@render tile(FileCode2, 'Codegen', openOrmSchemaTab, { pro: true, hint: 'Codegen — schema as Prisma or Drizzle code' })}
+              {@render tile(FileCode2, 'Codegen', openOrmSchemaTab, { pro: true, hint: 'Codegen - schema as Prisma or Drizzle code' })}
               {@render tile(BarChart2, 'Charts', openChartsTab, { pro: true })}
               {@render tile(GitBranch, 'Diagrams', openDiagramsTab, { pro: true })}
               {@render tile(History, 'Timeline', openSchemaTimelineTab, { pro: true })}
@@ -7822,25 +8098,7 @@ let rowSearch = $state('')
   onopenpages={() => { commandPage = 'pages'; commandOpen = true }}
   bind:readonly={tableReadonly}
   ondisconnect={requestDisconnect}
-  oncreatedatabase={async ({ name, owner, encoding, lcCollate, lcCtype, template, connectionLimit }) => {
-    const escaped = name.replace(/"/g, '""')
-    let sql
-    if (dbType === 'mysql') {
-      sql = `CREATE DATABASE \`${name.replace(/`/g, '``')}\``
-      if (encoding) sql += ` CHARACTER SET ${encoding}`
-      if (lcCollate) sql += ` COLLATE ${lcCollate}`
-    } else {
-      sql = `CREATE DATABASE "${escaped}"`
-      if (encoding) sql += `\n  ENCODING '${encoding}'`
-      if (template) sql += `\n  TEMPLATE ${template}`
-      if (lcCollate) sql += `\n  LC_COLLATE '${lcCollate}'`
-      if (lcCtype) sql += `\n  LC_CTYPE '${lcCtype}'`
-      if (owner) sql += `\n  OWNER "${owner.replace(/"/g, '""')}"`
-      if (connectionLimit != null && connectionLimit !== -1) sql += `\n  CONNECTION LIMIT ${connectionLimit}`
-    }
-    await executeDdl(sql)
-    toast.success(`Database "${name}" created`)
-  }}
+  oncreatedatabase={createDatabase}
 />
 {/if}
 

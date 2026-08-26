@@ -1,3 +1,4 @@
+mod app_lock;
 mod cloudflare;
 mod commands;
 mod copilot;
@@ -6,6 +7,7 @@ mod docker;
 mod license;
 mod mcp;
 mod omniroute;
+mod plugins;
 mod metrics;
 mod proc;
 mod providers;
@@ -22,11 +24,11 @@ use tauri::{
 };
 
 // The surface behind the page, shown whenever the webview has yet to composite a
-// frame — a cold start, a reload, or any moment the UI is mid-repaint. The
+// frame - a cold start, a reload, or any moment the UI is mid-repaint. The
 // default is white, which flashes hard against the (mostly dark) app themes, so
 // match the `--background` token of the base light/dark theme in
 // src/lib/themes/app-themes.css: oklch(0.132 0 0) and oklch(0.975 0 0).
-// Only the light/dark end has to be right — the frontend paints the exact
+// Only the light/dark end has to be right - the frontend paints the exact
 // per-theme background as soon as it has a frame.
 const DARK_SURFACE: tauri::window::Color = tauri::window::Color(8, 8, 8, 255);
 const LIGHT_SURFACE: tauri::window::Color = tauri::window::Color(247, 247, 247, 255);
@@ -41,7 +43,7 @@ fn surface_for_theme(theme: tauri::Theme) -> tauri::window::Color {
 /// Paint the webview's own backdrop on macOS.
 ///
 /// `WebviewWindow::set_background_color` is documented as "not implemented for
-/// the webview layer" on macOS, and it is the WKWebView — not the NSWindow —
+/// the webview layer" on macOS, and it is the WKWebView - not the NSWindow -
 /// that owns the white rectangle the user sees before the page paints. The
 /// equivalent knob there is `underPageBackgroundColor`.
 #[cfg(target_os = "macos")]
@@ -91,7 +93,7 @@ fn tray_icon_for_theme(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Linux WebKitGTK rendering fix — set before any threads spawn.
+    // Linux WebKitGTK rendering fix - set before any threads spawn.
     #[cfg(target_os = "linux")]
     // SAFETY: called before any threads are spawned.
     unsafe {
@@ -99,17 +101,17 @@ pub fn run() {
         // text as GPU textures that get bilinearly sampled at fractional pixel
         // offsets during scroll/zoom, producing the characteristic blur on Linux.
         // Disabling it falls back to a Cairo/FreeType software path that stays crisp.
-        // This is the only verified safe WebKitGTK rendering env var — others like
+        // This is the only verified safe WebKitGTK rendering env var - others like
         // WEBKIT_USE_LEGACY_TEXT_RENDERER are not real and can trigger SIGTRAP crashes.
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        // GDK_SCALE is intentionally NOT forced here — overriding it breaks HiDPI
+        // GDK_SCALE is intentionally NOT forced here - overriding it breaks HiDPI
         // setups (2× displays) and can cause rendering panics on Wayland compositors.
     }
 
     // Set a human-readable process title so the app shows as "stroke" in
-    // htop / ps / /proc — makes it easy to identify among WebKit helper processes.
+    // htop / ps / /proc - makes it easy to identify among WebKit helper processes.
     let _ = metrics::set_process_title("stroke".into());
-    // Create the shared connection Arc — both DbState and McpState point to the same lock.
+    // Create the shared connection Arc - both DbState and McpState point to the same lock.
     let db_conn: Arc<Mutex<Option<ActiveConnection>>> = Arc::new(Mutex::new(None));
     let db_state = DbState {
         conn: Arc::clone(&db_conn),
@@ -149,8 +151,8 @@ pub fn run() {
             .resizable(true)
             .maximized(true)
             // Never let the default white surface show. The real theme is only
-            // known to the frontend (localStorage), so start on the dark base —
-            // 11 of the 16 themes are dark — and correct to light right after
+            // known to the frontend (localStorage), so start on the dark base -
+            // 11 of the 16 themes are dark - and correct to light right after
             // build(), which still runs before the event loop composites.
             .background_color(DARK_SURFACE);
 
@@ -182,7 +184,7 @@ pub fn run() {
             .devtools(cfg!(debug_assertions))
             // The app implements its own CSS-based zoom; disable Tauri's injected
             // zoom polyfill. On macOS/Linux that polyfill attaches a `mousewheel`
-            // (legacy event) listener that calls set_webview_zoom on ctrl+scroll —
+            // (legacy event) listener that calls set_webview_zoom on ctrl+scroll -
             // a stray trackpad pinch near a column resize handle would then page-zoom
             // the whole webview (devicePixelRatio jumps, canvas renders blurry).
             .zoom_hotkeys_enabled(false)
@@ -221,7 +223,7 @@ pub fn run() {
 
                 // Install the standard macOS application menu. WKWebView text
                 // fields rely on the app menu's Edit items for the standard editing
-                // shortcuts — ⌘Z undo, ⌘⇧Z redo, ⌘X/⌘C/⌘V, ⌘A select-all, and
+                // shortcuts - ⌘Z undo, ⌘⇧Z redo, ⌘X/⌘C/⌘V, ⌘A select-all, and
                 // ⌥⌫ / ⌘⌫ word/line delete. Install the standard menu so native
                 // text editing works everywhere (inputs, textareas, cell editors).
                 let menu = tauri::menu::Menu::default(app.handle())?;
@@ -231,13 +233,13 @@ pub fn run() {
             // Logging is installed in release too, not just dev. Connection
             // problems get reported from machines we can't attach a debugger to (a
             // user's Windows PC behind a VPN), and the connect path logs which
-            // phase was slow — name lookup vs TCP vs TLS+auth. Without a release
+            // phase was slow - name lookup vs TCP vs TLS+auth. Without a release
             // log there is nothing to go on but "it's slow".
             //
             // The plugin's default targets are already [Stdout, LogDir], so dev
             // gets the terminal and release gets the rotating file in the platform
             // log dir (%LOCALAPPDATA%\<app>\logs on Windows, ~/.local/share/<app>/logs
-            // on Linux, ~/Library/Logs/<app> on macOS). Don't add a target here —
+            // on Linux, ~/Library/Logs/<app> on macOS). Don't add a target here -
             // `target()` appends to that list and every line would be logged twice.
             // Info level keeps this to phase timings and failures, not query traffic.
             app.handle().plugin(
@@ -318,6 +320,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            plugins::plugins_list,
+            plugins::plugins_read_source,
+            plugins::plugins_install,
+            plugins::plugins_uninstall,
+            plugins::plugins_dir,
             commands::ai_fetch,
             commands::ai_fetch_cancel,
             commands::ai_list_models,
@@ -406,6 +413,11 @@ pub fn run() {
             docker::scan_docker_databases,
             db::local_scan::scan_local_studios,
             db::local_scan::scan_machine_databases,
+            app_lock::app_lock_status,
+            app_lock::app_lock_set_pin,
+            app_lock::app_lock_verify,
+            app_lock::app_lock_disable,
+            app_lock::app_lock_set_prefs,
             secrets::ai_store_key,
             secrets::ai_load_key,
             secrets::ai_delete_key,
@@ -449,7 +461,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
-            // Real exit only (tray Quit / OS shutdown) — the hide-to-tray
+            // Real exit only (tray Quit / OS shutdown) - the hide-to-tray
             // CloseRequested path never reaches here. Reap the OmniRoute proxy
             // we spawned, or it survives every app quit.
             if let tauri::RunEvent::Exit = event {

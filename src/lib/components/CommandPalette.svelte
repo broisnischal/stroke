@@ -6,6 +6,7 @@
   import AiMarkdown from './AiMarkdown.svelte'
   import { chatCompletionStream, buildSystemPrompt, AI_TOOLS, isDestructiveSql, classifyDbError } from '$lib/ai.js'
   import { aiSettings, isAiConfigured } from '$lib/stores/ai-settings.js'
+  import { pinEnabled, lockNow } from '$lib/stores/app-lock.js'
   import { appCmdkAi } from '$lib/stores/settings.js'
   import { executeSql } from '$lib/api.js'
 
@@ -44,7 +45,7 @@
     hasSecurity = true,
     /** Redis (key-value) connection - hides SQL-only pages, shows the keyspace. */
     isRedis = false,
-    /** PostGIS present on this connection — gates the Map entry. */
+    /** PostGIS present on this connection - gates the Map entry. */
     geoAvailable = false,
     onopenredis = () => {},
     onopenlogs = () => {},
@@ -328,7 +329,7 @@
   // state changed is always behind what is actually on screen. The old effect
   // scrolled to a bottom that did not exist yet, fell a little further behind on
   // every token, and once the gap passed its 120px "near the bottom" gate it
-  // stopped following for the rest of the answer — which is exactly when there
+  // stopped following for the rest of the answer - which is exactly when there
   // was most left to read. Watching the box means the scroll happens after the
   // content it is scrolling to.
   $effect(() => {
@@ -492,7 +493,7 @@
       const s = scoreName(x, q, qLoose)
       if (s > 0) scored.push({ t: x.t, s, len: x.l.length })
     }
-    // Higher score first; ties broken by shorter name (more relevant) then A–Z.
+    // Higher score first; ties broken by shorter name (more relevant) then A-Z.
     scored.sort((a, b) => b.s - a.s || a.len - b.len || (a.t.name < b.t.name ? -1 : 1))
     return { items: scored.slice(0, TABLES_PAGE_CAP).map((x) => x.t), total: scored.length }
   }
@@ -806,6 +807,12 @@
                 <Icon name="settings" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Settings</span>
               </Command.Item>
+              {#if $pinEnabled}
+                <Command.Item value="lock app pin screen secure" onSelect={() => run(lockNow)}>
+                  <Icon name="lock" class="size-4 shrink-0 opacity-60" />
+                  <span data-slot="command-label" class="truncate">Lock Stroke</span>
+                </Command.Item>
+              {/if}
               <Command.Item value="keyboard shortcuts keybindings hotkeys help" onSelect={() => run(onopenshortcuts)}>
                 <Icon name="keyboard" class="size-4 shrink-0 opacity-60" />
                 <span data-slot="command-label" class="truncate">Keyboard shortcuts</span>

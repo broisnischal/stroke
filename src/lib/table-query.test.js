@@ -7,6 +7,7 @@ import {
   buildSelectSql,
   createFilter,
   clampPageSize,
+  fetchLimitFor,
   pageSizeLabel,
   readRowsResponse,
   ANY_COLUMN,
@@ -300,5 +301,31 @@ describe('buildSelectSql, LIMIT handling', () => {
     expect(buildSelectSql({ table: 't', engine: 'postgres', limit: PAGE_SIZE_ALL })).not.toContain('LIMIT')
     expect(buildSelectSql({ table: 't', engine: 'postgres', limit: 0 })).not.toContain('LIMIT')
     expect(buildSelectSql({ table: 't', engine: 'postgres', limit: MAX_PAGE_SIZE })).not.toContain('LIMIT')
+  })
+})
+
+describe('fetchLimitFor', () => {
+  it('passes a numeric page size straight through', () => {
+    expect(fetchLimitFor(50, 752, true)).toBe(50)
+    expect(fetchLimitFor(250, 0, false)).toBe(250)
+  })
+
+  it('sizes "All" from a count that describes the current view', () => {
+    expect(fetchLimitFor(PAGE_SIZE_ALL, 752, true)).toBe(752)
+  })
+
+  it('asks for the ceiling when the count belongs to another predicate', () => {
+    // The regression: a filter narrowed a 752-row table to one row, so `total`
+    // was 1. Clearing the filter must not fetch LIMIT 1.
+    expect(fetchLimitFor(PAGE_SIZE_ALL, 1, false)).toBe(MAX_PAGE_SIZE)
+  })
+
+  it('asks for the ceiling while the count is unknown or still running', () => {
+    expect(fetchLimitFor(PAGE_SIZE_ALL, 0, true)).toBe(MAX_PAGE_SIZE)
+    expect(fetchLimitFor(PAGE_SIZE_ALL, -1, true)).toBe(MAX_PAGE_SIZE)
+  })
+
+  it('never asks for more than the max page size', () => {
+    expect(fetchLimitFor(PAGE_SIZE_ALL, MAX_PAGE_SIZE * 3, true)).toBe(MAX_PAGE_SIZE)
   })
 })

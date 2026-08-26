@@ -95,6 +95,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   } from "$lib/stores/pending-table-edits.js";
   import { formatCellValue, transformsFor, transformById, enabledGeneratorGroups, linkifyValue, statsNeeded, annotatorEnabled, anyDisplayExtEnabled } from "$lib/plugins/registry.js";
   import { pluginState, isPluginEnabled } from "$lib/stores/plugins.js";
+  import { externalFormatVersion } from "$lib/plugins/external/host.js";
   import { isImageUrl } from "$lib/plugins/extensions/cell-transforms.js";
   import { t } from "$lib/i18n.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
@@ -947,6 +948,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const _vexprTextCache = new Map();
   /** @type {Map<number, Map<string, string>>} */
   const _colTfCache = new Map();
+  /** The row object each cached index was built from. The array-identity check
+   *  below misses one case: saving a cell swaps that ONE row for a new array and
+   *  leaves `rows` itself the same object (it is $state.raw - the parent bumps
+   *  dataVersion instead of replacing it), so the caches kept serving the
+   *  pre-edit text and an applied edit only appeared after a refresh.
+   *  @type {Map<number, unknown>} */
+  const _dispCacheRowRef = new Map();
   let _dispCacheRows = /** @type {unknown} */ (null);
   let _dispCacheVFns = /** @type {unknown} */ (null);
   let _dispCacheTFns = /** @type {unknown} */ (null);
@@ -956,12 +964,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (_dispCacheRows !== rows) {
       _dispCacheRows = rows;
       _cellTextCache.clear(); _vexprTextCache.clear(); _colTfCache.clear();
+      _dispCacheRowRef.clear();
       // Keyed by the full vector literal (10-20KB each for big embeddings), so
       // stale entries from previous pages/tables must not accumulate.
       _vectorDisplayCache.clear();
     }
     if (_dispCacheVFns !== _vcolFns) { _dispCacheVFns = _vcolFns; _vexprTextCache.clear(); }
     if (_dispCacheTFns !== _colTransformFns) { _dispCacheTFns = _colTransformFns; _colTfCache.clear(); }
+  }
+  /** Drop one row's cached text when the row behind it was replaced in place.
+   *  Called once per row per frame from drawBodyRow - not per cell, which would
+   *  put a Map lookup on every drawn cell for a check that can only change per row. */
+  function syncRowDisplayCache(/** @type {number} */ idx) {
+    const row = rows[idx];
+    if (_dispCacheRowRef.get(idx) === row) return;
+    if (_dispCacheRowRef.size >= _DISP_CACHE_MAX) _dispCacheRowRef.clear();
+    _dispCacheRowRef.set(idx, row);
+    _cellTextCache.delete(idx);
+    _vexprTextCache.delete(idx);
+    _colTfCache.delete(idx);
   }
   function cellDisplayText(/** @type {number} */ idx, /** @type {number} */ actualIdx, /** @type {unknown} */ value) {
     let arr = _cellTextCache.get(idx);
@@ -994,7 +1015,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Whether any formatter/linkifier is enabled - gates the per-cell directive
   // lookup so the scroll hot path does zero extension work in the common case.
-  const _extActive = $derived.by(() => { void $pluginState; return anyDisplayExtEnabled(); });
+  const _extActive = $derived.by(() => { void $pluginState; void $externalFormatVersion; return anyDisplayExtEnabled(); });
   // Reused per-cell stats context - formatters read `.stats` synchronously and
   // don't retain it, so one scratch object avoids an allocation per drawn cell
   // while a stats-dependent extension (heatmap / annotator) is enabled.
@@ -1028,7 +1049,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Repaint when extension settings or column stats change - both affect drawn
   // cell text, badges, tints, and the header annotator strip.
-  $effect(() => { void $pluginState; void _colStats; scheduleDraw(); });
+  // `externalFormatVersion` is the other half of the external-plugin contract:
+  // a plugin's directives arrive after the frame that asked for them, and this
+  // is what brings that frame back.
+  $effect(() => { void $pluginState; void $externalFormatVersion; void _colStats; scheduleDraw(); });
 
   // Resolved canvas-grid style preset (Settings → Appearance). Read once per frame
   // by draw() and passed into the row context, so it never adds per-cell reactivity.
@@ -1803,7 +1827,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (e.key === 'Tab' || e.key === 'Enter') {
       e.preventDefault()
       // Every column takes a value now, including generated ones, so Tab must
-      // be able to reach them — initial focus still skips them (see beginInsertRow),
+      // be able to reach them - initial focus still skips them (see beginInsertRow),
       // because overriding a sequence is the exception rather than the flow.
       const editableCols = columns
       if (!editableCols.length) return
@@ -2616,7 +2640,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Image / avatar cell thumbnails ───────────────────────────────────────────
   // When a column's transform is avatar / image-thumb, the cell renders the image
   // instead of text. Source images are routinely multi-megapixel, and a decoded
-  // 4000×3000 JPEG costs ~48 MB of RGBA regardless of how small it is drawn — so
+  // 4000×3000 JPEG costs ~48 MB of RGBA regardless of how small it is drawn - so
   // the loader is deliberately stingy:
   //   • only urls painted in the current frame are ever fetched (see _imgWanted),
   //   • at most _IMG_MAX_INFLIGHT decode at a time, the rest queue,
@@ -2630,7 +2654,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const _imgCache = new Map();
   /** @type {Map<string, number>} per-url transient-failure retry counter */
   const _imgRetry = new Map();
-  /** Urls waiting out a retry backoff — not cached, not queued. @type {Set<string>} */
+  /** Urls waiting out a retry backoff - not cached, not queued. @type {Set<string>} */
   const _imgBackoff = new Set();
   /** Pending retry timers, so a destroyed table cannot fire them. @type {Set<number>} */
   const _imgTimers = new Set();
@@ -2647,7 +2671,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /**
    * Center-crop and downscale a loaded image onto a small canvas. Used when
-   * createImageBitmap is unavailable or refuses the image — it rejects
+   * createImageBitmap is unavailable or refuses the image - it rejects
    * cross-origin sources that were not served with CORS headers, and canvas
    * drawing has no such restriction. Falling back here (rather than caching the
    * full-res element) is what keeps a remote image column from retaining
@@ -2691,7 +2715,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * Begin one decode. Remote avatar CDNs (lh3.googleusercontent.com,
    * avatars.githubusercontent.com) throttle bursts of parallel requests and
    * occasionally 403 on the app-origin Referer, so a single onerror is usually
-   * transient — retry with backoff before giving up rather than freezing the
+   * transient - retry with backoff before giving up rather than freezing the
    * cell as "broken image" permanently.
    * @param {string} url
    */
@@ -2783,7 +2807,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /**
-   * Thumbnail for a url if one is ready. Never starts a decode itself — the draw
+   * Thumbnail for a url if one is ready. Never starts a decode itself - the draw
    * path only registers interest, and pumpCellImages decides what actually runs.
    * @param {string} url
    * @returns {ImageBitmap | HTMLCanvasElement | 'error' | null}
@@ -2809,7 +2833,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (ready) {
       ctx.save();
       roundRect(ctx, ix, iy, size, size, radius); ctx.clip();
-      // Already a center-cropped square thumbnail — cheap blit, no per-frame resample.
+      // Already a center-cropped square thumbnail - cheap blit, no per-frame resample.
       ctx.drawImage(/** @type {CanvasImageSource} */ (thumb), ix, iy, size, size);
       ctx.restore();
     }
@@ -2842,7 +2866,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const MAX_VIRTUAL_COLS = 5
   /** Per-column logical width overrides for virtual rel columns, keyed by label (unset = auto). */
   let _vrelWidths = $state(/** @type {Record<string, number>} */ ({}))
-  // Auto width adapts to the longest label (8px/char estimate + padding), clamped 150–260px.
+  // Auto width adapts to the longest label (8px/char estimate + padding), clamped 150-260px.
   const _vrelBaseW = $derived.by(() => {
     if (!virtualRelCols.length) return 200
     const maxChars = Math.max(...virtualRelCols.map(v => v.label.length))
@@ -2969,7 +2993,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * bottom margin so the last row can be scrolled clear of the viewport edge.
    *
    * Embedded results get no margin. They are height-capped, not filled, so the
-   * margin never earns its keep there — it just left two empty row-heights
+   * margin never earns its keep there - it just left two empty row-heights
    * hanging under a short result (a one-row COUNT looked like a broken table).
    */
   const contentHeight = $derived(
@@ -3780,7 +3804,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Modified arrows belong to the app-level handler in StudioShell, not to the
     // cell cursor: Cmd/Ctrl+Arrow is table-level navigation (scroll to top/bottom,
     // first/last column, paginate) and Alt+Arrow is Go Back / Go Forward. Let them
-    // bubble untouched — the old double-handling (cursor jumped one cell AND the
+    // bubble untouched - the old double-handling (cursor jumped one cell AND the
     // view navigated) is what made both shortcuts feel broken.
     if (
       (e.ctrlKey || e.metaKey || e.altKey) &&
@@ -4000,7 +4024,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * it sideways. Reserving a fixed strip instead left a permanent dead gap down
    * the column.
    *
-   * Must stay in step with the draw pass below — this is the click target for
+   * Must stay in step with the draw pass below - this is the click target for
    * what that paints.
    */
   function cellButtonRects(cellX, w, ry, rh, { canExpand, alignRight = false }) {
@@ -4065,7 +4089,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     ctx.imageSmoothingEnabled = false
     // The panel colour is opaque and covers the whole canvas, so this single
-    // fill also clears the previous frame — a separate clearRect would just be a
+    // fill also clears the previous frame - a separate clearRect would just be a
     // second full-surface pass (measurable on WebKitGTK's CPU-rendered canvas).
     ctx.fillStyle = cPanel
     ctx.fillRect(0, 0, W, H)
@@ -4411,6 +4435,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function drawBodyRow(ctx, idx, ry, c) {
     const rh = ROW_HEIGHT
     if (windowed && rows[idx] === undefined) { _rowBg = null; drawLoadingRow(ctx, idx, ry, rh, c); return }
+    syncRowDisplayCache(idx)
     const isSel = selected.has(idx)
     const isPendingDelete = hasPendingDeletes && pendingDeletes.has(idx)
     _rowBg = rowBgStyle(idx, c)
@@ -4504,36 +4529,42 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const isVHov = hoveredRow === idx && hoveredColName === _vrelHoverKeys[vi]
       if (!_fonts) return
 
-      // Badge: compact tag style - no border at rest, border on hover/active.
+      // Badge: a quiet chip that is always a chip. It used to be a fully rounded
+      // capsule with no border at rest, so hovering conjured a lozenge out of
+      // what looked like plain text, and a long table name inside a full-radius
+      // pill read as a balloon. Now the shape never changes on hover - only its
+      // surface and border strength do - and the radius matches the app's
+      // rounded-md, not a capsule.
       const badgeFontPx = Math.max(10, _fonts.cellPx - 1)
-      const bPadX = 10
-      const bH = Math.round(badgeFontPx * 1.7)
-      const bR = Math.round(bH / 2) // pill - fully rounded, reads as a chip
+      const bPadX = Math.round(9 * canvasZoom)
+      const bH = Math.min(Math.round(badgeFontPx * 1.9), rh - Math.round(6 * canvasZoom))
+      const bR = Math.min(Math.round(6 * canvasZoom), Math.round(bH / 2))
       ctx.font = `500 ${badgeFontPx}px ${_fonts.family}`
 
-      // Consistent side gutters so the pill is centered with breathing room.
-      const gutter = Math.round(14 * canvasZoom)
+      // Consistent side gutters so the chip is centered with breathing room.
+      const gutter = Math.round(12 * canvasZoom)
       const maxLabelW = cw - gutter * 2 - bPadX * 2
       const labelTxt = truncText(ctx, vc.label, maxLabelW)
       const textW = textWidth(ctx, labelTxt)
       const bW = Math.min(textW + bPadX * 2, cw - gutter * 2)
-      const bX = cellX + (cw - bW) / 2
-      const bY = ry + (rh - bH) / 2
+      const bX = Math.round(cellX + (cw - bW) / 2)
+      const bY = Math.round(ry + (rh - bH) / 2)
 
       if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(cellX, ry, cw, rh) }
 
       ctx.fillStyle = isActive
-        ? withAlpha(c.cPrimary, 0.15)
-        : isVHov ? withAlpha(c.cMutedBg, 0.6) : withAlpha(c.cMutedBg, 0.3)
+        ? withAlpha(c.cPrimary, 0.12)
+        : isVHov ? withAlpha(c.cMutedBg, 0.55) : withAlpha(c.cMutedBg, 0.32)
       roundRect(ctx, bX, bY, bW, bH, bR); ctx.fill()
 
-      if (isActive || isVHov) {
-        ctx.strokeStyle = isActive ? withAlpha(c.cPrimary, 0.45) : withAlpha(c.cMuted, 0.25)
-        ctx.lineWidth = 1
-        roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
-      }
+      // Hairline at rest too, so the chip has an edge without shouting.
+      ctx.strokeStyle = isActive
+        ? withAlpha(c.cPrimary, 0.32)
+        : isVHov ? withAlpha(c.cMuted, 0.28) : withAlpha(c.cBorder, 0.5)
+      ctx.lineWidth = 1
+      roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
 
-      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, 0.72)
+      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, isVHov ? 0.85 : 0.7)
       ctx.textBaseline = 'middle'; ctx.textAlign = 'center'
       ctx.fillText(labelTxt, bX + bW / 2, ry + rh / 2 + 0.5)
     }
@@ -4711,14 +4742,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       !dir?.badge && !dir?.swatch && !dir?.dot && isRightAlignedColumn(actualIdx)
 
     const warnW = dir?.warn ? Math.round(14 * canvasZoom) : 0
-    // The hover actions live on the side the value isn't using — right of
-    // left-aligned text, left of right-aligned text — so they occupy empty
+    // The hover actions live on the side the value isn't using - right of
+    // left-aligned text, left of right-aligned text - so they occupy empty
     // space in both cases. Only long values, the ones that would actually
     // collide, give up room, and only while the pointer is in the cell.
     const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
     // The same gap on both sides. Left-aligned text used to reserve 4px on the
-    // assumption that a value never reaches the right edge — but a *truncated*
+    // assumption that a value never reaches the right edge - but a *truncated*
     // value reaches it every time, which put the ellipsis hard against the column
     // divider and made every long column read as congested.
     const rightReserve = CELL_PAD_X + (alignRight ? 0 : hoverW) + fkW + warnW
@@ -5287,7 +5318,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // but bails out immediately on non-Shift events so the compositor waits <0.05ms.
   // Wheel handling is split so PLAIN vertical scrolling stays on the compositor
   // (buttery, no per-tick main-thread round-trip). A *non-passive* wheel listener
-  // — needed to preventDefault ctrl-zoom and shift-horizontal — otherwise forces
+  // - needed to preventDefault ctrl-zoom and shift-horizontal - otherwise forces
   // the browser to consult JS before every scroll tick, and while the redraw loop
   // is busy that round-trip lands late → the exact stutter reported even on tiny
   // tables. So the non-passive listener is attached ONLY while Ctrl/Shift is
@@ -5362,7 +5393,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Passive fallback (always on, never blocks scroll): catches a trackpad pinch,
     // which arrives as a synthetic ctrl+wheel with NO physical Ctrl keydown, so the
     // gated listener above isn't attached for it. Drives the app's own zoom without
-    // preventDefault — native page-zoom is already blocked (macOS
+    // preventDefault - native page-zoom is already blocked (macOS
     // setAllowsMagnification / Tauri zoom_hotkeys_enabled=false). Skips when the
     // active listener is attached so a real Ctrl+wheel isn't handled twice.
     const onWheelPassive = (/** @type {WheelEvent} */ e) => {
@@ -5628,7 +5659,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         const vi = actualToVisColIdx(actualIdx)
         if (vi >= 0) focusedCol = vi
         // Clicking a cell is a deliberate jump, however short the distance, so it
-        // earns a back/forward entry. Arrow-key roaming deliberately does not —
+        // earns a back/forward entry. Arrow-key roaming deliberately does not -
         // that is what the parent's row-gap threshold is for.
         onjump()
         if (inspectorRow !== null) inspectorRow = idx
@@ -6068,7 +6099,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     {@const blankLabel = omit === 'default' ? 'default' : omit === 'null' ? 'NULL' : 'Required'}
                     <!-- Only a Required blank stops the insert, so only it is
                          worth noticing before you submit. The rest describe a
-                         value the database will supply and recede accordingly —
+                         value the database will supply and recede accordingly -
                          nothing is wrong yet, so nothing is coloured as wrong. -->
                     {@const blankClass = omit === 'required'
                       ? 'placeholder:text-muted-foreground/60'
@@ -6244,7 +6275,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                      proved the cell is non-null. Committing an edit (date pick, enum
                      pick, boolean toggle) sets `editingCell = null` synchronously, and
                      these {@const}s are deriveds that a child's lazy prop getter can
-                     force to revalidate before the {#if} tears this branch down —
+                     force to revalidate before the {#if} tears this branch down -
                      `columns[editingCell.colIdx]` then throws "null is not an object".
                      Editing a `created_at`-style column reproduced exactly that. -->
                 {@const ecol = columns[editingCell?.colIdx ?? -1]}
@@ -6450,8 +6481,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <!-- "No rows" is a claim about the data, so it must never be shown
                  while a fetch is still running. The full-page skeleton above
                  only covers the first load (no columns yet); every later fetch
-                 that empties the grid — a re-query, or the second half of a
-                 windowed load — lands here, and without this it would assert
+                 that empties the grid - a re-query, or the second half of a
+                 windowed load - lands here, and without this it would assert
                  the table is empty for the whole of a multi-second read. -->
             <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
@@ -6487,7 +6518,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   {#if windowStatus?.failed}
                     <TriangleAlert class="size-3 shrink-0 text-destructive" />
                     <span class="text-ui-2xs text-foreground/80">
-                      Couldn't load rows {(loadingSpan.first + 1).toLocaleString()}–{(loadingSpan.last + 1).toLocaleString()}
+                      Couldn't load rows {(loadingSpan.first + 1).toLocaleString()}-{(loadingSpan.last + 1).toLocaleString()}
                     </span>
                     <button
                       type="button"
@@ -6500,7 +6531,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   {:else}
                     <Loader class="size-3 shrink-0 animate-spin text-muted-foreground/60" />
                     <span class="text-ui-2xs text-muted-foreground">
-                      Loading rows {(loadingSpan.first + 1).toLocaleString()}–{(loadingSpan.last + 1).toLocaleString()}
+                      Loading rows {(loadingSpan.first + 1).toLocaleString()}-{(loadingSpan.last + 1).toLocaleString()}
                       <span class="text-muted-foreground/50">of {rows.length.toLocaleString()}</span>
                     </span>
                     {#if windowStatus?.slow}

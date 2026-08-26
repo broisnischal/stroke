@@ -1,6 +1,8 @@
-// Extension registry. Built-in extensions register here; the hook contract is
-// serializable-friendly so sandboxed third-party plugins could feed the same
-// hooks later without changing any call sites.
+// Extension registry. Built-in extensions register here, and third-party plugins
+// installed from a folder feed the same hooks from a Worker sandbox - see
+// ./external/host.js. Built-ins run in-process and answer synchronously;
+// external ones answer from the host's directive cache, one frame behind, which
+// is why the contract has always been plain serializable data.
 //
 // Hooks:
 //  - formatter:  { appliesTo(type, name, value), format(value, type, config, name, ctx)
@@ -15,6 +17,7 @@
 // stack on one cell. Recognized fields:
 //   display, title, badge{bg,fg}, swatch, dot, fg, bgTint, mask, reveal, link, warn
 import { isPluginEnabled, getPluginConfig } from '$lib/stores/plugins.js'
+import { externalFormatCell, externalFormattersActive } from './external/host.js'
 import { betterTime } from './extensions/better-time.js'
 import { freshness } from './extensions/freshness.js'
 import { nullishValues } from './extensions/nullish-values.js'
@@ -99,6 +102,10 @@ export function formatCellValue(value, type, name, ctx) {
     const href = ext.linkify(value, type, name, getPluginConfig(ext.id))
     if (href) { out = mergeDirective(out, { link: href }); break }
   }
+  // Built-ins win every field they set: an installed plugin adds to the picture
+  // rather than overriding what ships in the app.
+  const ext = externalFormatCell(value, type, name)
+  if (ext) out = mergeDirective(out, ext)
   return out
 }
 
@@ -129,7 +136,7 @@ export function statsNeeded() {
 export function anyDisplayExtEnabled() {
   for (const ext of FORMATTERS) if (isPluginEnabled(ext.id)) return true
   for (const ext of LINKIFIERS) if (isPluginEnabled(ext.id)) return true
-  return false
+  return externalFormattersActive()
 }
 
 /** Whether the column annotator strip should render. */

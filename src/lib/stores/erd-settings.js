@@ -34,13 +34,17 @@ export const SCOPE_DEFAULTS = {
 
 /**
  * Layout gutters per spacing preset. `rankSep`/`nodeSep` feed Dagre; the rest
- * drive the focus + fan-out packers. Every value leaves room for an edge lane
- * between two cards - that gap is what the router uses to get around them.
+ * drive the focus packer and the shelf packing between components.
+ *
+ * `rankSep` used to be wider than a card, back when an orthogonal router needed
+ * a corridor of stacked lanes between every pair of ranks. Curves along Dagre's
+ * own corridors need far less, and the gutter was most of the empty space that
+ * made a whole-schema diagram unreadable at fit-zoom.
  */
 export const SPACING_PRESETS = {
-  compact:     { rankSep: 220, nodeSep: 48,  colGap: 96,  rowGap: 56,  sideGap: 240 },
-  comfortable: { rankSep: 320, nodeSep: 76,  colGap: 140, rowGap: 84,  sideGap: 340 },
-  spacious:    { rankSep: 440, nodeSep: 108, colGap: 190, rowGap: 124, sideGap: 460 },
+  compact:     { rankSep: 110, nodeSep: 36,  colGap: 80,  rowGap: 44,  sideGap: 220 },
+  comfortable: { rankSep: 150, nodeSep: 52,  colGap: 110, rowGap: 64,  sideGap: 300 },
+  spacious:    { rankSep: 240, nodeSep: 88,  colGap: 170, rowGap: 108, sideGap: 430 },
 }
 
 /** @returns {ErdSettings} */

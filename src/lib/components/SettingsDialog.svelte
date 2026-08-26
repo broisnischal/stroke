@@ -53,6 +53,14 @@
     disableAutostart,
     getAutostartStatus,
   } from "$lib/api.js";
+  import PinSetupDialog from "./PinSetupDialog.svelte";
+  import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
+  import {
+    lockStatus,
+    refreshLockStatus,
+    setLockPrefs,
+    lockNow,
+  } from "$lib/stores/app-lock.js";
 
   let {
     open = $bindable(false),
@@ -100,9 +108,41 @@
     settings = loadSettings();
   }
 
+  // ── App PIN ──────────────────────────────────────────────────────────────
+  let pinDialogOpen = $state(false);
+  /** @type {'set' | 'change' | 'remove'} */
+  let pinDialogMode = $state('set');
+
+  /** @param {'set' | 'change' | 'remove'} mode */
+  function openPinDialog(mode) {
+    pinDialogMode = mode;
+    // Settings steps aside first, matching every other "open the real thing"
+    // row here - two stacked dialogs fight over the focus trap, and the PIN
+    // field must have it.
+    open = false;
+    pinDialogOpen = true;
+  }
+
+  const AUTO_LOCK_OPTIONS = [
+    { value: 0, label: 'Never' },
+    { value: 1, label: '1 min' },
+    { value: 5, label: '5 min' },
+    { value: 15, label: '15 min' },
+    { value: 60, label: '1 hr' },
+  ];
+
+  /** @param {{ requireOnConnect?: boolean, autoLockMinutes?: number }} prefs */
+  async function updateLockPrefs(prefs) {
+    try {
+      await setLockPrefs(prefs);
+    } catch (e) {
+      toast.error('Could not save the lock setting', { description: String(e) });
+    }
+  }
+
   /** @param {boolean} next */
   function handleOpenChange(next) {
-    if (next) { refreshSettings(); category = 'general'; query = ''; }
+    if (next) { refreshSettings(); category = 'general'; query = ''; void refreshLockStatus(); }
   }
 
   /** @param {import('$lib/themes/registry.js').ThemeId} themeId */
@@ -435,6 +475,8 @@
     </div>
   </Dialog.Content>
 </Dialog.Root>
+
+<PinSetupDialog bind:open={pinDialogOpen} mode={pinDialogMode} />
 
 <!-- ── Content snippets ──────────────────────────────────────────── -->
 {#snippet secLabel(/** @type {string} */ text)}
@@ -774,7 +816,7 @@
   {#if show('Web access', 'Let the agent search the web and read pages')}
     {@render switchRow(
       'Web access',
-      'Let the agent search the web and read pages for things your database cannot answer — error codes, function syntax, current docs. Your search terms leave your machine when it does.',
+      'Let the agent search the web and read pages for things your database cannot answer: error codes, function syntax, current docs. Your search terms leave your machine when it does.',
       settings.agentWebAccess,
       toggleAgentWebAccess,
     )}
@@ -801,7 +843,7 @@
     {@render switchRow($t('settings.previewSql'), $t('settings.previewSql.desc'), settings.previewDmlBeforeApply, togglePreviewDml)}
   {/if}
   {#if show('Wrap JSON', 'Soft-wrap long values in every JSON viewer instead of scrolling sideways')}
-    {@render switchRow('Wrap JSON', 'Soft-wrap long values — embeddings, document chunks — in every JSON view instead of running off the right edge. Off keeps the structure easier to scan.', settings.jsonWordWrap, toggleJsonWordWrap)}
+    {@render switchRow('Wrap JSON', 'Soft-wrap long values (embeddings, document chunks) in every JSON view instead of running off the right edge. Off keeps the structure easier to scan.', settings.jsonWordWrap, toggleJsonWordWrap)}
   {/if}
   {#if show('Vim mode', 'Experimental modal keyboard navigation across the app, the data grid, and the SQL editor')}
     {@render switchRow('Vim mode', 'Experimental: modal keyboard navigation (hjkl, gg/G, i/Esc) across the grid, the SQL editor, and tabs', settings.vimMode, toggleVimMode)}
@@ -816,13 +858,64 @@
     {@render switchRow($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'), settings.mcpAutoStart, toggleMcpAutoStart)}
   {/if}
 
+  {@render secLabel('Security')}
+  {#if show('App PIN', 'Require a PIN to open Stroke and to connect to a database')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="flex items-center gap-2 text-ui-sm font-medium text-foreground">
+          App PIN
+          <span class="rounded-full border px-1.5 py-px text-ui-3xs font-medium leading-4 {$lockStatus.enabled ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border/60 text-muted-foreground'}">
+            {$lockStatus.enabled ? 'On' : 'Off'}
+          </span>
+        </p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          A {$lockStatus.pinLength}-digit PIN that locks Stroke on launch. Stored as a salted
+          hash in your OS keychain - there is no reset link, so pick one you will remember.
+        </p>
+      </div>
+      <div class="flex shrink-0 items-center gap-2">
+        {#if $lockStatus.enabled}
+          <Button type="button" variant="ghost" size="sm" onclick={() => openPinDialog('remove')}>Remove</Button>
+          <Button type="button" variant="outline" size="sm" onclick={() => openPinDialog('change')}>Change</Button>
+        {:else}
+          <Button type="button" variant="outline" size="sm" onclick={() => openPinDialog('set')}>Set PIN</Button>
+        {/if}
+      </div>
+    </div>
+  {/if}
+  {#if $lockStatus.enabled}
+    {#if show('Ask when connecting', 'Confirm the PIN before opening or reconnecting to a database')}
+      {@render switchRow(
+        'Ask when connecting',
+        'Confirm the PIN before opening or reconnecting to a database. The reconnect right after you unlock the app is exempt - you just proved who you are.',
+        $lockStatus.requireOnConnect,
+        () => void updateLockPrefs({ requireOnConnect: !$lockStatus.requireOnConnect }),
+      )}
+    {/if}
+    {#if show('Auto-lock', 'Lock again after a stretch of inactivity')}
+      <div class={rowCls}>
+        <div class="min-w-0">
+          <p class="text-ui-sm font-medium text-foreground">Auto-lock</p>
+          <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+            Lock again after this much inactivity. Open tabs and queries are kept - the
+            screen goes over the session, not through it.
+          </p>
+        </div>
+        {@render segmented('Auto-lock after', AUTO_LOCK_OPTIONS, $lockStatus.autoLockMinutes, (v) => void updateLockPrefs({ autoLockMinutes: v }))}
+      </div>
+    {/if}
+    {#if show('Lock now', 'Lock Stroke immediately')}
+      {@render actionRow('Lock now', 'Lock Stroke immediately, without waiting for the auto-lock.', 'Lock', () => { open = false; lockNow(); })}
+    {/if}
+  {/if}
+
   <!-- Privacy lives in General, not Agent: this switch covers the whole app, and
        under Agent it read as if it were about the AI features alone. -->
   {@render secLabel('Privacy')}
   {#if show('Anonymous usage data', 'Help decide what to build next')}
     {@render switchRow(
       'Anonymous usage data',
-      'Sends which features you use, how often, the app version and your OS — nothing else. No queries, no table or database names, no connection details, and nothing about the data you browse. Turning it off takes effect immediately.',
+      'Sends which features you use, how often, the app version and your OS. Nothing else. No queries, no table or database names, no connection details, and nothing about the data you browse. Turning it off takes effect immediately.',
       settings.telemetry,
       toggleTelemetry,
     )}
@@ -1018,7 +1111,7 @@
   {#if show('Native scrolling', 'Let the OS scroll the grid and the sidebar instead of the app\'s eased scrolling')}
     {@render switchRow(
       'Native scrolling',
-      "Hand the data grid and the sidebar back to the OS scroller. Off (the default) the app eases each wheel tick to its destination, which reads as smoother on mice that scroll in big jumps; on, scrolling behaves exactly like the rest of your desktop — including its own momentum — and nothing of ours sits in front of the wheel.",
+      "Hand the data grid and the sidebar back to the OS scroller. Off (the default) the app eases each wheel tick to its destination, which reads as smoother on mice that scroll in big jumps; on, scrolling behaves exactly like the rest of your desktop (including its own momentum) and nothing of ours sits in front of the wheel.",
       settings.nativeScroll,
       toggleNativeScroll,
     )}

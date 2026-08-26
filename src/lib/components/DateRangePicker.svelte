@@ -33,8 +33,8 @@
   }));
 
   const label = $derived.by(() => {
-    if (from && to) return `${from}  –  ${to}`;
-    if (from) return `${from}  – …`;
+    if (from && to) return `${from} to ${to}`;
+    if (from) return `${from} to …`;
     return "Pick range…";
   });
 
