@@ -13,7 +13,7 @@ const c = (over = {}) => ({
 
 describe('scoreSearchInput', () => {
   it('ignores a field that claims nothing', () => {
-    // A password box, a row editor, a port number — "/" must never land there.
+    // A password box, a row editor, a port number - "/" must never land there.
     expect(scoreSearchInput(c({ placeholder: 'localhost' }))).toBe(0)
     expect(scoreSearchInput(c({ type: 'password' }))).toBe(0)
   })

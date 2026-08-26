@@ -1,7 +1,7 @@
 //! Web access for the AI agent: a search, and a page reader.
 //!
 //! Both live in Rust rather than the webview because the webview cannot make
-//! these requests at all — no search endpoint or arbitrary site sends CORS
+//! these requests at all - no search endpoint or arbitrary site sends CORS
 //! headers that would let a `fetch()` from the app origin read the response.
 //!
 //! Search goes through DuckDuckGo's HTML endpoint, which needs no API key. That

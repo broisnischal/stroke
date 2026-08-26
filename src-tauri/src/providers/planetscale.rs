@@ -1,5 +1,5 @@
 /*!
- * PlanetScale adapter — MySQL/Vitess. Sign in via OAuth, list databases across
+ * PlanetScale adapter - MySQL/Vitess. Sign in via OAuth, list databases across
  * the account's organizations, and mint fresh connection credentials on connect
  * (PlanetScale returns a password exactly once, at password-creation time).
  */
@@ -9,7 +9,7 @@ use serde_json::Value;
 
 pub const OAUTH: OAuthConfig = OAuthConfig {
     // Public client_id (safe to embed). The client SECRET lives only on the
-    // stroke.click proxy as PLANETSCALE_CLIENT_SECRET — never in this binary.
+    // stroke.click proxy as PLANETSCALE_CLIENT_SECRET - never in this binary.
     client_id: "pscale_app_1c8af8139904805f4506cfb88a4f9967",
     auth_url: "https://auth.planetscale.com/oauth/authorize",
     // token_url is used by the proxy, not the app (the app posts to TOKEN_PROXY).

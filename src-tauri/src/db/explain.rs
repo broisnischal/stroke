@@ -10,7 +10,7 @@ pub struct ExplainResult {
     pub planning_time: f64,
     /// Milliseconds spent executing (PostgreSQL only; 0 for others).
     pub execution_time: f64,
-    /// Which driver produced this result — helps the frontend pick the renderer.
+    /// Which driver produced this result - helps the frontend pick the renderer.
     pub driver: String,
 }
 
@@ -25,7 +25,7 @@ pub fn explain_from_text_lines(lines: Vec<String>, driver: &str) -> ExplainResul
     }
     let mut arena: Vec<N> = Vec::new();
     let mut roots: Vec<usize> = Vec::new();
-    // Stack of (indent, node index) — a node attaches under the nearest
+    // Stack of (indent, node index) - a node attaches under the nearest
     // strictly-shallower ancestor still on the stack.
     let mut stack: Vec<(usize, usize)> = Vec::new();
 
@@ -98,7 +98,7 @@ fn strip_sql(sql: &str) -> &str {
         } else if upper_rest.starts_with("QUERY PLAN") {
             rest[10..].trim_start()
         } else if upper_rest.starts_with('(') {
-            // EXPLAIN (ANALYZE, ...) — skip to closing paren
+            // EXPLAIN (ANALYZE, ...) - skip to closing paren
             rest.find(')').map(|i| rest[i + 1..].trim_start()).unwrap_or(rest)
         } else {
             rest
@@ -117,7 +117,7 @@ pub async fn explain_pg(pool: &sqlx::PgPool, sql: &str) -> Result<ExplainResult,
         Ok(row) => row.0,
         // CockroachDB speaks the PG wire protocol but rejects PG's EXPLAIN option
         // syntax (`at or near "analyze"`). Fall back to its indented text plan; if
-        // that also fails, surface the original error — it's the meaningful one for
+        // that also fails, surface the original error - it's the meaningful one for
         // a genuine query fault on real PostgreSQL.
         Err(e) => {
             return match explain_cockroach(pool, sql).await {

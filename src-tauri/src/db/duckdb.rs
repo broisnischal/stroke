@@ -51,7 +51,7 @@ fn valueref_to_json(v: ValueRef<'_>) -> Value {
         ValueRef::Double(f) => serde_json::Number::from_f64(f).map(Value::Number).unwrap_or(Value::Null),
         ValueRef::Decimal(d) => Value::String(d.to_string()),
         ValueRef::Text(bytes) => {
-            // Cap oversized text/JSON — a multi-MB cell shipped whole freezes
+            // Cap oversized text/JSON - a multi-MB cell shipped whole freezes
             // the webview (see sql_util::CELL_VALUE_CAP), same guard as the
             // other engines.
             let s = String::from_utf8_lossy(bytes);
@@ -387,7 +387,7 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<RowFilter>>,
-    // When false, skip the primary-key lookup — the frontend keeps it across
+    // When false, skip the primary-key lookup - the frontend keeps it across
     // repeat fetches (pagination/sort/filter). The column list is still fetched
     // because sort-column validation depends on it.
     include_meta: bool,
@@ -642,7 +642,7 @@ mod tests {
         let date_cell = &rows.rows[0][2];
         assert!(date_cell.as_str().map(|s| s.starts_with("18")).unwrap_or(false), "date: {date_cell:?}");
 
-        // indexes (PK shows up as an ART index in duckdb_indexes or not at all — must not error)
+        // indexes (PK shows up as an ART index in duckdb_indexes or not at all - must not error)
         let _ = list_indexes(&h).await.unwrap();
 
         // editing

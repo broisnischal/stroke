@@ -1,5 +1,5 @@
 /*!
- * Neon adapter — the reference implementation. Neon is a public PKCE OAuth
+ * Neon adapter - the reference implementation. Neon is a public PKCE OAuth
  * client and its API hands back a full `postgres://` connection URI (password
  * included), so sign-in → list projects → one-click connect works end-to-end.
  */
@@ -8,8 +8,8 @@ use super::{http, OAuthConfig, ProviderConnection, ProviderDatabase};
 use serde_json::Value;
 
 pub const OAUTH: OAuthConfig = OAuthConfig {
-    // Neon doesn't offer self-serve OAuth apps (partner-only), so — like we do
-    // with Cloudflare/Wrangler — we reuse the official neonctl CLI's PUBLIC PKCE
+    // Neon doesn't offer self-serve OAuth apps (partner-only), so - like we do
+    // with Cloudflare/Wrangler - we reuse the official neonctl CLI's PUBLIC PKCE
     // client. No secret, no proxy: the token exchange goes straight to Neon
     // (see Provider::is_public_client). Redirect must be 127.0.0.1/callback,
     // which neonctl's client registered (see Provider::redirect_uri).
@@ -45,7 +45,7 @@ async fn get(token: &str, path: &str) -> Result<Value, String> {
 }
 
 /// Each Neon project is presented as one connectable database. Neon scopes
-/// projects under organizations, so `/projects` requires an `org_id` — list the
+/// projects under organizations, so `/projects` requires an `org_id` - list the
 /// user's orgs first, then each org's projects, and flatten them.
 pub async fn list_databases(token: &str) -> Result<Vec<ProviderDatabase>, String> {
     let orgs_body = get(token, "/users/me/organizations").await?;

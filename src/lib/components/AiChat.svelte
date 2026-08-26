@@ -212,7 +212,7 @@
 
   /**
    * Save a chart canvas as PNG through the native dialog.
-   * Both call sites used to build an `<a download>`, which WKWebView ignores —
+   * Both call sites used to build an `<a download>`, which WKWebView ignores -
    * the button looked like it worked and produced no file.
    * @param {string} selector CSS selector for the chart's canvas
    * @param {string} title used for the default filename
@@ -495,7 +495,7 @@
     const plainHistory = $state.snapshot(rawApiHistory);
     if (activeConvId) {
       // The title is deliberately NOT written here. It is seeded from the first
-      // message on create, then owned by generateAiTitle (and by rename) — this
+      // message on create, then owned by generateAiTitle (and by rename) - this
       // save runs after every turn, so re-deriving it from the first message
       // clobbered the generated title moments after it landed, which is why every
       // conversation in the list stayed named after its opening word.
@@ -528,7 +528,7 @@
       const { content } = await chatCompletionRaw(settings, [
         {
           role: "user",
-          content: `Name this database-assistant conversation with a specific 3-6 word title: what the user is working on, naming the tables, metric or task involved. Prefer "Revenue by plan, last 90d" over "Data question". Never echo a greeting. Reply with ONLY the title — no quotes, no trailing punctuation.\n\nUser: ${String(userMsg.content).slice(0, 600)}\nAssistant: ${String(assistantMsg.content).slice(0, 600)}`,
+          content: `Name this database-assistant conversation with a specific 3-6 word title: what the user is working on, naming the tables, metric or task involved. Prefer "Revenue by plan, last 90d" over "Data question". Never echo a greeting. Reply with ONLY the title - no quotes, no trailing punctuation.\n\nUser: ${String(userMsg.content).slice(0, 600)}\nAssistant: ${String(assistantMsg.content).slice(0, 600)}`,
         },
       ]);
       // Small models like to wrap the answer in quotes or prefix "Title:".
@@ -602,7 +602,7 @@
   let rawApiHistory = $state([]);
   let loading = $state(false);
   let error = $state("");
-  /** Provider payload behind the error banner — collapsed until asked for. */
+  /** Provider payload behind the error banner - collapsed until asked for. */
   let errorDetailOpen = $state(false);
 
   /** @param {string} detail */
@@ -1556,7 +1556,7 @@
    * 'ACTIVE' or '1', that a date is stored as an epoch string, or that a
    * nullable column is null for every row that matters. Queries written against
    * the type alone get those wrong, so the model sees actual values before it
-   * writes any SQL. Cached per table for the session — the shape of a table's
+   * writes any SQL. Cached per table for the session - the shape of a table's
    * data doesn't change between turns.
    *
    * Best effort throughout: a table that can't be read is simply left out.
@@ -1600,7 +1600,7 @@
 
   /**
    * Quoted, schema-qualified table reference for the connected engine.
-   * SQLite/D1/LibSQL have no user schemas, so the schema half is dropped there —
+   * SQLite/D1/LibSQL have no user schemas, so the schema half is dropped there -
    * qualifying would turn a valid name into a missing-table error.
    * @param {string} schema @param {string} table
    */
@@ -1930,13 +1930,13 @@
           last_error: prior.lastError,
           // The old wording here was "explain to the user why this cannot be
           // done", which asked the model to account for a failure it had no
-          // information about — so it invented one, and a plain "no such table"
+          // information about - so it invented one, and a plain "no such table"
           // got reported to the user as a database permission problem. Report
           // the error; do not theorise about its cause.
           instruction:
             "Either try a genuinely different approach (a different tool, or SQL for THIS engine), " +
             "or tell the user the operation failed and quote last_error verbatim. " +
-            "Do NOT guess at a cause you have not verified — in particular, never claim a permissions, " +
+            "Do NOT guess at a cause you have not verified - in particular, never claim a permissions, " +
             "access, or authentication problem unless last_error actually says so.",
         }),
       });
@@ -2057,7 +2057,7 @@
           const hint = classifyDbError(msg);
           // Show the failure in the transcript rather than deleting the
           // indicator. Hiding it left the user watching the model narrate a
-          // cause for an error they were never shown — the query that actually
+          // cause for an error they were never shown - the query that actually
           // failed, and why, is the one thing they need to see.
           const execIdx = items.findIndex((i) => i.id === execId);
           const failedItem = /** @type {ChatItem} */ ({
@@ -3370,7 +3370,7 @@
               {:else if item.kind === "executing"}
                 {@const meta = execMeta(item.op, item.sql)}
                 <!-- One line, one animation, and the same px-3.5 gutter as every
-                     other row — it used to sit flush left of the text column with a
+                     other row - it used to sit flush left of the text column with a
                      ping halo AND three bouncing dots competing for attention. -->
                 <div class="flex items-center gap-2 px-3.5">
                   <span
@@ -4241,7 +4241,7 @@
                   settingsOpen = true;
                   settingsTab = "context";
                 }}
-                title="Context usage — click for a breakdown"
+                title="Context usage - click for a breakdown"
               >
                 <BarChart2 class="size-3 shrink-0" />
                 <span class="tabular-nums"

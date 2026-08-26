@@ -155,7 +155,7 @@ describe('windowKeepCount', () => {
 })
 
 describe('seekKeyFor', () => {
-  /** `events`: a bigint PK, ordered by it — the case windowing is built for. */
+  /** `events`: a bigint PK, ordered by it - the case windowing is built for. */
   const eventsCols = [
     { name: 'id', dataType: 'int8' },
     { name: 'user_id', dataType: 'uuid' },
@@ -179,7 +179,7 @@ describe('seekKeyFor', () => {
   })
 
   it('refuses a sort the key alone cannot resolve', () => {
-    // ORDER BY kind, id — the keyset predicate has no tiebreaker for `kind`.
+    // ORDER BY kind, id - the keyset predicate has no tiebreaker for `kind`.
     expect(seekKeyFor(view({ order: stableWindowOrder({ column: 'kind' }, [], ['id']) }))).toBeNull()
   })
 

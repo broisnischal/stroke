@@ -250,7 +250,7 @@
      It lines up with the grid rather than fighting it: content starts where the
      first column starts, and the frozen gutter continues down the left as a
      filled strip (matching the grid's row-number column) so its right edge reads
-     as the gutter rule — not a hairline floating in empty space. -->
+     as the gutter rule - not a hairline floating in empty space. -->
 <div class="relative border-y border-border/40 bg-card">
   {#if indent > 0}
     <div class="pointer-events-none absolute inset-y-0 left-0 border-r border-border/40 bg-muted/20" style="width:{indent}px"></div>

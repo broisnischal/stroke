@@ -15,8 +15,8 @@
 	} = $props();
 </script>
 
-<!-- rounded-xl (12px) against the viewport's p-1 (4px) puts items at 8px — outer
-	 radius minus padding — so item corners sit concentric inside the panel
+<!-- rounded-xl (12px) against the viewport's p-1 (4px) puts items at 8px - outer
+	 radius minus padding - so item corners sit concentric inside the panel
 	 instead of leaving a crescent of gap at each one.
 	 The exit runs quicker than the enter: a menu should get out of the way faster
 	 than it arrives. -->

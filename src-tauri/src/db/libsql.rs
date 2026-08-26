@@ -91,7 +91,7 @@ impl TypedValue {
                 .and_then(|s| s.parse::<f64>().ok())
                 .map(|f| Value::from(f))
                 .unwrap_or(Value::Null),
-            // Capped — a multi-MB text cell shipped whole freezes the webview
+            // Capped - a multi-MB text cell shipped whole freezes the webview
             // (see sql_util::CELL_VALUE_CAP).
             "text" => super::sql_util::cap_json_value(
                 "text",

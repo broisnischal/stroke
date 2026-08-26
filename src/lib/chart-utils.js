@@ -59,7 +59,7 @@ export function getRequiredAxes(chartType) {
     case 'funnel':
       return { x: 'Label', y: 'Value' }
     case 'gauge':
-      return { x: 'Label', y: 'Value (0–100)' }
+      return { x: 'Label', y: 'Value (0-100)' }
     case 'radar':
       return { x: 'Category', y: 'Value' }
     case 'histogram':
@@ -131,7 +131,7 @@ export function resolveCssColor(varName) {
 }
 
 /** The app's --primary token as a concrete colour, for single-series charts
- * across the app (table view, SQL editor, AI charts, previews). '' when unset —
+ * across the app (table view, SQL editor, AI charts, previews). '' when unset -
  * callers fall back to DEFAULT_PALETTE. */
 export function resolveChartAccent() {
   return resolveCssColor('--primary')
@@ -216,8 +216,8 @@ function shadowPointer(isDark) {
  * Chart text and rules, taken from the theme actually in use.
  *
  * These used to be `isDark ? 'rgba(255,255,255,…)' : 'rgba(0,0,0,…)'`, which
- * knows only two themes. The app ships many — each with its own foreground,
- * muted foreground and border — so on any of them the chart text was a generic
+ * knows only two themes. The app ships many - each with its own foreground,
+ * muted foreground and border - so on any of them the chart text was a generic
  * white or black wash that matched nothing around it. Reading the real tokens
  * is what makes a chart look like it belongs to the theme it is sitting in.
  *
@@ -692,7 +692,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
     const labels = counts.map((_, i) => {
       const lo = min + i * step
       const hi = lo + step
-      return `${lo.toFixed(1)}–${hi.toFixed(1)}`
+      return `${lo.toFixed(1)}-${hi.toFixed(1)}`
     })
     return {
       ...base,
@@ -966,7 +966,7 @@ export function buildOption({ type, columns, rows, xCol, yCol, zCol, groupCol, i
   // ── Sunburst ──────────────────────────────────────────────────────────────
   if (type === 'sunburst') {
     // Same guards as buildTreeData: dedupe by name, attach each node to at most
-    // one parent, skip self/cycle edges and cap the count — duplicate rows or
+    // one parent, skip self/cycle edges and cap the count - duplicate rows or
     // cyclic parent data otherwise build a graph that hangs/crashes ECharts.
     const MAX_NODES = 2000
     /** @type {Map<string, any>} */
@@ -1495,8 +1495,8 @@ function makeSeries(type, name, data, color, n = 0) {
  *
  * `previewOption` is a JSON snapshot of a built option, so it carries whatever
  * was true when it was saved: theme colours baked into every axis label and
- * text style, a legend laid out for a full-size chart, and — because
- * JSON.stringify drops functions — no formatters at all. Rendered months later
+ * text style, a legend laid out for a full-size chart, and - because
+ * JSON.stringify drops functions - no formatters at all. Rendered months later
  * in the other theme, the axis labels are dark text on a dark card, which is
  * why a saved chart could come back with no readable axes.
  *
@@ -1547,7 +1547,7 @@ export function restyleSavedOption(option, { isDark, compact = false }) {
   if (option.legend) {
     out.legend = { ...option.legend, textStyle: { ...option.legend.textStyle, color: themed.textStyle.color } }
     // A tile is a few hundred pixels wide. A legend that was fine beside a
-    // full-size chart covers the plot here, and its labels get clipped — so at
+    // full-size chart covers the plot here, and its labels get clipped - so at
     // this size the chart itself is worth more than its key.
     if (compact) out.legend = { ...out.legend, show: false }
   }
@@ -1775,7 +1775,7 @@ export const CHART_CATALOG = [
     group: 'Part-to-Whole',
     icon: 'gauge',
     description: 'Speedometer-style gauge for a single KPI',
-    axes: { x: 'label', y: 'value (0–max)' },
+    axes: { x: 'label', y: 'value (0-max)' },
     requires: { x: 'any', y: 'number' },
     aiHint: 'First row\'s Y value is displayed on the gauge',
   },

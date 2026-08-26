@@ -18,7 +18,7 @@
 	 row, small enough to mis-click and cramped enough to read as an afterthought.
 	 transition-colors (never `all`): the highlight used to snap from row to row,
 	 so running the pointer down a list strobed. 120ms is the press/hover band.
-	 data-selected carries its own weight — the current value was distinguished
+	 data-selected carries its own weight - the current value was distinguished
 	 only by a tick 32px away at the far edge, which is not where the eye is. -->
 <SelectPrimitive.Item
 	bind:ref

@@ -1,12 +1,12 @@
 /*!
- * Database provider adapters — sign in to a hosting provider (Neon, Supabase,
+ * Database provider adapters - sign in to a hosting provider (Neon, Supabase,
  * PlanetScale, Prisma Postgres) with OAuth, list every database on the account,
  * and connect in one click without hunting for connection strings.
  *
  * Design: this module owns the shared OAuth 2.0 + PKCE machinery (mirrors
  * `cloudflare.rs`, kept separate so the working D1 flow is untouched) and
- * dispatches provider-specific work — listing databases, building a connectable
- * spec — to the per-provider submodules via a `Provider` enum. Every provider is
+ * dispatches provider-specific work - listing databases, building a connectable
+ * spec - to the per-provider submodules via a `Provider` enum. Every provider is
  * a *public* PKCE client: no client secret is shipped in the binary.
  *
  * Adding a provider = add an enum variant, its `OAuthConfig`, and a submodule
@@ -33,7 +33,7 @@ const AUTH_TIMEOUT_SECS: u64 = 300;
 const CALLBACK_PORTS: &[u16] = &[8989, 8990, 8991, 8992, 8993];
 
 // Token-exchange proxy. Neon/Supabase/PlanetScale are confidential OAuth clients
-// whose token endpoint requires a client_secret — which must never ship in a
+// whose token endpoint requires a client_secret - which must never ship in a
 // desktop binary. The stroke-web app (TanStack Start on Cloudflare Workers)
 // hosts a server route that holds the secrets, injects them server-side, and
 // forwards to the real provider token endpoint. The app sends only the public
@@ -107,7 +107,7 @@ impl Provider {
     }
 
     /// Whether the provider's authorize/token endpoints support PKCE. PlanetScale
-    /// does NOT — sending code_challenge makes it reject the request — so it uses
+    /// does NOT - sending code_challenge makes it reject the request - so it uses
     /// a plain confidential authorization-code flow (secret only, via the proxy).
     fn uses_pkce(&self) -> bool {
         !matches!(self, Self::PlanetScale)
@@ -247,7 +247,7 @@ async fn bind_callback_listener(ports: &[u16]) -> Result<(TcpListener, u16), Str
     }
     if ports.len() == 1 {
         return Err(format!(
-            "Port {} is in use — this provider requires that exact port for its OAuth redirect. \
+            "Port {} is in use - this provider requires that exact port for its OAuth redirect. \
              Close whatever is using it (another Stroke window or dev server) and retry.",
             ports[0]
         ));
@@ -259,12 +259,12 @@ async fn bind_callback_listener(ports: &[u16]) -> Result<(TcpListener, u16), Str
     ))
 }
 
-const OK_HTML: &str = r#"<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Stroke — authorized</title>
+const OK_HTML: &str = r#"<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Stroke - authorized</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d0d0d;color:#eee}
 .card{text-align:center;padding:48px;border-radius:16px;border:1px solid #333;background:#111}h2{color:#22c55e;margin-bottom:12px}p{color:#888;margin:0}</style></head>
 <body><div class="card"><h2>Authorization successful</h2><p>You can close this tab and return to Stroke.</p></div></body></html>"#;
 
-const ERR_HTML: &str = r#"<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Stroke — error</title>
+const ERR_HTML: &str = r#"<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Stroke - error</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d0d0d;color:#eee}
 .card{text-align:center;padding:48px;border-radius:16px;border:1px solid #4b1c1c;background:#1a0f0f}h2{color:#ef4444;margin-bottom:12px}p{color:#888;margin:0}</style></head>
 <body><div class="card"><h2>Authorization failed</h2><p>You can close this tab and try again in Stroke.</p></div></body></html>"#;
@@ -330,7 +330,7 @@ async fn await_oauth_callback(listener: TcpListener, expected_state: &str) -> Re
     };
     if state.as_deref() != Some(expected_state) {
         let _ = stream.write_all(send(ERR_HTML).as_bytes()).await;
-        return Err("OAuth state mismatch — possible CSRF".into());
+        return Err("OAuth state mismatch - possible CSRF".into());
     }
 
     let _ = stream.write_all(send(OK_HTML).as_bytes()).await;
@@ -346,7 +346,7 @@ struct TokenResponse {
     expires_in: Option<u64>,
 }
 
-/// POST a token request to `url` — either the real provider token endpoint
+/// POST a token request to `url` - either the real provider token endpoint
 /// (public clients) or the stroke.click proxy (confidential clients, where the
 /// proxy injects the secret and `params` includes `provider`).
 async fn post_token(url: &str, params: &[(&str, &str)]) -> Result<TokenResponse, String> {
@@ -407,7 +407,7 @@ async fn exchange_code(
         params.push(("code_verifier", v));
     }
     if is_public {
-        // Direct to the provider — no secret, no proxy.
+        // Direct to the provider - no secret, no proxy.
         post_token(cfg.token_url, &params).await
     } else {
         // Via the proxy, which injects the client_secret.
@@ -437,7 +437,7 @@ async fn refresh_token(
 
 // ── Token storage (namespaced per provider in the secrets store) ─────────────────
 
-// `async` because the keychain is only ever touched off the caller's thread —
+// `async` because the keychain is only ever touched off the caller's thread -
 // see the module comment in secrets.rs.
 async fn store_tokens(
     app: &tauri::AppHandle,
@@ -487,7 +487,7 @@ async fn valid_token(app: &tauri::AppHandle, p: Provider) -> Result<String, Stri
 
     // Missing expiry => assume the token is long-lived and valid, mirroring the
     // Cloudflare flow (`unwrap_or(u64::MAX)`). A `0` default treated every such
-    // token as already expired and forced a needless re-login on every call —
+    // token as already expired and forced a needless re-login on every call -
     // the main cause of "it asks me to sign in again each day".
     let expires = map
         .get(&format!("__{k}_expires__"))
@@ -498,8 +498,8 @@ async fn valid_token(app: &tauri::AppHandle, p: Provider) -> Result<String, Stri
     }
 
     // Past the stored expiry: try to renew silently with the refresh token. If we
-    // can't — no refresh token, or the refresh call fails (e.g. a transient proxy
-    // hiccup) — fall back to the existing access token instead of forcing a
+    // can't - no refresh token, or the refresh call fails (e.g. a transient proxy
+    // hiccup) - fall back to the existing access token instead of forcing a
     // re-login. The downstream API call is the real arbiter: a genuinely dead
     // token surfaces a clear auth error there (and the UI offers reconnect), while
     // a still-valid or barely-past-buffer token keeps working. This favours long
@@ -610,7 +610,7 @@ pub async fn provider_start_oauth(
     })
 }
 
-/// Abort an in-flight OAuth wait (Cancel button) — frees the callback port.
+/// Abort an in-flight OAuth wait (Cancel button) - frees the callback port.
 #[tauri::command]
 pub fn provider_cancel_oauth() {
     oauth_cancel().notify_waiters();

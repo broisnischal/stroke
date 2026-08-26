@@ -1,7 +1,7 @@
 /**
  * "/" focuses the search box for whatever you are looking at.
  *
- * The app has upwards of thirty search and filter fields — the sidebar's table
+ * The app has upwards of thirty search and filter fields - the sidebar's table
  * filter, the settings search, the log filter, the connection rail, the object
  * browser, each dialog's own. Binding a shortcut per field would be thirty
  * bindings to keep in step with thirty components, and would still miss the
@@ -11,7 +11,7 @@
  * screen and picks the field that is most plausibly *the* search box there. A
  * field added tomorrow is found without anyone remembering to register it.
  *
- * The scoring is separated from the DOM so it can be tested — the ranking is
+ * The scoring is separated from the DOM so it can be tested - the ranking is
  * the part with judgement in it, and the part that will need tuning.
  */
 
@@ -119,7 +119,7 @@ export function findSearchInput(root = document) {
     if (!(el instanceof HTMLInputElement)) continue
     if (el.disabled || el.readOnly) continue
     // offsetParent is null for display:none and for anything inside it, which is
-    // how the app hides inactive tabs — exactly the fields that must not win.
+    // how the app hides inactive tabs - exactly the fields that must not win.
     if (el.offsetParent === null) continue
     if (el.getClientRects().length === 0) continue
     candidates.push({

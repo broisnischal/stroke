@@ -3,7 +3,7 @@
  *
  * A 1536-number text field is data the eye cannot use: every value is `0.0…`
  * something and the wall of digits says nothing about the vector. What is
- * actually worth knowing is its shape — how many dimensions, how the values are
+ * actually worth knowing is its shape - how many dimensions, how the values are
  * distributed, whether it is unit-normalised (almost every embedding model
  * returns normalised vectors, so a norm that isn't 1 is a real signal), and
  * where the extremes are.
@@ -65,7 +65,7 @@ export function parseVector(raw) {
   const values = []
   for (const part of body.split(',')) {
     const n = Number(part)
-    // A single non-numeric element means this is not a vector — say so rather
+    // A single non-numeric element means this is not a vector - say so rather
     // than render a viewer full of NaN.
     if (!Number.isFinite(n)) return null
     values.push(n)
@@ -108,7 +108,7 @@ function stats(values) {
 
 /**
  * Histogram of the values themselves (the strip above is indexed by dimension;
- * this answers "how are the values distributed?" — roughly gaussian around 0
+ * this answers "how are the values distributed?" - roughly gaussian around 0
  * for a healthy embedding, spikes or heavy tails when something is off).
  * @param {number[]} values @param {number} bins
  * @returns {{ counts: number[], from: number, to: number, max: number }}

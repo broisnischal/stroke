@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 // ── Provider catalogue ───────────────────────────────────────────────────────
 
-/** Stroke's own zero-config gateway — see stroke-web/FREE_AI_TIER.md. */
+/** Stroke's own zero-config gateway - see stroke-web/FREE_AI_TIER.md. */
 export const STROKE_FREE_BASE_URL = 'https://stroke.click/api/ai'
 
 export const PROVIDERS = [
@@ -63,7 +63,7 @@ export const PROVIDER_MODELS = {
     { label: 'Gemini 1.5 Pro', model: 'gemini-1.5-pro', tag: 'smart' },
     { label: 'Gemini 1.5 Flash', model: 'gemini-1.5-flash', tag: 'fast' },
   ],
-  // Ollama models are discovered from the running server — it only accepts exact
+  // Ollama models are discovered from the running server - it only accepts exact
   // installed tags (`llama3.1:8b`), so any hardcoded guess is a 404 waiting to happen.
   ollama: [],
   // Same story as Ollama: the catalogue depends on which upstream providers the
@@ -111,7 +111,7 @@ const SEEDED_KEY   = 'stroke:ai-seeded'
  * The profile a fresh install starts on.
  *
  * This used to be an OpenRouter model, which cannot answer without a key the new
- * user hasn't got — so the assistant was broken until they went and configured
+ * user hasn't got - so the assistant was broken until they went and configured
  * one. Stroke Free needs no credentials, so the AI works on first launch.
  */
 function makeDefaultProfile() {
@@ -122,7 +122,7 @@ function makeDefaultProfile() {
     baseUrl: STROKE_FREE_BASE_URL,
     // The fast alias by default. The gateway still routes any turn that carries
     // tools to the larger model, so the database agent keeps working while plain
-    // conversation runs on the cheap one — the alias sets the floor, not the cap.
+    // conversation runs on the cheap one - the alias sets the floor, not the cap.
     model: 'stroke-free-fast',
   })
 }
@@ -154,7 +154,7 @@ function loadProfiles() {
     }
   } catch { /* ignore */ }
   // Nothing stored and nothing to migrate: this is a fresh install, so seed the
-  // credential-free profile rather than leaving the picker on "No model" — the
+  // credential-free profile rather than leaving the picker on "No model" - the
   // assistant has to work before the user has configured anything.
   try {
     if (localStorage.getItem(SEEDED_KEY)) return []
@@ -239,7 +239,7 @@ export async function refreshActiveSettings() {
 
 // Bootstrap after the first paint, not during module evaluation. This is the
 // process's first read of the secrets vault, and the OS may put a "Stroke wants
-// to use your confidential information" keychain prompt in front of it — firing
+// to use your confidential information" keychain prompt in front of it - firing
 // it inline would land that prompt on screen before the window has composited a
 // single frame, i.e. a system modal over an empty white window. One frame plus a
 // macrotask is enough for the shell to be on screen behind it.

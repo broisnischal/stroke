@@ -11,13 +11,13 @@
  *   • SQL, query text, results, row data
  *   • file paths, IP addresses, account or email
  *
- * Events are names, not payloads — `table_open` carries no table. The server
+ * Events are names, not payloads - `table_open` carries no table. The server
  * validates every name against the same allowlist and drops anything else, so
  * neither end trusts the other to have got it right.
  *
  * Counts are batched and flushed on a timer, so a burst of activity is one
  * request rather than one per click, and a failure drops the batch instead of
- * retrying — analytics must never cost the user a request, a retry loop, or a
+ * retrying - analytics must never cost the user a request, a retry loop, or a
  * visible error.
  */
 
@@ -37,7 +37,7 @@ let timer = null
 let deviceId = ''
 let started = false
 
-/** The user's choice. Absent means enabled — see the Settings copy. */
+/** The user's choice. Absent means enabled - see the Settings copy. */
 function enabled() {
   try {
     return loadSettings().telemetry !== false
@@ -50,7 +50,7 @@ function isTauri() {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
-/** "macos" | "windows" | "linux" | "" — the three the server records. */
+/** "macos" | "windows" | "linux" | "" - the three the server records. */
 function detectOs() {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
   if (/Mac|iPhone|iPad/.test(ua)) return 'macos'

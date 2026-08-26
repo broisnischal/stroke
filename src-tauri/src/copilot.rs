@@ -156,7 +156,7 @@ pub async fn copilot_get_copilot_token(oauth_token: String) -> Result<CopilotTok
         let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
         return Err(format!(
-            "GitHub returned {status} — OAuth token may be expired or revoked. {body}"
+            "GitHub returned {status} - OAuth token may be expired or revoked. {body}"
         ));
     }
 

@@ -100,7 +100,7 @@ const PG_FUNCTIONS = [
   { label: 'row_number',    sig: 'row_number()',                                      doc: 'Unique sequential integer for each row in its partition.' },
   { label: 'rank',          sig: 'rank()',                                             doc: 'Rank with gaps for ties: 1, 1, 3, ...' },
   { label: 'dense_rank',    sig: 'dense_rank()',                                      doc: 'Rank without gaps for ties: 1, 1, 2, ...' },
-  { label: 'ntile',         sig: 'ntile(${1:buckets})',                               doc: 'Distribute rows into n buckets, returns bucket number 1–n.' },
+  { label: 'ntile',         sig: 'ntile(${1:buckets})',                               doc: 'Distribute rows into n buckets, returns bucket number 1-n.' },
   { label: 'lag',           sig: 'lag(${1:value}, ${2:1})',                           doc: 'Value from a previous row.' },
   { label: 'lead',          sig: 'lead(${1:value}, ${2:1})',                          doc: 'Value from a following row.' },
   { label: 'first_value',   sig: 'first_value(${1:expression})',                      doc: 'First value in the current window frame.' },

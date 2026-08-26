@@ -267,7 +267,7 @@
     void loadInfo()
   })
 
-  // ── Logical DB switching (0–15) ─────────────────────────────────────────────
+  // ── Logical DB switching (0-15) ─────────────────────────────────────────────
   // Redis exposes 16 numbered logical DBs. The backend opens a fresh connection
   // per command at cfg.db, so switching = reconnect the active connection at the
   // new db (reusing connect_redis_db), then reload the keyspace.

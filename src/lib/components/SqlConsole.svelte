@@ -367,7 +367,7 @@
   })
 
   // The JSON view materialises a real object per row AND a formatted string of
-  // all of them — both O(rows × columns) — while the table beside it is canvas-
+  // all of them - both O(rows × columns) - while the table beside it is canvas-
   // virtualised and pays for neither. Unbounded, a `SELECT *` over a million
   // rows spent its time building a string far too large to read, and often ran
   // the webview out of memory before it could show any of it.

@@ -3,7 +3,7 @@
    * A geometry on a real map, small enough to live inside a dialog.
    *
    * The point of showing a coordinate on a map is answering "where is that
-   * actually" — which a fixed preview can't do, because the answer is at a scale
+   * actually" - which a fixed preview can't do, because the answer is at a scale
    * you have to choose. So this pans and zooms: it opens framed on the geometry
    * with enough context to place it, and you can pull back to the continent or
    * push in to the street.
@@ -56,7 +56,7 @@
 
   /**
    * A single point has no extent to frame, so it gets a neighbourhood-level
-   * scale — close enough to recognise the place, wide enough to know which one.
+   * scale - close enough to recognise the place, wide enough to know which one.
    * Everything else is fitted with padding so the shape isn't flush to the edge.
    */
   function frameShape() {
@@ -292,7 +292,7 @@
       <button
         type="button"
         onclick={() => { basemapId = b.id; tiles.reset(); requestDraw() }}
-        title={b.offline ? 'Offline outline — no network requests' : `Tiles from ${b.attribution}`}
+        title={b.offline ? 'Offline outline - no network requests' : `Tiles from ${b.attribution}`}
         class={cn(
           'inline-flex h-5 items-center rounded px-1.5 text-ui-3xs transition-colors',
           basemapId === b.id ? 'bg-muted text-foreground' : 'text-muted-foreground/70 hover:text-foreground',

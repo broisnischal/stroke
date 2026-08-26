@@ -170,7 +170,7 @@ export function createSqlTab(sqlText, title = 'Query Editor') {
 /**
  * A read-only DDL view. Distinct from a `sql` tab on purpose: DDL is something
  * you read, so it gets a bare editor with no Run button, no query toolbar and no
- * results pane — none of which do anything useful for a CREATE TABLE you can't
+ * results pane - none of which do anything useful for a CREATE TABLE you can't
  * execute against the table it already describes.
  * @param {string} ddlText @param {string} title
  */

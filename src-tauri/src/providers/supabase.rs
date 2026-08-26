@@ -1,5 +1,5 @@
 /*!
- * Supabase adapter — sign in via the Management API (OAuth2 + PKCE) and list
+ * Supabase adapter - sign in via the Management API (OAuth2 + PKCE) and list
  * every project. The database password is never exposed by the API for security,
  * so `build_connection` prefills host/port/user/database and sets
  * `needs_password = true`; the UI prompts for the password once.
@@ -10,7 +10,7 @@ use serde_json::Value;
 
 pub const OAUTH: OAuthConfig = OAuthConfig {
     // Public client_id (safe to embed). The client SECRET is held only by the
-    // stroke.click proxy as SUPABASE_CLIENT_SECRET — never in this binary.
+    // stroke.click proxy as SUPABASE_CLIENT_SECRET - never in this binary.
     client_id: "77c997a8-fd73-4eff-8b6b-1123182ef16a",
     auth_url: "https://api.supabase.com/v1/oauth/authorize",
     // token_url is used by the proxy, not the app (the app posts to TOKEN_PROXY).
@@ -68,9 +68,9 @@ pub async fn build_connection(token: &str, project_ref: &str) -> Result<Provider
     // unreachable" on the many networks without IPv6. The shared pooler is
     // IPv4-compatible on every tier. Its username embeds the project ref
     // (`postgres.<ref>`), and session mode (port 5432) behaves like a normal
-    // Postgres connection — the right choice for a GUI client.
+    // Postgres connection - the right choice for a GUI client.
     //
-    // Ask the Management API for the exact pooler host — never guess the region
+    // Ask the Management API for the exact pooler host - never guess the region
     // prefix (aws-0 vs aws-1), since a wrong host connects to a pooler node that
     // doesn't host this project's tenant → "tenant/user … not found".
     let pooler = get(token, &format!("/projects/{project_ref}/config/database/pooler"))
@@ -91,7 +91,7 @@ pub async fn build_connection(token: &str, project_ref: &str) -> Result<Provider
 
     let mut host = String::new();
     let mut user = format!("postgres.{project_ref}");
-    // The connection_string carries the exact pooler host + tenant user — parse it.
+    // The connection_string carries the exact pooler host + tenant user - parse it.
     if let Some(cs) = obj["connection_string"].as_str().or_else(|| obj["connectionString"].as_str()) {
         if let Ok((h, _p, u, _pw, _d)) = super::neon::parse_pg_uri(cs) {
             if !h.is_empty() {
@@ -122,7 +122,7 @@ pub async fn build_connection(token: &str, project_ref: &str) -> Result<Provider
     Ok(ProviderConnection {
         db_type: "postgres".into(),
         host,
-        port: 5432, // session mode — normal Postgres semantics, best for a GUI
+        port: 5432, // session mode - normal Postgres semantics, best for a GUI
         username: user,
         password: String::new(),
         database: "postgres".into(),

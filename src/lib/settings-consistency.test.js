@@ -15,7 +15,7 @@ const read = (/** @type {string} */ rel) => readFileSync(new URL(rel, import.met
 /** Contents of `const <name> = [ … ]`, up to the first closing bracket. */
 function listBlock(/** @type {string} */ src, /** @type {string} */ name) {
   const start = src.indexOf(`const ${name}`)
-  if (start === -1) throw new Error(`${name} not found — was it renamed?`)
+  if (start === -1) throw new Error(`${name} not found - was it renamed?`)
   const end = src.indexOf(']', start)
   return src.slice(start, end)
 }
@@ -63,7 +63,7 @@ describe('settings option lists stay in step with their consumers', () => {
     const invoked = new Set(
       [...api.matchAll(/\binv(?:oke)?\(\s*['"]([a-z0-9_]+)['"]/g)].map((m) => m[1]),
     )
-    // Handlers are listed as `<module>::<name>,` — commands.rs is only the
+    // Handlers are listed as `<module>::<name>,` - commands.rs is only the
     // largest of several modules that contribute them (mcp, secrets, metrics…).
     const registered = new Set(
       [...lib.matchAll(/(?:^|\s)(?:[a-z_]+::)+([a-z0-9_]+),/g)].map((m) => m[1]),
@@ -101,7 +101,7 @@ describe('settings option lists stay in step with their consumers', () => {
       .map(Number)
     for (const name of ['DEFAULT_AGENT_CHAT_FONT', 'DEFAULT_AGENT_CODE_FONT', 'LEGACY_AGENT_CHAT_FONT', 'LEGACY_AGENT_CODE_FONT']) {
       const m = settings.match(new RegExp(`${name} = (\\d+)`))
-      expect(m, `${name} not found — was it renamed?`).toBeTruthy()
+      expect(m, `${name} not found - was it renamed?`).toBeTruthy()
       expect(sizes, `${name} = ${m[1]} is not offered by the picker`).toContain(Number(m[1]))
     }
   })
@@ -154,7 +154,7 @@ describe('the JSONPath suggestion widget is shared', () => {
   it('is used by every viewer that offers completions', () => {
     // There were three copies. The JSON tab had a good one; the SQL and table
     // views had a poorer one built from `getCompletions`, which discards the
-    // kind, detail and preview the completion engine already computed — so each
+    // kind, detail and preview the completion engine already computed - so each
     // row printed the same identifier twice and highlighted none of it.
     for (const file of ['JsonViewer', 'JsonViewerPage', 'TableJsonView']) {
       expect(read(`./components/${file}.svelte`), file).toMatch(/JsonPathSuggest/)

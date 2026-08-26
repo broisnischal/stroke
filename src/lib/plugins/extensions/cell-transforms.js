@@ -17,7 +17,7 @@ function asEpoch(value) {
 function isEpochLike(value) {
   const n = asEpoch(value)
   if (n === null) return false
-  // Plausible ~2001–2100 in seconds (1e9–4e9) or milliseconds (1e12–4e12).
+  // Plausible ~2001-2100 in seconds (1e9-4e9) or milliseconds (1e12-4e12).
   return (n > 1e9 && n < 4e9) || (n > 1e12 && n < 4e12)
 }
 /** @param {unknown} v */

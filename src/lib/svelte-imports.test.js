@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * Svelte's lifecycle functions are ordinary imports, not globals — but nothing
+ * Svelte's lifecycle functions are ordinary imports, not globals - but nothing
  * in the toolchain says so. The compiler treats an unimported `onDestroy` as a
  * free variable and emits it verbatim; `vite build` succeeds; `svelte-check`
  * reports zero errors, because these script blocks are plain JS with no

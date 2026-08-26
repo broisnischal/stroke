@@ -89,7 +89,7 @@ describe('describeAiError', () => {
 
 describe('describeAiError · quota', () => {
   const QUOTA_MESSAGE =
-    "You've used today's free AI requests. They reset at midnight UTC — or add your own API key in Settings → AI."
+    "You've used today's free AI requests. They reset at midnight UTC - or add your own API key in Settings → AI."
   const QUOTA = `AI API 429: ${JSON.stringify({
     error: { code: 'device_quota_exhausted', message: QUOTA_MESSAGE, type: 'rate_limit_error' },
   })}`

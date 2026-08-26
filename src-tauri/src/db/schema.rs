@@ -53,7 +53,7 @@ pub struct TableColumnStructure {
 }
 
 pub(crate) fn validate_ident(name: &str) -> Result<(), String> {
-    // Disallow `.` — every caller passes a single schema/table/column component
+    // Disallow `.` - every caller passes a single schema/table/column component
     // (never a `schema.table` string), so allowing `.` would let "a.b" collapse
     // into one literal quoted identifier and target the wrong object.
     if name.is_empty()
@@ -140,7 +140,7 @@ const LIST_INDEXES_SQL: &str = r#"
 /// `COUNT(*)` on a large production table is a full scan, so a handful of them
 /// pin most of the pool for minutes. Interactive queries then can't get a
 /// connection and fail with "pool timed out while waiting for an open
-/// connection" — the app starving itself, which reads as the connection being
+/// connection" - the app starving itself, which reads as the connection being
 /// broken. A count that can't finish in this budget is not worth a sidebar
 /// number; it degrades to "unknown" instead.
 const COUNT_STATEMENT_TIMEOUT: &str = "4s";
@@ -148,7 +148,7 @@ const COUNT_STATEMENT_TIMEOUT: &str = "4s";
 const COUNT_STATEMENT_TIMEOUT_MS: u64 = 4_000;
 
 async fn exact_row_count(pool: &PgPool, schema: &str, table: &str) -> Result<i64, String> {
-    // Names arrive from the frontend in the lazy-count pass — escape embedded
+    // Names arrive from the frontend in the lazy-count pass - escape embedded
     // quotes so an unusual (or hostile) identifier can't break out of the quoting.
     let q = |id: &str| format!("\"{}\"", id.replace('"', "\"\""));
     let sql = format!("SELECT COUNT(*)::bigint FROM {}.{}", q(schema), q(table));
@@ -172,7 +172,7 @@ async fn exact_row_count(pool: &PgPool, schema: &str, table: &str) -> Result<i64
 }
 
 /// Bound on concurrent COUNT(*) queries in the lazy-count pass. Firing all of
-/// them at once (join_all) on a large schema swamps the small desktop pool —
+/// them at once (join_all) on a large schema swamps the small desktop pool -
 /// 70+ acquires queue for seconds each ("time to acquire exceeded slow
 /// threshold") and starve interactive queries.
 ///
@@ -285,7 +285,7 @@ async fn list_tables_pg(pool: &PgPool, schema: &str) -> Result<Vec<TableInfo>, S
         })
         .collect();
 
-    // Views and foreign tables never get a COUNT(*) — report 0 immediately.
+    // Views and foreign tables never get a COUNT(*) - report 0 immediately.
     // Real tables keep -1 (unknown): returning right away lets the sidebar
     // render instantly, and the UI resolves exact counts in a background
     // `table_row_counts` pass instead of blocking the list on N COUNT(*)s.
@@ -653,7 +653,7 @@ async fn list_tables_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<TableIn
             // TABLE_ROWS is BIGINT UNSIGNED. COALESCE makes it non-nullable so
             // decode as u64 directly; Option<u64> can silently fail on non-null columns.
             // For InnoDB this is only an estimate and is frequently 0 (or far off)
-            // until ANALYZE TABLE runs — so a 0 estimate is treated as unknown (-1)
+            // until ANALYZE TABLE runs - so a 0 estimate is treated as unknown (-1)
             // and resolved with an exact COUNT(*) below.
             let est: i64 = r.try_get::<u64, _>(2).unwrap_or(0) as i64;
             let kind = if ty == "VIEW" { "view" } else { "table" }.to_string();
@@ -663,7 +663,7 @@ async fn list_tables_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<TableIn
         .collect();
 
     // Views report 0 immediately; base tables with no usable estimate keep -1
-    // (unknown) and are resolved lazily via `table_row_counts` — see the
+    // (unknown) and are resolved lazily via `table_row_counts` - see the
     // PostgreSQL path above.
     for t in tables.iter_mut() {
         if t.row_count < 0 && t.kind == "view" {
@@ -1152,7 +1152,7 @@ pub async fn list_sequences(state: State<'_, DbState>, schema: String) -> Result
             list_sequences_pg(&pool, &schema).await
         }
         // Sequences are a PostgreSQL concept. MySQL uses AUTO_INCREMENT and SQLite
-        // uses sqlite_sequence rowids — neither exposes first-class sequence objects,
+        // uses sqlite_sequence rowids - neither exposes first-class sequence objects,
         // so there is nothing to list for those engines (documented N/A per todo P2.12).
         _ => Ok(vec![]),
     }
@@ -1861,7 +1861,7 @@ fn incoming_fks_from_batched(
     chunk: &[String],
     target: &str,
 ) -> Option<Vec<IncomingForeignKey>> {
-    // A successful empty result means "no FKs in this chunk" — it must not fall
+    // A successful empty result means "no FKs in this chunk" - it must not fall
     // back: D1 derives column names from row keys, so zero rows = zero columns.
     if res.rows.is_empty() {
         return Some(Vec::new());
@@ -1916,7 +1916,7 @@ async fn get_incoming_fks_d1(cfg: &super::connection::D1Config, table: &str) -> 
             .and_then(|res| incoming_fks_from_batched(&res, chunk, table));
         match batched {
             Some(mut fks) => result.append(&mut fks),
-            // Table-valued pragma unavailable — per-table PRAGMA fallback.
+            // Table-valued pragma unavailable - per-table PRAGMA fallback.
             None => {
                 for from_table in chunk {
                     let tq = format!("\"{}\"", from_table.replace('"', "\"\""));
@@ -1947,7 +1947,7 @@ async fn get_incoming_fks_libsql(cfg: &super::connection::LibSqlConfig, table: &
             .and_then(|res| incoming_fks_from_batched(&res, chunk, table));
         match batched {
             Some(mut fks) => result.append(&mut fks),
-            // Table-valued pragma unavailable — per-table PRAGMA fallback.
+            // Table-valued pragma unavailable - per-table PRAGMA fallback.
             None => {
                 for from_table in chunk {
                     let tq = format!("\"{}\"", from_table.replace('"', "\"\""));

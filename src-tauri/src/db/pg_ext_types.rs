@@ -4,7 +4,7 @@ Wire decoders for the Postgres extension types the driver doesn't know.
 sqlx decodes the core types; anything an extension adds arrives as raw bytes in
 the binary protocol, and the generic "is it UTF-8?" fallback can't help because a
 vector is packed floats and a geometry is packed doubles. Without these the cells
-read `<VECTOR>` and `<GEOMETRY>` — the app can see there is data and then refuses
+read `<VECTOR>` and `<GEOMETRY>` - the app can see there is data and then refuses
 to show it, which is the least useful thing it could do with a pgvector table.
 
 Everything here reads a byte slice and returns a string in the same shape the
@@ -55,7 +55,7 @@ impl<'a> Cur<'a> {
 
 /// Shortest representation that round-trips an f32, which is what pgvector
 /// stores and prints. Widening to f64 first is what turns the stored `0.001`
-/// into `0.001000000047497451` — the f32 has to be formatted as an f32.
+/// into `0.001000000047497451` - the f32 has to be formatted as an f32.
 fn numf(v: f32) -> String {
     if v == v.trunc() && v.abs() < 1e15 {
         return format!("{}", v as i64);
@@ -71,7 +71,7 @@ fn numf(v: f32) -> String {
 }
 
 /// Shortest representation that round-trips, the way both pgvector and PostGIS
-/// print numbers — `1` not `1.0`, `0.5` not `0.50000000`.
+/// print numbers - `1` not `1.0`, `0.5` not `0.50000000`.
 fn num(v: f64) -> String {
     if v == v.trunc() && v.abs() < 1e15 {
         return format!("{}", v as i64);
@@ -226,7 +226,7 @@ fn geom(c: &mut Cur) -> Option<(String, Option<u32>)> {
         5 => "MULTILINESTRING",
         6 => "MULTIPOLYGON",
         7 => "GEOMETRYCOLLECTION",
-        _ => return None, // curves, surfaces, TIN — not modelled here
+        _ => return None, // curves, surfaces, TIN - not modelled here
     };
 
     let body = match base {

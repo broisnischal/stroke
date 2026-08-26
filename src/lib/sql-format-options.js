@@ -45,7 +45,7 @@ export const SQL_FORMAT_FIELDS = [
   { key: 'keywordCase', label: 'Keyword case', desc: 'Casing for SQL keywords (SELECT, FROM, WHERE…).', kind: 'case' },
   { key: 'dataTypeCase', label: 'Data type case', desc: 'Casing for data types (INT, VARCHAR…).', kind: 'case' },
   { key: 'functionCase', label: 'Function case', desc: 'Casing for function names (COUNT, SUM…).', kind: 'case' },
-  { key: 'identifierCase', label: 'Identifier case', desc: 'Casing for identifiers. Experimental — a quoted identifier is case-sensitive, so changing this can change what a statement means.', kind: 'case' },
+  { key: 'identifierCase', label: 'Identifier case', desc: 'Casing for identifiers. Experimental - a quoted identifier is case-sensitive, so changing this can change what a statement means.', kind: 'case' },
   { key: 'tabWidth', label: 'Tab width', desc: 'Spaces per indentation level.', kind: 'tabWidth' },
   { key: 'useTabs', label: 'Use tabs', desc: 'Indent with tab characters instead of spaces.', kind: 'bool' },
   { key: 'logicalOperatorNewline', label: 'Logical operator newline', desc: 'Put AND / OR before or after the line break.', kind: 'operatorNewline' },

@@ -146,7 +146,7 @@ describe('projectGeometry', () => {
     const p = projectGeometry(g, 100, 100, 10)
     expect(p.vertices).toHaveLength(2)
     const [a, b] = p.vertices
-    // (0,0) lands bottom-left, (10,10) top-right — y grows downward in SVG.
+    // (0,0) lands bottom-left, (10,10) top-right - y grows downward in SVG.
     expect(a.y).toBeGreaterThan(b.y)
     expect(a.x).toBeLessThan(b.x)
   })

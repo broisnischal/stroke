@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::process::{Child, Command};
 
-/// SSH tunnel configuration — serialized alongside saved connections.
+/// SSH tunnel configuration - serialized alongside saved connections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshConfig {
@@ -36,7 +36,7 @@ impl Drop for SshTunnel {
 }
 
 fn find_free_port() -> Result<u16, String> {
-    // Bind to :0 — the OS assigns an ephemeral port — then release the listener.
+    // Bind to :0 - the OS assigns an ephemeral port - then release the listener.
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("Cannot find a free local port: {e}"))?;
     let port = listener
@@ -103,7 +103,7 @@ impl SshTunnel {
             }
             if tokio::time::Instant::now() >= deadline {
                 return Err(format!(
-                    "SSH tunnel to {}@{} timed out — \
+                    "SSH tunnel to {}@{} timed out - \
                      check credentials, host reachability, and that port {} is not blocked",
                     ssh.username, ssh.host, ssh.port
                 ));

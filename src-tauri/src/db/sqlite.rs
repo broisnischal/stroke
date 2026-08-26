@@ -18,7 +18,7 @@ pub fn cell_to_json(row: &sqlx::sqlite::SqliteRow, idx: usize) -> Value {
     }
     if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
         return match v {
-            // Cap oversized text/JSON — a multi-MB cell shipped whole freezes
+            // Cap oversized text/JSON - a multi-MB cell shipped whole freezes
             // the webview (see sql_util::CELL_VALUE_CAP).
             Some(s) if s.len() > super::sql_util::CELL_VALUE_CAP => {
                 super::sql_util::oversize_cell(&col_type(row, idx), s.len(), s.as_bytes())
@@ -29,7 +29,7 @@ pub fn cell_to_json(row: &sqlx::sqlite::SqliteRow, idx: usize) -> Value {
     }
     if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
         return match v {
-            // Hex display doubles the byte count — cap blobs the same way so a
+            // Hex display doubles the byte count - cap blobs the same way so a
             // file stored in a blob column can't ship megabytes of hex.
             Some(b) if b.len() * 2 > super::sql_util::CELL_VALUE_CAP => {
                 let head: String = b
@@ -115,7 +115,7 @@ pub async fn execute_sql(pool: &SqlitePool, sql: &str) -> Result<SqlResult, Stri
     if matches!(head.as_str(), "select" | "with" | "pragma" | "explain" | "values") {
         let mut stream = sqlx::query(sql).fetch(pool);
         // Convert each row to JSON as it streams in and drop the driver row
-        // immediately — retaining the full Vec<SqliteRow> alongside the JSON
+        // immediately - retaining the full Vec<SqliteRow> alongside the JSON
         // rows would double peak memory on a large result.
         let mut columns: Vec<ColumnInfo> = Vec::new();
         let mut data: Vec<Vec<Value>> = Vec::new();
@@ -153,7 +153,7 @@ pub async fn execute_sql(pool: &SqlitePool, sql: &str) -> Result<SqlResult, Stri
             row_count: Some(n),
             message: if capped {
                 Some(format!(
-                    "Result capped at {EXECUTE_SQL_MAX_ROWS} rows — add a LIMIT clause to fetch a specific range."
+                    "Result capped at {EXECUTE_SQL_MAX_ROWS} rows - add a LIMIT clause to fetch a specific range."
                 ))
             } else {
                 None
@@ -192,7 +192,7 @@ pub async fn get_table_rows(
     sort_column: Option<String>,
     sort_direction: Option<String>,
     filters: Option<Vec<crate::db::RowFilter>>,
-    // When false, skip the primary-key/foreign-key PRAGMA round-trips — the
+    // When false, skip the primary-key/foreign-key PRAGMA round-trips - the
     // frontend already holds them for repeat fetches (pagination/sort/filter/live).
     include_meta: bool,
     // Null placement ("first"/"last"); None keeps the historical NULLS LAST default.
@@ -249,7 +249,7 @@ pub async fn get_table_rows(
         .collect();
 
     // Build WHERE clause (using ? placeholders)
-    // Each entry: (conjunct — None for first, Some("AND"/"OR") for rest, condition SQL, binds)
+    // Each entry: (conjunct - None for first, Some("AND"/"OR") for rest, condition SQL, binds)
     let mut cond_parts: Vec<(Option<&'static str>, String)> = vec![];
     let mut binds: Vec<String> = vec![];
 
@@ -322,7 +322,7 @@ pub async fn get_table_rows(
         out
     };
 
-    // ORDER BY — an explicit NULLS clause keeps ordering consistent when a column
+    // ORDER BY - an explicit NULLS clause keeps ordering consistent when a column
     // has NULLs; defaults to NULLS LAST when the caller doesn't specify placement.
     let order_clause = if let Some(col) = sort_column {
         let dir = sort_direction.as_deref().unwrap_or("asc").to_ascii_uppercase();
@@ -398,7 +398,7 @@ pub async fn get_table_rows(
         .map(|r| (0..columns.len()).map(|i| cell_to_json(r, i)).collect())
         .collect();
 
-    // Two extra PRAGMA statements serialized on the single-connection pool —
+    // Two extra PRAGMA statements serialized on the single-connection pool -
     // skip them on metadata-skipping fetches; the frontend keeps its cached values.
     let (primary_key, foreign_keys) = if include_meta {
         (
@@ -441,7 +441,7 @@ pub fn build_d1_filter(qcol: &str, op: &str, val: &str) -> (String, Vec<serde_js
 
 fn build_filter_condition(qcol: &str, op: &str, val: &str) -> (String, Vec<String>) {
     match op {
-        // Comparison operators: SQLite is dynamically typed — no cast needed.
+        // Comparison operators: SQLite is dynamically typed - no cast needed.
         // Direct comparison works correctly for integers, reals, and text alike.
         "eq"  => (format!("{qcol} = ?"),  vec![val.to_string()]),
         "neq" => (format!("{qcol} != ?"), vec![val.to_string()]),

@@ -1,5 +1,5 @@
 /*!
-Zero-config discovery of the databases already running on this machine — the ORM
+Zero-config discovery of the databases already running on this machine - the ORM
 studios pointed at one, and the database servers installed natively.
 
 `prisma studio` and `drizzle-kit studio` are already pointed at a database: the
@@ -10,7 +10,7 @@ the project's own config, and hand the frontend a ready-to-use connection.
 
 Discovery is by *process*, not by HTTP. Both studios speak private, unversioned
 HTTP APIs that would break on any upgrade, whereas a command line, a cwd and an
-environment are stable — and they yield the real database URL, so a click opens a
+environment are stable - and they yield the real database URL, so a click opens a
 native Stroke session (editing, SQL, AI, exports) instead of proxying every query
 through someone else's dev server.
 
@@ -36,7 +36,7 @@ const PORT_PROBE_SPAN: u16 = 6;
 pub struct DetectedStudio {
     /// Stable across scans, so the UI can key rows without them flickering.
     pub id: String,
-    /// `prisma` | `drizzle` — also a `DbIcon` brand id.
+    /// `prisma` | `drizzle` - also a `DbIcon` brand id.
     pub tool: String,
     pub tool_label: String,
     pub pid: u32,
@@ -156,8 +156,8 @@ fn collect_studios() -> Vec<DetectedStudio> {
             env,
         };
         let studio = describe(found);
-        // `npx`/`bunx prisma studio` shows up twice — once as the launcher, once
-        // as the process it spawned — and only the child holds the socket. One
+        // `npx`/`bunx prisma studio` shows up twice - once as the launcher, once
+        // as the process it spawned - and only the child holds the socket. One
         // row per project, preferring the entry that knows a real port and
         // resolved a database.
         match out
@@ -197,7 +197,7 @@ fn classify(args: &[String]) -> Option<&'static str> {
 /// The port a studio is really serving on.
 ///
 /// Current Prisma Studio takes a *random high port* and prints it, so neither the
-/// default nor the command line can be trusted — the process's own listening
+/// default nor the command line can be trusted - the process's own listening
 /// sockets are the only ground truth. Among several (a debugger, a query engine),
 /// prefer what the CLI asked for, then the tool's default, then the lowest.
 fn serving_port(pid: u32, arg: Option<u16>, tool: &str) -> Option<u16> {
@@ -432,7 +432,7 @@ fn merge_env_file(text: &str, out: &mut HashMap<String, String>) {
         let mut val = v.trim();
         let quoted = val.starts_with('"') || val.starts_with('\'');
         if !quoted {
-            // `KEY=value # note` — a trailing comment is not part of the value.
+            // `KEY=value # note` - a trailing comment is not part of the value.
             if let Some(i) = val.find(" #") {
                 val = val[..i].trim_end();
             }
@@ -474,7 +474,7 @@ fn resolve_prisma(p: &StudioProcess, env: &HashMap<String, String>) -> Target {
                 let base = schema.parent().unwrap_or(&p.cwd).to_path_buf();
                 let source = display_rel(&p.cwd, schema);
                 // `url` can be a Prisma Postgres / Accelerate proxy string that no
-                // driver can open — `directUrl` is the real database in that case.
+                // driver can open - `directUrl` is the real database in that case.
                 for key in ["url", "directUrl"] {
                     if let Some(url) = assign_value(&block, key, env) {
                         candidates.push(Candidate { url, base: base.clone(), source: source.clone() });
@@ -502,7 +502,7 @@ fn resolve_prisma(p: &StudioProcess, env: &HashMap<String, String>) -> Target {
     // 3. Prisma's own default, then the names the hosted providers use. A driver
     //    adapter (Turso, Neon, Vercel, D1) leaves the datasource block with a
     //    provider and nothing else, so the URL only ever exists in the
-    //    environment — which is exactly the remote case.
+    //    environment - which is exactly the remote case.
     if candidates.is_empty() {
         for key in [
             "DATABASE_URL",
@@ -531,7 +531,7 @@ fn resolve_prisma(p: &StudioProcess, env: &HashMap<String, String>) -> Target {
     let Some(first) = candidates.first() else {
         return Target::failed(
             fallback_source,
-            "Couldn't work out this project's database URL — no datasource url, and DATABASE_URL isn't set in its .env.",
+            "Couldn't work out this project's database URL - no datasource url, and DATABASE_URL isn't set in its .env.",
         );
     };
     for c in &candidates {
@@ -549,10 +549,10 @@ fn resolve_prisma(p: &StudioProcess, env: &HashMap<String, String>) -> Target {
         first.source.clone(),
         if scheme.starts_with("prisma") {
             // Accelerate/Prisma Postgres URLs are an API endpoint, not a wire
-            // protocol — but the app can reach the same database another way.
+            // protocol - but the app can reach the same database another way.
             "This is a Prisma Postgres URL, which no driver can open directly. Connect it from Hosting providers → Prisma Postgres, or add a `directUrl` to the datasource block.".to_string()
         } else {
-            format!("Stroke can't open a `{scheme}` datasource URL directly — add a `directUrl` pointing at the database itself.")
+            format!("Stroke can't open a `{scheme}` datasource URL directly - add a `directUrl` pointing at the database itself.")
         },
     )
 }
@@ -570,7 +570,7 @@ fn auth_token_from_env(env: &HashMap<String, String>) -> Option<String> {
     .cloned()
 }
 
-/// `prisma.config.ts` and friends — where Prisma 6 keeps the datasource url.
+/// `prisma.config.ts` and friends - where Prisma 6 keeps the datasource url.
 fn prisma_config_path(p: &StudioProcess) -> Option<PathBuf> {
     if let Some(arg) = flag_value(&p.args, "--config") {
         let path = p.cwd.join(arg);
@@ -646,7 +646,7 @@ fn resolve_drizzle(p: &StudioProcess, env: &HashMap<String, String>) -> Target {
     if driver.contains("expo") || declared.contains("pglite") || declared.contains("gel") {
         return Target::failed(
             source,
-            format!("`{}` runs inside the app process — there's no server here to connect to.", if driver.is_empty() { &declared } else { &driver }),
+            format!("`{}` runs inside the app process - there's no server here to connect to.", if driver.is_empty() { &declared } else { &driver }),
         );
     }
 
@@ -667,7 +667,7 @@ fn resolve_drizzle(p: &StudioProcess, env: &HashMap<String, String>) -> Target {
         }
         return Target::failed(
             source,
-            "This D1 config is missing an accountId, databaseId or token that Stroke can resolve — set them in the project's .env.",
+            "This D1 config is missing an accountId, databaseId or token that Stroke can resolve - set them in the project's .env.",
         );
     }
 
@@ -691,13 +691,13 @@ fn resolve_drizzle(p: &StudioProcess, env: &HashMap<String, String>) -> Target {
             if text.contains("miniflare-D1DatabaseObject") || text.contains(".wrangler") {
                 return Target::failed(
                     source,
-                    "This is a Cloudflare D1 local database, but miniflare hasn't created its SQLite file yet — start your dev server (or run `wrangler d1 migrations apply <db> --local`), then refresh.",
+                    "This is a Cloudflare D1 local database, but miniflare hasn't created its SQLite file yet - start your dev server (or run `wrangler d1 migrations apply <db> --local`), then refresh.",
                 );
             }
         }
         return Target::failed(
             source,
-            "Couldn't resolve dbCredentials — the env var this config points at isn't set in the project's .env.",
+            "Couldn't resolve dbCredentials - the env var this config points at isn't set in the project's .env.",
         );
     };
 
@@ -718,13 +718,13 @@ fn resolve_drizzle(p: &StudioProcess, env: &HashMap<String, String>) -> Target {
 }
 
 /// The SQLite file `wrangler ... --local` (miniflare) creates for a D1 binding.
-/// Configs that read this at runtime — a helper returning the path — can't be
+/// Configs that read this at runtime - a helper returning the path - can't be
 /// evaluated statically, but the location is fixed relative to the project, so
 /// resolve it directly.
 ///
 /// The directory holds the user's database as `<sha256>.sqlite` alongside
 /// miniflare's own `metadata.sqlite` (internal `_cf_*` bookkeeping). Selecting
-/// by name — the hash-stemmed file — is what avoids opening the metadata store
+/// by name - the hash-stemmed file - is what avoids opening the metadata store
 /// and showing empty `_cf_ALARM` tables instead of the real data.
 fn resolve_local_d1_sqlite(cwd: &Path) -> Option<String> {
     let dir = cwd.join(".wrangler/state/v3/d1/miniflare-D1DatabaseObject");
@@ -742,7 +742,7 @@ fn resolve_local_d1_sqlite(cwd: &Path) -> Option<String> {
     // One per binding in practice; if miniflare kept several, the one holding
     // the most data is the one being used. A just-written database can have a
     // near-empty main file with every row still in its `-wal`, so weigh the
-    // sidecar too — otherwise an idle binding outranks the live one. SQLite
+    // sidecar too - otherwise an idle binding outranks the live one. SQLite
     // merges the WAL on open, so the main file is still the path to hand back.
     files.sort_by_key(|f| d1_stored_bytes(f));
     files.pop().map(|f| f.to_string_lossy().to_string())
@@ -760,7 +760,7 @@ fn is_d1_database_name(stem: &str) -> bool {
     stem.len() >= 16 && stem.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// `dbCredentials: { host, port, user, password, database }` — the field form.
+/// `dbCredentials: { host, port, user, password, database }` - the field form.
 fn drizzle_url_from_parts(
     text: &str,
     dialect: &str,
@@ -815,7 +815,7 @@ fn drizzle_config_path(p: &StudioProcess) -> Option<PathBuf> {
 // ── URL → Stroke driver ───────────────────────────────────────────────────────
 
 /// Maps a resolved URL (plus whatever the config called its dialect) onto a
-/// Stroke driver id. Returns None when no driver can open it — a Prisma Postgres
+/// Stroke driver id. Returns None when no driver can open it - a Prisma Postgres
 /// proxy string, an Expo/React-Native SQLite binding, and so on.
 fn target_from_url(url: &str, dialect: &str, base: &Path) -> Option<Target> {
     let raw = url.trim();
@@ -826,7 +826,7 @@ fn target_from_url(url: &str, dialect: &str, base: &Path) -> Option<Target> {
         || (!lower.contains("://") && (d.contains("sqlite") || d.contains("better-sqlite")));
     if file_backed {
         let path = raw.trim_start_matches("file:");
-        // `:memory:` is the studio's own process memory — nothing to attach to.
+        // `:memory:` is the studio's own process memory - nothing to attach to.
         if path.is_empty() || path.contains(":memory:") {
             return None;
         }
@@ -960,7 +960,7 @@ fn interpolate(text: &str, env: &HashMap<String, String>) -> String {
             out.push_str(&rest[start..]);
             return out;
         };
-        // `${DATABASE_URL}` — inside an interpolation a bare name is a variable
+        // `${DATABASE_URL}` - inside an interpolation a bare name is a variable
         // reference, which is what dotenv-expand means by it too.
         let inner = tail[..end].trim();
         let value = resolve_expr(inner, env).or_else(|| env.get(inner).cloned());
@@ -1009,7 +1009,7 @@ fn env_var_name(expr: &str) -> Option<String> {
     }
     let start = start?;
     let tail = &after[start..];
-    // `env.get("X")` — step over the `get` and keep looking.
+    // `env.get("X")` - step over the `get` and keep looking.
     if tail.starts_with("get") && !tail[3..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
         return env_var_name(&format!("env{}", &tail[3..]));
     }
@@ -1024,7 +1024,7 @@ fn env_var_name(expr: &str) -> Option<String> {
     }
 }
 
-/// Lexically resolves `.` and `..` — `canonicalize` can't be used because the
+/// Lexically resolves `.` and `..` - `canonicalize` can't be used because the
 /// SQLite file may not exist yet (a fresh `drizzle-kit push` hasn't run).
 fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
@@ -1046,7 +1046,7 @@ fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
 }
 
-/// True when the byte offset sits on a `//` or `#` comment line — a commented-out
+/// True when the byte offset sits on a `//` or `#` comment line - a commented-out
 /// `url` must not win over the live one below it.
 fn line_is_comment(text: &str, at: usize) -> bool {
     let line_start = text[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
@@ -1273,7 +1273,7 @@ mod tests {
     fn resolves_the_local_d1_sqlite_file_for_a_helper_computed_url() {
         // The Cloudflare D1 local-dev config from the wild: `url: localD1File()`
         // computes the miniflare path at runtime. Static parsing can't reach it,
-        // so the fallback must find the file itself — under whatever name
+        // so the fallback must find the file itself - under whatever name
         // miniflare gave it, since the stem is a hash of the user's database.
         let root = std::env::temp_dir().join(format!("stroke_d1_scan_{}", std::process::id()));
         let d1_dir = root.join(".wrangler/state/v3/d1/miniflare-D1DatabaseObject");
@@ -1287,7 +1287,7 @@ mod tests {
         std::fs::write(&db, b"the real database with user tables").unwrap();
         std::fs::write(format!("{}-wal", db.display()), vec![0u8; 65536]).unwrap();
         // miniflare's own metadata store must NOT be picked, even though it
-        // outweighs both — its stem isn't a hash.
+        // outweighs both - its stem isn't a hash.
         std::fs::write(d1_dir.join("metadata.sqlite"), vec![0u8; 1 << 20]).unwrap();
 
         let found = resolve_local_d1_sqlite(&root);
@@ -1338,7 +1338,7 @@ mod tests {
 // A Postgres from the package manager has no compose file and no schema to read,
 // so there is nothing to recover a password from. What it does have is a process
 // and a port, which is enough to offer the connection with the engine's own
-// conventional superuser — the case that actually works on a dev box.
+// conventional superuser - the case that actually works on a dev box.
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -1357,7 +1357,7 @@ pub struct MachineDatabase {
 }
 
 /// Engine for a server process, matched on the executable rather than the whole
-/// command line — `psql`, `pg_dump` and an editor holding "postgres" in a path
+/// command line - `psql`, `pg_dump` and an editor holding "postgres" in a path
 /// are all clients, not servers.
 fn engine_for_process(exe: &str, args: &[String]) -> Option<&'static str> {
     let name = exe.rsplit('/').next().unwrap_or(exe).to_lowercase();
@@ -1393,7 +1393,7 @@ fn machine_defaults(engine: &str) -> (&'static str, &'static str) {
 ///
 /// A container's server process is visible in the host process list too, but its
 /// listening socket lives in the container's own network namespace, so it never
-/// matches the host's socket table and drops out here — which is what keeps it
+/// matches the host's socket table and drops out here - which is what keeps it
 /// from being listed twice alongside its Docker row.
 #[tauri::command]
 pub async fn scan_machine_databases() -> Result<Vec<MachineDatabase>, String> {

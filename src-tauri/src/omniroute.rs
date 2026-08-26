@@ -28,7 +28,7 @@ impl OmniRouteState {
     }
 
     /// Synchronously kill the child if this app started one. Called from the
-    /// `RunEvent::Exit` hook in lib.rs — the async `omniroute_stop` path never
+    /// `RunEvent::Exit` hook in lib.rs - the async `omniroute_stop` path never
     /// runs on quit, so without this the proxy outlives the app.
     pub fn kill_now(&self) {
         if let Ok(mut slot) = self.child.lock() {
@@ -59,7 +59,7 @@ fn emit(app: &tauri::AppHandle, line: &str, kind: &str) {
 //
 // A windowed app does not get the PATH a terminal gets. macOS starts a .app
 // from launchd, which hands it `/usr/bin:/bin:/usr/sbin:/sbin` and nothing
-// else — no Homebrew, no nvm, no fnm, no Volta. Node lives in exactly those
+// else - no Homebrew, no nvm, no fnm, no Volta. Node lives in exactly those
 // places, so every lookup here missed and the app told users who plainly had
 // Node installed that they had none, with no way to act on it. Linux .desktop
 // launches have the same gap; Windows GUI processes do inherit the user PATH.
@@ -124,7 +124,7 @@ async fn login_shell_path() -> Option<String> {
     .await
     .ok()?
     .ok()?;
-    // `printf` emits no newline, so the PATH is whatever follows the last one —
+    // `printf` emits no newline, so the PATH is whatever follows the last one -
     // login shells are free to print a banner ahead of it.
     let text = String::from_utf8_lossy(&out.stdout);
     let p = text.rsplit('\n').next().unwrap_or("").trim().to_string();
@@ -146,7 +146,7 @@ fn fallback_dirs() -> Vec<String> {
         out.push(format!("{home}/{rel}"));
     }
     // Version managers keep every Node release in its own directory, so the bin
-    // path cannot be written down — enumerate, newest first.
+    // path cannot be written down - enumerate, newest first.
     out.extend(node_version_bins(&format!("{home}/.nvm/versions/node"), "bin"));
     out.extend(node_version_bins(
         &format!("{home}/Library/Application Support/fnm/node-versions"),
@@ -232,15 +232,15 @@ async fn omniroute_command() -> Cmd {
 // do was tell them to go run npm in a terminal themselves.
 //
 // So the app keeps its own copy under its data directory. That needs no
-// elevation on any platform, leaves the user's global npm prefix alone, and —
-// because the entry script then sits at a known absolute path — lets the server
+// elevation on any platform, leaves the user's global npm prefix alone, and -
+// because the entry script then sits at a known absolute path - lets the server
 // start as `node <entry>`, with no PATH search and no shell in between. On
 // Windows that is what stops a console window from existing, rather than merely
 // hiding one.
 //
 // A pre-existing global install still works: every lookup falls back to it.
 
-/// `<app data>/omniroute` — the npm project the app installs into.
+/// `<app data>/omniroute` - the npm project the app installs into.
 fn managed_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app
         .path()

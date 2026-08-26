@@ -1,7 +1,7 @@
-//! Geo view — PostGIS layer discovery and map feature fetching.
+//! Geo view - PostGIS layer discovery and map feature fetching.
 //!
 //! The map is fed by two commands. [`geo_overview`] answers "is this a spatial
-//! database, and what can be mapped?" — cheap enough to run on connect.
+//! database, and what can be mapped?" - cheap enough to run on connect.
 //! [`geo_features`] fetches what belongs in the current viewport.
 //!
 //! Two constraints shape everything here:
@@ -35,7 +35,7 @@ pub struct GeoLayer {
     pub schema: String,
     pub table: String,
     pub column: String,
-    /// "geometry" or "geography" — they need different SQL, so the UI keeps it.
+    /// "geometry" or "geography" - they need different SQL, so the UI keeps it.
     pub kind: String,
     /// 0 when the column is untyped (`geometry` with no typmod), which PostGIS
     /// treats as "unknown CRS" and this module reads as already-WGS84.
@@ -67,9 +67,9 @@ pub struct GeoBbox {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeoFeatures {
-    /// "features" — real geometries, one per row; each carries its whole row in
+    /// "features" - real geometries, one per row; each carries its whole row in
     /// `properties`, so clicking one can show the record.
-    /// "clusters" — grid-collapsed points carrying a `count`. The viewport held
+    /// "clusters" - grid-collapsed points carrying a `count`. The viewport held
     /// more rows than could be drawn.
     pub mode: String,
     pub features: Vec<Value>,
@@ -80,7 +80,7 @@ pub struct GeoFeatures {
     /// "zoom to fit". Only computed when asked for.
     pub extent: Option<[f64; 4]>,
     /// The table's column names, for the map's filter bar. Sent alongside the
-    /// extent — i.e. once per layer selection, not per pan. Cluster rows carry
+    /// extent - i.e. once per layer selection, not per pan. Cluster rows carry
     /// only a count, so without this a table large enough to *always* cluster
     /// could never offer a filter at all.
     pub columns: Vec<String>,
@@ -198,7 +198,7 @@ fn wgs84_expr(col: &str, kind: &str, srid: i32) -> String {
 /// The GeoJSON-representable form of a geometry expression.
 ///
 /// A column with a declared type can only ever hold that type, so it needs
-/// nothing but dropping Z/M — GeoJSON has no third ordinate, and PostGIS emits
+/// nothing but dropping Z/M - GeoJSON has no third ordinate, and PostGIS emits
 /// one if it isn't asked otherwise.
 ///
 /// An *untyped* `geometry` column can hold anything PostGIS can parse, including
@@ -221,7 +221,7 @@ fn geojson_expr(g: &str, geom_type: &str) -> String {
 
 /// A bounding-box predicate against the *stored* column, so the GiST index can
 /// answer it. The viewport arrives in WGS84 and is pushed into the column's own
-/// SRID — the opposite direction to [`wgs84_expr`], and the reason a map over a
+/// SRID - the opposite direction to [`wgs84_expr`], and the reason a map over a
 /// SRID-3857 table is still index-driven.
 fn bbox_predicate(col: &str, kind: &str, srid: i32, p: usize) -> String {
     let env = format!("ST_MakeEnvelope(${p}, ${}, ${}, ${}, 4326)", p + 1, p + 2, p + 3);
@@ -297,7 +297,7 @@ async fn geom_column_names(
 
 /// The layer's full WGS84 extent, for "zoom to fit".
 ///
-/// Unfiltered, this reads the GiST index's own statistics — instant, and the
+/// Unfiltered, this reads the GiST index's own statistics - instant, and the
 /// only affordable answer on a large table. It is an estimate and can be missing
 /// (never analyzed, no index), in which case, and whenever a filter is active,
 /// the exact extent is measured. `ST_EstimatedExtent` returns `box2d`, a type
@@ -366,7 +366,7 @@ async fn layer_extent(
 
 /// Features for the current viewport.
 ///
-/// `simplify` is a tolerance in degrees, normally "one screen pixel" — dropping
+/// `simplify` is a tolerance in degrees, normally "one screen pixel" - dropping
 /// vertices the viewer could not resolve anyway is what keeps a 30k-row road
 /// layer interactive. `cluster_cell` is the grid size used when the viewport
 /// holds more than `limit` rows.
@@ -378,7 +378,7 @@ pub async fn geo_features(
     column: String,
     kind: String,
     srid: i32,
-    // The column's declared geometry type, straight from `GeoLayer` — it decides
+    // The column's declared geometry type, straight from `GeoLayer` - it decides
     // whether the rows need the defensive GeoJSON conversion.
     geom_type: String,
     bbox: Option<GeoBbox>,
@@ -459,7 +459,7 @@ pub async fn geo_features(
         // The caller's cell size is "so many screen pixels wide", expressed in
         // degrees of LONGITUDE. Snapping latitude by the same number of degrees
         // makes every cell taller than it is wide once the map is drawn, because
-        // Mercator stretches latitude by 1/cos(φ) — 1.6x across Europe, 2x by
+        // Mercator stretches latitude by 1/cos(φ) - 1.6x across Europe, 2x by
         // 60°N. The visible result is each place breaking into a vertical stack
         // of separate blobs with gaps the marks can't bridge.
         //
@@ -485,7 +485,7 @@ pub async fn geo_features(
     } else {
         // `preserveCollapsed` keeps a degenerate stand-in for shapes smaller than
         // the tolerance. Without it ST_Simplify returns NULL for them and small
-        // features silently vanish as you zoom out — the worst possible failure
+        // features silently vanish as you zoom out - the worst possible failure
         // for a map, because nothing looks wrong.
         let geom = if simplify.is_finite() && simplify > 0.0 {
             format!("ST_Simplify({safe}, {simplify}, true)")

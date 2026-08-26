@@ -86,7 +86,7 @@ function isPlainIdent(name) {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
 }
 
-/** Property key for an object literal — quoted only when it has to be. */
+/** Property key for an object literal - quoted only when it has to be. */
 function propKey(name) {
   return isPlainIdent(name) ? name : JSON.stringify(name)
 }
@@ -302,7 +302,7 @@ function relationsOf(model) {
     const stem = r.column.name.replace(/_?id$/i, '')
     const base = (stem && stem !== r.column.name ? toCamel(stem) : toCamel(r.parent.name)) || toCamel(r.parent.name)
     r.childField = claim(r.child, base)
-    // The back-reference is named after the child table — unless two keys point
+    // The back-reference is named after the child table - unless two keys point
     // here, in which case the key's own name is what tells them apart
     // (`authorPosts` / `reviewerPosts`, never `posts` / `posts2`).
     const childName = r.one ? toCamel(r.child.name) : pluralField(r.child.name)
@@ -317,7 +317,7 @@ function relationsOf(model) {
 
 /**
  * A list-shaped field name: `post` → `posts`, `address` → `addresses`.
- * A table that is already plural keeps its name — `posts` must not become
+ * A table that is already plural keeps its name - `posts` must not become
  * `postses`. `ss` is the tell that a trailing `s` is part of the word.
  */
 function pluralField(tableName) {
@@ -371,7 +371,7 @@ function prismaType(c, model) {
   return map[t] ?? null
 }
 
-/** `@db.VarChar(255)` and friends — only where they carry real information. */
+/** `@db.VarChar(255)` and friends - only where they carry real information. */
 function prismaNativeType(c, model) {
   // Native-type attributes are per-provider; only the Postgres set is emitted.
   if (model.dialect !== 'postgres' && model.dialect !== 'cockroachdb') return ''
@@ -401,7 +401,7 @@ function prismaDefault(c, type) {
   if (/^-?\d+(\.\d+)?$/.test(v) && (type === 'Int' || type === 'BigInt' || type === 'Float' || type === 'Decimal')) {
     return ` @default(${v})`
   }
-  // `'draft'::text` / `'draft'::"Status"` — a literal wearing a cast.
+  // `'draft'::text` / `'draft'::"Status"` - a literal wearing a cast.
   const lit = v.match(/^'((?:[^']|'')*)'(::.+)?$/)
   if (lit) {
     const text = lit[1].replace(/''/g, "'")
@@ -506,7 +506,7 @@ export function renderPrismaSchema(model, opts = {}) {
     }
     for (const idx of t.indexes) {
       const cols = idx.columns.map((c) => fieldNameFor(t, c)).filter(Boolean)
-      if (cols.length !== idx.columns.length) continue // expression index — no field to point at
+      if (cols.length !== idx.columns.length) continue // expression index - no field to point at
       if (idx.unique && cols.length === 1) continue    // already `@unique` on the field
       extras.push(`  @@${idx.unique ? 'unique' : 'index'}([${cols.join(', ')}])`)
     }
@@ -595,7 +595,7 @@ function drizzleColumn(c, model) {
     inet: 'inet', cidr: 'cidr', macaddr: 'macaddr', interval: 'interval', time: 'time', money: 'text',
   }
   // No built-in bytea: keep the column honest instead of silently typing it text.
-  if (t === 'bytea') return { expr: `text(${name}) /* bytea — declare a customType */`, helpers: ['text'] }
+  if (t === 'bytea') return { expr: `text(${name}) /* bytea - declare a customType */`, helpers: ['text'] }
 
   let expr
   if (t === 'varchar' || t === 'character varying') expr = use('varchar', c.args[0] ? `, { length: ${c.args[0]} }` : '')
@@ -768,7 +768,7 @@ export function renderDrizzleSchema(model) {
 // created first, and a schema with a cycle (or simply alphabetical ordering
 // that puts the child first) cannot satisfy that at all.
 
-/** Every engine can be described as DDL — it is their own language. */
+/** Every engine can be described as DDL - it is their own language. */
 export const SQL_ENGINES = [
   'postgres', 'cockroachdb', 'mysql', 'mariadb',
   'sqlite', 'libsql', 'd1', 'mssql', 'duckdb', 'clickhouse',

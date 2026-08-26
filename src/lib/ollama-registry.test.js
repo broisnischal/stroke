@@ -27,8 +27,8 @@ describe('classifyOllamaModels', () => {
   })
 
   it('puts the suffix on the tag when there is one', () => {
-    // `gemma4:31b:cloud` happens to work on 0.24.0, but the documented form —
-    // and the one older releases accept — is a suffixed tag.
+    // `gemma4:31b:cloud` happens to work on 0.24.0, but the documented form -
+    // and the one older releases accept - is a suffixed tag.
     const { cloud } = classifyOllamaModels([{ name: 'gemma4:31b', size: 62.5e9 }])
     expect(cloud[0].id).toBe('gemma4:31b-cloud')
     expect(cloud[0].pull).toBe('ollama run gemma4:31b-cloud')

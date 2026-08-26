@@ -91,7 +91,7 @@
    */
   function cleanPreviewOption(option) {
     // Shared with the dashboard: a saved option also carries the theme colours
-    // it was built in, so re-theming has to happen here too — a chart saved in
+    // it was built in, so re-theming has to happen here too - a chart saved in
     // light mode used to render its axis labels as dark text on a dark card.
     return restyleSavedOption(option, { isDark: $isCurrentThemeDark })
   }

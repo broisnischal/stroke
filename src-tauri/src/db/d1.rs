@@ -8,7 +8,7 @@ use std::time::Instant;
 // ── Shared HTTP client ─────────────────────────────────────────────────────────
 // One client for the whole process lifetime. reqwest maintains an internal
 // connection pool, so subsequent requests to the same host reuse the TLS
-// session and avoid the ~300–700 ms TLS handshake on every call.
+// session and avoid the ~300-700 ms TLS handshake on every call.
 
 static D1_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
@@ -20,7 +20,7 @@ fn client() -> &'static reqwest::Client {
             .pool_idle_timeout(std::time::Duration::from_secs(90))
             // Without these, a REST call that never answers (captive portal, dropped
             // route, Cloudflare edge stall) leaves the UI spinning on "Connecting…"
-            // forever — the command simply never returns.
+            // forever - the command simply never returns.
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(60))
             .build()
@@ -78,7 +78,7 @@ fn result_to_sql(result: D1QueryResult, elapsed: u64) -> Result<SqlResult, Strin
         .map(|row| {
             columns
                 .iter()
-                // Cap oversized cells — a multi-MB TEXT/JSON value shipped whole
+                // Cap oversized cells - a multi-MB TEXT/JSON value shipped whole
                 // freezes the webview (see sql_util::CELL_VALUE_CAP); small
                 // scalars pass through untouched.
                 .map(|c| {
@@ -142,7 +142,7 @@ pub async fn query(config: &D1Config, sql: &str, params: Vec<Value>) -> Result<S
     // a session that worked ten minutes ago starts answering 401 to everything
     // until you reconnect. Exchange the refresh token once and replay the
     // request; if that still fails, the error below is the real one and the user
-    // genuinely needs to re-authorize. Exactly one retry — a revoked token would
+    // genuinely needs to re-authorize. Exactly one retry - a revoked token would
     // otherwise loop.
     if res.status() == reqwest::StatusCode::UNAUTHORIZED {
         if let Some(fresh) = crate::cloudflare::refreshed_token().await {

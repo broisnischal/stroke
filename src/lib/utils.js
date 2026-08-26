@@ -9,7 +9,7 @@ import { extendTailwindMerge } from 'tailwind-merge'
  *
  *   cn('bg-primary text-primary-foreground', 'text-ui-sm font-semibold')
  *
- * silently loses `text-primary-foreground` — the element falls back to inheriting
+ * silently loses `text-primary-foreground` - the element falls back to inheriting
  * the ambient colour. That is how the "Add connection" button rendered as a blank
  * white slab on the dark themes: white-on-white, label and icon invisible.
  *

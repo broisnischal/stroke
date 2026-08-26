@@ -206,7 +206,7 @@ export const TABLE_ALIGN_OPTIONS = /** @type {const} */ ([
 export const TABLE_ALIGN_IDS = TABLE_ALIGN_OPTIONS.map((o) => o.id)
 export const DEFAULT_TABLE_ALIGN = 'left'
 
-// Must stay in step with DATA_VIEW_MODES in TableToolbar.svelte — that list is
+// Must stay in step with DATA_VIEW_MODES in TableToolbar.svelte - that list is
 // what a tab can actually switch to, this one is what you may pick as the
 // default. 'erd' was added to the toolbar without being added here, so it was
 // the one view you could open but never default to.
@@ -301,7 +301,7 @@ export const DEFAULT_SETTINGS = {
   cmdkAiEnabled: false,
   // Soft-wrap in every JSON viewer. Off by default: unwrapped keeps the
   // structure scannable down the left edge, and one embedding value can run to
-  // tens of thousands of characters — wrapped, it buries every row around it.
+  // tens of thousands of characters - wrapped, it buries every row around it.
   jsonWordWrap: false,
   // Off by default, i.e. the grid and the sidebar scroll with the app's own eased
   // scrolling. Turning it on hands both back to the OS - which is what you want
@@ -322,7 +322,7 @@ export const DEFAULT_SETTINGS = {
   // succeeded is filed under Saved Queries too, deduplicated by its SQL.
   autoSaveQueries: false,
   // On by default, and stated plainly in Settings. What it sends is a fixed
-  // list of event names, the version and the OS — never a query, a table name
+  // list of event names, the version and the OS - never a query, a table name
   // or anything about a connection. See src/lib/telemetry.js.
   telemetry: true,
   liveModeEnabled: false,
@@ -366,8 +366,8 @@ export const appVimMode = writable(false)
 export const appCmdkAi = writable(false)
 
 /** Reactive JSON soft-wrap preference (synced by applySettings).
- *  Every JSON viewer subscribes, so flipping it in Settings — or from the Wrap
- *  button on any one of them — reflows all of them at once instead of leaving
+ *  Every JSON viewer subscribes, so flipping it in Settings - or from the Wrap
+ *  button on any one of them - reflows all of them at once instead of leaving
  *  each open view on whatever it happened to be created with. */
 export const appJsonWordWrap = writable(false)
 
@@ -448,7 +448,7 @@ let _settingsCache = null
 /**
  * On a fresh install (no saved settings) pick the theme to match the OS
  * appearance: Light Studio for a light system, Dark Studio otherwise. Only ever
- * consulted on the very first load — once the user has any saved settings their
+ * consulted on the very first load - once the user has any saved settings their
  * chosen theme wins and this is never used again.
  * @returns {ThemeId}
  */
@@ -468,7 +468,7 @@ function systemPreferredTheme() {
 /**
  * Windows renders the UI a touch small at 100% (higher default DPI handling than
  * macOS), so new installs there default to 125%. Other platforms keep 100%.
- * First-launch only — the user's saved zoom always wins afterwards.
+ * First-launch only - the user's saved zoom always wins afterwards.
  * @returns {number}
  */
 function defaultZoomForPlatform() {
@@ -815,8 +815,8 @@ export function toggleLightDark() {
   const current = loadSettings()
   // Record the theme being *left* before reading the other mode's memory.
   // `updateSettings` only ever records the theme being set, so a theme that was
-  // chosen in an earlier session — or before this per-mode memory existed, or on
-  // a first launch where the default came from the OS appearance — was never
+  // chosen in an earlier session - or before this per-mode memory existed, or on
+  // a first launch where the default came from the OS appearance - was never
   // written down. Toggling away from it then fell back to plain Dark/Light
   // Studio and the choice was lost on the way back. Recording here makes the
   // round-trip lossless: whatever you are looking at is what you return to.

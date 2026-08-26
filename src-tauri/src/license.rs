@@ -1,4 +1,4 @@
-/// License system — Ed25519 signed keys + 5-day trial.
+/// License system - Ed25519 signed keys + 5-day trial.
 ///
 /// Key format:  <base64url_message>.<base64url_64_byte_signature>
 /// Message:     "v1:{email}:{plan}:{iat}:{exp}"   (UTF-8, exp=0 means lifetime)
@@ -7,12 +7,12 @@
 ///   <app_data_dir>/license.json
 ///
 /// Trial is tracked in TWO locations (8 LE bytes = u64 unix timestamp of first launch):
-///   <app_data_dir>/.trial        — removed on a full uninstall
-///   <home>/.stroke/trial         — survives uninstall, so reinstalling does NOT
+///   <app_data_dir>/.trial        - removed on a full uninstall
+///   <home>/.stroke/trial         - survives uninstall, so reinstalling does NOT
 ///                                  grant a fresh trial. The earliest timestamp
 ///                                  across both wins, and both are repaired on read.
 ///   (For tamper-proof enforcement across full disk wipes, register the trial
-///    start server-side keyed by device_id — the API scaffolding already exists.)
+///    start server-side keyed by device_id - the API scaffolding already exists.)
 ///
 /// -------------------------------------------------------------------
 /// SETUP: run  `node scripts/license-tool.mjs keygen`  once.
@@ -205,7 +205,7 @@ fn now_secs() -> u64 {
 }
 
 /// Reads the trial start across all mirror locations and returns `days_remaining`
-/// (negative = expired). The EARLIEST timestamp found wins — so deleting one copy
+/// (negative = expired). The EARLIEST timestamp found wins - so deleting one copy
 /// (e.g. uninstalling, which wipes app-data) can't grant a fresh trial while the
 /// home-dir copy survives. Every location is (re)written with the winning start so
 /// a missing/newer copy is repaired on each launch.
@@ -222,7 +222,7 @@ pub fn trial_days_remaining(data_dir: &Path) -> i64 {
         }
     }
 
-    // First launch on this device (or every copy was removed) — start now.
+    // First launch on this device (or every copy was removed) - start now.
     let start_secs = earliest.unwrap_or_else(now_secs);
 
     // Propagate/repair the winning start to every location.
@@ -254,7 +254,7 @@ fn local_trial_start(data_dir: &Path) -> Option<u64> {
 
 /// Phone home to sync the trial clock with the server (earliest-wins). The
 /// server records the start the first time it sees this device and always
-/// returns the earliest known start — so a reinstall or disk wipe can't hand
+/// returns the earliest known start - so a reinstall or disk wipe can't hand
 /// out a fresh trial. On success the authoritative start is written to every
 /// local mirror so the next local check reflects it. No-op when offline.
 pub async fn reconcile_trial(data_dir: &Path) {
@@ -269,7 +269,7 @@ pub async fn reconcile_trial(data_dir: &Path) {
     }
 }
 
-/// DEBUG ONLY — write a trial start timestamp N days in the past so the UI
+/// DEBUG ONLY - write a trial start timestamp N days in the past so the UI
 /// shows "N days elapsed" without waiting for real time to pass.
 #[cfg(debug_assertions)]
 pub fn debug_set_trial_days_ago(data_dir: &Path, days_ago: u64) -> Result<(), String> {
@@ -283,7 +283,7 @@ pub fn debug_set_trial_days_ago(data_dir: &Path, days_ago: u64) -> Result<(), St
     Ok(())
 }
 
-/// DEBUG ONLY — delete every trial mirror so the next check starts a fresh trial.
+/// DEBUG ONLY - delete every trial mirror so the next check starts a fresh trial.
 #[cfg(debug_assertions)]
 pub fn debug_reset_trial(data_dir: &Path) -> Result<(), String> {
     for p in trial_paths(data_dir) {
@@ -304,7 +304,7 @@ pub struct ParsedKey {
     pub expires_at: Option<u64>,
 }
 
-/// Return the hex SHA-256 of a key string — used to populate REVOKED_KEY_HASHES.
+/// Return the hex SHA-256 of a key string - used to populate REVOKED_KEY_HASHES.
 pub fn key_hash(key: &str) -> String {
     let mut h = Sha256::new();
     h.update(key.as_bytes());
@@ -328,7 +328,7 @@ pub fn verify_key(key: &str) -> Result<ParsedKey, String> {
 
     // Reject placeholder key
     if pk_bytes == [0u8; 32] {
-        return Err("Public key not configured — run `node scripts/license-tool.mjs keygen` and update PUBLIC_KEY_HEX in license.rs".to_string());
+        return Err("Public key not configured - run `node scripts/license-tool.mjs keygen` and update PUBLIC_KEY_HEX in license.rs".to_string());
     }
 
     let verifying_key =
@@ -355,7 +355,7 @@ pub fn verify_key(key: &str) -> Result<ParsedKey, String> {
     // Verify Ed25519 signature
     verifying_key
         .verify(&msg_bytes, &signature)
-        .map_err(|_| "invalid license signature — key may be forged or corrupted".to_string())?;
+        .map_err(|_| "invalid license signature - key may be forged or corrupted".to_string())?;
 
     // Parse message "v1:{email}:{plan}:{iat}:{exp}"
     let msg_str = String::from_utf8(msg_bytes)
@@ -438,7 +438,7 @@ fn http_client() -> &'static reqwest::Client {
     })
 }
 
-/// POST /api/license/activate — registers this device with the server.
+/// POST /api/license/activate - registers this device with the server.
 /// Returns the server JSON on success, or an error string.
 /// On network failure returns Ok(None) so the caller can apply an offline grace.
 pub async fn api_activate(
@@ -472,7 +472,7 @@ pub async fn api_activate(
     }
 }
 
-/// POST /api/license/check — phone-home to detect server-side revocation.
+/// POST /api/license/check - phone-home to detect server-side revocation.
 /// Returns `true` if still valid, `false` if revoked/invalid.
 /// Returns `None` on network error (caller should skip and retry later).
 pub async fn api_check(key: &str, device_id: &str) -> Option<bool> {
@@ -487,7 +487,7 @@ pub async fn api_check(key: &str, device_id: &str) -> Option<bool> {
     Some(json.get("valid").and_then(|v| v.as_bool()).unwrap_or(false))
 }
 
-/// POST /api/license/trial — register/sync this device's trial start.
+/// POST /api/license/trial - register/sync this device's trial start.
 /// Sends the local start (if any) so the server can keep the earliest; returns
 /// the server's authoritative start (unix seconds), or None on network error.
 pub async fn api_trial(device_id: &str, local_started_at: Option<u64>) -> Option<u64> {
@@ -505,7 +505,7 @@ pub async fn api_trial(device_id: &str, local_started_at: Option<u64>) -> Option
     json.get("started_at").and_then(|v| v.as_u64())
 }
 
-/// POST /api/license/deactivate — releases the seat on the server.
+/// POST /api/license/deactivate - releases the seat on the server.
 /// Fire-and-forget; silently ignores errors.
 pub async fn api_deactivate(key: &str, device_id: &str) {
     let body = serde_json::json!({ "key": key, "device_id": device_id });
@@ -533,10 +533,10 @@ pub fn check_status(data_dir: &Path) -> LicenseStatus {
                         expires_at: parsed.expires_at,
                     };
                 }
-                // Device mismatch — treat as expired trial so they can re-activate
+                // Device mismatch - treat as expired trial so they can re-activate
             }
             Err(_) => {
-                // Corrupted / tampered license file — remove it
+                // Corrupted / tampered license file - remove it
                 let _ = delete_license(data_dir);
             }
         }

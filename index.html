@@ -13,7 +13,7 @@
         const lightThemes = ['light', 'parchment', 'ice', 'github-light', 'light-high-contrast']
         let theme = parsed?.theme
         if (!valid.includes(theme)) {
-          // No saved preference — follow the OS
+          // No saved preference - follow the OS
           const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches !== false
           theme = prefersDark ? 'dark' : 'light'
         }

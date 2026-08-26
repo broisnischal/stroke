@@ -150,7 +150,7 @@ pub struct RedisConfig {
     pub host: String,
     pub port: u16,
     pub password: Option<String>,
-    /// Logical database index (0–15 by default).
+    /// Logical database index (0-15 by default).
     #[serde(default)]
     pub db: u8,
     /// Use TLS (rediss://) instead of plain TCP (redis://).
@@ -342,10 +342,10 @@ async fn close_existing(state: &State<'_, DbState>) {
     let old = state.conn.lock().ok().and_then(|mut g| g.take());
     let Some(conn) = old else { return };
     // Drain the old pool in the background. Pool::close() waits for every
-    // connection to be handed back — and against a dead peer (sleep/wake,
+    // connection to be handed back - and against a dead peer (sleep/wake,
     // network change: exactly the state a reconnect follows) that stalls for
-    // seconds. Nothing downstream needs the drain to finish — the state slot
-    // is already empty — so never make connect/switch wait on it. The timeout
+    // seconds. Nothing downstream needs the drain to finish - the state slot
+    // is already empty - so never make connect/switch wait on it. The timeout
     // caps the drain; after that the OS cleans up the sockets.
     tokio::spawn(async move {
         let timeout = std::time::Duration::from_secs(3);
@@ -390,7 +390,7 @@ enum Preflight {
     Unreachable(String),
     /// Indeterminate: candidates were still in flight when the budget ran out.
     /// A slow VPN/satellite link looks exactly like this, so this must NEVER
-    /// veto the real connect — it only supplies the message if that stalls too.
+    /// veto the real connect - it only supplies the message if that stalls too.
     Inconclusive(String),
 }
 
@@ -448,7 +448,7 @@ async fn preflight(host: &str, port: u16) -> Preflight {
     if stalled {
         // Some address never answered. Could be a slow link, so stay advisory.
         Preflight::Inconclusive(format!(
-            "Can't reach {target} — no response within {}s. Check the host/port, and whether a firewall or VPN is blocking it.",
+            "Can't reach {target} - no response within {}s. Check the host/port, and whether a firewall or VPN is blocking it.",
             TCP_BUDGET.as_secs()
         ))
     } else {
@@ -479,7 +479,7 @@ async fn preflight(host: &str, port: u16) -> Preflight {
 /// host still connects.
 ///
 /// Phase timings are logged at info level. "Connecting is slow" is otherwise
-/// unattributable from the outside — name lookup, TCP, and TLS+auth stall for
+/// unattributable from the outside - name lookup, TCP, and TLS+auth stall for
 /// completely different reasons, and the machines where this reproduces (Windows
 /// behind a VPN, corporate DNS) are rarely the machine doing the debugging.
 async fn connect_racing_probe<T>(
@@ -555,7 +555,7 @@ async fn connect_racing_probe<T>(
 /// connections standing by so a burst never pays a handshake, and
 /// `test_before_acquire(false)` skips the ping that would prove they're alive.
 /// Together they mean that after a laptop sleep, a VPN flip or a wifi change
-/// every standing connection is dead and the next query gets one of them — which
+/// every standing connection is dead and the next query gets one of them - which
 /// is the slow, error-then-reconnect path the user actually feels.
 ///
 /// Pinging every acquire costs a full round trip six times over on one table
@@ -580,7 +580,7 @@ fn pg_pool_builder() -> PgPoolOptions {
         // BACKGROUND so a burst finds them ready instead of opening its own
         // mid-flight. Idle connections coming back dead after sleep/wake is
         // handled by the idle-gated ping below, so this only has to cover the
-        // burst — and on a host where one handshake costs seconds (a proxied
+        // burst - and on a host where one handshake costs seconds (a proxied
         // serverless Postgres measured at ~5.7s) four background opens raced the
         // first table open's six queries for the same ten slots. The row counts
         // lost that race, which is exactly what "pool timed out while waiting for
@@ -588,13 +588,13 @@ fn pg_pool_builder() -> PgPoolOptions {
         .min_connections(2)
         // 20s, not 10: a single handshake to a proxied serverless host measured
         // 5.7s, so a query queued behind two of them blew a 10s ceiling and failed
-        // as "pool timed out" — reporting a timeout for a connection that was
+        // as "pool timed out" - reporting a timeout for a connection that was
         // simply still being made. The connect path has its own CONNECT_DEADLINE;
         // this only bounds how long a query waits for a slot.
         .acquire_timeout(Duration::from_secs(20))
         // Keep connections warm for the whole active session. A short idle_timeout
         // (was 30 s) meant any pause longer than that forced a full TCP+TLS+auth
-        // re-handshake on the next query — on a remote/SSL host that's seconds of
+        // re-handshake on the next query - on a remote/SSL host that's seconds of
         // latency per connection, and a single table open opens several. 10 min
         // keeps the pool warm between interactions so repeat fetches stay fast;
         // test_before_acquire (sqlx default) still drops connections killed by
@@ -611,7 +611,7 @@ fn pg_pool_builder() -> PgPoolOptions {
         // Staleness is bounded by max_lifetime, and anything idle long enough to
         // have been killed by a sleep/wake is checked by `before_acquire` below.
         .test_before_acquire(false)
-        // Ping only what might be dead — see STALE_AFTER. A failure here makes the
+        // Ping only what might be dead - see STALE_AFTER. A failure here makes the
         // pool drop this connection and hand over another (or open one), so a
         // stale pool repairs itself during acquire rather than after a failed query.
         .before_acquire(|conn, meta| {
@@ -629,7 +629,7 @@ fn pg_pool_builder() -> PgPoolOptions {
 // (`warm_pool`), from a time when `min_connections` was 0 and the pool started
 // with exactly the one connection the handshake produced. `min_connections(4)`
 // now has the pool's own maintenance task doing that in the background, so the
-// warm added nothing but three more acquires per connect — and because it HELD
+// warm added nothing but three more acquires per connect - and because it HELD
 // each one until the last landed, it was also what made "pool timed out while
 // waiting for an open connection" reachable on a slow link. Removed rather than
 // tuned: the pool already does this, and one mechanism is easier to reason about
@@ -638,7 +638,7 @@ fn pg_pool_builder() -> PgPoolOptions {
 /// Turn sqlx's `PoolTimedOut` into the error that actually caused it.
 ///
 /// A pool `acquire()` retries internally and reports only "pool timed out while
-/// waiting for an open connection" — which says nothing about *why* no
+/// waiting for an open connection" - which says nothing about *why* no
 /// connection could be established (bad password, server at max_connections, TLS
 /// refused). One direct connection attempt surfaces the real message. Runs only
 /// on the failure path, so a successful connect pays nothing.
@@ -703,7 +703,7 @@ where
     // A timed-out attempt drops its half-built pool, which closes whatever
     // connections it had opened, so retrying does not pile connections onto the
     // server.
-    // The retry only ever earned its place against a LOST SYN — a packet dropped
+    // The retry only ever earned its place against a LOST SYN - a packet dropped
     // before the socket exists, where the kernel then sits on its ~1s retransmit.
     // It cannot help a handshake that is merely slow, because restarting one pays
     // the TLS and auth round trips again from zero.
@@ -719,7 +719,7 @@ where
     //     connected in 11067ms
     //
     // 5.3 seconds of progress binned, and four half-built pools left for the
-    // server to clean up — which is also how "pool timed out" showed up on the
+    // server to clean up - which is also how "pool timed out" showed up on the
     // first table open.
     //
     // So the probe decides. It opens its own TCP connection to the same host, and
@@ -756,7 +756,7 @@ pub(crate) async fn open_pg(config: &PgConfig) -> Result<PgPool, String> {
     // still bounding accidental full-table scans that would pin a connection.
     //
     // Preferred path: ride statement_timeout in the startup packet (`options=`),
-    // which saves one round trip per pooled connection vs an after_connect SET —
+    // which saves one round trip per pooled connection vs an after_connect SET -
     // on a remote host that's a full RTT for every connection the pool opens.
     // Optional session time zone (Settings → Database). Ride it in the startup
     // packet next to statement_timeout so the whole pool inherits it with no
@@ -1152,7 +1152,7 @@ mod tests {
     }
 
     /// While TCP is still unproven a stall really might be a lost SYN, and a fresh
-    /// SYN is the only thing that helps — so there the ladder still fires.
+    /// SYN is the only thing that helps - so there the ladder still fires.
     #[tokio::test(start_paused = true)]
     async fn an_unproven_tcp_path_still_gets_a_fresh_syn() {
         let tries = AtomicUsize::new(0);

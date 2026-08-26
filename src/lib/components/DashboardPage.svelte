@@ -401,7 +401,7 @@
           <button
             type="button"
             class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            title="View only — hide every control (Esc to exit)"
+            title="View only - hide every control (Esc to exit)"
             onclick={() => setViewOnly(true)}
           >
             <Presentation class="size-3.5" />

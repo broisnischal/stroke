@@ -63,4 +63,4 @@ export function guardWrite(what) {
 }
 
 /** Shared tooltip for a control disabled by read-only mode. */
-export const READ_ONLY_HINT = 'Disabled — this connection is open in read-only mode'
+export const READ_ONLY_HINT = 'Disabled - this connection is open in read-only mode'

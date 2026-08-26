@@ -1,6 +1,6 @@
 <script>
   /**
-   * Geo view — every spatial column in the database, drawn on a world map.
+   * Geo view - every spatial column in the database, drawn on a world map.
    *
    * The map is a canvas, not a tile layer: the country outlines ship with the
    * app (`public/world.geo.json`, the same file the choropleth chart uses), so
@@ -8,7 +8,7 @@
    * database that has no business talking to a tile server.
    *
    * Rendering has exactly two layers and one accent: filled land in a neutral,
-   * the rows on top in colour. The land has to be filled — an outline-only
+   * the rows on top in colour. The land has to be filled - an outline-only
    * basemap vanishes the moment data covers it, and a continent you can't
    * recognise gives a cluster nothing to mean. Everything else is left out, so
    * the only thing competing for attention is the data.
@@ -47,7 +47,7 @@
   let {
     /**
      * Restrict the layer list to one table, for the Map view embedded in a table
-     * tab. The picker still lists that table's own geometry columns — a table can
+     * tab. The picker still lists that table's own geometry columns - a table can
      * have several, and they can mean different things (a point and its parcel).
      */
     scopeSchema = '',
@@ -60,7 +60,7 @@
    * as high as a canvas can draw in one frame rather than as low as is safe.
    */
   const FEATURE_BUDGET = 8000
-  /** Viewport changes settle before refetching — a drag is many events, one query. */
+  /** Viewport changes settle before refetching - a drag is many events, one query. */
   const REFETCH_DELAY = 220
 
   /**
@@ -73,7 +73,7 @@
    *
    * The rest are raster tiles from public providers, so choosing one starts
    * fetching images from that host. Satellite and street detail cannot be
-   * shipped offline — the imagery is terabytes — so this is the trade being
+   * shipped offline - the imagery is terabytes - so this is the trade being
    * offered, and it is offered explicitly rather than made the default.
    */
   const BASEMAPS = [
@@ -131,7 +131,7 @@
   let filterColumn = $state('')
   let filterOp = $state('eq')
   let filterValue = $state('')
-  /** Columns offered to the filter — the keys of a fetched row, so no extra query. */
+  /** Columns offered to the filter - the keys of a fetched row, so no extra query. */
   let filterColumns = $state(/** @type {string[]} */ ([]))
 
   const opNeedsValue = $derived(FILTER_OPS.find((o) => o.value === filterOp)?.needsValue !== false)
@@ -202,7 +202,7 @@
    * Normally the theme's accent, so the map belongs to the rest of the app. But
    * several themes resolve `--primary` to a near-white with no chroma at all
    * (`oklch(0.985 0 0)`), and white data over a neutral basemap on a black
-   * canvas is indistinguishable from the basemap — which is the one thing the
+   * canvas is indistinguishable from the basemap - which is the one thing the
    * map exists to show. When the accent has no colour to give, fall back to the
    * app's chart lead, which always does.
    * @param {string} rgb "r,g,b"
@@ -261,7 +261,7 @@
     void fetchFeatures({ fit: true })
   }
 
-  /** Re-run with the filter, and re-frame — the matching rows are usually elsewhere. */
+  /** Re-run with the filter, and re-frame - the matching rows are usually elsewhere. */
   function applyFilter() {
     selected = null
     void fetchFeatures({ fit: true })
@@ -298,7 +298,7 @@
         filters: activeFilters,
         includeExtent: Boolean(opts.fit),
       })
-      // A viewport moved on while this was in flight — its answer is stale.
+      // A viewport moved on while this was in flight - its answer is stale.
       if (seq !== fetchSeq) return
       features = res?.features || []
       if (res?.mode === 'clusters') clusterCellDeg = cell
@@ -361,7 +361,7 @@
 
     // The bundled vector map is always drawn. Tiles go OVER it rather than
     // instead of it, so a provider that is slow, blocked, or offline degrades to
-    // the map that ships with the app instead of to a black rectangle — and the
+    // the map that ships with the app instead of to a black rectangle - and the
     // first paint after switching basemaps has something on it while the tiles
     // are still in flight.
     drawGraticule(ctx)
@@ -396,7 +396,7 @@
 
   /**
    * One raster tile, or null while it loads. A tile that arrives later triggers
-   * a redraw rather than blocking the frame that asked for it — a map that waits
+   * a redraw rather than blocking the frame that asked for it - a map that waits
    * for its slowest tile is a map that stutters on every pan.
    * @param {string} url
    */
@@ -477,7 +477,7 @@
     ctx.save()
     // Land is FILLED, not outlined. An outline-only basemap disappears the
     // moment data is drawn over it, and a map you cannot recognise is not a map
-    // — the continent is the frame that makes a cluster mean something. The tone
+    // - the continent is the frame that makes a cluster mean something. The tone
     // comes from the foreground rather than the border token so it holds its
     // contrast in either polarity: 10% of near-white on black reads as land,
     // and 10% of near-black on white does too.
@@ -577,7 +577,7 @@
         let py = 0
         walkGeometry(f.geometry, project, { point: (x, y) => ((px = x), (py = y)), ring() {} })
         if (px < -60 || px > width + 60 || py < -60 || py > height + 60) continue
-        // Area, not radius, tracks the count — radius alone exaggerates a busy
+        // Area, not radius, tracks the count - radius alone exaggerates a busy
         // cell by the square of how busy it is.
         marks.push({ x: px, y: py, r: rMin + (rMax - rMin) * Math.sqrt(n / peak), n })
       }
@@ -615,8 +615,8 @@
 
     // Individual rows. Points and areas are drawn in separate passes because they
     // want opposite fills: a polygon needs a translucent wash so overlapping ones
-    // stay readable, a point needs an opaque centre. Sharing one fillStyle — as
-    // this did — paints every dot at the polygon's alpha and turns the whole
+    // stay readable, a point needs an opaque centre. Sharing one fillStyle - as
+    // this did - paints every dot at the polygon's alpha and turns the whole
     // layer into hollow rings.
     const dotted = features.length > 3000 ? 1.8 : 3
 
@@ -722,8 +722,8 @@
     dragMoved = false
     lastX = e.clientX
     lastY = e.clientY
-    // Capture BEFORE arming the drag. If it throws — a stale pointer id, a
-    // webview that lost the pointer — an exception thrown after `dragging = true`
+    // Capture BEFORE arming the drag. If it throws - a stale pointer id, a
+    // webview that lost the pointer - an exception thrown after `dragging = true`
     // would leave the map panning on plain hover with no button held, because
     // nothing would ever deliver the pointerup that clears it.
     try {
@@ -737,7 +737,7 @@
 
   /**
    * The coordinate readout and the hover test are both per-pixel work that only
-   * has to be right once per frame — running them on every pointermove writes
+   * has to be right once per frame - running them on every pointermove writes
    * reactive state ~120 times a second and hit-tests thousands of geometries in
    * between paints, for a readout nobody can read that fast.
    * @param {number} px @param {number} py
@@ -748,7 +748,7 @@
       hoverFrame = 0
       const w = fromScreen(view, width, height, px, py)
       cursor = toLonLat(w.x, w.y)
-      // Clusters aren't selectable, so there is nothing to point at — and that
+      // Clusters aren't selectable, so there is nothing to point at - and that
       // is also the mode with the most features to walk.
       // Hit-testing walks every feature, so it is skipped where it would cost
       // more than it tells you: mid-drag (the cursor is already 'grabbing'), in
@@ -838,7 +838,7 @@
   onMount(() => {
     // Safety net for the drag state. Pointer capture is supposed to guarantee the
     // canvas sees the matching pointerup, but a lost capture, a context menu, or
-    // the window losing focus mid-drag can swallow it — and then the map is stuck
+    // the window losing focus mid-drag can swallow it - and then the map is stuck
     // showing a closed hand and panning on hover with no way back. A window-level
     // release costs nothing and makes that unreachable.
     const releaseDrag = () => {
@@ -905,7 +905,7 @@
     requestDraw()
   })
 
-  /** Busiest cluster in view — the top of the density legend's scale. */
+  /** Busiest cluster in view - the top of the density legend's scale. */
   const peakCount = $derived(
     features.reduce((m, f) => Math.max(m, Number(f?.properties?.count) || 0), 0),
   )
@@ -1205,7 +1205,7 @@
             )}
           >
             {#if tileErrors > 0}
-              {tileErrors} tile{tileErrors === 1 ? '' : 's'} failed to load — showing the bundled map
+              {tileErrors} tile{tileErrors === 1 ? '' : 's'} failed to load - showing the bundled map
             {:else}
               {basemap.attribution}
             {/if}

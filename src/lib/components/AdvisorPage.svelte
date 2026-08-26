@@ -320,7 +320,7 @@
         <ul class="mt-1.5 space-y-1">
           {#each failedChecks as c (c.id)}
             <li class="font-mono text-ui-2xs leading-relaxed text-muted-foreground">
-              {c.title} — {c.error ?? 'unknown error'}
+              {c.title} - {c.error ?? 'unknown error'}
             </li>
           {/each}
         </ul>

@@ -25,7 +25,7 @@
     ondisconnect = () => {},
     // Seeds from a saved connection picked in the dialog's sidebar, so its
     // account and database show as already selected instead of the picker
-    // restarting on the first account. Selection only — see `seedFromSaved`.
+    // restarting on the first account. Selection only - see `seedFromSaved`.
     initialAccountId = '',
     initialDatabaseId = '',
     initialDatabaseName = '',
@@ -56,7 +56,7 @@
   )
 
   // Show a saved connection's database as the current selection. Deliberately
-  // does not call `onselect` — that is what connects, and picking a row in the
+  // does not call `onselect` - that is what connects, and picking a row in the
   // connections sidebar is not a request to dial it. Latched on the id so it
   // seeds once per saved connection and never fights a manual pick.
   let seededDbId = ''
@@ -186,7 +186,7 @@
   {#if phase === 'idle'}
     <ProviderAuthPanel
       title="Sign in with Cloudflare"
-      subtitle="Opens your browser to authorize. Stroke gets a scoped token for D1 — your Cloudflare password never passes through it."
+      subtitle="Opens your browser to authorize. Stroke gets a scoped token for D1 - your Cloudflare password never passes through it."
       hint="Same PKCE flow as Wrangler"
     >
       {#snippet mark()}<DbIcon id="d1" class="size-4 shrink-0" />{/snippet}

@@ -108,7 +108,7 @@
    * Structural fingerprint of an option: which series it declares (type + name)
    * and the shape of its axes (count + type). Two options with the same
    * fingerprint differ only in their data, which echarts can merge in place.
-   * Anything a merge could not express — a dropped series, a swapped axis kind —
+   * Anything a merge could not express - a dropped series, a swapped axis kind -
    * changes the fingerprint and falls back to a full rebuild.
    * @param {any} o
    */

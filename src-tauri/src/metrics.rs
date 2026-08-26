@@ -2,10 +2,10 @@
 Process naming and runtime metrics for Stroke.
 
 Exposes two Tauri commands:
-  - `set_process_title`  — renames the process so it shows up as a recognisable
+  - `set_process_title`  - renames the process so it shows up as a recognisable
                            name in htop / ps / Activity Monitor instead of the
                            raw binary name.
-  - `get_app_metrics`    — returns the current process's PID, resident memory
+  - `get_app_metrics`    - returns the current process's PID, resident memory
                            (RSS in bytes), virtual memory, and CPU percentage so
                            the frontend can display a live performance indicator.
 */
@@ -34,11 +34,11 @@ fn sys() -> &'static Mutex<System> {
 pub struct AppMetrics {
     /// OS process ID of this Stroke process.
     pub pid: u32,
-    /// Resident Set Size in bytes — actual physical RAM in use.
+    /// Resident Set Size in bytes - actual physical RAM in use.
     pub rss_bytes: u64,
     /// Virtual memory size in bytes.
     pub virtual_bytes: u64,
-    /// CPU usage as a percentage (0–100, may exceed 100 on multi-core).
+    /// CPU usage as a percentage (0-100, may exceed 100 on multi-core).
     pub cpu_percent: f32,
     /// Human-readable label for the process visible in the OS monitor.
     pub process_name: String,
@@ -54,7 +54,7 @@ pub fn set_process_title(_name: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         use std::ffi::CString;
-        // Truncate to 15 bytes — Linux kernel limit for PR_SET_NAME.
+        // Truncate to 15 bytes - Linux kernel limit for PR_SET_NAME.
         let truncated: String = _name.chars().take(15).collect();
         let cname = CString::new(truncated).map_err(|e| e.to_string())?;
         // SAFETY: prctl is thread-safe for PR_SET_NAME; no memory aliasing.

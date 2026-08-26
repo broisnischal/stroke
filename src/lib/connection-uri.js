@@ -93,7 +93,7 @@ export function parseMssqlUri(uri) {
   if (!trimmed) return null
 
   // Prisma (and JDBC) write SQL Server as `sqlserver://host:1433;database=x;user=y`
-  // — semicolon parameters, not a URL query string. `new URL` reads that as a
+  // - semicolon parameters, not a URL query string. `new URL` reads that as a
   // malformed port and throws, so it is parsed on its own terms.
   const semi = trimmed.match(/^(?:sqlserver|mssql):\/\/([^;]+);(.*)$/i)
   if (semi) {
