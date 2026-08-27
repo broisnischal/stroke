@@ -3883,16 +3883,53 @@ let rowSearch = $state('')
     incomingFkCache = next
   }
 
-  /** Load incoming FKs for a table into the cache (no-op if already cached). */
+  /**
+   * Requests already in flight, keyed the same way as the cache.
+   *
+   * The cache is only populated once the request comes back, so the `has(key)`
+   * guard below could not see a request that had been fired but not yet
+   * answered. Restoring a session therefore fired one reverse-FK query per
+   * restored tab at the same instant - measured at nine concurrent calls
+   * totalling 37s of backend time against a D1 database, where each call is
+   * several HTTP round trips to Cloudflare. Everything the user was actually
+   * waiting for queued behind them.
+   * @type {Map<string, Promise<void>>}
+   */
+  const _incomingFkInFlight = new Map()
+  /** Bumped whenever the cache is dropped, so a reply from before the drop is discarded. */
+  let _incomingFkGen = 0
+
+  /** Load incoming FKs for a table into the cache (no-op if cached or in flight). */
   async function loadIncomingForeignKeys(schema, table) {
     const key = `${schema}.${table}`
     if (incomingFkCache.has(key)) return
-    try {
-      const result = await getIncomingForeignKeys(schema, table)
-      setIncomingFkCache(key, result ?? [])
-    } catch {
-      setIncomingFkCache(key, [])
-    }
+    const pending = _incomingFkInFlight.get(key)
+    if (pending) return pending
+    const gen = _incomingFkGen
+    const p = (async () => {
+      /** @type {any[]} */
+      let result = []
+      try {
+        result = (await getIncomingForeignKeys(schema, table)) ?? []
+      } catch {
+        result = []
+      }
+      // The connection or schema may have changed while this was in flight; the
+      // cache is keyed by "schema.table" alone, so writing now would serve one
+      // database's reverse FKs for a same-named table in another.
+      if (gen !== _incomingFkGen) return
+      _incomingFkInFlight.delete(key)
+      setIncomingFkCache(key, result)
+    })()
+    _incomingFkInFlight.set(key, p)
+    return p
+  }
+
+  /** Drop the reverse-FK cache and abandon anything still in flight for it. */
+  function resetIncomingFkCache() {
+    incomingFkCache = new Map()
+    _incomingFkInFlight.clear()
+    _incomingFkGen++
   }
 
   /**
@@ -4256,7 +4293,7 @@ let rowSearch = $state('')
    *  catalog to have changed. */
   function invalidateCatalog() {
     _catalog.invalidate(connectionPrefix(persistConnectionId))
-    incomingFkCache = new Map()
+    resetIncomingFkCache()
   }
 
   /** @param {{ force?: boolean }} [opts] */
@@ -5579,7 +5616,7 @@ let rowSearch = $state('')
     // resident forever). The ConnectionModal connect path lands here without
     // going through clearConnectionState, so reset them in both places.
     tableColumnsCache = new Map()
-    incomingFkCache = new Map()
+    resetIncomingFkCache()
     _catalog.clear()
     // The connection is live: render the shell NOW (setting `connection` above
     // dropped the reconnect overlay) with the welcome tab open and the sidebar
@@ -6015,7 +6052,7 @@ let rowSearch = $state('')
     triggers = []
     sequences = []
     tableColumnsCache = new Map()
-    incomingFkCache = new Map()
+    resetIncomingFkCache()
     _catalog.clear()
     _sqlHintsLoadedFor = ''
     activeSchema = 'public'
