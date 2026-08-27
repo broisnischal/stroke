@@ -42,6 +42,13 @@ export default defineConfig({
     svelte({ compilerOptions: { runes: true } }),
     tailwindcss(),
   ],
+  optimizeDeps: {
+    // canvas-confetti is only reached through a lazy `await import()` on the license
+    // pages, so Vite's initial scan misses it. Discovering it mid-session re-runs the
+    // optimizer, rehashes every pre-bundled chunk, and the webview then 404s on the
+    // old runtime-*/index-client-*/Icon-* paths -> the whole app goes blank.
+    include: ['canvas-confetti'],
+  },
   resolve: {
     alias: {
       $lib: path.resolve(__dirname, './src/lib'),
