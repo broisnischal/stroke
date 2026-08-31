@@ -5767,41 +5767,60 @@ let rowSearch = $state('')
 
   // Warm the lazy page/panel chunks during browser idle time so the first
   // navigation to a tab is instant instead of paying a cold chunk fetch+parse.
-  // These chunks pull in heavy deps (monaco, echarts, marked+shiki), so we warm
-  // ONE per idle slot - never blocking interaction. Ordered by how commonly each
-  // is opened; the monaco-backed editors come first since they dominate latency.
-  // If the user opens a page sooner, import() dedups to the same promise and
-  // resolves immediately. Fire-and-forget; failures are harmless.
+  // We warm ONE per idle slot - never blocking interaction. Ordered by how
+  // commonly each is opened; the monaco-backed editors come first since they
+  // dominate latency. If the user opens a page sooner, import() dedups to the
+  // same promise and resolves immediately. Fire-and-forget; failures are harmless.
+  //
+  // Measured on a release build against the manifest's static import graph -
+  // warming a chunk pulls its static imports, its own dynamic imports stay lazy.
+  // The eager entry graph is 2.71MB/25 chunks; the full warm set adds 6.01MB/49.
+  // But 5.35MB of that is two entries: SqlConsole drags in monaco (3.78MB) and
+  // AiChat the markdown/highlight stack (1.57MB). The other 22 pages cost 0.66MB
+  // between them, 0.01-0.11MB each - so trimming that tail buys nothing and only
+  // costs first-open latency, which is why it is all still here.
+  //
+  // What is worth skipping is whatever this engine cannot open at all. A warmed
+  // chunk is never freed again (which already sits badly beside the idle-teardown
+  // above), and on a Redis connection every relational page is unreachable UI -
+  // monaco included, so ~4.3MB of the 6.01MB was being pinned for tabs that do
+  // not exist. Hence the gate per entry, and hence waiting for a connection:
+  // before one exists the engine is unknown and no tab can be opened anyway.
   //
   // Keep these specifiers identical to the {#await import('./X.svelte')} blocks
   // below so Vite resolves them to the same chunk.
-  onMount(() => {
-    const warmers = [
-      () => import('./SqlConsole.svelte'),       // monaco
-      () => import('./AiSidebar.svelte'),        // marked + shiki
-      () => import('./AiChat.svelte'),           // marked + shiki
-      () => import('./OrmRunner.svelte'),        // monaco
-      () => import('./TableJsonView.svelte'),    // monaco - data view mode
-      () => import('./TableTextView.svelte'),    // monaco - data view mode
-      () => import('./StructureView.svelte'),
-      () => import('./SchemaPage.svelte'),
-      () => import('./ChartsPage.svelte'),       // echarts
-      () => import('./DashboardPage.svelte'),
-      () => import('./SecurityPage.svelte'),
-      () => import('./SearchPage.svelte'),
-      () => import('./InstanceInsightsPage.svelte'),
-      () => import('./ObjectsPage.svelte'),
-      () => import('./DiagramsPage.svelte'),     // echarts
-      () => import('./EntityRelationPage.svelte'),
-      () => import('./DataDiffPage.svelte'),     // monaco
-      () => import('./NotebookEditor.svelte'),
-      () => import('./JsonViewerPage.svelte'),
-      () => import('./ExtensionsPage.svelte'),
-      () => import('./BackupPage.svelte'),
-      () => import('./LogsPage.svelte'),
-      () => import('./SchemaTimelinePage.svelte'),
-      () => import('./RedisKeyspacePage.svelte'),
+  $effect(() => {
+    if (!connection) return
+    // [reachable on this engine, loader]. Gates mirror the tab affordances in
+    // the empty-state grid and the palette; keep them in sync when a page moves.
+    /** @type {Array<[boolean, () => Promise<unknown>]>} */
+    const candidates = [
+      [isRedis,          () => import('./RedisKeyspacePage.svelte')], // the only page Redis has
+      [!isRedis,         () => import('./SqlConsole.svelte')],        // monaco
+      [true,             () => import('./AiSidebar.svelte')],         // marked + shiki
+      [true,             () => import('./AiChat.svelte')],            // marked + shiki
+      [!isRedis,         () => import('./OrmRunner.svelte')],         // monaco
+      [!isRedis,         () => import('./TableJsonView.svelte')],     // monaco - data view mode
+      [!isRedis,         () => import('./TableTextView.svelte')],     // monaco - data view mode
+      [!isRedis,         () => import('./StructureView.svelte')],
+      [hasSchemaExplorer, () => import('./SchemaPage.svelte')],
+      [!isRedis,         () => import('./ChartsPage.svelte')],        // echarts
+      [!isRedis,         () => import('./DashboardPage.svelte')],
+      [hasSecurity,      () => import('./SecurityPage.svelte')],
+      [!isRedis,         () => import('./SearchPage.svelte')],
+      [!isRedis,         () => import('./InstanceInsightsPage.svelte')],
+      [!isRedis,         () => import('./ObjectsPage.svelte')],
+      [!isRedis,         () => import('./DiagramsPage.svelte')],      // echarts
+      [!isRedis,         () => import('./EntityRelationPage.svelte')],
+      [!isRedis,         () => import('./DataDiffPage.svelte')],      // monaco
+      [!isRedis,         () => import('./NotebookEditor.svelte')],
+      [!isRedis,         () => import('./JsonViewerPage.svelte')],
+      [!isRedis,         () => import('./ExtensionsPage.svelte')],
+      [!isRedis,         () => import('./BackupPage.svelte')],
+      [true,             () => import('./LogsPage.svelte')],
+      [!isRedis,         () => import('./SchemaTimelinePage.svelte')],
     ]
+    const warmers = candidates.filter(([reachable]) => reachable).map(([, load]) => load)
     const ric = window.requestIdleCallback ?? ((/** @type {Function} */ fn) => setTimeout(() => fn(), 200))
     const cancel = window.cancelIdleCallback ?? clearTimeout
     let i = 0
