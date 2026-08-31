@@ -3992,8 +3992,30 @@ let rowSearch = $state('')
     await openTableTab(refSchema, fk.referencedTable, { filters, resetQuery: true })
   }
 
+  /**
+   * True when the reply to a request issued while `conn` was connected belongs
+   * to a database that is no longer the one on screen.
+   *
+   * Every catalog loader needs this, and the `activeSchema === schemaAtCall`
+   * check some of them already do is NOT a substitute: clearConnectionState()
+   * resets activeSchema to 'public', so switching between two PostgreSQL
+   * databases leaves that comparison true and a late reply from the old database
+   * is applied to the new one - wrong table list, wrong catalog, and a cache
+   * entry written under whichever connection id happened to be current. The
+   * window is invisible over a local socket and wide open on a slow link or a
+   * slower machine, which is exactly where it gets reported from.
+   *
+   * Capture `persistConnectionId` before the first await, compare after.
+   * @param {string} conn
+   */
+  function connectionMoved(conn) {
+    return persistConnectionId !== conn
+  }
+
   async function loadSchemas() {
+    const connAtCall = persistConnectionId
     const list = await listSchemas()
+    if (connectionMoved(connAtCall)) return
     schemas = list
     if (list.length === 0) {
       activeSchema = ''
@@ -4032,6 +4054,7 @@ let rowSearch = $state('')
     const mySeq = ++_structureSeq
     const targetSchema = activeSchema
     const targetTable  = activeTable
+    const connAtCall   = persistConnectionId
     const driver       = dbType  // 'postgres' | 'mysql' | 'sqlite' | 'd1'
     try {
       const s = targetSchema.replace(/'/g, "''")
@@ -4134,7 +4157,10 @@ let rowSearch = $state('')
         ])
       }
 
-      if (activeTable === targetTable && activeSchema === targetSchema) {
+      // Table and schema names both survive a connection switch - two databases
+      // routinely hold a `public.users` - so the connection has to be checked on
+      // its own or one database's columns get shown for the other's table.
+      if (activeTable === targetTable && activeSchema === targetSchema && !connectionMoved(connAtCall)) {
         structureColumns = rows.map((row) => ({
           ordinalPosition:  Number(row[0]) || 0,
           name:             String(row[1] ?? ''),
@@ -4148,6 +4174,7 @@ let rowSearch = $state('')
       }
     } catch (e) {
       if (String(e).includes('Query cancelled')) return
+      if (connectionMoved(connAtCall)) return
       toast.error('Could not load table structure', { description: String(e) })
       if (activeTable === targetTable) structureColumns = []
     } finally {
@@ -4248,11 +4275,15 @@ let rowSearch = $state('')
     if (force) _catalog.invalidate(key)
     const hit = /** @type {SchemaCatalog | undefined} */ (_catalog.get(key, CATALOG_TTL_MS))
     if (hit) { applySchemaCatalog(hit); return }
+    const connAtCall = persistConnectionId
     const [idx, enm, trg, seq] = await Promise.all([
       fetchIndexes(schema), fetchEnums(schema), fetchTriggers(schema), fetchSequences(schema),
     ])
     // The schema can change while four requests are in flight; a late payload
-    // must not overwrite the catalog of wherever the user has since gone.
+    // must not overwrite the catalog of wherever the user has since gone. The
+    // connection can change too, and that check has to be separate - the schema
+    // is 'public' on both sides of a Postgres-to-Postgres switch.
+    if (connectionMoved(connAtCall)) return
     const payload = { indexes: idx, enums: enm, triggers: trg, sequences: seq }
     _catalog.set(key, payload)
     if (activeSchema === schema) applySchemaCatalog(payload)
@@ -4264,11 +4295,12 @@ let rowSearch = $state('')
   async function reloadCatalogKind(kind) {
     const schema = activeSchema
     if (!schema) return
+    const connAtCall = persistConnectionId
     const fetched = kind === 'indexes' ? await fetchIndexes(schema)
       : kind === 'enums' ? await fetchEnums(schema)
       : kind === 'triggers' ? await fetchTriggers(schema)
       : await fetchSequences(schema)
-    if (activeSchema !== schema) return
+    if (activeSchema !== schema || connectionMoved(connAtCall)) return
     if (kind === 'indexes') indexes = fetched
     else if (kind === 'enums') enums = fetched
     else if (kind === 'triggers') triggers = fetched
@@ -4306,6 +4338,7 @@ let rowSearch = $state('')
     // Captured once: activeSchema can change while the fetch is in flight, and
     // the background count pass must target the schema this list came from.
     const schemaAtCall = activeSchema
+    const connAtCall = persistConnectionId
     const key = catalogKey(persistConnectionId, 'tables', schemaAtCall)
     if (force) invalidateCatalog()
     const cached = force ? undefined : /** @type {any[] | undefined} */ (_catalog.get(key, TABLE_LIST_TTL_MS))
@@ -4320,6 +4353,11 @@ let rowSearch = $state('')
       error = ''
       try {
         const list = await listTables(schemaAtCall)
+        // Dropped, not applied: writing `tables` now would put the previous
+        // database's tables in the sidebar of the one just connected, and the
+        // _catalog.set below would file them under whichever connection id is
+        // current - poisoning that connection's cache for the whole TTL.
+        if (connectionMoved(connAtCall)) return
         tables = list
           .map((t) => ({
             name: t.name ?? t.table_name ?? '',
@@ -4333,10 +4371,13 @@ let rowSearch = $state('')
           activeTable = tables[0]?.name ?? null
         }
       } catch (e) {
+        if (connectionMoved(connAtCall)) return
         error = String(e)
         tables = []
       } finally {
-        loadingTables = false
+        // A stale reply must not clear the spinner the *new* connection's load
+        // just put up, so this is guarded too - `return` above still runs it.
+        if (!connectionMoved(connAtCall)) loadingTables = false
       }
     }
     // The list arrives with unknown (null) counts so it renders immediately;
