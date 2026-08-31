@@ -3,7 +3,7 @@
   import JsonPathSuggest from './JsonPathSuggest.svelte'
   import { appJsonWordWrap } from '$lib/stores/settings.js'
   import { onMount, tick, untrack } from 'svelte'
-  import * as monaco from 'monaco-editor'
+  import * as monaco from '$lib/monaco.js'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
   import { defineStrokeMonacoThemes, applyMonacoTheme, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'

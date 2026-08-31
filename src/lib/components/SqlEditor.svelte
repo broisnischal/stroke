@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import * as monaco from 'monaco-editor'
+  import * as monaco from '$lib/monaco.js'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
   import { registerMonacoSqlFormatter } from '$lib/format-sql.js'
   import { registerMonacoSqlCompletion, setSqlHintsForModel } from '$lib/monaco-sql-complete.js'

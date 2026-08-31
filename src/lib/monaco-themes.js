@@ -1,4 +1,4 @@
-import * as monaco from 'monaco-editor'
+import * as monaco from '$lib/monaco.js'
 import { MONACO_THEME_SPECS, monacoThemeDefinition } from '$lib/themes/monaco-presets.js'
 import { monacoThemeName, THEME_IDS, getThemeDefinition } from '$lib/themes/registry.js'
 

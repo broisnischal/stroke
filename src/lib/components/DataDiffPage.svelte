@@ -1,5 +1,5 @@
 <script>
-  import * as monaco from 'monaco-editor'
+  import * as monaco from '$lib/monaco.js'
   import GitCompare from '@lucide/svelte/icons/git-compare'
   import Loader2 from '@lucide/svelte/icons/loader-2'
   import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down'
