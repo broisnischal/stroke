@@ -4494,6 +4494,24 @@ let rowSearch = $state('')
   }
   /** The predicate `total` belongs to; '' until a count lands. */
   let _totalSig = $state('')
+  /**
+   * The view a known `total` was actually counted for: connection, schema,
+   * table and predicate together. The predicate alone is not enough - two
+   * tables routinely carry the same filter, and reusing one's count for the
+   * other would show the wrong number of rows.
+   * @param {string} schema @param {string} table @param {string} sig
+   */
+  function rowCountKey(schema, table, sig) {
+    return `${persistConnectionId}\u0000${schema}\u0000${table}\u0000${sig}`
+  }
+  /** Set only when a count lands; cleared by anything that can change how many
+   *  rows match. While it matches the view being loaded, the count on screen is
+   *  the answer and the background COUNT(*) is skipped. */
+  let _countedView = ''
+  /** Row data may have changed under the current predicate - count again. */
+  function invalidateRowCount() {
+    _countedView = ''
+  }
   const rowPredicateSig = $derived(predicateSig(apiSearch(rowSearch), rowFilters))
   /** `total` was counted under the search + filters now on screen. */
   const totalIsForThisView = $derived(total > 0 && _totalSig === rowPredicateSig)
@@ -5144,6 +5162,8 @@ let rowSearch = $state('')
       // Frozen with the query: the count this load produces belongs to THIS
       // predicate, even if the user edits the filters while it is in flight.
       const ownerSig = predicateSig(apiSearch(rowSearch), rowFilters)
+      // Identity of the view this load is for, for reusing a count across pages.
+      const viewKey = rowCountKey(ownerSchema, ownerTable, ownerSig)
       const data = await getTableRows(
         ownerSchema, ownerTable,
         wantsWindow ? WINDOW_PROBE : effectivePageSize,
@@ -5326,7 +5346,12 @@ let rowSearch = $state('')
         _infiniteRows = fetched
         // total = -1 means "counting" (Postgres, non-blocking). Other engines
         // return a real total here; refreshRowCount() then no-ops for them.
-        total = Number(data.total ?? 0)
+        // When the count for this exact view is already known, keep it rather
+        // than dropping back to the sentinel: without this, every page change
+        // would blank the total and force the COUNT(*) the skip below exists to
+        // avoid, and the footer would flicker through "counting" on each page.
+        const incoming = Number(data.total ?? 0)
+        total = incoming >= 0 ? incoming : (_countedView === viewKey ? total : incoming)
         _totalSig = ownerSig
       }
       queryMs = ranMs
@@ -5344,7 +5369,18 @@ let rowSearch = $state('')
       }
       // Fire-and-forget: fill the total in the background so the count never
       // delays the rows. Windowed loads already have a real total from the fetch.
-      if (!windowed) void refreshRowCount(ownerTabId, seq, ownerSchema, ownerTable, ownerQuery, ownerSig)
+      // A page change cannot change how many rows match the predicate, so the
+      // count already on screen is the answer. Re-asking is a full COUNT(*) per
+      // page: measured on the 1M-row `events` fixture with a `kind LIKE` filter
+      // at 182ms cold / 32ms warm, against 0.79ms for the page of rows it
+      // accompanies - and on a remote database it is another round trip on top.
+      // The count is background work, so this never showed up as a blocked
+      // paint, only as load the server was carrying for an answer we had.
+      // `keepScroll` is the live refresh: rows may have changed underneath, so
+      // that always recounts.
+      if (!windowed && (keepScroll || _countedView !== viewKey)) {
+        void refreshRowCount(ownerTabId, seq, ownerSchema, ownerTable, ownerQuery, ownerSig, viewKey)
+      }
       // Mirror the landed result into the owning tab so the spinner in the tab
       // strip stops and a later switch away/back doesn't refetch it.
       patchTableTab(ownerTabId ?? '', { loadingRows: false, error: '' })
@@ -5387,7 +5423,7 @@ let rowSearch = $state('')
    * @param {string | null} tabId @param {number} seq @param {string} schema
    * @param {string} table @param {{ search?: string, searchIsRegex?: boolean, filters?: any[] }} query
    */
-  async function refreshRowCount(tabId, seq, schema, table, query, sig = '') {
+  async function refreshRowCount(tabId, seq, schema, table, query, sig = '', viewKey = '') {
     if (!table) return
     try {
       const n = await countTableRows(schema, table, query)
@@ -5397,6 +5433,7 @@ let rowSearch = $state('')
         if (tabId !== activeTabId) return
         total = n
         _totalSig = sig
+        _countedView = viewKey
         const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
         if (page > maxPage) page = maxPage
       }
@@ -6475,6 +6512,9 @@ let rowSearch = $state('')
         saveActiveTabState()
         toast.success('Row inserted')
       } else {
+        // This branch does not adjust `total` (whether the new row matches the
+        // active filter is the database's call), so the count has to be redone.
+        invalidateRowCount()
         await loadRows()
         toast.success('Row inserted', {
           description: hasActiveFilters
@@ -6500,6 +6540,9 @@ let rowSearch = $state('')
     const _start = Date.now()
     try {
       await executeSqlMulti(sql)
+      // Hand-written DML: rows may have been inserted or deleted, or edited so
+      // they no longer match the active filter. Nothing here can be assumed.
+      invalidateRowCount()
       recordActivity({ type: 'row_save', title: `Applied edited SQL${activeTable ? ` on ${activeTable}` : ''}`, schema: activeSchema, table: activeTable ?? '', durationMs: Date.now() - _start, success: true })
       await loadRows()
       toast.success('Changes applied')
@@ -6530,6 +6573,10 @@ let rowSearch = $state('')
       // rows is $state.raw, so the in-place assignment above doesn't notify the
       // canvas; bump dataVersion to force the grid to repaint the edited cell.
       dataVersion++
+      // With a filter or search active, the edited value may have moved this row
+      // in or out of the result - so the total is no longer known to be right.
+      // Unfiltered, editing a cell cannot change how many rows there are.
+      if (rowSearch.trim() !== '' || activeFilters(rowFilters).length > 0) invalidateRowCount()
       saveActiveTabState()
       recordActivity({ type: 'row_save', title: `Updated ${col.name} in ${activeTable}`, schema: activeSchema, table: activeTable, durationMs: Date.now() - _saveStart, success: true })
     } catch (e) {
