@@ -103,74 +103,146 @@ Two things were real and measured:
   style system. Resolved once and kept live by the MediaQueryList.
   `smooth-scroll.js`.
 
-Verification so far: `npx vitest run` is 467/467 green, `npx vite build`
-is clean, and the app runs with all of this in place.
+- **Monaco entry trimmed to the languages the app has.** `monaco-editor`'s
+  default entry is an everything-bundle: 80-odd basic languages plus the css,
+  html, json and typescript services, each service dragging its own worker. The
+  app displays six languages, and the blocker last time was not being able to
+  prove that - `MonacoTextView` takes `language` as a prop. It is provable: the
+  only two dynamic call sites are `OrmSchemaPage` (`sql` | `rust` for Prisma |
+  `typescript`) and `TableTextView` (`stroke-csv`, `stroke-tsv`, `markdown`,
+  `json`), and every other site passes a literal. So the full set is sql, json,
+  javascript, typescript, rust, markdown - note `markdown`, which the earlier
+  list here missed. `src/lib/monaco.js` now composes the entry by hand out of
+  the same pieces `editor.main.js` uses: `edcore.main.js` (all editor features,
+  no languages), the six language contributions, and the json + typescript
+  services republished on `monaco.languages.*` by hand, which `editor.main.js`
+  does itself and the contributions do not. All 11 importers now go through it.
+  Measured over `dist/assets`: **34,821,807 -> 32,585,794 bytes, -2.24MB
+  (-6.4%)**, 81 chunks gone, `css.worker` (1.05MB) and `html.worker` (719KB)
+  among them - both were being emitted for grammars nothing in the app can open.
+  `ts.worker` stays: `OrmRunner` really does use
+  `languages.typescript.javascriptDefaults` for its IntelliSense.
+
+- **The startup prefetch is engine-aware, and the tail is staying.** Measured
+  properly this time, on a release build, against the manifest's static import
+  graph (warming a chunk pulls its static imports; its own dynamic imports stay
+  lazy). The eager entry graph is 2.71MB/25 chunks and the warm set adds
+  6.01MB/49 - but the shape is nothing like the guess above. 5.35MB of it is two
+  entries: `SqlConsole` pulls monaco (3.78MB) and `AiChat` the markdown/highlight
+  stack (1.57MB). The other 22 pages cost 0.66MB *between them*, 0.01-0.11MB
+  each. So "trim the tail" buys ~nothing and would regress first-open latency on
+  21 pages to save half a megabyte; the tail stays, and the note explaining why
+  is now in the code so nobody re-derives it.
+  What the measurement does justify is the engine gate: a warmed chunk is never
+  freed, and on a Redis connection every relational page is unreachable UI -
+  monaco included - so ~4.3MB of that 6.01MB was being pinned for tabs that do
+  not exist. The list is now per-entry gated on the same `isRedis` /
+  `hasSchemaExplorer` / `hasSecurity` flags the tab affordances use, it waits for
+  a connection (before one exists the engine is unknown and no tab can open
+  anyway), and `RedisKeyspacePage` warms only on Redis, where it goes first.
+  `StudioShell.svelte`.
+
+- **Scroll blitting.** The remaining draw cost was `fillText`, and it is now
+  skipped for every row that did not change. On a frame that differs from the
+  last one only by a vertical scroll, `drawImage` moves the still-valid band and
+  only the strip the scroll uncovered is repainted - a one-row step paints one
+  row instead of every visible one. `DataTable.svelte`.
+  The safety argument matters more than the mechanism here:
+  - The scroll loop already distinguished a position-only frame from a content
+    change (`_loopNeedsDraw`, set by `scheduleDraw`, which every content, hover,
+    focus, selection, theme and geometry change goes through). That existing flag
+    is the gate - nothing new had to be invented to know when a blit is legal.
+  - draw() adds the geometric half: no animating skeletons, no insert draft, no
+    expanded rows (non-uniform row heights), integer dy, and dy and the header
+    offset both landing on whole device pixels.
+  - The copy runs with the transform reset, source and destination the same
+    size, so it is an exact 1:1 move of whole device pixels. Going through the
+    DPR-scaled transform would let a fractional viewport width or a 1.5x DPR
+    resample the band, and since each frame copies the last, that blur would
+    compound over a scroll into smeared text. This is the trap in this approach.
+  - The strip is rounded outward and the repaint band is widened a pixel at each
+    edge, so a row separator bleeding outside its own band cannot leave a seam.
+  - The loop now forces a full repaint when scrolling stops. Any artifact this
+    path could produce therefore lives only while content is moving and is gone
+    within one frame of the user letting go - it can never persist in a resting
+    grid.
+  The blit arithmetic is verified exhaustively rather than by eye: across 2,280
+  (DPR, header height, viewport height, dy) combinations, every body pixel in the
+  new frame is either copied from exactly the right source row or falls inside
+  the repainted strip. What I could *not* do is drive a live scroll and look at
+  it, so the pixel-level "does it look right" check is still owed.
+
+- **Rust verification (was item 1).** `cargo check --no-default-features` passes
+  clean; `tauri:build` succeeds on macOS (3m00s, both bundles produced), so
+  mimalloc is exercised in the release profile and not just in dev - and this
+  branch is running on it. Windows is still untried.
+
+Verification: `npx vitest run` is 467/467 green, `npx vite build` is clean,
+`cargo check --no-default-features` passes, and the app runs with all of this in
+place. The canvas draw path has no unit coverage, so the blit is covered by the
+geometry check described above rather than by the suite.
 
 ## Remaining
 
 Ordered by expected payoff.
 
-1. **Finish the Rust verification.** I stopped a `cargo check` partway to write
-   this up. `cargo check --no-default-features` and a `tauri:build` still need to
-   pass, and mimalloc needs a look on macOS and Windows before this merges. It
-   is a one-line global allocator swap so I expect it to be fine, but I have
-   only exercised it on Linux.
+1. **Look at a live scroll.** The blit is verified arithmetically (2,280
+   configurations, no uncovered or mis-sourced pixel) and every gate is
+   conservative, but nobody has watched a real grid scroll with it on. Open a
+   text-heavy table, scroll hard in both directions, and check the seam where the
+   strip meets the blitted band, the hover highlight, the focused-cell ring and
+   the frozen columns. Then re-run the frame-time probe: the prediction is
+   `fillText` ~167/frame -> ~10 during a smooth scroll, so a draw around 4ms
+   instead of 8.7ms. If something is wrong it will be a band of stale rows during
+   the scroll that snaps correct the moment you stop - that shape of bug means a
+   missed `scheduleDraw`, i.e. some state changes the body without going through
+   it.
 
-2. **Scroll blitting, the big remaining render lever.** After the truncation
-   cache, `fillText` is what is left: 167 calls and 6,243 characters per frame,
-   4.8ms of an 8.7ms draw, about 29us per call. That is Cairo rasterising glyphs
-   on the CPU and no amount of JS tuning touches it. The real fix is to stop
-   redrawing text that has not moved: on a vertical scroll of one or two rows,
-   `ctx.drawImage(canvas, 0, dy)` to blit the unchanged band and repaint only
-   the newly exposed strip. That should cut `fillText` from ~167/frame to ~10
-   during a smooth scroll, i.e. most of the remaining draw cost. It needs
-   careful dirty-rect bookkeeping for hover highlights, the focused-cell ring
-   and sub-pixel offsets, which is why I did not start it under time pressure.
+2. **Windows.** Everything else on item 1 is closed: `cargo check
+   --no-default-features` is clean and `tauri:build` succeeds on macOS in 3m00s,
+   bundling both `Stroke.app` and `Stroke_1.22.0_aarch64.dmg`, so mimalloc is
+   fine in the release profile on macOS as well as Linux. (Notarization is
+   skipped locally for want of `APPLE_ID` / `APPLE_API_KEY` in the environment -
+   that is the machine, not the build.) Windows is the one platform nobody has
+   run this on. It is a one-line global allocator swap, so the expectation is
+   that CI just goes green, but it should be watched on the first Windows build.
 
-3. **WebKit's idle memory, unexplained.** A fresh process with no table open and
-   the chunk prefetch disabled still sat at 370MB Rust / 836-1038MB WebKit, with
-   only 505 DOM nodes and 246 modules loaded. `smaps` shows it is all allocator
-   memory (234MB `[heap]` plus 346MB across 6,215 anonymous mappings), not
-   DOM/JS I can point at. I could not attribute this from outside the process
-   and I could not rule out my own probe contaminating it. Next step is a clean
-   run with no instrumentation at all, and a release build for comparison, since
-   a lot of it may just be dev-mode module overhead.
+3. **WebKit's idle memory, unexplained.** Unchanged from before. A fresh process
+   with no table open and the chunk prefetch disabled still sat at 370MB Rust /
+   836-1038MB WebKit, with only 505 DOM nodes and 246 modules loaded. `smaps`
+   shows it is all allocator memory (234MB `[heap]` plus 346MB across 6,215
+   anonymous mappings), not DOM/JS I can point at. Next step is a clean run with
+   no instrumentation at all, and a release build for comparison, since a lot of
+   it may just be dev-mode module overhead. The 2.24MB the Monaco trim removed
+   and the ~4.3MB the engine gate stops pinning on Redis both come off this
+   number, but neither is close to explaining it.
 
-4. **The 24-chunk startup prefetch** (`StudioShell.svelte`, the `warmers`
-   array). It unconditionally pulls Monaco, ECharts twice, marked+shiki twice,
-   mermaid, cytoscape, katex and 20-odd page components into memory whether or
-   not they are ever opened, and a warmed chunk can never be freed. That sits
-   oddly next to the idle-teardown code right above it, which unmounts views
-   after 3 minutes hidden specifically to reclaim memory. My attempt to measure
-   the cost was too noisy to be worth acting on, so I left it alone rather than
-   regress first-open latency on a guess. Worth doing properly: measure on a
-   release build, then make it engine-aware (no `RedisKeyspacePage` on a
-   Postgres connection) and trim the tail.
-
-5. **Monaco is importing far more than it uses.** `import * as monaco from
-   'monaco-editor'` pulls every language contribution, which is why the bundle
-   carries `ts.worker` at 6.7MB, `css.worker` at 1MB, `html.worker` at 703KB and
-   a 2.5MB main chunk, plus 3.7MB of `monaco-themes`. The app only ever uses
-   sql, pgsql, json, javascript/typescript and rust. Importing
-   `monaco-editor/esm/vs/editor/editor.api` with an explicit language list would
-   cut this substantially. I skipped it because `MonacoTextView` takes its
-   language as a prop and I could not prove the full set of values it receives,
-   so getting it wrong silently breaks syntax highlighting somewhere.
-
-6. **Eased scrolling is the default** (`nativeScroll: false`). It puts a
+4. **Eased scrolling is the default** (`nativeScroll: false`). It puts a
    non-passive wheel listener in front of every tick and animates `scrollTop`
    from JS across roughly 20 frames per notch, reading `scrollHeight` each frame
    (a forced layout, measured at 15us). The repo's own notes already flag this
-   mechanism as a stutter source. It measured small here, and it is a deliberate
-   product choice with a setting behind it, so I did not touch the default. It
-   is worth an A/B on a slower machine.
+   mechanism as a stutter source. It measured small, and it is a deliberate
+   product choice with a setting behind it, so the default is untouched. Worth an
+   A/B on a slower machine. Note it interacts with the blit now: those ~20
+   small-step frames per notch are exactly the case the blit is best at, so this
+   may have got cheaper on its own.
 
-7. **`[will-change:transform]` on nine DOM scroll containers.** The repo's own
-   DataTable notes say that promoting a scroller like this created a heavy
-   compositing layer that lagged vertical scroll, and it is the reason
+5. **`[will-change:transform]` on nine DOM scroll containers.** Unchanged. The
+   repo's own DataTable notes say that promoting a scroller like this created a
+   heavy compositing layer that lagged vertical scroll, and it is the reason
    `RowExpandViewer` has to portal its context menu out. No promoted layers were
    live at idle when I checked, so I could not measure a cost and left it. Needs
    a real before/after on a long list.
+
+6. **Monaco's remaining weight.** `ts.worker` is still 6.9MB and `editor.api2`
+   2.59MB. The worker is genuinely used (`OrmRunner` IntelliSense) so it cannot
+   just go, but it is loaded for anyone who opens the ORM runner once. Worth
+   checking whether the ORM runner needs full type-checking or only completions.
+   Separately, the largest chunks in `dist` are no longer Monaco's at all -
+   `brain` (1.53MB), `emacs-lisp` (780KB), `cpp` (626KB), `wasm` (622KB) are
+   Shiki grammars, and the app highlights nothing like that many languages. That
+   is the same trim, one library over, and probably a bigger win than what is
+   left in Monaco.
 
 ## Things I ruled out, so nobody re-checks them
 
