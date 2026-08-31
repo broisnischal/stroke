@@ -3544,6 +3544,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Repaint requested (via scheduleDraw) while the scroll loop owns the frame -
   // the loop draws it instead of a second rAF double-painting the same frame.
   let _loopNeedsDraw = false
+  // Vertical content delta, in CSS px, for a frame that differs from the last by
+  // NOTHING BUT a vertical scroll - draw() may then blit the unchanged band
+  // instead of repainting it (see the blit block there). Only the scroll loop
+  // ever sets this, and draw() zeroes it on entry, so every other path into
+  // draw() is a full repaint by construction.
+  let _blitDy = 0
 
   function startScrollLoop() {
     _scrollLoopDeadline = performance.now() + 200
@@ -3556,8 +3562,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (!el || !_ctx || _fatalError || performance.now() > _scrollLoopDeadline) {
         _scrollLoopId = 0
         _isScrolling = false
-        // A repaint requested on the loop's last frame must not be dropped.
-        if (_loopNeedsDraw) { _loopNeedsDraw = false; scheduleDraw() }
+        _loopNeedsDraw = false
+        // Always repaint in full once scrolling stops, even if nothing asked for
+        // it. The blit path below reuses pixels from the previous frame, so this
+        // is what guarantees the view the user is left looking at was rendered
+        // from scratch - any artifact a blit could produce lives only while the
+        // content is still moving, and never in a resting grid.
+        _blitDy = 0
+        scheduleDraw()
         return
       }
       // Snap to whole CSS pixels. The canvas is sticky-pinned at the viewport's
@@ -3567,8 +3579,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const st = Math.round(el.scrollTop)
       const sl = Math.round(el.scrollLeft)
       if (st !== _loopLastTop || sl !== _loopLastLeft || _loopNeedsDraw) {
+        const prevVirt = _scrollTop
         _physScrollTop = st
         _scrollTop = physToVirt(st)
+        // Offer draw() a blit only when this frame is a pure vertical move of the
+        // last one: same horizontal offset, a previous frame to copy from, and no
+        // repaint pending (scheduleDraw sets _loopNeedsDraw for every content,
+        // hover, focus, selection, theme and geometry change, so that flag is the
+        // single "something other than position changed" signal). draw() applies
+        // the remaining, geometric preconditions.
+        _blitDy =
+          sl === _loopLastLeft && _loopLastTop >= 0 && !_loopNeedsDraw
+            ? _scrollTop - prevVirt
+            : 0
         _scrollLeft = sl
         _loopLastTop = st
         _loopLastLeft = sl
@@ -4110,9 +4133,53 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const ctx = _ctx
     const read = _readColor
     if (!ctx || !read || !canvasEl || !colorProbe) return
+
+    // ── Scroll blitting ──────────────────────────────────────────────────────
+    // After the truncation cache, `fillText` is the whole remaining draw cost:
+    // measured at 167 calls / 6,243 glyphs per frame, 4.8ms of an 8.7ms draw,
+    // ~29us a call. That is Cairo rasterising glyphs on the CPU and no amount of
+    // JS tuning reaches it. The only way past it is to stop redrawing text that
+    // has not moved - on a frame that differs from the last one *only* by a
+    // vertical scroll, the body is a rigid translation of what is already on the
+    // canvas, so one drawImage moves the still-valid band and we repaint just the
+    // strip the scroll uncovered. A one- or two-row step then paints one or two
+    // rows instead of every visible one.
+    //
+    // The scroll loop opens the gate (pure vertical move, no repaint pending);
+    // everything below is the geometric half of the precondition - the body must
+    // be a rigid translation, which it is not when skeleton rows are animating,
+    // when an insert draft adds a band above row 0, when an expanded row makes
+    // row heights non-uniform, or when dy is fractional (reachable only on a
+    // table large enough for the scroll range to be compressed), which would land
+    // text on half-pixels and smear it. `_sawSkeleton` is still the *previous*
+    // frame's value here; it is reset a few lines down.
+    const dy = _blitDy
+    _blitDy = 0
+    const blitBodyH = Math.max(0, _viewportHeight - HEADER_H)
+    // Backing-store pixels per CSS pixel. Both the header offset and the scroll
+    // delta have to land on whole device pixels for the copy to be exact; at the
+    // usual DPR of 1 or 2 they always do, and on a fractional DPR we simply fall
+    // back to a full repaint for the frames where they do not.
+    const blitScale = _viewportWidth > 0 ? ctx.canvas.width / _viewportWidth : 0
+    const canBlit =
+      dy !== 0 &&
+      Number.isInteger(dy) &&
+      Math.abs(dy) < blitBodyH &&
+      blitScale > 0 &&
+      Number.isInteger(dy * blitScale) &&
+      Number.isInteger(HEADER_H * blitScale) &&
+      !_sawSkeleton &&
+      !newRowDrafts &&
+      expandedRows.size === 0 &&
+      visibleColumns.length > 0
+
     // Rebuilt as cells paint; pumpCellImages() below uses it to fetch only what
     // is actually on screen and to protect those thumbnails from eviction.
-    _imgWanted.clear()
+    // A blit frame paints only the exposed strip, so clearing here would drop
+    // every thumbnail that merely survived the scroll; the set is instead left to
+    // accumulate and is rebuilt by the next full frame, which the loop guarantees
+    // arrives as soon as scrolling stops.
+    if (!canBlit) _imgWanted.clear()
     // Fonts are measured off the live DOM probe, so they already reflect the
     // app zoom (.text-ui-* sizes resolve against --app-font-size). The layout
     // constants (ROW_HEIGHT, HEADER_H, …) scale by the same canvasZoom factor,
@@ -4154,11 +4221,56 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const RED = 'rgb(239, 68, 68)'
 
     ctx.imageSmoothingEnabled = false
-    // The panel colour is opaque and covers the whole canvas, so this single
-    // fill also clears the previous frame - a separate clearRect would just be a
-    // second full-surface pass (measurable on WebKitGTK's CPU-rendered canvas).
-    ctx.fillStyle = cPanel
-    ctx.fillRect(0, 0, W, H)
+    // Strip of body the scroll uncovered, in viewport px - the only part that
+    // needs rows painted on a blit frame. Empty (stripH 0) on a full frame.
+    let stripTop = 0
+    let stripH = 0
+    if (canBlit) {
+      // The copy is done in backing-store pixels with the transform reset, source
+      // and destination the same size, so it is always an exact 1:1 move of whole
+      // device pixels. Going through the DPR-scaled transform instead would let a
+      // fractional viewport size or a 1.5x DPR make source and destination differ
+      // by a fraction of a pixel - drawImage would then *resample* the band, and
+      // because each frame copies the previous one that blur would compound over a
+      // scroll into visibly smeared text. `blitScale` is read off the canvas
+      // rather than from devicePixelRatio because syncCanvasSurface caps it at 2.
+      const devH = ctx.canvas.height
+      const headDev = HEADER_H * blitScale
+      const kDev = dy * blitScale // integer: canBlit required it
+      // dy > 0 means the content moved up: keep the lower band, expose the bottom.
+      const srcTop = headDev + (kDev > 0 ? kDev : 0)
+      const dstTop = headDev + (kDev > 0 ? 0 : -kDev)
+      const keepDev = devH - Math.max(srcTop, dstTop)
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.drawImage(
+        ctx.canvas,
+        0, srcTop, ctx.canvas.width, keepDev,
+        0, dstTop, ctx.canvas.width, keepDev,
+      )
+      ctx.restore()
+      // Back in CSS px for the strip. Rounded outward so a fractional viewport
+      // height can only ever make us repaint a hair more than was uncovered,
+      // never leave a sliver of stale pixels behind.
+      if (kDev > 0) {
+        stripTop = Math.floor((dstTop + keepDev) / blitScale)
+        stripH = Math.ceil(H - stripTop)
+      } else {
+        stripTop = HEADER_H
+        stripH = Math.ceil(-dy)
+      }
+      // Clear only what the blit did not cover. The header repaints its own
+      // background (drawHeaderRow starts with a full-width fill), and everything
+      // between is either blitted or in the strip.
+      ctx.fillStyle = cPanel
+      ctx.fillRect(0, stripTop, W, stripH)
+    } else {
+      // The panel colour is opaque and covers the whole canvas, so this single
+      // fill also clears the previous frame - a separate clearRect would just be a
+      // second full-surface pass (measurable on WebKitGTK's CPU-rendered canvas).
+      ctx.fillStyle = cPanel
+      ctx.fillRect(0, 0, W, H)
+    }
 
     const usedW = Math.max(0, Math.min(W, geom.totalWidth - _scrollLeft))
     const navName = focusedCol !== null ? navigableColumns[focusedCol]?.name : null
@@ -4284,11 +4396,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       let i = rowIndexAtY(rowTops, n, bodyTopY, ROW_HEIGHT)
       const firstVis = i
       let lastVis = i
+      // On a blit frame every row outside the exposed strip is already on the
+      // canvas, translated into place. A row straddling the strip edge is
+      // repainted whole: the half that was blitted is overpainted with identical
+      // pixels, which is cheaper than clipping and cannot leave a seam. The loop
+      // itself still runs to completion - emitVisibleRange drives row windowing
+      // and must see the true visible range on every frame, blit or not.
+      // Widened by a pixel at each edge: a row's separators and focus ring sit on
+      // half-pixel coordinates and can bleed one pixel outside its own band, so
+      // the neighbouring row is repainted too rather than risk a seam where the
+      // blit met the strip. Worst case that is one extra row at each end.
+      const repaintTop = stripTop - 1
+      const repaintBot = stripTop + stripH + 1
       for (; i < n; i++) {
         const ry = rowViewportY(i)
         if (ry >= H) break
         if (ry + ROW_HEIGHT <= HEADER_H) continue
-        drawBodyRow(ctx, i, ry, bodyC)
+        if (!canBlit || (ry < repaintBot && ry + ROW_HEIGHT > repaintTop)) {
+          drawBodyRow(ctx, i, ry, bodyC)
+        }
         lastVis = i
       }
       if (n > 0) emitVisibleRange(firstVis, Math.min(lastVis, n - 1))
