@@ -63,9 +63,13 @@ export function createSmoothScroll(el) {
   const maxTop = () => Math.max(0, el.scrollHeight - el.clientHeight)
   const maxLeft = () => Math.max(0, el.scrollWidth - el.clientWidth)
   const clamp = (/** @type {number} */ v, /** @type {number} */ max) => (v < 0 ? 0 : v > max ? max : v)
-  /** Someone who asked for less motion gets none: jump, don't ease. */
-  const reduceMotion = () =>
-    typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  /** Someone who asked for less motion gets none: jump, don't ease.
+   *  The query is resolved once and kept live by the MediaQueryList itself -
+   *  calling matchMedia() per wheel tick cost ~5us of style resolution each time,
+   *  on the one path that must not touch the style system. */
+  const motionQuery =
+    typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
+  const reduceMotion = () => motionQuery !== null && motionQuery.matches
 
   /** Adopt the element's current position - after a programmatic jump, a drag of
    *  the scrollbar, or a keyboard scroll, our position is stale and would yank the

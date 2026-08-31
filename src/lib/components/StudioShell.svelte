@@ -3883,16 +3883,53 @@ let rowSearch = $state('')
     incomingFkCache = next
   }
 
-  /** Load incoming FKs for a table into the cache (no-op if already cached). */
+  /**
+   * Requests already in flight, keyed the same way as the cache.
+   *
+   * The cache is only populated once the request comes back, so the `has(key)`
+   * guard below could not see a request that had been fired but not yet
+   * answered. Restoring a session therefore fired one reverse-FK query per
+   * restored tab at the same instant - measured at nine concurrent calls
+   * totalling 37s of backend time against a D1 database, where each call is
+   * several HTTP round trips to Cloudflare. Everything the user was actually
+   * waiting for queued behind them.
+   * @type {Map<string, Promise<void>>}
+   */
+  const _incomingFkInFlight = new Map()
+  /** Bumped whenever the cache is dropped, so a reply from before the drop is discarded. */
+  let _incomingFkGen = 0
+
+  /** Load incoming FKs for a table into the cache (no-op if cached or in flight). */
   async function loadIncomingForeignKeys(schema, table) {
     const key = `${schema}.${table}`
     if (incomingFkCache.has(key)) return
-    try {
-      const result = await getIncomingForeignKeys(schema, table)
-      setIncomingFkCache(key, result ?? [])
-    } catch {
-      setIncomingFkCache(key, [])
-    }
+    const pending = _incomingFkInFlight.get(key)
+    if (pending) return pending
+    const gen = _incomingFkGen
+    const p = (async () => {
+      /** @type {any[]} */
+      let result = []
+      try {
+        result = (await getIncomingForeignKeys(schema, table)) ?? []
+      } catch {
+        result = []
+      }
+      // The connection or schema may have changed while this was in flight; the
+      // cache is keyed by "schema.table" alone, so writing now would serve one
+      // database's reverse FKs for a same-named table in another.
+      if (gen !== _incomingFkGen) return
+      _incomingFkInFlight.delete(key)
+      setIncomingFkCache(key, result)
+    })()
+    _incomingFkInFlight.set(key, p)
+    return p
+  }
+
+  /** Drop the reverse-FK cache and abandon anything still in flight for it. */
+  function resetIncomingFkCache() {
+    incomingFkCache = new Map()
+    _incomingFkInFlight.clear()
+    _incomingFkGen++
   }
 
   /**
@@ -3955,8 +3992,30 @@ let rowSearch = $state('')
     await openTableTab(refSchema, fk.referencedTable, { filters, resetQuery: true })
   }
 
+  /**
+   * True when the reply to a request issued while `conn` was connected belongs
+   * to a database that is no longer the one on screen.
+   *
+   * Every catalog loader needs this, and the `activeSchema === schemaAtCall`
+   * check some of them already do is NOT a substitute: clearConnectionState()
+   * resets activeSchema to 'public', so switching between two PostgreSQL
+   * databases leaves that comparison true and a late reply from the old database
+   * is applied to the new one - wrong table list, wrong catalog, and a cache
+   * entry written under whichever connection id happened to be current. The
+   * window is invisible over a local socket and wide open on a slow link or a
+   * slower machine, which is exactly where it gets reported from.
+   *
+   * Capture `persistConnectionId` before the first await, compare after.
+   * @param {string} conn
+   */
+  function connectionMoved(conn) {
+    return persistConnectionId !== conn
+  }
+
   async function loadSchemas() {
+    const connAtCall = persistConnectionId
     const list = await listSchemas()
+    if (connectionMoved(connAtCall)) return
     schemas = list
     if (list.length === 0) {
       activeSchema = ''
@@ -3995,6 +4054,7 @@ let rowSearch = $state('')
     const mySeq = ++_structureSeq
     const targetSchema = activeSchema
     const targetTable  = activeTable
+    const connAtCall   = persistConnectionId
     const driver       = dbType  // 'postgres' | 'mysql' | 'sqlite' | 'd1'
     try {
       const s = targetSchema.replace(/'/g, "''")
@@ -4097,7 +4157,10 @@ let rowSearch = $state('')
         ])
       }
 
-      if (activeTable === targetTable && activeSchema === targetSchema) {
+      // Table and schema names both survive a connection switch - two databases
+      // routinely hold a `public.users` - so the connection has to be checked on
+      // its own or one database's columns get shown for the other's table.
+      if (activeTable === targetTable && activeSchema === targetSchema && !connectionMoved(connAtCall)) {
         structureColumns = rows.map((row) => ({
           ordinalPosition:  Number(row[0]) || 0,
           name:             String(row[1] ?? ''),
@@ -4111,6 +4174,7 @@ let rowSearch = $state('')
       }
     } catch (e) {
       if (String(e).includes('Query cancelled')) return
+      if (connectionMoved(connAtCall)) return
       toast.error('Could not load table structure', { description: String(e) })
       if (activeTable === targetTable) structureColumns = []
     } finally {
@@ -4211,11 +4275,15 @@ let rowSearch = $state('')
     if (force) _catalog.invalidate(key)
     const hit = /** @type {SchemaCatalog | undefined} */ (_catalog.get(key, CATALOG_TTL_MS))
     if (hit) { applySchemaCatalog(hit); return }
+    const connAtCall = persistConnectionId
     const [idx, enm, trg, seq] = await Promise.all([
       fetchIndexes(schema), fetchEnums(schema), fetchTriggers(schema), fetchSequences(schema),
     ])
     // The schema can change while four requests are in flight; a late payload
-    // must not overwrite the catalog of wherever the user has since gone.
+    // must not overwrite the catalog of wherever the user has since gone. The
+    // connection can change too, and that check has to be separate - the schema
+    // is 'public' on both sides of a Postgres-to-Postgres switch.
+    if (connectionMoved(connAtCall)) return
     const payload = { indexes: idx, enums: enm, triggers: trg, sequences: seq }
     _catalog.set(key, payload)
     if (activeSchema === schema) applySchemaCatalog(payload)
@@ -4227,11 +4295,12 @@ let rowSearch = $state('')
   async function reloadCatalogKind(kind) {
     const schema = activeSchema
     if (!schema) return
+    const connAtCall = persistConnectionId
     const fetched = kind === 'indexes' ? await fetchIndexes(schema)
       : kind === 'enums' ? await fetchEnums(schema)
       : kind === 'triggers' ? await fetchTriggers(schema)
       : await fetchSequences(schema)
-    if (activeSchema !== schema) return
+    if (activeSchema !== schema || connectionMoved(connAtCall)) return
     if (kind === 'indexes') indexes = fetched
     else if (kind === 'enums') enums = fetched
     else if (kind === 'triggers') triggers = fetched
@@ -4256,7 +4325,7 @@ let rowSearch = $state('')
    *  catalog to have changed. */
   function invalidateCatalog() {
     _catalog.invalidate(connectionPrefix(persistConnectionId))
-    incomingFkCache = new Map()
+    resetIncomingFkCache()
   }
 
   /** @param {{ force?: boolean }} [opts] */
@@ -4269,6 +4338,7 @@ let rowSearch = $state('')
     // Captured once: activeSchema can change while the fetch is in flight, and
     // the background count pass must target the schema this list came from.
     const schemaAtCall = activeSchema
+    const connAtCall = persistConnectionId
     const key = catalogKey(persistConnectionId, 'tables', schemaAtCall)
     if (force) invalidateCatalog()
     const cached = force ? undefined : /** @type {any[] | undefined} */ (_catalog.get(key, TABLE_LIST_TTL_MS))
@@ -4283,6 +4353,11 @@ let rowSearch = $state('')
       error = ''
       try {
         const list = await listTables(schemaAtCall)
+        // Dropped, not applied: writing `tables` now would put the previous
+        // database's tables in the sidebar of the one just connected, and the
+        // _catalog.set below would file them under whichever connection id is
+        // current - poisoning that connection's cache for the whole TTL.
+        if (connectionMoved(connAtCall)) return
         tables = list
           .map((t) => ({
             name: t.name ?? t.table_name ?? '',
@@ -4296,10 +4371,13 @@ let rowSearch = $state('')
           activeTable = tables[0]?.name ?? null
         }
       } catch (e) {
+        if (connectionMoved(connAtCall)) return
         error = String(e)
         tables = []
       } finally {
-        loadingTables = false
+        // A stale reply must not clear the spinner the *new* connection's load
+        // just put up, so this is guarded too - `return` above still runs it.
+        if (!connectionMoved(connAtCall)) loadingTables = false
       }
     }
     // The list arrives with unknown (null) counts so it renders immediately;
@@ -4416,6 +4494,24 @@ let rowSearch = $state('')
   }
   /** The predicate `total` belongs to; '' until a count lands. */
   let _totalSig = $state('')
+  /**
+   * The view a known `total` was actually counted for: connection, schema,
+   * table and predicate together. The predicate alone is not enough - two
+   * tables routinely carry the same filter, and reusing one's count for the
+   * other would show the wrong number of rows.
+   * @param {string} schema @param {string} table @param {string} sig
+   */
+  function rowCountKey(schema, table, sig) {
+    return `${persistConnectionId}\u0000${schema}\u0000${table}\u0000${sig}`
+  }
+  /** Set only when a count lands; cleared by anything that can change how many
+   *  rows match. While it matches the view being loaded, the count on screen is
+   *  the answer and the background COUNT(*) is skipped. */
+  let _countedView = ''
+  /** Row data may have changed under the current predicate - count again. */
+  function invalidateRowCount() {
+    _countedView = ''
+  }
   const rowPredicateSig = $derived(predicateSig(apiSearch(rowSearch), rowFilters))
   /** `total` was counted under the search + filters now on screen. */
   const totalIsForThisView = $derived(total > 0 && _totalSig === rowPredicateSig)
@@ -5066,6 +5162,8 @@ let rowSearch = $state('')
       // Frozen with the query: the count this load produces belongs to THIS
       // predicate, even if the user edits the filters while it is in flight.
       const ownerSig = predicateSig(apiSearch(rowSearch), rowFilters)
+      // Identity of the view this load is for, for reusing a count across pages.
+      const viewKey = rowCountKey(ownerSchema, ownerTable, ownerSig)
       const data = await getTableRows(
         ownerSchema, ownerTable,
         wantsWindow ? WINDOW_PROBE : effectivePageSize,
@@ -5248,7 +5346,12 @@ let rowSearch = $state('')
         _infiniteRows = fetched
         // total = -1 means "counting" (Postgres, non-blocking). Other engines
         // return a real total here; refreshRowCount() then no-ops for them.
-        total = Number(data.total ?? 0)
+        // When the count for this exact view is already known, keep it rather
+        // than dropping back to the sentinel: without this, every page change
+        // would blank the total and force the COUNT(*) the skip below exists to
+        // avoid, and the footer would flicker through "counting" on each page.
+        const incoming = Number(data.total ?? 0)
+        total = incoming >= 0 ? incoming : (_countedView === viewKey ? total : incoming)
         _totalSig = ownerSig
       }
       queryMs = ranMs
@@ -5266,7 +5369,18 @@ let rowSearch = $state('')
       }
       // Fire-and-forget: fill the total in the background so the count never
       // delays the rows. Windowed loads already have a real total from the fetch.
-      if (!windowed) void refreshRowCount(ownerTabId, seq, ownerSchema, ownerTable, ownerQuery, ownerSig)
+      // A page change cannot change how many rows match the predicate, so the
+      // count already on screen is the answer. Re-asking is a full COUNT(*) per
+      // page: measured on the 1M-row `events` fixture with a `kind LIKE` filter
+      // at 182ms cold / 32ms warm, against 0.79ms for the page of rows it
+      // accompanies - and on a remote database it is another round trip on top.
+      // The count is background work, so this never showed up as a blocked
+      // paint, only as load the server was carrying for an answer we had.
+      // `keepScroll` is the live refresh: rows may have changed underneath, so
+      // that always recounts.
+      if (!windowed && (keepScroll || _countedView !== viewKey)) {
+        void refreshRowCount(ownerTabId, seq, ownerSchema, ownerTable, ownerQuery, ownerSig, viewKey)
+      }
       // Mirror the landed result into the owning tab so the spinner in the tab
       // strip stops and a later switch away/back doesn't refetch it.
       patchTableTab(ownerTabId ?? '', { loadingRows: false, error: '' })
@@ -5309,7 +5423,7 @@ let rowSearch = $state('')
    * @param {string | null} tabId @param {number} seq @param {string} schema
    * @param {string} table @param {{ search?: string, searchIsRegex?: boolean, filters?: any[] }} query
    */
-  async function refreshRowCount(tabId, seq, schema, table, query, sig = '') {
+  async function refreshRowCount(tabId, seq, schema, table, query, sig = '', viewKey = '') {
     if (!table) return
     try {
       const n = await countTableRows(schema, table, query)
@@ -5319,6 +5433,7 @@ let rowSearch = $state('')
         if (tabId !== activeTabId) return
         total = n
         _totalSig = sig
+        _countedView = viewKey
         const maxPage = Math.max(1, Math.ceil(total / effectivePageSize) || 1)
         if (page > maxPage) page = maxPage
       }
@@ -5579,7 +5694,7 @@ let rowSearch = $state('')
     // resident forever). The ConnectionModal connect path lands here without
     // going through clearConnectionState, so reset them in both places.
     tableColumnsCache = new Map()
-    incomingFkCache = new Map()
+    resetIncomingFkCache()
     _catalog.clear()
     // The connection is live: render the shell NOW (setting `connection` above
     // dropped the reconnect overlay) with the welcome tab open and the sidebar
@@ -5652,41 +5767,60 @@ let rowSearch = $state('')
 
   // Warm the lazy page/panel chunks during browser idle time so the first
   // navigation to a tab is instant instead of paying a cold chunk fetch+parse.
-  // These chunks pull in heavy deps (monaco, echarts, marked+shiki), so we warm
-  // ONE per idle slot - never blocking interaction. Ordered by how commonly each
-  // is opened; the monaco-backed editors come first since they dominate latency.
-  // If the user opens a page sooner, import() dedups to the same promise and
-  // resolves immediately. Fire-and-forget; failures are harmless.
+  // We warm ONE per idle slot - never blocking interaction. Ordered by how
+  // commonly each is opened; the monaco-backed editors come first since they
+  // dominate latency. If the user opens a page sooner, import() dedups to the
+  // same promise and resolves immediately. Fire-and-forget; failures are harmless.
+  //
+  // Measured on a release build against the manifest's static import graph -
+  // warming a chunk pulls its static imports, its own dynamic imports stay lazy.
+  // The eager entry graph is 2.71MB/25 chunks; the full warm set adds 6.01MB/49.
+  // But 5.35MB of that is two entries: SqlConsole drags in monaco (3.78MB) and
+  // AiChat the markdown/highlight stack (1.57MB). The other 22 pages cost 0.66MB
+  // between them, 0.01-0.11MB each - so trimming that tail buys nothing and only
+  // costs first-open latency, which is why it is all still here.
+  //
+  // What is worth skipping is whatever this engine cannot open at all. A warmed
+  // chunk is never freed again (which already sits badly beside the idle-teardown
+  // above), and on a Redis connection every relational page is unreachable UI -
+  // monaco included, so ~4.3MB of the 6.01MB was being pinned for tabs that do
+  // not exist. Hence the gate per entry, and hence waiting for a connection:
+  // before one exists the engine is unknown and no tab can be opened anyway.
   //
   // Keep these specifiers identical to the {#await import('./X.svelte')} blocks
   // below so Vite resolves them to the same chunk.
-  onMount(() => {
-    const warmers = [
-      () => import('./SqlConsole.svelte'),       // monaco
-      () => import('./AiSidebar.svelte'),        // marked + shiki
-      () => import('./AiChat.svelte'),           // marked + shiki
-      () => import('./OrmRunner.svelte'),        // monaco
-      () => import('./TableJsonView.svelte'),    // monaco - data view mode
-      () => import('./TableTextView.svelte'),    // monaco - data view mode
-      () => import('./StructureView.svelte'),
-      () => import('./SchemaPage.svelte'),
-      () => import('./ChartsPage.svelte'),       // echarts
-      () => import('./DashboardPage.svelte'),
-      () => import('./SecurityPage.svelte'),
-      () => import('./SearchPage.svelte'),
-      () => import('./InstanceInsightsPage.svelte'),
-      () => import('./ObjectsPage.svelte'),
-      () => import('./DiagramsPage.svelte'),     // echarts
-      () => import('./EntityRelationPage.svelte'),
-      () => import('./DataDiffPage.svelte'),     // monaco
-      () => import('./NotebookEditor.svelte'),
-      () => import('./JsonViewerPage.svelte'),
-      () => import('./ExtensionsPage.svelte'),
-      () => import('./BackupPage.svelte'),
-      () => import('./LogsPage.svelte'),
-      () => import('./SchemaTimelinePage.svelte'),
-      () => import('./RedisKeyspacePage.svelte'),
+  $effect(() => {
+    if (!connection) return
+    // [reachable on this engine, loader]. Gates mirror the tab affordances in
+    // the empty-state grid and the palette; keep them in sync when a page moves.
+    /** @type {Array<[boolean, () => Promise<unknown>]>} */
+    const candidates = [
+      [isRedis,          () => import('./RedisKeyspacePage.svelte')], // the only page Redis has
+      [!isRedis,         () => import('./SqlConsole.svelte')],        // monaco
+      [true,             () => import('./AiSidebar.svelte')],         // marked + shiki
+      [true,             () => import('./AiChat.svelte')],            // marked + shiki
+      [!isRedis,         () => import('./OrmRunner.svelte')],         // monaco
+      [!isRedis,         () => import('./TableJsonView.svelte')],     // monaco - data view mode
+      [!isRedis,         () => import('./TableTextView.svelte')],     // monaco - data view mode
+      [!isRedis,         () => import('./StructureView.svelte')],
+      [hasSchemaExplorer, () => import('./SchemaPage.svelte')],
+      [!isRedis,         () => import('./ChartsPage.svelte')],        // echarts
+      [!isRedis,         () => import('./DashboardPage.svelte')],
+      [hasSecurity,      () => import('./SecurityPage.svelte')],
+      [!isRedis,         () => import('./SearchPage.svelte')],
+      [!isRedis,         () => import('./InstanceInsightsPage.svelte')],
+      [!isRedis,         () => import('./ObjectsPage.svelte')],
+      [!isRedis,         () => import('./DiagramsPage.svelte')],      // echarts
+      [!isRedis,         () => import('./EntityRelationPage.svelte')],
+      [!isRedis,         () => import('./DataDiffPage.svelte')],      // monaco
+      [!isRedis,         () => import('./NotebookEditor.svelte')],
+      [!isRedis,         () => import('./JsonViewerPage.svelte')],
+      [!isRedis,         () => import('./ExtensionsPage.svelte')],
+      [!isRedis,         () => import('./BackupPage.svelte')],
+      [true,             () => import('./LogsPage.svelte')],
+      [!isRedis,         () => import('./SchemaTimelinePage.svelte')],
     ]
+    const warmers = candidates.filter(([reachable]) => reachable).map(([, load]) => load)
     const ric = window.requestIdleCallback ?? ((/** @type {Function} */ fn) => setTimeout(() => fn(), 200))
     const cancel = window.cancelIdleCallback ?? clearTimeout
     let i = 0
@@ -6015,7 +6149,7 @@ let rowSearch = $state('')
     triggers = []
     sequences = []
     tableColumnsCache = new Map()
-    incomingFkCache = new Map()
+    resetIncomingFkCache()
     _catalog.clear()
     _sqlHintsLoadedFor = ''
     activeSchema = 'public'
@@ -6397,6 +6531,9 @@ let rowSearch = $state('')
         saveActiveTabState()
         toast.success('Row inserted')
       } else {
+        // This branch does not adjust `total` (whether the new row matches the
+        // active filter is the database's call), so the count has to be redone.
+        invalidateRowCount()
         await loadRows()
         toast.success('Row inserted', {
           description: hasActiveFilters
@@ -6422,6 +6559,9 @@ let rowSearch = $state('')
     const _start = Date.now()
     try {
       await executeSqlMulti(sql)
+      // Hand-written DML: rows may have been inserted or deleted, or edited so
+      // they no longer match the active filter. Nothing here can be assumed.
+      invalidateRowCount()
       recordActivity({ type: 'row_save', title: `Applied edited SQL${activeTable ? ` on ${activeTable}` : ''}`, schema: activeSchema, table: activeTable ?? '', durationMs: Date.now() - _start, success: true })
       await loadRows()
       toast.success('Changes applied')
@@ -6452,6 +6592,10 @@ let rowSearch = $state('')
       // rows is $state.raw, so the in-place assignment above doesn't notify the
       // canvas; bump dataVersion to force the grid to repaint the edited cell.
       dataVersion++
+      // With a filter or search active, the edited value may have moved this row
+      // in or out of the result - so the total is no longer known to be right.
+      // Unfiltered, editing a cell cannot change how many rows there are.
+      if (rowSearch.trim() !== '' || activeFilters(rowFilters).length > 0) invalidateRowCount()
       saveActiveTabState()
       recordActivity({ type: 'row_save', title: `Updated ${col.name} in ${activeTable}`, schema: activeSchema, table: activeTable, durationMs: Date.now() - _saveStart, success: true })
     } catch (e) {

@@ -42,6 +42,26 @@ export default defineConfig({
     svelte({ compilerOptions: { runes: true } }),
     tailwindcss(),
   ],
+  optimizeDeps: {
+    // canvas-confetti is only reached through a lazy `await import()` on the license
+    // pages, so Vite's initial scan misses it. Discovering it mid-session re-runs the
+    // optimizer, rehashes every pre-bundled chunk, and the webview then 404s on the
+    // old runtime-*/index-client-*/Icon-* paths -> the whole app goes blank.
+    include: [
+      'canvas-confetti',
+      // src/lib/monaco.js composes the editor entry by hand out of subpaths, and it
+      // is itself only reached through a lazy import, so the same scan misses all of
+      // these. Keep this list in step with the imports at the top of that file.
+      'monaco-editor/esm/vs/editor/edcore.main.js',
+      'monaco-editor/esm/vs/basic-languages/sql/sql.contribution.js',
+      'monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution.js',
+      'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution.js',
+      'monaco-editor/esm/vs/basic-languages/rust/rust.contribution.js',
+      'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js',
+      'monaco-editor/esm/vs/language/json/monaco.contribution.js',
+      'monaco-editor/esm/vs/language/typescript/monaco.contribution.js',
+    ],
+  },
   resolve: {
     alias: {
       $lib: path.resolve(__dirname, './src/lib'),

@@ -8,7 +8,7 @@
   import Braces from '@lucide/svelte/icons/braces'
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import { oversizeCellInfo, formatByteSize } from '$lib/cell-value.js'
-  import * as monaco from 'monaco-editor'
+  import * as monaco from '$lib/monaco.js'
   import { configureMonacoWorkers, editorFontFamily } from '$lib/monaco-env.js'
   import { defineStrokeMonacoThemes, applyMonacoTheme, monacoThemeId, readEditorFontOptions } from '$lib/monaco-themes.js'
   import { normalizeThemeId } from '$lib/themes/registry.js'

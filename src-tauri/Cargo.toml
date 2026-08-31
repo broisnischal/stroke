@@ -36,6 +36,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 futures = "0.3"
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 libc = "0.2"
+# Global allocator. glibc malloc keeps one ~64MB arena per worker thread and
+# does not hand them back, so serialising one large result set left ~200MB of
+# resident arenas behind for the rest of the session. mimalloc releases pages to
+# the OS and is faster on the alloc-heavy JSON path.
+mimalloc = { version = "0.1", default-features = false }
 chrono = { version = "0.4", features = ["serde"] }
 rust_decimal = { version = "1", features = ["serde"] }
 uuid = { version = "1", features = ["serde"] }
@@ -107,4 +112,41 @@ opt-level = 3
 [profile.dev.package.curve25519-dalek]
 opt-level = 3
 [profile.dev.package.block-buffer]
+opt-level = 3
+
+# ── Dev-profile IPC optimization ──────────────────────────────────────────────
+# Every command result is serialised to JSON and handed to the webview, and a
+# browse of a large table is megabytes of it. At opt-level 0 serde_json's
+# generated code is ~20x slower than release, so a dev build spent most of a
+# row fetch inside serialisation rather than in the database. These crates are
+# dependencies, so raising them costs nothing on incremental rebuilds of our
+# own code.
+[profile.dev.package.serde_json]
+opt-level = 3
+[profile.dev.package.serde]
+opt-level = 3
+[profile.dev.package.itoa]
+opt-level = 3
+[profile.dev.package.ryu]
+opt-level = 3
+[profile.dev.package.mimalloc]
+opt-level = 3
+[profile.dev.package.libmimalloc-sys]
+opt-level = 3
+# Row decoding: sqlx reads every column of every row through these.
+[profile.dev.package.sqlx-core]
+opt-level = 3
+[profile.dev.package.sqlx-postgres]
+opt-level = 3
+[profile.dev.package.sqlx-mysql]
+opt-level = 3
+[profile.dev.package.sqlx-sqlite]
+opt-level = 3
+[profile.dev.package.rust_decimal]
+opt-level = 3
+[profile.dev.package.chrono]
+opt-level = 3
+[profile.dev.package.uuid]
+opt-level = 3
+[profile.dev.package.base64]
 opt-level = 3

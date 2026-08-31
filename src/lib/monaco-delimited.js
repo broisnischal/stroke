@@ -4,7 +4,7 @@
  * tokenizer instead of any custom rendering. Token names map onto the existing
  * Stroke Monaco themes ('string', 'number', 'keyword', 'delimiter').
  */
-import * as monaco from 'monaco-editor'
+import * as monaco from '$lib/monaco.js'
 
 let registered = false
 

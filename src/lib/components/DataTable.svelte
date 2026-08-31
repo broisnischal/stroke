@@ -971,7 +971,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
     if (_dispCacheVFns !== _vcolFns) { _dispCacheVFns = _vcolFns; _vexprTextCache.clear(); }
     if (_dispCacheTFns !== _colTransformFns) { _dispCacheTFns = _colTransformFns; _colTfCache.clear(); }
+    // The truncation cache is keyed by (font, width, string) and stays correct
+    // across pages, so it deliberately survives a `rows` swap - that is what
+    // keeps windowed scrolling on cache hits. It is dropped on a column change
+    // so one table's strings are not held alive after you navigate to another.
+    if (_truncCacheCols !== columns) { _truncCacheCols = columns; _truncCacheReset(); }
   }
+  let _truncCacheCols = /** @type {unknown} */ (null);
   /** Drop one row's cached text when the row behind it was replaced in place.
    *  Called once per row per frame from drawBodyRow - not per cell, which would
    *  put a Map lookup on every drawn cell for a check that can only change per row. */
@@ -3143,12 +3149,36 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Per-column stable cache - computed once per column/schema change instead of
   // once per cell per render. getColumnEnumValues, canEditColumn, and fkByColumn
   // were previously called rows×cols times on every reactive update.
-  const _colCache = $derived.by(() => columns.map((col, colIdx) => ({
-    colType: col?.dataType ?? col?.data_type ?? '',
-    enumValues: getColumnEnumValues(col),
-    canEdit: !readonly && primaryKey.length > 0 && isEditableType(col?.dataType ?? col?.data_type ?? ''),
-    fk: fkByColumn[col?.name ?? ''] ?? null,
-  })))
+  const _colCache = $derived.by(() => {
+    // Alignment mode is per-table, not per-column, but it decides `alignRight`
+    // below, so it belongs in this cache's dependency set.
+    const align = $appTableAlign
+    return columns.map((col) => {
+      const colType = col?.dataType ?? col?.data_type ?? ''
+      const t = String(colType)
+      return {
+        colType,
+        enumValues: getColumnEnumValues(col),
+        canEdit: !readonly && primaryKey.length > 0 && isEditableType(t),
+        fk: fkByColumn[col?.name ?? ''] ?? null,
+        // Type predicates. Each one is a regex over the column's declared type,
+        // and drawCell needs all of them; evaluated there they ran once per cell
+        // per frame - four regexes and half a dozen throwaway strings per cell,
+        // ~40k regex executions/sec while scrolling. They depend only on the
+        // column, so they are resolved once here instead.
+        isBool: isBooleanType(t),
+        isArrayType: isSqlArrayType(t),
+        isVector: isVectorType(t),
+        isGeom: isGeometryType(t),
+        // Right-alignment under the 'numbers' setting: quantities line up by
+        // place value, prose stays left. Booleans match /int/ on engines that
+        // spell them tinyint(1), so they are excluded before the numeric test.
+        alignRight: align === 'right' ? true
+          : align !== 'numbers' ? false
+          : !/bool/i.test(t) && _statsNumericRe.test(t),
+      }
+    })
+  })
 
   // Per-column numeric stats for heatmap + annotator extensions. Computed once
   // per data/settings change (NOT per render), sampled to bound cost on big
@@ -3166,14 +3196,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {number} actualIdx index into `columns`
    */
   function isRightAlignedColumn(actualIdx) {
-    const mode = $appTableAlign
-    if (mode === 'right') return true
-    if (mode !== 'numbers') return false
-    const col = columns[actualIdx]
-    const type = String(col?.dataType ?? col?.data_type ?? '')
-    // Booleans match /int/ in some engines (tinyint(1)) but are not quantities.
-    if (/bool/i.test(type)) return false
-    return _statsNumericRe.test(type)
+    const cached = _colCache[actualIdx]
+    if (cached) return cached.alignRight
+    // No such column (a virtual/unmapped index): only the blanket 'right' mode
+    // still applies.
+    return $appTableAlign === 'right'
   }
   const _colStats = $derived.by(() => {
     void $pluginState
@@ -3517,6 +3544,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Repaint requested (via scheduleDraw) while the scroll loop owns the frame -
   // the loop draws it instead of a second rAF double-painting the same frame.
   let _loopNeedsDraw = false
+  // Vertical content delta, in CSS px, for a frame that differs from the last by
+  // NOTHING BUT a vertical scroll - draw() may then blit the unchanged band
+  // instead of repainting it (see the blit block there). Only the scroll loop
+  // ever sets this, and draw() zeroes it on entry, so every other path into
+  // draw() is a full repaint by construction.
+  let _blitDy = 0
 
   function startScrollLoop() {
     _scrollLoopDeadline = performance.now() + 200
@@ -3529,8 +3562,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (!el || !_ctx || _fatalError || performance.now() > _scrollLoopDeadline) {
         _scrollLoopId = 0
         _isScrolling = false
-        // A repaint requested on the loop's last frame must not be dropped.
-        if (_loopNeedsDraw) { _loopNeedsDraw = false; scheduleDraw() }
+        _loopNeedsDraw = false
+        // Always repaint in full once scrolling stops, even if nothing asked for
+        // it. The blit path below reuses pixels from the previous frame, so this
+        // is what guarantees the view the user is left looking at was rendered
+        // from scratch - any artifact a blit could produce lives only while the
+        // content is still moving, and never in a resting grid.
+        _blitDy = 0
+        scheduleDraw()
         return
       }
       // Snap to whole CSS pixels. The canvas is sticky-pinned at the viewport's
@@ -3540,8 +3579,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const st = Math.round(el.scrollTop)
       const sl = Math.round(el.scrollLeft)
       if (st !== _loopLastTop || sl !== _loopLastLeft || _loopNeedsDraw) {
+        const prevVirt = _scrollTop
         _physScrollTop = st
         _scrollTop = physToVirt(st)
+        // Offer draw() a blit only when this frame is a pure vertical move of the
+        // last one: same horizontal offset, a previous frame to copy from, and no
+        // repaint pending (scheduleDraw sets _loopNeedsDraw for every content,
+        // hover, focus, selection, theme and geometry change, so that flag is the
+        // single "something other than position changed" signal). draw() applies
+        // the remaining, geometric preconditions.
+        _blitDy =
+          sl === _loopLastLeft && _loopLastTop >= 0 && !_loopNeedsDraw
+            ? _scrollTop - prevVirt
+            : 0
         _scrollLeft = sl
         _loopLastTop = st
         _loopLastLeft = sl
@@ -3978,6 +4028,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return _glyphW > 0 ? str.length * _glyphW : ctx.measureText(str).width
   }
 
+  // Truncated strings, keyed by column width then by source string, for the
+  // active font.
+  //
+  // Truncating is the most expensive thing in the draw loop: WebKit shapes the
+  // whole string through HarfBuzz for every measureText, and a text-heavy table
+  // measured ~16,000 characters per frame (113 calls, 3.1ms of an 11ms frame)
+  // re-deriving answers it had already computed. The result is a pure function
+  // of (font, width, string) and all three are constant while scrolling, so each
+  // combination is measured once and the rest of the scroll is map hits.
+  /** @type {Map<number, Map<string, string>>} */
+  const _truncCache = new Map()
+  /** The font `_truncCache` was built under; a zoom or font change drops it. */
+  let _truncCacheFont = ''
+  let _truncCacheEntries = 0
+  const _TRUNC_CACHE_MAX = 8192
+
+  function _truncCacheReset() {
+    _truncCache.clear()
+    _truncCacheEntries = 0
+  }
+
   /** Truncate `text` to fit `maxW` px under the current ctx.font, adding `…`. */
   function truncText(ctx, text, maxW) {
     if (maxW <= 0) return ''
@@ -3986,6 +4057,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     _syncGlyphW(ctx)
     // Fast no-truncation check: if the monospace estimate fits, trust it.
     if (_glyphW > 0 && len * _glyphW <= maxW) return text
+    // Past here the string has to be measured, so consult the cache first.
+    // `_glyphFont` was just refreshed from ctx.font by _syncGlyphW above.
+    if (_truncCacheFont !== _glyphFont) { _truncCacheReset(); _truncCacheFont = _glyphFont }
+    let byText = _truncCache.get(maxW)
+    if (byText !== undefined) {
+      const hit = byText.get(text)
+      if (hit !== undefined) return hit
+    }
+    const out = _truncMeasure(ctx, text, maxW, len)
+    if (_truncCacheEntries >= _TRUNC_CACHE_MAX) { _truncCacheReset(); byText = undefined }
+    if (byText === undefined) { byText = new Map(); _truncCache.set(maxW, byText) }
+    byText.set(text, out)
+    _truncCacheEntries++
+    return out
+  }
+
+  /** The measuring half of truncText - only reached on a cache miss. */
+  function _truncMeasure(ctx, text, maxW, len) {
     // For truncation, always measure accurately - the monospace estimate can
     // over-count for non-ASCII characters (Arabic, CJK, etc.) that fall back
     // to a narrower font, leaving an apparent gap after the ellipsis.
@@ -4044,9 +4133,53 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const ctx = _ctx
     const read = _readColor
     if (!ctx || !read || !canvasEl || !colorProbe) return
+
+    // ── Scroll blitting ──────────────────────────────────────────────────────
+    // After the truncation cache, `fillText` is the whole remaining draw cost:
+    // measured at 167 calls / 6,243 glyphs per frame, 4.8ms of an 8.7ms draw,
+    // ~29us a call. That is Cairo rasterising glyphs on the CPU and no amount of
+    // JS tuning reaches it. The only way past it is to stop redrawing text that
+    // has not moved - on a frame that differs from the last one *only* by a
+    // vertical scroll, the body is a rigid translation of what is already on the
+    // canvas, so one drawImage moves the still-valid band and we repaint just the
+    // strip the scroll uncovered. A one- or two-row step then paints one or two
+    // rows instead of every visible one.
+    //
+    // The scroll loop opens the gate (pure vertical move, no repaint pending);
+    // everything below is the geometric half of the precondition - the body must
+    // be a rigid translation, which it is not when skeleton rows are animating,
+    // when an insert draft adds a band above row 0, when an expanded row makes
+    // row heights non-uniform, or when dy is fractional (reachable only on a
+    // table large enough for the scroll range to be compressed), which would land
+    // text on half-pixels and smear it. `_sawSkeleton` is still the *previous*
+    // frame's value here; it is reset a few lines down.
+    const dy = _blitDy
+    _blitDy = 0
+    const blitBodyH = Math.max(0, _viewportHeight - HEADER_H)
+    // Backing-store pixels per CSS pixel. Both the header offset and the scroll
+    // delta have to land on whole device pixels for the copy to be exact; at the
+    // usual DPR of 1 or 2 they always do, and on a fractional DPR we simply fall
+    // back to a full repaint for the frames where they do not.
+    const blitScale = _viewportWidth > 0 ? ctx.canvas.width / _viewportWidth : 0
+    const canBlit =
+      dy !== 0 &&
+      Number.isInteger(dy) &&
+      Math.abs(dy) < blitBodyH &&
+      blitScale > 0 &&
+      Number.isInteger(dy * blitScale) &&
+      Number.isInteger(HEADER_H * blitScale) &&
+      !_sawSkeleton &&
+      !newRowDrafts &&
+      expandedRows.size === 0 &&
+      visibleColumns.length > 0
+
     // Rebuilt as cells paint; pumpCellImages() below uses it to fetch only what
     // is actually on screen and to protect those thumbnails from eviction.
-    _imgWanted.clear()
+    // A blit frame paints only the exposed strip, so clearing here would drop
+    // every thumbnail that merely survived the scroll; the set is instead left to
+    // accumulate and is rebuilt by the next full frame, which the loop guarantees
+    // arrives as soon as scrolling stops.
+    if (!canBlit) _imgWanted.clear()
     // Fonts are measured off the live DOM probe, so they already reflect the
     // app zoom (.text-ui-* sizes resolve against --app-font-size). The layout
     // constants (ROW_HEIGHT, HEADER_H, …) scale by the same canvasZoom factor,
@@ -4088,11 +4221,56 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const RED = 'rgb(239, 68, 68)'
 
     ctx.imageSmoothingEnabled = false
-    // The panel colour is opaque and covers the whole canvas, so this single
-    // fill also clears the previous frame - a separate clearRect would just be a
-    // second full-surface pass (measurable on WebKitGTK's CPU-rendered canvas).
-    ctx.fillStyle = cPanel
-    ctx.fillRect(0, 0, W, H)
+    // Strip of body the scroll uncovered, in viewport px - the only part that
+    // needs rows painted on a blit frame. Empty (stripH 0) on a full frame.
+    let stripTop = 0
+    let stripH = 0
+    if (canBlit) {
+      // The copy is done in backing-store pixels with the transform reset, source
+      // and destination the same size, so it is always an exact 1:1 move of whole
+      // device pixels. Going through the DPR-scaled transform instead would let a
+      // fractional viewport size or a 1.5x DPR make source and destination differ
+      // by a fraction of a pixel - drawImage would then *resample* the band, and
+      // because each frame copies the previous one that blur would compound over a
+      // scroll into visibly smeared text. `blitScale` is read off the canvas
+      // rather than from devicePixelRatio because syncCanvasSurface caps it at 2.
+      const devH = ctx.canvas.height
+      const headDev = HEADER_H * blitScale
+      const kDev = dy * blitScale // integer: canBlit required it
+      // dy > 0 means the content moved up: keep the lower band, expose the bottom.
+      const srcTop = headDev + (kDev > 0 ? kDev : 0)
+      const dstTop = headDev + (kDev > 0 ? 0 : -kDev)
+      const keepDev = devH - Math.max(srcTop, dstTop)
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.drawImage(
+        ctx.canvas,
+        0, srcTop, ctx.canvas.width, keepDev,
+        0, dstTop, ctx.canvas.width, keepDev,
+      )
+      ctx.restore()
+      // Back in CSS px for the strip. Rounded outward so a fractional viewport
+      // height can only ever make us repaint a hair more than was uncovered,
+      // never leave a sliver of stale pixels behind.
+      if (kDev > 0) {
+        stripTop = Math.floor((dstTop + keepDev) / blitScale)
+        stripH = Math.ceil(H - stripTop)
+      } else {
+        stripTop = HEADER_H
+        stripH = Math.ceil(-dy)
+      }
+      // Clear only what the blit did not cover. The header repaints its own
+      // background (drawHeaderRow starts with a full-width fill), and everything
+      // between is either blitted or in the strip.
+      ctx.fillStyle = cPanel
+      ctx.fillRect(0, stripTop, W, stripH)
+    } else {
+      // The panel colour is opaque and covers the whole canvas, so this single
+      // fill also clears the previous frame - a separate clearRect would just be a
+      // second full-surface pass (measurable on WebKitGTK's CPU-rendered canvas).
+      ctx.fillStyle = cPanel
+      ctx.fillRect(0, 0, W, H)
+    }
 
     const usedW = Math.max(0, Math.min(W, geom.totalWidth - _scrollLeft))
     const navName = focusedCol !== null ? navigableColumns[focusedCol]?.name : null
@@ -4182,10 +4360,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       firstColIdx++
     }
 
+    // Pinned columns, collected once per frame. Null rather than an empty array
+    // so drawBodyRow can skip the loop with a single check.
+    /** @type {typeof geom.cols | null} */
+    let pinnedCols = null
+    for (const col of geom.cols) {
+      if (!col.pinned) continue
+      if (!pinnedCols) pinnedCols = []
+      pinnedCols.push(col)
+    }
+
     const bodyC = {
       cFg, cText, cMuted, cGrid, cBorder, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
       AMBER, BLUE_FG, RED, cPrimary, frozenW, tableStyle, dotSize, vSeps, firstColIdx,
       rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
+      // Frame-constant snapshots of the reactive values the per-cell loops read.
+      // Every entry below was previously read straight off the reactive graph
+      // inside drawCell, i.e. once per cell per frame. A $derived read is not a
+      // property access - it re-checks the derived against each of its
+      // dependencies' write versions - and there were ~20 of them per cell, so a
+      // 150-cell viewport paid ~3000 graph reads a frame for values that cannot
+      // change mid-frame. Read once here, then drawCell only touches this object.
+      cols: geom.cols, pinnedCols, scrollLeft: _scrollLeft, viewportWidth: W,
+      padX: CELL_PAD_X, iconHit: ICON_HIT, zoom: canvasZoom, fonts: _fonts,
+      nameToActualIdx: _nameToActualIdx, colCache: _colCache,
+      editingCell, focusedRow, hoveredRow, hoveredColName, focusColName, selectedCols,
+      hasPendingEdits, pendingEdits, editedRowSet: _editedRowSet,
+      colStats: _colStats, extActive: _extActive, colTransformFns: _colTransformFns,
+      searchLower: _searchLower, nullishOn: _nullishOn, rows,
+      alignAll: $appTableAlign === 'right',
     }
 
     const bodyTopY = Math.max(0, _scrollTop - HEADER_H - insertRowOffset)
@@ -4193,11 +4396,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       let i = rowIndexAtY(rowTops, n, bodyTopY, ROW_HEIGHT)
       const firstVis = i
       let lastVis = i
+      // On a blit frame every row outside the exposed strip is already on the
+      // canvas, translated into place. A row straddling the strip edge is
+      // repainted whole: the half that was blitted is overpainted with identical
+      // pixels, which is cheaper than clipping and cannot leave a seam. The loop
+      // itself still runs to completion - emitVisibleRange drives row windowing
+      // and must see the true visible range on every frame, blit or not.
+      // Widened by a pixel at each edge: a row's separators and focus ring sit on
+      // half-pixel coordinates and can bleed one pixel outside its own band, so
+      // the neighbouring row is repainted too rather than risk a seam where the
+      // blit met the strip. Worst case that is one extra row at each end.
+      const repaintTop = stripTop - 1
+      const repaintBot = stripTop + stripH + 1
       for (; i < n; i++) {
         const ry = rowViewportY(i)
         if (ry >= H) break
         if (ry + ROW_HEIGHT <= HEADER_H) continue
-        drawBodyRow(ctx, i, ry, bodyC)
+        if (!canBlit || (ry < repaintBot && ry + ROW_HEIGHT > repaintTop)) {
+          drawBodyRow(ctx, i, ry, bodyC)
+        }
         lastVis = i
       }
       if (n > 0) emitVisibleRange(firstVis, Math.min(lastVis, n - 1))
@@ -4448,20 +4665,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // frame's precomputed first visible index (c.firstColIdx) and break once a
     // column starts past the right viewport edge, so neither off-screen tail is
     // iterated per row (matters for very wide tables).
-    for (let ci = c.firstColIdx; ci < geom.cols.length; ci++) {
-      const col = geom.cols[ci]
+    // `cols`, `sl` and `vw` are read off the frame context rather than the
+    // reactive graph: `geom` is a $derived, and `geom.cols.length` in the loop
+    // condition re-entered it once per column per row.
+    const cols = c.cols
+    const sl = c.scrollLeft
+    for (let ci = c.firstColIdx, nc = cols.length, vpw = c.viewportWidth; ci < nc; ci++) {
+      const col = cols[ci]
       if (col.pinned) continue
-      const dx = col.contentX - _scrollLeft
-      if (dx >= _viewportWidth) break
+      const dx = col.contentX - sl
+      if (dx >= vpw) break
       if (dx + col.w <= 0) continue
       drawCell(ctx, idx, col, dx, ry, rh, c)
     }
 
-    // Pinned cells on top (frozen left).
-    for (const col of geom.cols) {
-      if (!col.pinned) continue
-      const dx = colDrawnX(col, geom, _scrollLeft)
-      drawCell(ctx, idx, col, dx, ry, rh, c, true)
+    // Pinned cells on top (frozen left). c.pinnedCols is null when nothing is
+    // pinned - the common case - so no row pays for a scan of every column.
+    if (c.pinnedCols) {
+      for (const col of c.pinnedCols) {
+        drawCell(ctx, idx, col, colDrawnX(col, geom, sl), ry, rh, c, true)
+      }
     }
 
     drawRowGutters(ctx, idx, -_scrollLeft, ry, rh, c)
@@ -4574,7 +4797,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // collected into ONE path and stroked once - instead of a beginPath/stroke
     // per cell. This collapses ~(cols+3) draw-call flushes per row down to one,
     // the single biggest scroll-perf win alongside O(1) text measurement.
-    const vw = _viewportWidth
+    const vw = c.viewportWidth
     // Vertical separators were collected once for the frame; the row only chooses
     // how to render them per the active grid-style preset. All branches stay a
     // single batched path/fill, so this is O(visible cols) no matter the row count.
@@ -4612,8 +4835,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function drawCell(ctx, idx, col, cellX, ry, rh, c, pinned = false) {
     const w = col.w
 
-    const actualIdx = _nameToActualIdx.get(col.name) ?? -1
-    const cached = _colCache[actualIdx]
+    const actualIdx = c.nameToActualIdx.get(col.name) ?? -1
+    const cached = c.colCache[actualIdx]
 
     if (pinned) {
       ctx.fillStyle = c.cPanel
@@ -4622,33 +4845,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (_rowBg) { ctx.fillStyle = _rowBg; ctx.fillRect(cellX, ry, w, rh) }
     }
 
-    const editing = editingCell && editingCell.rowIdx === idx && editingCell.colIdx === actualIdx
-    const staged = (hasPendingEdits && _editedRowSet.has(idx)) ? pendingEdits.get(idx + ':' + actualIdx) : undefined
+    const ec = c.editingCell
+    const editing = ec && ec.rowIdx === idx && ec.colIdx === actualIdx
+    const staged = (c.hasPendingEdits && c.editedRowSet.has(idx)) ? c.pendingEdits.get(idx + ':' + actualIdx) : undefined
     const isDirty = !!staged
-    const value = staged ? staged.value : rows[idx]?.[actualIdx]
+    const value = staged ? staged.value : c.rows[idx]?.[actualIdx]
     const isNull = value === null || value === undefined
     const isJson = !isNull && typeof value === 'object'
     const fk = cached?.fk ?? null
     const activeFk = fk && !isNull
-    const isFocusedCell = focusedRow === idx && c.navName === col.name && !editing
+    const isFocusedCell = c.focusedRow === idx && c.navName === col.name && !editing
 
     // Extension render directive (badges, tints, masks, links, swatches, …).
     // Computed once per cell and merged across enabled formatters; null/JSON
     // cells skip it entirely so the common path allocates nothing.
     let _ctxArg
-    if (_colStats) { _statsCtx.stats = _colStats.get(actualIdx); _ctxArg = _statsCtx }
-    const dir = (_extActive && !isNull && !isJson)
+    if (c.colStats) { _statsCtx.stats = c.colStats.get(actualIdx); _ctxArg = _statsCtx }
+    const dir = (c.extActive && !isNull && !isJson)
       ? formatCellValue(value, cached?.colType ?? '', col.name, _ctxArg)
       : null
 
     // Cell background tints.
     if (!editing) {
       // Column-selection band (drawn first so other tints layer on top).
-      if (selectedCols.has(col.name)) {
+      if (c.selectedCols.has(col.name)) {
         ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, w, rh)
       }
       // Focused-column band (drawn first so per-cell tints layer on top).
-      if (focusColName !== null && col.name === focusColName) {
+      if (c.focusColName !== null && col.name === c.focusColName) {
         ctx.fillStyle = withAlpha(c.cPrimary, 0.1); ctx.fillRect(cellX, ry, w, rh)
       }
       if (isDirty) { ctx.fillStyle = withAlpha(c.AMBER, 0.15); ctx.fillRect(cellX, ry, w, rh) }
@@ -4687,14 +4911,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     if (editing) return // text drawn by the DOM overlay
 
-    const rowHover = hoveredRow === idx
-    const isHover = rowHover && hoveredColName === col.name
-    const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !isBooleanType(cached?.colType ?? '')
+    const rowHover = c.hoveredRow === idx
+    const isHover = rowHover && c.hoveredColName === col.name
+    const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !cached?.isBool
     const cy = ry + rh / 2
 
     // A per-column transform (chosen from the header menu) renders live and wins
     // over formatter directives; skipped for staged/editing cells.
-    const colTf = (!staged && rows[idx]) ? _colTransformFns[col.name] : undefined
+    const colTf = (!staged && c.rows[idx]) ? c.colTransformFns[col.name] : undefined
     // Avatar / image thumbnail transform - draw the image itself, not text.
     if (colTf && _IMG_TF.has(colTf.id) && !isNull && isImageUrl(value)) {
       drawCellImage(ctx, String(value), cellX, ry, w, rh, cy, colTf.id === 'avatar', c)
@@ -4704,12 +4928,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Cell text - directive display wins; masked cells reveal on hover.
     const revealed = dir?.mask && isHover
     // SQL array columns render pgAdmin-style ({a,b}); jsonb arrays stay JSON.
-    const isArrayCol = Array.isArray(value) && isSqlArrayType(cached?.colType)
-    const isVectorCol = typeof value === "string" && isVectorType(cached?.colType)
+    const isArrayCol = Array.isArray(value) && !!cached?.isArrayType
+    const isVectorCol = typeof value === "string" && !!cached?.isVector
     // Geometry gets the same treatment as vectors: the type + SRID (+ point
     // coords) read better than a row of EWKT. geometrySummary only inspects
     // the header, so it is cheap enough for the draw path.
-    const isGeomCol = typeof value === "string" && isGeometryType(cached?.colType)
+    const isGeomCol = typeof value === "string" && !!cached?.isGeom
     const text = colTf
       ? colTransformText(idx, actualIdx, value, colTf)
       : dir
@@ -4720,11 +4944,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             ? vectorDisplay(value, vectorHeads(w))
             : isGeomCol
               ? geometrySummary(value)
-              : staged || !rows[idx]
+              : staged || !c.rows[idx]
             ? displayCell(value)
             : cellDisplayText(idx, actualIdx, value)
     // NULL glyph when the Empty & NULL Markers plugin is on (formatters skip null).
-    const shownText = (isNull && _nullishOn) ? '∅' : text
+    const shownText = (isNull && c.nullishOn) ? '∅' : text
 
     // Text color - directive link/fg may override (but never over a stronger
     // dirty/fk/focused state highlight).
@@ -4739,48 +4963,48 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // status pill is a left-anchored object; sliding it to the right edge would
     // read as a layout bug rather than an alignment choice.
     const alignRight =
-      !dir?.badge && !dir?.swatch && !dir?.dot && isRightAlignedColumn(actualIdx)
+      !dir?.badge && !dir?.swatch && !dir?.dot && (cached ? cached.alignRight : c.alignAll)
 
-    const warnW = dir?.warn ? Math.round(14 * canvasZoom) : 0
+    const warnW = dir?.warn ? Math.round(14 * c.zoom) : 0
     // The hover actions live on the side the value isn't using - right of
     // left-aligned text, left of right-aligned text - so they occupy empty
     // space in both cases. Only long values, the ones that would actually
     // collide, give up room, and only while the pointer is in the cell.
-    const hoverW = isHover ? ICON_HIT + (canExpand ? ICON_HIT : 0) : 0
+    const hoverW = isHover ? c.iconHit + (canExpand ? c.iconHit : 0) : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
     // The same gap on both sides. Left-aligned text used to reserve 4px on the
     // assumption that a value never reaches the right edge - but a *truncated*
     // value reaches it every time, which put the ellipsis hard against the column
     // divider and made every long column read as congested.
-    const rightReserve = CELL_PAD_X + (alignRight ? 0 : hoverW) + fkW + warnW
+    const rightReserve = c.padX + (alignRight ? 0 : hoverW) + fkW + warnW
     const hoverLeftReserve = alignRight ? hoverW : 0
 
     // Left-side decorations (color swatch / boolean dot) push the text right.
-    let textX = cellX + CELL_PAD_X
+    let textX = cellX + c.padX
     let leftPad = 0
     if (dir?.swatch) {
-      const sw = Math.round(11 * canvasZoom)
-      roundRect(ctx, textX, cy - sw / 2, sw, sw, Math.round(2.5 * canvasZoom))
+      const sw = Math.round(11 * c.zoom)
+      roundRect(ctx, textX, cy - sw / 2, sw, sw, Math.round(2.5 * c.zoom))
       ctx.fillStyle = dir.swatch; ctx.fill()
       ctx.strokeStyle = withAlpha(c.cBorder, 0.6); ctx.lineWidth = 1
-      roundRect(ctx, textX, cy - sw / 2, sw, sw, Math.round(2.5 * canvasZoom)); ctx.stroke()
-      leftPad = sw + Math.round(7 * canvasZoom)
+      roundRect(ctx, textX, cy - sw / 2, sw, sw, Math.round(2.5 * c.zoom)); ctx.stroke()
+      leftPad = sw + Math.round(7 * c.zoom)
     } else if (dir?.dot) {
-      const dr = Math.round(7 * canvasZoom)
+      const dr = Math.round(7 * c.zoom)
       ctx.fillStyle = dir.dot
       ctx.beginPath(); ctx.arc(textX + dr / 2, cy, dr / 2, 0, Math.PI * 2); ctx.fill()
-      leftPad = dr + Math.round(7 * canvasZoom)
+      leftPad = dr + Math.round(7 * c.zoom)
     }
     textX += leftPad + hoverLeftReserve
-    const textMaxW = w - CELL_PAD_X - leftPad - hoverLeftReserve - rightReserve
+    const textMaxW = w - c.padX - leftPad - hoverLeftReserve - rightReserve
 
-    ctx.font = _fonts.cell
+    ctx.font = c.fonts.cell
     ctx.textAlign = 'left'
     if (dir?.badge) {
       // Status pill - label inside a rounded, tinted capsule.
-      const padX = Math.round(7 * canvasZoom)
+      const padX = Math.round(7 * c.zoom)
       const label = truncText(ctx, shownText, Math.max(0, textMaxW - padX * 2))
-      const pillH = Math.min(rh - Math.round(6 * canvasZoom), Math.round(17 * canvasZoom))
+      const pillH = Math.min(rh - Math.round(6 * c.zoom), Math.round(17 * c.zoom))
       const pillW = Math.min(Math.max(0, textMaxW), textWidth(ctx, label) + padX * 2)
       const py = ry + (rh - pillH) / 2
       roundRect(ctx, textX, py, pillW, pillH, pillH / 2)
@@ -4795,11 +5019,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const drawX = alignRight
         ? textX + Math.max(0, textMaxW - textWidth(ctx, drawn))
         : textX
-      if (_searchLower && !isNull) drawSearchHighlights(ctx, drawn, drawX, ry, rh, c)
+      if (c.searchLower && !isNull) drawSearchHighlights(ctx, drawn, drawX, ry, rh, c)
       ctx.fillStyle = textColor
       ctx.fillText(drawn, drawX, cy + 0.5)
       if (dir?.link) {
-        const uy = cy + Math.round(7 * canvasZoom)
+        const uy = cy + Math.round(7 * c.zoom)
         const uw = Math.min(textWidth(ctx, drawn), Math.max(0, textMaxW))
         ctx.strokeStyle = withAlpha(textColor, 0.5); ctx.lineWidth = 1
         ctx.beginPath(); ctx.moveTo(drawX, uy); ctx.lineTo(drawX + uw, uy); ctx.stroke()
@@ -4811,7 +5035,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     // 0. Validation warning marker (amber dot).
     if (dir?.warn) {
-      const wr = Math.round(4 * canvasZoom)
+      const wr = Math.round(4 * c.zoom)
       ctx.fillStyle = withAlpha(c.AMBER, 0.95)
       ctx.beginPath(); ctx.arc(rx - wr, cy, wr, 0, Math.PI * 2); ctx.fill()
       rx -= warnW
@@ -4824,14 +5048,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (alignRight) {
         let lx = cellX + 4
         drawIcon(ctx, 'copy', lx + 5, cy - 7, 14, c.cMuted, 1.8)
-        lx += ICON_HIT
+        lx += c.iconHit
         if (canExpand) drawIcon(ctx, 'maximize-2', lx + 5, cy - 7, 14, c.cMuted, 1.8)
       } else {
-        drawIcon(ctx, 'copy', rx - ICON_HIT + 5, cy - 7, 14, c.cMuted, 1.8)
-        rx -= ICON_HIT
+        drawIcon(ctx, 'copy', rx - c.iconHit + 5, cy - 7, 14, c.cMuted, 1.8)
+        rx -= c.iconHit
         if (canExpand) {
-          drawIcon(ctx, 'maximize-2', rx - ICON_HIT + 5, cy - 7, 14, c.cMuted, 1.8)
-          rx -= ICON_HIT
+          drawIcon(ctx, 'maximize-2', rx - c.iconHit + 5, cy - 7, 14, c.cMuted, 1.8)
+          rx -= c.iconHit
         }
       }
     }

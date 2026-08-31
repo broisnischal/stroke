@@ -1,3 +1,14 @@
+// Global allocator.
+//
+// The default (glibc malloc) keeps a per-thread arena and does not return it to
+// the OS. Serialising one large result set therefore left roughly 200MB of
+// resident arenas behind for the rest of the session, and the process never
+// shrank back after you moved on to a smaller table. mimalloc decommits pages it
+// no longer needs and is measurably faster on the allocation-heavy row-decode
+// and JSON paths, which is most of what a browse does.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod app_lock;
 mod cloudflare;
 mod commands;
