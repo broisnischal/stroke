@@ -40,7 +40,7 @@
     "mode-watcher": "^1.1.0",
     "svelte": "^5.55.5",
     "vite": "^8.2.1",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
