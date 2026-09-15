@@ -91,7 +91,7 @@
         <button
           type="button"
           onclick={quit}
-          class="text-muted-foreground/70 transition-colors hover:text-foreground"
+          class="text-muted-foreground transition-colors hover:text-foreground"
         >
           Quit Stroke
         </button>

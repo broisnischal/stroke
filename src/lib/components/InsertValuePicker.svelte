@@ -24,7 +24,7 @@
     /** Placeholder for the input when empty. */
     placeholder = '',
     /** Extra placeholder styling - required blanks read louder than optional ones. */
-    placeholderClass = 'placeholder:text-muted-foreground/40',
+    placeholderClass = 'placeholder:text-muted-foreground',
     disabled = false,
     /** Grid wiring: identifies the field for focus restoration. */
     colName = '',
@@ -138,7 +138,7 @@
       {disabled}
       tabindex={-1}
       aria-label="Show values"
-      class="absolute right-0 inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground"
+      class="absolute right-0 inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
       onclick={() => { open = !open; inputEl?.focus() }}
     >
       <Icon name="chevron-down" class={cn('size-3 transition-transform', open && 'rotate-180')} />
@@ -156,7 +156,7 @@
     class="max-h-56 w-[var(--bits-popover-anchor-width)] min-w-40 overflow-y-auto p-1"
   >
     {#if rows.length === 1 && query}
-      <p class="px-2 py-1.5 font-mono text-ui-xs text-muted-foreground/60">No value matches “{query}”</p>
+      <p class="px-2 py-1.5 font-mono text-ui-xs text-muted-foreground">No value matches “{query}”</p>
     {/if}
     {#each rows as row, i (row.value + String(i))}
       <button
@@ -165,13 +165,13 @@
         onclick={() => commit(row.value)}
         class={cn(
           'flex h-7 w-full items-center gap-2 rounded px-2 text-left font-mono text-ui-xs transition-colors',
-          row.empty ? 'text-muted-foreground/70' : 'text-foreground',
+          row.empty ? 'text-muted-foreground' : 'text-foreground',
           i === active ? 'bg-accent text-accent-foreground' : '',
         )}
       >
         <span class="min-w-0 flex-1 truncate">{row.label}</span>
         {#if row.value === value}
-          <span class="shrink-0 text-ui-3xs text-muted-foreground/50">current</span>
+          <span class="shrink-0 text-ui-3xs text-muted-foreground">current</span>
         {/if}
       </button>
     {/each}

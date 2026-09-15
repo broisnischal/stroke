@@ -58,7 +58,7 @@
         </p>
       {/if}
       {#if hint}
-        <p class="mt-1.5 text-ui-2xs text-muted-foreground/50">{hint}</p>
+        <p class="mt-1.5 text-ui-2xs text-muted-foreground">{hint}</p>
       {/if}
     </div>
 

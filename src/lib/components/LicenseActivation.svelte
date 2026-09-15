@@ -51,7 +51,7 @@
 
 {#snippet keyField(extraClass)}
   <div class={cn('relative', extraClass)}>
-    <Icon name="key-round" class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/40" />
+    <Icon name="key-round" class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
     <input
       type="text"
       bind:value={key}
@@ -60,7 +60,7 @@
       spellcheck="false"
       autocomplete="off"
       disabled={loading || success}
-      class="h-11 w-full rounded-lg border-2 border-border bg-muted/20 pl-10 pr-3 font-mono text-ui-sm tracking-wider text-foreground outline-none transition-[color,border-color] placeholder:font-sans placeholder:tracking-normal placeholder:text-muted-foreground/30 hover:border-foreground/25 focus:border-ring focus-visible:ring-0 disabled:opacity-50"
+      class="h-11 w-full rounded-lg border-2 border-border bg-muted/20 pl-10 pr-3 font-mono text-ui-sm tracking-wider text-foreground outline-none transition-[color,border-color] placeholder:font-sans placeholder:tracking-normal placeholder:text-muted-foreground hover:border-foreground/25 focus:border-ring focus-visible:ring-0 disabled:opacity-50"
     />
   </div>
 {/snippet}
@@ -77,7 +77,7 @@
         ? 'bg-foreground text-background hover:bg-foreground/85'
         : success
           ? 'bg-success/15 text-success'
-          : 'cursor-not-allowed border-2 border-border/50 bg-muted/30 text-muted-foreground/50',
+          : 'cursor-not-allowed border-2 border-border/50 bg-muted/30 text-muted-foreground',
     )}
   >
     {#if loading}

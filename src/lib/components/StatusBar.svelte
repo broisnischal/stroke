@@ -5,7 +5,13 @@
   import { toast }    from '$lib/components/ui/sonner/toast.svelte.js'
   import { readOnlyMode, READ_ONLY_HINT } from '$lib/stores/read-only.js'
   import { aiProfiles, activeProfileId, setActiveProfile } from '$lib/stores/ai-settings.js'
-  import { toggleLightDark, isCurrentThemeDark, appVimMode, appLiveMode } from '$lib/stores/settings.js'
+  import { toggleLightDark, isCurrentThemeDark, appVimMode, appLiveMode, updateSettings } from '$lib/stores/settings.js'
+  import {
+    EASTER_EGG_THEME_ID,
+    EASTER_EGG_CLICKS,
+    easterEggFound,
+    markEasterEggFound,
+  } from '$lib/themes/registry.js'
   import { vimSubMode, VIM_MODE_LABEL } from '$lib/vim/vim.js'
   import { listDatabases, canSwitchDatabase, currentDatabaseKey } from '$lib/databases.js'
   import { engineFamily } from '$lib/stores/connections.js'
@@ -69,14 +75,14 @@
     oncreatedatabase = /** @type {(opts: import('./CreateDatabaseDialog.svelte').CreateDbOptions) => Promise<void>} */ (async () => {}),
     /** Global read-only toggle - prevents all writes across the whole session */
     readonly = $bindable(false),
-    sidebarVisible       = true,
-    tabBarVisible        = true,
-    tableToolbarVisible  = true,
-    statusBarVisible     = true,
-    ontoggleSidebar       = /** @type {() => void} */ (() => {}),
-    ontoggletabbar        = /** @type {() => void} */ (() => {}),
-    ontoggletabletoolbar  = /** @type {() => void} */ (() => {}),
-    ontogglestatusbar     = /** @type {() => void} */ (() => {}),
+    sidebarVisible = true,
+    tabBarVisible = true,
+    tableToolbarVisible = true,
+    statusBarVisible = true,
+    ontoggleSidebar = /** @type {() => void} */ (() => {}),
+    ontoggletabbar = /** @type {() => void} */ (() => {}),
+    ontoggletabletoolbar = /** @type {() => void} */ (() => {}),
+    ontogglestatusbar = /** @type {() => void} */ (() => {}),
   } = $props()
 
   const activeProfile = $derived($aiProfiles.find((p) => p.id === $activeProfileId) ?? $aiProfiles[0])
@@ -302,7 +308,32 @@
   }
 
   /** Shared icon-only button classes */
-  const iconBtn = 'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground'
+  // ── Easter egg ────────────────────────────────────────────────────────────
+  // Seven clicks on the version number. The counter resets after a second of
+  // stillness so a double-click while reading the number never creeps toward it,
+  // and nothing on screen hints at the count - a progress indicator would turn a
+  // thing you stumble into a thing you grind out.
+  let eggClicks = 0
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let eggTimer = null
+  $effect(() => () => { if (eggTimer) clearTimeout(eggTimer) })
+  function bumpEgg() {
+    if (eggTimer) clearTimeout(eggTimer)
+    eggTimer = setTimeout(() => { eggClicks = 0; eggTimer = null }, 1000)
+    eggClicks += 1
+    if (eggClicks < EASTER_EGG_CLICKS) return
+    eggClicks = 0
+    const firstTime = !easterEggFound()
+    markEasterEggFound()
+    updateSettings({ theme: EASTER_EGG_THEME_ID })
+    toast.success(firstTime ? 'Hotdog Stand unlocked' : 'Hotdog Stand', {
+      description: firstTime
+        ? "Windows 3.1's worst idea, now yours. It stays in Appearance - pick anything else to escape."
+        : 'Back for more.',
+    })
+  }
+
+  const iconBtn = 'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground'
   /** Shared label+icon button */
   const labelBtn = 'flex h-6 items-center gap-1.5 rounded-md px-2 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground'
 
@@ -333,7 +364,7 @@
 
 <!-- Vertical separator -->
 {#snippet sep()}
-  <span class="mx-1 h-3.5 w-px shrink-0 bg-border/30"></span>
+  <span class="w-2.5 shrink-0" aria-hidden="true"></span>
 {/snippet}
 
 <div
@@ -351,9 +382,9 @@
         {:else}
           <Icon name="wifi" class="size-3 shrink-0 text-success" />
         {/if}
-        <span class={cn('max-w-[7rem] truncate font-medium', connectionLost && 'text-destructive/70')}>{connType}</span>
+        <span class={cn('max-w-[7rem] truncate font-medium', connectionLost && 'text-destructive')}>{connType}</span>
         {#if connLabel}
-          <span class="hidden max-w-[6rem] truncate text-muted-foreground/45 @min-[900px]/sb:inline">· {connLabel}</span>
+          <span class="hidden max-w-[6rem] truncate text-muted-foreground @min-[900px]/sb:inline">· {connLabel}</span>
         {/if}
         {#if connection?.environment}
           <span class="size-1.5 shrink-0 rounded-full bg-muted-foreground/35" title={connection.environment}></span>
@@ -377,7 +408,7 @@
             <button
               {...props}
               type="button"
-              class={cn(labelBtn, 'text-muted-foreground/80')}
+              class={cn(labelBtn, 'text-muted-foreground')}
               title="Switch connection (⇧⌘C) · double-click to manage"
               ondblclick={openConnectionManager}
             >
@@ -391,7 +422,7 @@
             {@const subtitle = conn ? connSubtitle(conn) : ''}
             <span class={cn(
               'flex size-5 shrink-0 items-center justify-center rounded-md',
-              isCurrent ? 'bg-success/12 text-success' : 'bg-muted/50 text-muted-foreground/55',
+              isCurrent ? 'bg-success/12 text-success' : 'bg-muted/50 text-muted-foreground',
             )}>
               {#if conn?.provider && hasBrand(conn.provider)}
                 <BrandIcon name={conn.provider} class="size-3.5" />
@@ -415,7 +446,7 @@
                 class="flex w-full items-center gap-2 rounded-lg px-2 h-6.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 onclick={() => { connOpen = false; onconnect() }}
               >
-                <Icon name="wifi-off" class="size-3.5 shrink-0 text-muted-foreground/50" />
+                <Icon name="wifi-off" class="size-3.5 shrink-0 text-muted-foreground" />
                 Manage connections…
               </button>
             </div>
@@ -424,7 +455,7 @@
       {:else}
         <button
           type="button"
-          class={cn(labelBtn, 'text-muted-foreground/80')}
+          class={cn(labelBtn, 'text-muted-foreground')}
           title="Manage connections (⇧⌘C)"
           onclick={onconnect}
           ondblclick={openConnectionManager}
@@ -442,7 +473,7 @@
           onOpenChange={(o) => { if (o && dbList.length === 0) void fetchDatabases(); if (!o) dbSearch = '' }}
         >
           <DropdownMenu.Trigger
-            class={cn(labelBtn, 'text-muted-foreground/80', !canSwitchDb && 'cursor-default hover:bg-transparent hover:text-muted-foreground/80')}
+            class={cn(labelBtn, 'text-muted-foreground', !canSwitchDb && 'cursor-default hover:bg-transparent hover:text-muted-foreground')}
             disabled={!canSwitchDb}
             title={canSwitchDb ? 'Switch database (⌘D)' : currentDbLabel}
           >
@@ -468,26 +499,32 @@
             <!-- Always mounted (not gated on list size) so the search box is
                  active the moment the switcher opens and arrows/Tab/Enter work
                  for any number of databases. -->
-            <div class="border-b border-border/50 px-2 h-6.5">
-              <input
-                bind:this={dbInputEl}
-                type="text"
-                aria-label="Filter databases"
-                placeholder={isD1 ? 'Filter D1 databases…' : 'Filter databases…'}
-                class="h-7 w-full rounded-lg bg-muted/40 px-2.5 text-ui-2xs outline-none placeholder:text-muted-foreground/35 focus:ring-0"
-                bind:value={dbSearch}
-                onkeydown={onDbInputKeydown}
-              />
+            <div class="border-b border-border/50 p-2">
+              <div class="relative">
+                <Icon
+                  name="search"
+                  class="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+                />
+                <input
+                  bind:this={dbInputEl}
+                  type="text"
+                  aria-label="Filter databases"
+                  placeholder={isD1 ? 'Filter D1 databases…' : 'Filter databases…'}
+                  class="field-surface h-8 w-full bg-transparent pr-2.5 pl-8 text-ui-2xs outline-none placeholder:text-muted-foreground"
+                  bind:value={dbSearch}
+                  onkeydown={onDbInputKeydown}
+                />
+              </div>
             </div>
 
-            <div bind:this={dbListEl} class="db-list-scroll max-h-[200px] overflow-y-auto p-1 [contain:layout_paint]">
+            <div bind:this={dbListEl} class="db-list-scroll max-h-[240px] overflow-y-auto p-2 [contain:layout_paint]">
               {#if dbLoading}
-                <div class="flex items-center justify-center gap-2 py-4 text-muted-foreground/50">
+                <div class="flex items-center justify-center gap-2 py-4 text-muted-foreground">
                   <Icon name="refresh-cw" class="size-3 animate-spin" />
                   <span class="text-ui-2xs">Loading…</span>
                 </div>
               {:else if dbFiltered.length === 0}
-                <div class="py-3 text-center text-ui-2xs text-muted-foreground/45">
+                <div class="py-3 text-center text-ui-2xs text-muted-foreground">
                   {dbSearch ? 'No match' : 'No databases found'}
                 </div>
               {:else}
@@ -500,7 +537,7 @@
                     type="button"
                     data-hl={dbHl === i ? '' : undefined}
                     class={cn(
-                      'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left font-mono text-ui-xs text-foreground/90 transition-colors',
+                      'flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left font-mono text-ui-xs text-foreground/90 transition-colors',
                       dbHl === i && 'bg-accent text-foreground',
                       isCurrent && 'font-semibold',
                     )}
@@ -508,9 +545,9 @@
                     onpointerenter={() => (dbHl = i)}
                   >
                     {#if isD1}
-                      <Icon name="cloud" class={cn('size-3.5 shrink-0', isCurrent ? 'text-amber-500' : 'text-muted-foreground/35')} />
+                      <Icon name="cloud" class={cn('size-3.5 shrink-0', isCurrent ? 'text-amber-500' : 'text-muted-foreground')} />
                     {:else}
-                      <Icon name="database" class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground/35')} />
+                      <Icon name="database" class={cn('size-3.5 shrink-0', isCurrent ? 'text-foreground' : 'text-muted-foreground')} />
                     {/if}
                     <span class="min-w-0 flex-1 truncate">{db.label}</span>
                     {#if isCurrent}<Icon name="check" class="ml-auto size-3 shrink-0 text-success" />{/if}
@@ -520,14 +557,14 @@
             </div>
 
             {#if canSwitchDb}
-              <div class="flex items-center justify-between border-t border-border/50 px-2.5 h-6.5">
-                <span class="text-ui-3xs text-muted-foreground/40">
+              <div class="flex h-9 items-center justify-between gap-2 border-t border-border/50 px-2">
+                <span class="text-ui-2xs text-muted-foreground">
                   {dbList.length} database{dbList.length === 1 ? '' : 's'}
                 </span>
                 <div class="flex items-center gap-0.5">
                   <button
                     type="button"
-                    class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/50 hover:text-foreground"
+                    class="hit-area inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
                     onclick={fetchDatabases}
                     title="Refresh"
                   >
@@ -536,7 +573,7 @@
                   {#if isPostgres}
                     <button
                       type="button"
-                      class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/50 hover:text-foreground"
+                      class="hit-area inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
                       onclick={() => { dbOpen = false; createDbOpen = true }}
                       disabled={$readOnlyMode}
                       title={$readOnlyMode ? READ_ONLY_HINT : 'Create database'}
@@ -594,7 +631,7 @@
             'flex h-6 items-center gap-1.5 rounded-md px-2 transition-[background-color,color] duration-150',
             live
               ? 'font-medium text-success bg-success/10 hover:bg-success/16'
-              : 'text-muted-foreground/50 hover:bg-muted/50 hover:text-foreground',
+              : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
           )}
           onclick={ontogglelive}
           aria-pressed={live}
@@ -614,7 +651,7 @@
       {#if queryMs > 0}
         {@render sep()}
         <span
-          class="shrink-0 px-1 font-mono text-ui-2xs tabular-nums text-muted-foreground/55"
+          class="shrink-0 px-1 font-mono text-ui-2xs tabular-nums text-muted-foreground"
           title="Last data fetch took {queryMs.toLocaleString('en-US')}ms"
         >{queryMsLabel}</span>
       {/if}
@@ -632,7 +669,7 @@
       <!-- Not connected -->
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-md px-2 h-6 text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
+        class="flex items-center gap-1.5 rounded-md px-2 h-6 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
         onclick={onconnect}
         title="No connection, click to connect"
       >
@@ -653,7 +690,7 @@
           $vimSubMode === 'insert' && 'bg-success/15 text-success',
           $vimSubMode === 'visual' && 'bg-warning/15 text-warning',
           $vimSubMode === 'command' && 'bg-primary/15 text-primary',
-          $vimSubMode === 'normal' && 'bg-muted/40 text-muted-foreground/70',
+          $vimSubMode === 'normal' && 'bg-muted/40 text-muted-foreground',
         )}
         title="Vim mode · {VIM_MODE_LABEL[$vimSubMode]} (experimental)"
       >{VIM_MODE_LABEL[$vimSubMode]}</span>
@@ -661,7 +698,14 @@
 
     <!-- App version -->
     {#if appVersion}
-      <span class="inline-flex h-6 items-center rounded-md px-1.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/45" title="Stroke v{appVersion}">v{appVersion}</span>
+      <!-- Also the way in. Seven clicks, no hint - an easter egg you can find by
+           reading a tooltip is not one. It behaves as a plain label otherwise. -->
+      <button
+        type="button"
+        class="inline-flex h-6 items-center rounded-md px-1.5 font-mono text-ui-2xs tabular-nums text-muted-foreground transition-colors hover:text-foreground"
+        title="Stroke v{appVersion}"
+        onclick={bumpEgg}
+      >v{appVersion}</button>
     {/if}
 
     <!-- Pending edits -->
@@ -674,33 +718,33 @@
         title="Apply {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
       >
         {#if applying}
-          <span class="size-2.5 shrink-0 animate-spin rounded-full border border-current/40 border-t-current"></span>
+          <span class="size-3 shrink-0 animate-spin rounded-full border border-current/40 border-t-current"></span>
           Applying…
         {:else}
-          <Icon name="check" class="size-2.5 shrink-0" />
+          <Icon name="check" class="size-3 shrink-0" />
           Apply {pendingEditCount}
         {/if}
       </button>
       <button
         type="button"
-        class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
+        class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
         onclick={onresetedits}
         disabled={applying}
         title="Discard unsaved changes"
       >
-        <Icon name="undo-2" class="size-2.5 shrink-0" />
+        <Icon name="undo-2" class="size-3 shrink-0" />
         <span class="@max-[780px]/sb:hidden">Reset</span>
       </button>
       {@render sep()}
     {/if}
 
-    <!-- Go to page, opens the ⌘P page navigator -->
+    <!-- Go to page, opens the ⌘⇧P page navigator -->
     {#if connection}
       <button
         type="button"
         class={iconBtn}
         onclick={onopenpages}
-        title="Go to page (⌘P)"
+        title="Go to page (⌘⇧P)"
         aria-label="Go to page"
       >
         <Icon name="layout-template" class="size-3.5" />
@@ -726,7 +770,7 @@
     <!-- Read-only toggle -->
     <button
       type="button"
-      class={cn(iconBtn, readonly && 'text-warning! hover:text-warning/80!')}
+      class={cn(iconBtn, readonly && 'text-warning! hover:text-warning!')}
       title={readonly ? 'Read-only mode, click to enable editing' : 'Read-write mode, click to lock'}
       aria-pressed={readonly}
       onclick={() => (readonly = !readonly)}
@@ -787,7 +831,7 @@
     {#if hasUpdate}
       <button
         type="button"
-        class="flex items-center gap-1 rounded-md px-2 h-6 text-ui-2xs font-medium text-warning transition-colors hover:bg-muted/50 hover:text-warning/80"
+        class="flex items-center gap-1 rounded-md px-2 h-6 text-ui-2xs font-medium text-warning transition-colors hover:bg-muted/50 hover:text-warning"
         onclick={oncheckupdate}
         title="Update available"
       >
@@ -802,7 +846,7 @@
       type="button"
       class={cn(
         labelBtn,
-        mcpRunning ? 'text-muted-foreground/70' : 'text-muted-foreground/30',
+        mcpRunning ? 'text-muted-foreground' : 'text-muted-foreground',
       )}
       onclick={onopenmcp}
       title={mcpRunning ? 'MCP running, click to manage' : 'MCP stopped, click to manage'}
@@ -824,7 +868,7 @@
       onselect={(it) => setActiveProfile(it.value)}
     >
       {#snippet trigger(props)}
-        <button {...props} type="button" class={cn(labelBtn, 'text-muted-foreground/70')} title="Switch AI model">
+        <button {...props} type="button" class={cn(labelBtn, 'text-muted-foreground')} title="Switch AI model">
           {#if activeProfile && hasBrand(activeProfile.provider)}
             <BrandIcon name={activeProfile.provider} class="size-3 shrink-0 opacity-70" />
           {:else}
@@ -837,9 +881,9 @@
       {#snippet item(it)}
         {@const profile = $aiProfiles.find((p) => p.id === it.value)}
         {#if profile && hasBrand(profile.provider)}
-          <BrandIcon name={profile.provider} class="size-4 shrink-0 text-muted-foreground/70" />
+          <BrandIcon name={profile.provider} class="size-4 shrink-0 text-muted-foreground" />
         {:else}
-          <Icon name="bot" class="size-4 shrink-0 text-muted-foreground/40" />
+          <Icon name="bot" class="size-4 shrink-0 text-muted-foreground" />
         {/if}
         <span class="min-w-0 flex-1 truncate text-ui-sm font-medium" title={profile?.model ?? it.label}>{profile?.name ?? it.label}</span>
         {#if $activeProfileId === it.value}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
@@ -851,7 +895,7 @@
             class="flex w-full items-center gap-1.5 rounded-md px-2 h-6.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onclick={() => { aiModelMenuOpen = false; onopenmodelsettings() }}
           >
-            <Icon name="settings-2" class="size-3.5 shrink-0 text-muted-foreground/50" />
+            <Icon name="settings-2" class="size-3.5 shrink-0 text-muted-foreground" />
             Manage models…
           </button>
         </div>

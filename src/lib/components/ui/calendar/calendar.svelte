@@ -62,7 +62,7 @@
 											"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 											"data-selected:bg-primary data-selected:text-primary-foreground data-selected:hover:bg-primary/90",
 											"data-today:bg-muted/60 data-today:font-medium",
-											"data-outside-month:text-muted-foreground/30 data-outside-month:pointer-events-none",
+											"data-outside-month:text-muted-foreground data-outside-month:pointer-events-none",
 											"data-disabled:pointer-events-none data-disabled:opacity-30"
 										)}
 									/>

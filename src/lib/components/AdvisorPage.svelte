@@ -163,7 +163,7 @@
         </DropdownMenu.Trigger>
         <DropdownMenu.Content align="end" class="min-w-40">
           <DropdownMenu.Group>
-            <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
+            <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground">
               Export {visible.length} findings
             </DropdownMenu.GroupHeading>
             <DropdownMenu.Item onSelect={() => void exportReport('csv')}>CSV</DropdownMenu.Item>
@@ -197,12 +197,12 @@
     {/each}
 
     <div class="relative ml-auto">
-      <Icon name="search" class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/60" />
+      <Icon name="search" class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
       <input
         bind:value={query}
         placeholder="Filter by table, check…"
         aria-label="Filter findings"
-        class="h-7 w-56 rounded-md border border-border/60 bg-background pl-7 pr-2 text-ui-xs text-foreground placeholder:text-muted-foreground/60 focus:border-primary/40 focus:outline-none"
+        class= "field-surface h-7 w-56 bg-background pl-7 pr-2 text-ui-xs text-foreground placeholder:text-muted-foreground focus:border-primary/40 focus:outline-none"
       />
     </div>
   </div>
@@ -216,12 +216,12 @@
       </div>
     {:else if loading && !report}
       <div class="flex flex-col items-center justify-center gap-2 py-20 text-center">
-        <Icon name="loader-2" class="size-5 animate-spin text-muted-foreground/50" />
+        <Icon name="loader-2" class="size-5 animate-spin text-muted-foreground" />
         <p class="text-ui-xs text-muted-foreground">Reading the catalog…</p>
       </div>
     {:else if report?.unsupported}
       <div class="flex flex-col items-center justify-center gap-2 py-20 text-center">
-        <Icon name="info" class="size-5 text-muted-foreground/50" />
+        <Icon name="info" class="size-5 text-muted-foreground" />
         <p class="text-ui-sm text-foreground">No checks for {report.engine} yet</p>
         <p class="max-w-md text-ui-xs leading-relaxed text-muted-foreground">
           The checks are PostgreSQL catalog queries. Rather than show an empty report that
@@ -277,7 +277,7 @@
                   <li class="flex items-start gap-3 px-4 py-2 pl-10">
                     <Icon
                       name={f.entityKind === 'index' ? 'list' : f.entityKind === 'constraint' ? 'link-2' : 'table-2'}
-                      class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60"
+                      class="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
                     />
                     <span class="min-w-0 flex-1">
                       <span class="block truncate font-mono text-ui-xs text-foreground">{f.entity}</span>

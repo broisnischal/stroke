@@ -38,11 +38,11 @@
     <BarChart2 class="size-3.5 shrink-0 text-muted-foreground" />
     <span class="min-w-0 flex-1 truncate font-mono font-medium text-foreground">{column}</span>
     {#if dataType}
-      <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/60">{dataType}</span>
+      <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground">{dataType}</span>
     {/if}
     <button
       type="button"
-      class="ml-1 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted hover:text-foreground"
+      class="ml-1 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
       onclick={onclose}
       aria-label="Close stats"
     >

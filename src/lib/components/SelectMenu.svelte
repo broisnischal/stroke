@@ -65,13 +65,13 @@
         {#if lead && selected}{@render lead(selected)}{:else if selected?.icon}<Icon name={selected.icon} class="size-3.5 shrink-0 text-muted-foreground" />{/if}
         <span class="truncate font-medium">{selected?.label ?? placeholder}</span>
       </span>
-      <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground/70" />
+      <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground" />
     </button>
   {/snippet}
   {#snippet item(it)}
     {#if lead}{@render lead(it)}{:else if it.icon}<Icon name={it.icon} class="size-4 shrink-0 text-muted-foreground" />{/if}
     <span class="min-w-0 flex-1 truncate">{it.label}</span>
-    {#if it.hint}<span class="shrink-0 text-ui-3xs text-muted-foreground/65">{it.hint}</span>{/if}
+    {#if it.hint}<span class="shrink-0 text-ui-3xs text-muted-foreground">{it.hint}</span>{/if}
     {#if String(it.value) === String(value)}<Icon name="check" class="ml-auto size-3.5 shrink-0 text-primary" />{/if}
   {/snippet}
 </SearchableMenu>

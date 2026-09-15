@@ -16,10 +16,10 @@
   let { open = $bindable(false), connected = false } = $props();
 
   /** @type {{ running: boolean, port: number, url: string, token: string } | null} */
-  let status   = $state(null);
+  let status = $state(null);
   let toggling = $state(false);
   /** @type {string | null} */
-  let copied   = $state(null);
+  let copied = $state(null);
 
   // Read-only mode - persisted to localStorage
   let readOnly = $state(
@@ -57,9 +57,9 @@
     if (open) mcpSetReadonly(readOnly).catch(() => {})
   })
 
-  const claudeConfig  = $derived(status ? JSON.stringify({ mcpServers: { "stroke": { url: status.url, headers: { Authorization: `Bearer ${status.token}` } } } }, null, 2) : '')
-  const cursorConfig  = $derived(claudeConfig)
-  const vscodeConfig  = $derived(status ? JSON.stringify({ servers: { "stroke": { type: "http", url: status.url, headers: { Authorization: `Bearer ${status.token}` } } } }, null, 2) : '')
+  const claudeConfig = $derived(status ? JSON.stringify({ mcpServers: { "stroke": { url: status.url, headers: { Authorization: `Bearer ${status.token}` } } } }, null, 2) : '')
+  const cursorConfig = $derived(claudeConfig)
+  const vscodeConfig = $derived(status ? JSON.stringify({ servers: { "stroke": { type: "http", url: status.url, headers: { Authorization: `Bearer ${status.token}` } } } }, null, 2) : '')
 
   const cursorInstallUrl = $derived.by(() => {
     if (!status) return ''
@@ -100,7 +100,7 @@
           <Dialog.Title class="text-ui-lg font-semibold leading-none tracking-tight text-foreground">
             MCP Server
           </Dialog.Title>
-          <p class="mt-1 text-ui-sm leading-snug text-muted-foreground/70">
+          <p class="mt-1 text-ui-sm leading-snug text-muted-foreground">
             Connect Claude, Cursor, or VS Code to your database.
           </p>
         </div>
@@ -119,7 +119,7 @@
               <code class="min-w-0 flex-1 truncate font-mono text-ui-xs text-foreground/80">{status.url}</code>
               <button
                 type="button"
-                class="shrink-0 rounded p-0.5 text-muted-foreground/40 transition-colors hover:text-foreground"
+                class="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
                 onclick={() => void copy(status?.url ?? '', 'url')}
                 aria-label="Copy URL"
               >
@@ -131,7 +131,7 @@
               </button>
             </div>
           {:else}
-            <div class="flex-1 rounded-lg border border-dashed border-border/40 px-3 py-2 text-ui-xs text-muted-foreground/50">
+            <div class="flex-1 rounded-lg border border-dashed border-border/40 px-3 py-2 text-ui-xs text-muted-foreground">
               {connected ? 'Loading…' : 'No database connected'}
             </div>
           {/if}
@@ -170,7 +170,7 @@
               Running on port {status.port}
             </span>
           {:else if status}
-            <span class="inline-flex items-center gap-1.5 text-ui-2xs text-muted-foreground/45">
+            <span class="inline-flex items-center gap-1.5 text-ui-2xs text-muted-foreground">
               <span class="size-1.5 rounded-full bg-muted-foreground/30"></span>
               Stopped
             </span>
@@ -186,7 +186,7 @@
           onclick={toggleReadOnly}
         >
           <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/40 ring-1 ring-border/25">
-            <ShieldCheck class={cn("size-4", readOnly ? "text-warning" : "text-muted-foreground/50")} />
+            <ShieldCheck class={cn("size-4", readOnly ? "text-warning" : "text-muted-foreground")} />
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center justify-between gap-3">
@@ -208,7 +208,7 @@
                 ></span>
               </div>
             </div>
-            <p class="mt-0.5 text-ui-xs leading-snug text-muted-foreground/55">
+            <p class="mt-0.5 text-ui-xs leading-snug text-muted-foreground">
               {readOnly
                 ? 'Only SELECT queries are permitted. Write operations are blocked.'
                 : 'All SQL operations are allowed. Enable to restrict the agent to reads only.'}
@@ -220,7 +220,7 @@
       <!-- ── Client cards ── -->
       {#if status}
         <div class="px-6 py-5">
-          <p class="mb-4 text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">
+          <p class="mb-4 text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
             Connect a client
           </p>
 
@@ -232,7 +232,7 @@
               </div>
               <div class="min-w-0 flex-1">
                 <p class="text-ui-sm font-medium text-foreground">Claude Desktop</p>
-                <p class="mt-0.5 text-ui-2xs text-muted-foreground/55">Paste JSON into your config file</p>
+                <p class="mt-0.5 text-ui-2xs text-muted-foreground">Paste JSON into your config file</p>
               </div>
               <button
                 type="button"
@@ -256,7 +256,7 @@
               </div>
               <div class="min-w-0 flex-1">
                 <p class="text-ui-sm font-medium text-foreground">Cursor</p>
-                <p class="mt-0.5 text-ui-2xs text-muted-foreground/55">Install via Cursor's MCP deep link</p>
+                <p class="mt-0.5 text-ui-2xs text-muted-foreground">Install via Cursor's MCP deep link</p>
               </div>
               <div class="flex shrink-0 items-center gap-1.5">
                 <button
@@ -269,7 +269,7 @@
                 </button>
                 <button
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded-lg border border-border/40 px-2.5 py-1.5 text-ui-xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-border/40 px-2.5 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
                   onclick={() => void copy(cursorConfig, 'cursor')}
                 >
                   {#if copied === 'cursor'}
@@ -288,7 +288,7 @@
               </div>
               <div class="min-w-0 flex-1">
                 <p class="text-ui-sm font-medium text-foreground">VS Code</p>
-                <p class="mt-0.5 text-ui-2xs text-muted-foreground/55">Install via built-in MCP handler</p>
+                <p class="mt-0.5 text-ui-2xs text-muted-foreground">Install via built-in MCP handler</p>
               </div>
               <div class="flex shrink-0 items-center gap-1.5">
                 <button
@@ -301,7 +301,7 @@
                 </button>
                 <button
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded-lg border border-border/40 px-2.5 py-1.5 text-ui-xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-border/40 px-2.5 py-1.5 text-ui-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
                   onclick={() => void installVia(vscodeInsidersUrl)}
                 >
                   <ExternalLink class="size-3" />
@@ -314,16 +314,16 @@
       {:else if connected}
         <div class="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
           <div class="flex size-12 items-center justify-center rounded-lg border border-border/30 bg-muted/20">
-            <Server class="size-5 text-muted-foreground/30" />
+            <Server class="size-5 text-muted-foreground" />
           </div>
-          <p class="text-ui-sm text-muted-foreground/60">Loading server status…</p>
+          <p class="text-ui-sm text-muted-foreground">Loading server status…</p>
         </div>
       {:else}
         <div class="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
           <div class="flex size-12 items-center justify-center rounded-lg border border-border/30 bg-muted/20">
-            <Server class="size-5 text-muted-foreground/30" />
+            <Server class="size-5 text-muted-foreground" />
           </div>
-          <p class="max-w-[220px] text-ui-sm text-muted-foreground/60">
+          <p class="max-w-[220px] text-ui-sm text-muted-foreground">
             Connect to a database first, then start the MCP server.
           </p>
         </div>

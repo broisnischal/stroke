@@ -10,6 +10,7 @@
   import Terminal from '@lucide/svelte/icons/terminal'
   import Sparkles from '@lucide/svelte/icons/sparkles'
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
+  import { cn } from '$lib/utils.js'
   import Command from '@lucide/svelte/icons/command'
   import Code2 from '@lucide/svelte/icons/code-2'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
@@ -152,8 +153,10 @@
     createLogsTab,
     createInsightsTab,
     createAdvisorTab,
+    createGolfTab,
     findInsightsTab,
     findAdvisorTab,
+    findGolfTab,
     createObjectsTab,
     findObjectsTab,
     createRedisTab,
@@ -243,7 +246,7 @@
     findForeignKeyForColumn,
     normalizeForeignKeys,
   } from '$lib/foreign-key-nav.js'
-  import { loadLayout, saveLayout } from '$lib/stores/layout.js'
+  import { loadLayout, saveLayout, sidebarSideStore, setSidebarSide } from '$lib/stores/layout.js'
   import {
     getLastConnection,
     getLastSchema,
@@ -449,9 +452,12 @@
     saveLayout({ navSidebarPanel: p, navSidebarOpen: true })
   }
   /** Which side the navigation sidebar docks to. @type {'left' | 'right'} */
-  let sidebarSide = $state(loadLayout().navSidebarSide)
+  // Read through the store, not from the layout blob: the side can now be set
+  // from Settings → Appearance as well as the sidebar's own context menu, and
+  // both need to land in one place the shell can react to.
+  const sidebarSide = $derived($sidebarSideStore)
   /** @param {'left' | 'right'} s */
-  function moveSidebar(s) { sidebarSide = s; saveLayout({ navSidebarSide: s }) }
+  function moveSidebar(s) { setSidebarSide(s) }
   let aiSidebarOpen = $state(loadLayout().aiSidebarOpen)
   let aiSidebarEverOpened = $state(loadLayout().aiSidebarOpen)
   let statusBarVisible = $state(loadLayout().statusBarVisible)
@@ -704,6 +710,7 @@
   let logsEverOpened = $state(false)
   let insightsEverOpened = $state(false)
   let advisorEverOpened = $state(false)
+  let golfEverOpened = $state(false)
   let objectsEverOpened = $state(false)
   let redisEverOpened = $state(false)
   let extensionsEverOpened = $state(false)
@@ -712,7 +719,7 @@
   let backupEverOpened = $state(false)
   let chartsEverOpened = $state(false)
   let dashboardEverOpened = $state(false)
-  let erdEverOpened     = $state(false)
+  let erdEverOpened = $state(false)
   let diagramsEverOpened = $state(false)
   let searchEverOpened = $state(false)
   let schemaTimelineEverOpened = $state(false)
@@ -962,6 +969,7 @@
     if (activeTab?.kind === 'logs') logsEverOpened = true
     if (activeTab?.kind === 'insights') insightsEverOpened = true
     if (activeTab?.kind === 'advisor') advisorEverOpened = true
+    if (activeTab?.kind === 'golf') golfEverOpened = true
     if (activeTab?.kind === 'objects') objectsEverOpened = true
     if (activeTab?.kind === 'redis') redisEverOpened = true
     if (activeTab?.kind === 'extensions') extensionsEverOpened = true
@@ -1694,11 +1702,11 @@ let rowSearch = $state('')
    */
   const windowTitle = $derived.by(() => {
     const c = connection
-    if (!c) return 'studio'
+    if (!c) return 'Stroke'
     if (c.database) return c.database
     if (c.name) return c.name
     if (c.filePath) return c.filePath.split(/[\\/]/).pop() || c.filePath
-    return 'studio'
+    return 'Stroke'
   })
 
   // Keep MCP layer in sync with saved connections + active connection (no passwords sent).
@@ -2115,10 +2123,10 @@ let rowSearch = $state('')
     commandOpen = true
   })
 
-  // Ctrl/⌘+P - VSCode-style "Go to page" navigator. Registered as a capture-phase
-  // window listener (not createHotkey) so it beats the webview's native Print
-  // accelerator on WebKitGTK/WebView2 - otherwise the print dialog opens first
-  // and the handler never runs.
+  // Ctrl/⌘+P - table search. Registered as a capture-phase window listener (not
+  // createHotkey) so it beats the webview's native Print accelerator on
+  // WebKitGTK/WebView2 - otherwise the print dialog opens first and the handler
+  // never runs. ⌘⇧P is the page navigator, one modifier away.
   $effect(() => {
     /** @param {KeyboardEvent} e */
     function onKeyP(e) {
@@ -2128,7 +2136,7 @@ let rowSearch = $state('')
         // Only open+set page mode from a closed state - never yank the page mode
         // if the palette is already open mid-interaction.
         if (commandOpen) return
-        commandPage = 'pages'
+        commandPage = 'tables'
         commandOpen = true
       }
     }
@@ -2311,7 +2319,7 @@ let rowSearch = $state('')
     })
   }
 
-  // Command palette - VS Code muscle-memory alias for Mod+K.
+  // Page navigator - the VS Code chord, one modifier off ⌘P's table search.
   createHotkey('Mod+Shift+P', (e) => {
     e.preventDefault()
     commandPage = 'pages'
@@ -3049,6 +3057,11 @@ let rowSearch = $state('')
     openSingletonTab({ find: findAdvisorTab, create: createAdvisorTab })
   }
 
+  /** The hidden game. Reached only by typing its word into a table's search. */
+  function openGolfTab() {
+    openSingletonTab({ find: findGolfTab, create: createGolfTab })
+  }
+
   function openObjectsTab() {
     openSingletonTab({ find: findObjectsTab, create: createObjectsTab })
   }
@@ -3218,6 +3231,39 @@ let rowSearch = $state('')
   // on initial open, so this never fights it. Small tabs are left untouched.
   const TAB_ROWS_MRU_MAX = 3
   const TAB_EVICT_ROW_THRESHOLD = 5_000
+  // Row count alone is the wrong unit. A table with a pgvector column decodes to
+  // ~17KB per row, so 500 rows of embeddings cost more than 5,000 rows of
+  // integers and were never evicted however cold the tab got - three of those
+  // parked in the background is a quarter of a gigabyte held for tabs nobody is
+  // looking at. Size is what matters, so size is what gets measured.
+  const TAB_EVICT_BYTE_THRESHOLD = 8 * 1024 * 1024
+  const PAYLOAD_SAMPLE_ROWS = 8
+
+  /**
+   * Rough byte cost of a result set, from a sample rather than the whole thing:
+   * stringifying a million rows to decide whether to drop them would cost more
+   * than keeping them. Rows are uniform enough that a handful extrapolates well,
+   * and the decision only needs the right order of magnitude.
+   * @param {unknown[][] | undefined} rowsArr
+   */
+  function estimateRowsBytes(rowsArr) {
+    if (!Array.isArray(rowsArr) || rowsArr.length === 0) return 0
+    const step = Math.max(1, Math.floor(rowsArr.length / PAYLOAD_SAMPLE_ROWS))
+    let sampled = 0
+    let bytes = 0
+    for (let i = 0; i < rowsArr.length && sampled < PAYLOAD_SAMPLE_ROWS; i += step) {
+      const row = rowsArr[i]
+      if (!row) continue // windowed sets are sparse
+      try {
+        bytes += JSON.stringify(row)?.length ?? 0
+      } catch {
+        bytes += 256 // circular or otherwise unserialisable: assume small
+      }
+      sampled += 1
+    }
+    if (sampled === 0) return 0
+    return Math.round((bytes / sampled) * rowsArr.length)
+  }
   let _tabRowsMru = /** @type {string[]} */ ([])
   function evictColdTabRows(activeId) {
     // Trim to the window we actually read - entries past it are never consulted,
@@ -3233,13 +3279,17 @@ let rowSearch = $state('')
       if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return false
       const st = /** @type {TableTabState} */ (t.state)
       if (!st) return false
-      if (Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD) return true
       // Windowed tabs keep their (huge, sparse) array outside the reactive tree,
-      // so `st.rows` is empty and the check above can't see them. Measure the
-      // cached array instead, or an open million-row table would be retained for
-      // the whole session however cold it got.
+      // so `st.rows` is empty and has to be measured from the cache instead, or
+      // an open million-row table would be retained for the whole session
+      // however cold it got.
       const cached = _liveRowsByTab.get(t.id)
-      return Array.isArray(cached) && cached.length > TAB_EVICT_ROW_THRESHOLD
+      const rowsArr = Array.isArray(st.rows) && st.rows.length > 0 ? st.rows : cached
+      if (!Array.isArray(rowsArr) || rowsArr.length === 0) return false
+      if (rowsArr.length > TAB_EVICT_ROW_THRESHOLD) return true
+      // Cheap enough to run on every switch: a sample of eight rows, and only
+      // for tabs that survived the row-count test.
+      return estimateRowsBytes(rowsArr) > TAB_EVICT_BYTE_THRESHOLD
     }
     // Most switches evict nothing. Test first so the common path doesn't rebuild
     // the tabs array - that write invalidates every consumer of `tabs` (tab strip,
@@ -3943,7 +3993,7 @@ let rowSearch = $state('')
         const filters = buildForeignKeyFilters(detail.fk, columns, detail.row)
         if (!filters) return { columns: [], rows: [], error: 'FK value is NULL' }
         const refSchema = detail.fk.referencedSchema || detail.fk.referenced_schema || activeSchema
-        const refTable  = detail.fk.referencedTable  || detail.fk.referenced_table  || ''
+        const refTable = detail.fk.referencedTable  || detail.fk.referenced_table  || ''
         if (!refTable) return { columns: [], rows: [], error: 'No referenced table' }
         const data = await getTableRows(refSchema, refTable, 50, 0, { filters: filtersForApi(filters) })
         return { columns: data.columns ?? [], rows: data.rows ?? [] }
@@ -4053,9 +4103,9 @@ let rowSearch = $state('')
     loadingStructure = true
     const mySeq = ++_structureSeq
     const targetSchema = activeSchema
-    const targetTable  = activeTable
-    const connAtCall   = persistConnectionId
-    const driver       = dbType  // 'postgres' | 'mysql' | 'sqlite' | 'd1'
+    const targetTable = activeTable
+    const connAtCall = persistConnectionId
+    const driver = dbType  // 'postgres' | 'mysql' | 'sqlite' | 'd1'
     try {
       const s = targetSchema.replace(/'/g, "''")
       const t = targetTable.replace(/'/g, "''")
@@ -4085,8 +4135,8 @@ let rowSearch = $state('')
             (
               SELECT rn.nspname || '.' || rc.relname || '.' || ra.attname
               FROM pg_catalog.pg_constraint  pc
-              JOIN pg_catalog.pg_class        rc ON rc.oid  = pc.confrelid
-              JOIN pg_catalog.pg_namespace    rn ON rn.oid  = rc.relnamespace
+              JOIN pg_catalog.pg_class        rc ON rc.oid = pc.confrelid
+              JOIN pg_catalog.pg_namespace    rn ON rn.oid = rc.relnamespace
               JOIN pg_catalog.pg_attribute    ra ON ra.attrelid = rc.oid AND ra.attnum = pc.confkey[1]
               WHERE pc.contype = 'f' AND pc.conrelid = a.attrelid AND pc.conkey[1] = a.attnum
               LIMIT 1
@@ -4142,7 +4192,7 @@ let rowSearch = $state('')
         for (const fkRow of fkR?.rows ?? []) {
           const fromCol = String(fkRow[3] ?? '')
           const toTable = String(fkRow[2] ?? '')
-          const toCol   = String(fkRow[4] ?? '')
+          const toCol = String(fkRow[4] ?? '')
           if (fromCol && !fkMap.has(fromCol)) fkMap.set(fromCol, `${toTable}.${toCol}`)
         }
         rows = (colR?.rows ?? []).map((row) => [
@@ -6018,6 +6068,16 @@ let rowSearch = $state('')
     showSwitchDbDialog = true
   }
 
+  /** Double-click a database: switch straight there, no confirm step. The dialog
+   *  exists because switching drops the open tabs, but once you have done it a
+   *  few times the confirm is just a second click - so the second click IS the
+   *  confirmation. Single click still asks. */
+  function switchDatabaseNow(/** @type {{ key: string, label: string }} */ entry) {
+    pendingDbSwitch = entry
+    showSwitchDbDialog = false
+    commitDatabaseSwitch()
+  }
+
   /** Same three dispatch paths the status-bar switcher uses, by engine. */
   function commitDatabaseSwitch() {
     const entry = pendingDbSwitch
@@ -6771,14 +6831,14 @@ let rowSearch = $state('')
     <Dialog.Overlay class="fixed inset-0 z-50 bg-black/65" />
     <Dialog.Content class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border/60 bg-background p-5 elevate-3-rim outline-none">
       <div class="mb-5 flex size-10 items-center justify-center rounded-lg border border-warning/20 bg-warning/10">
-        <Lock class="size-5 text-warning/80" />
+        <Lock class="size-5 text-warning" />
       </div>
       <h2 class="mb-1.5 text-ui-sm font-semibold text-foreground">Stroke Pro required</h2>
       <p class="mb-5 text-ui-xs leading-relaxed text-muted-foreground">This feature is not available on the free plan. Upgrade to Stroke Pro to unlock AI, dashboards, ORM runner, schema explorer, and more.</p>
       <div class="flex items-center gap-2">
         <button
           onclick={() => (showProGate = false)}
-          class="flex h-8 flex-1 items-center justify-center rounded-lg border border-border/60 bg-muted/50 px-4 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          class= "field-surface flex h-8 flex-1 items-center justify-center bg-muted/50 px-4 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           Back
         </button>
@@ -6896,7 +6956,7 @@ let rowSearch = $state('')
       </p>
       <button
         type="button"
-        class="mt-3 text-ui-2xs text-muted-foreground/40 underline underline-offset-4 transition-colors hover:text-foreground"
+        class="mt-3 text-ui-2xs text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
         onclick={() => void cancelAutoConnect()}
       >
         Cancel
@@ -6940,7 +7000,7 @@ let rowSearch = $state('')
       <svelte:boundary>
         {#snippet failed(err, reset)}
           <div class="flex h-full w-[220px] shrink-0 flex-col items-center justify-center gap-3 border-r border-border/50 bg-sidebar p-4 text-center">
-            <AlertTriangle class="size-5 text-destructive/60" />
+            <AlertTriangle class="size-5 text-destructive" />
             <p class="text-ui-xs font-medium text-muted-foreground">Sidebar error</p>
             <button
               type="button"
@@ -6975,6 +7035,7 @@ let rowSearch = $state('')
         onrefresh={handleRefresh}
         {connection}
         onswitchdatabase={requestDatabaseSwitch}
+        onswitchdatabasenow={switchDatabaseNow}
         onnewdatabase={() => (showCreateDbDialog = true)}
         onrenamedatabase={({ name, existing }) => openDbNameDialog({ mode: 'rename', name, existing })}
         onduplicatedatabase={({ name, existing }) => openDbNameDialog({ mode: 'duplicate', name, existing })}
@@ -7024,7 +7085,7 @@ let rowSearch = $state('')
   <main class="flex min-h-0 min-w-0 flex-1 flex-col bg-panel" data-studio-region="main">
     {#snippet tabError(/** @type {unknown} */ error, /** @type {() => void} */ reset)}
       <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-        <AlertTriangle class="size-8 text-destructive/60" />
+        <AlertTriangle class="size-8 text-destructive" />
         <div class="flex flex-col gap-1">
           <p class="text-ui-sm font-medium text-foreground">This view hit an error</p>
           <p class="max-w-md break-words font-mono text-ui-xs text-muted-foreground">
@@ -7064,8 +7125,8 @@ let rowSearch = $state('')
         <!-- Supported engines, real brand marks -->
         <div class="relative flex flex-wrap items-center justify-center gap-2">
           {#each [['postgres','PostgreSQL'],['mysql','MySQL'],['sqlite','SQLite'],['clickhouse','ClickHouse'],['d1','Cloudflare D1']] as [id, label]}
-            <span class="inline-flex items-center gap-2 rounded-full border border-border/50 bg-muted/20 py-1.5 pl-2.5 pr-3.5 text-ui-xs font-medium text-muted-foreground/85 transition-colors hover:border-border hover:text-foreground">
-              <DbIcon {id} class="size-4 text-muted-foreground/70" />
+            <span class="inline-flex items-center gap-2 rounded-full border border-border/50 bg-muted/20 py-1.5 pl-2.5 pr-3.5 text-ui-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground">
+              <DbIcon {id} class="size-4 text-muted-foreground" />
               {label}
             </span>
           {/each}
@@ -7080,7 +7141,7 @@ let rowSearch = $state('')
             <Plus class="size-4" />
             Add connection
           </Button>
-          <p class="flex items-center gap-1.5 text-ui-xs text-muted-foreground/70">
+          <p class="flex items-center gap-1.5 text-ui-xs text-muted-foreground">
             or press
             <kbd>⌘K</kbd>
             for the command menu
@@ -7262,6 +7323,21 @@ let rowSearch = $state('')
           <svelte:boundary failed={tabError}>
             {#await import('./InstanceInsightsPage.svelte')}<TabLoading />{:then { default: InstanceInsightsPage }}
               <InstanceInsightsPage active={activeTab?.kind === 'insights'} connectionName={connection?.name ?? connection?.database ?? ''} {dbType} />
+            {/await}
+          </svelte:boundary>
+        </div>
+      {/if}
+
+      <!-- VACUUM. Lazy like every other page, so an easter egg nobody has found
+           costs nothing in the bundle they downloaded. -->
+      {#if golfEverOpened}
+        <div
+          class={activeTab?.kind === 'golf' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'golf' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./VacuumGame.svelte')}<TabLoading />{:then { default: VacuumGame }}
+              <VacuumGame />
             {/await}
           </svelte:boundary>
         </div>
@@ -7624,14 +7700,14 @@ let rowSearch = $state('')
           {#if isNetworkError(error)}
             <!-- ── Network / offline error, full-area friendly state ── -->
             <div class="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-              <WifiOff class="size-8 text-muted-foreground/20" />
+              <WifiOff class="size-8 text-muted-foreground" />
               <div class="space-y-1">
                 <p class="font-mono text-ui font-medium text-foreground/70">Cannot reach database</p>
-                <p class="font-mono text-ui-xs text-muted-foreground/50">Check your internet connection or whether the server is reachable.</p>
+                <p class="font-mono text-ui-xs text-muted-foreground">Check your internet connection or whether the server is reachable.</p>
               </div>
               <button
                 type="button"
-                class="flex items-center gap-1.5 rounded-md border border-border/30 bg-muted/30 px-3 py-1.5 font-mono text-ui-xs text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground"
+                class="flex items-center gap-1.5 rounded-md border border-border/30 bg-muted/30 px-3 py-1.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                 onclick={() => { error = ''; connectionLost = false; void loadRows() }}
               >
                 <RefreshCw class="size-3" />
@@ -7641,26 +7717,26 @@ let rowSearch = $state('')
           {:else}
             <!-- ── SQL / application error, compact banner ── -->
             <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
-              <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
+              <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive" />
               <!-- Drivers wrap the cause in transport noise - D1 returns its whole
                    HTTP envelope around a five-word message. Show the cause; the
                    raw text stays one click away and in the query log. -->
-              <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">
+              <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive">
                 {humanizeDbError(error)}
                 {#if humanizeDbError(error) !== error.replace(/^Error:\s*/, '').trim()}
                   <button
                     type="button"
-                    class="ml-1.5 align-baseline text-ui-3xs text-destructive/45 underline-offset-2 transition-colors hover:text-destructive hover:underline"
+                    class="ml-1.5 align-baseline text-ui-3xs text-destructive underline-offset-2 transition-colors hover:text-destructive hover:underline"
                     onclick={() => (showRawError = !showRawError)}
                   >{showRawError ? 'hide raw' : 'raw'}</button>
                   {#if showRawError}
-                    <span class="mt-1 block break-all text-ui-3xs text-destructive/45">{error}</span>
+                    <span class="mt-1 block break-all text-ui-3xs text-destructive">{error}</span>
                   {/if}
                 {/if}
               </p>
               <button
                 type="button"
-                class="mt-px shrink-0 text-destructive/40 transition-colors hover:text-destructive"
+                class="mt-px shrink-0 text-destructive transition-colors hover:text-destructive"
                 onclick={() => (error = '')}
                 title="Dismiss"
               >
@@ -7679,7 +7755,7 @@ let rowSearch = $state('')
           </div>
         {:else if error && !isNetworkError(error)}
           <div class="flex flex-1 items-center justify-center">
-            <p class="font-mono text-ui-sm text-muted-foreground/40">Dismiss the error above to continue.</p>
+            <p class="font-mono text-ui-sm text-muted-foreground">Dismiss the error above to continue.</p>
           </div>
         {:else if !error}
           {#if tableViewMode === 'structure' && canShowStructure}
@@ -7789,6 +7865,7 @@ let rowSearch = $state('')
               void tick().then(() => dtBeginInsertRow?.())
             }}
             onopeninsql={openTableInSqlEditor}
+            onmagicword={openGolfTab}
             readonly={tableReadonly}
             {hiddenColumns}
             virtualColCount={vcolCount}
@@ -7996,9 +8073,9 @@ let rowSearch = $state('')
         {@const cell = 'group relative flex min-h-[5.25rem] min-w-0 flex-col justify-between overflow-hidden rounded-lg border border-border/60 bg-card/50 p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
         {@const proCell = 'group relative flex min-h-[5.25rem] min-w-0 cursor-not-allowed flex-col justify-between overflow-hidden rounded-lg border border-border/40 bg-card/30 p-2.5 text-left transition-[background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.04]'}
         {@const iconCls = 'size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'}
-        {@const proIconCls = 'size-4 shrink-0 text-muted-foreground/50'}
+        {@const proIconCls = 'size-4 shrink-0 text-muted-foreground'}
         {@const labelCls = 'text-ui-2xs font-medium leading-[1.25] text-foreground/85 transition-colors group-hover:text-foreground [overflow-wrap:anywhere]'}
-        {@const proLabelCls = 'text-ui-2xs font-medium leading-[1.25] text-muted-foreground/60 [overflow-wrap:anywhere]'}
+        {@const proLabelCls = 'text-ui-2xs font-medium leading-[1.25] text-muted-foreground [overflow-wrap:anywhere]'}
 
         <!-- Shift is spelled out off macOS: the bundled UI/mono webfonts have no
              U+21E7, so "Ctrl⇧E" fell back mid-word and rendered as garbage.
@@ -8006,32 +8083,39 @@ let rowSearch = $state('')
              this size. -->
         {@const shiftKey = isMac ? '⇧' : 'Shift'}
         {#snippet chord(/** @type {string[]} */ keys)}
-          <span class="flex shrink-0 items-center gap-1 font-mono text-ui-3xs leading-none text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
+          <span class="flex shrink-0 items-center gap-1 font-mono text-ui-3xs leading-none text-muted-foreground transition-colors group-hover:text-foreground">
             {#each keys as k (k)}<span>{k}</span>{/each}
           </span>
         {/snippet}
 
-        {#snippet tile(/** @type {any} */ Icon, /** @type {string} */ label, /** @type {() => void} */ onclick, /** @type {{ pro?: boolean, keys?: string[], hint?: string }} */ opts = {})}
+        <!-- The tile grid, back to the shape it had: icon pinned top, label and
+             chord anchored bottom, every tile the same size. What changed is the
+             count - five actions instead of sixteen - so the grid is a shortlist
+             you take in at a glance rather than a wall you have to read. -->
+        {#snippet row(/** @type {any} */ Icon, /** @type {string} */ label, /** @type {string} */ _desc, /** @type {() => void} */ onclick, /** @type {{ pro?: boolean, keys?: string[] }} */ opts = {})}
           {@const locked = !!opts.pro && !$hasPro}
           <button
             type="button"
             {onclick}
-            title={opts.hint ? `${opts.hint}${locked ? ' - Pro' : ''}` : locked ? `${label} - Pro` : label}
-            class={locked ? proCell : cell}
+            title={locked ? `${label} - ${_desc} - Pro` : `${label} - ${_desc}`}
+            class={cn(
+              // min-h, not h: a label that wraps to two lines in a narrow pane grows
+              // the tile instead of spilling out of it.
+              "group flex min-h-[5.25rem] min-w-0 flex-col justify-between gap-2 overflow-hidden rounded-xl border p-2.5 text-left transition-[background-color,border-color,transform] duration-150 ease-[var(--ease-out)]",
+              locked
+                ? "cursor-not-allowed border-border/40 bg-card/30 hover:border-warning/30 hover:bg-warning/[0.04]"
+                : "border-border/60 bg-card/50 hover:border-border hover:bg-accent/40 active:scale-[0.98]",
+            )}
           >
-            <span class="flex w-full items-center justify-between gap-1.5">
-              <Icon class={locked ? proIconCls : iconCls} />
-              {#if locked}<Lock class="size-2.5 shrink-0 text-muted-foreground/30" />{/if}
+            <span class="flex w-full items-start justify-between gap-1.5">
+              <Icon class="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+              {#if locked}<Lock class="size-3 shrink-0 text-warning" aria-label="Pro feature" />{/if}
             </span>
-            <!-- Label + chord anchored to the bottom. The chord row is always
-                 present (empty when a tile has no shortcut) so every label in a
-                 row lands on the same baseline, wrapped or not. -->
-            <span class="mt-auto flex w-full min-w-0 flex-col gap-1">
-              <span class={locked ? proLabelCls : labelCls}>{label}</span>
-              <!-- A chord is a hint, not the point of the tile: when the column
-                   is too narrow for "Ctrl Shift E" it clips here rather than
-                   printing across the neighbouring tile. -->
-              <span class="flex h-[0.85rem] min-w-0 items-center overflow-hidden">
+            <span class="flex w-full min-w-0 flex-col gap-1">
+              <span class="truncate text-ui-2xs font-medium leading-[1.25] text-foreground">{label}</span>
+              <!-- The chord row is always present, empty or not, so every label in a
+                   row lands on the same baseline whether or not it wrapped. -->
+              <span class="flex min-h-[1em] min-w-0 items-center overflow-hidden">
                 {#if opts.keys && !locked}{@render chord(opts.keys)}{/if}
               </span>
             </span>
@@ -8055,66 +8139,44 @@ let rowSearch = $state('')
                   <span class="size-1.5 shrink-0 rounded-full bg-success"></span>
                   {connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}
                 </span>
-                <span class="text-ui-xs text-muted-foreground/60">·</span>
+                <span class="text-ui-xs text-muted-foreground">·</span>
                 <span class="text-ui-xs capitalize text-muted-foreground">{dbType}</span>
                 {#if tables.length > 0}
-                  <span class="text-ui-xs text-muted-foreground/60">·</span>
+                  <span class="text-ui-xs text-muted-foreground">·</span>
                   <span class="text-ui-xs tabular-nums text-muted-foreground">{tables.length} {tables.length === 1 ? 'table' : 'tables'}</span>
                 {/if}
               </div>
             {/if}
           </div>
-
-          <!-- Action grid, max-w-md keeps all sections aligned. Column COUNT is
-               derived from the space available rather than fixed at 4: the pane
-               narrows whenever the sidebar is dragged wider, and four columns of
-               a 28rem grid squeezed into half that width is what pushed labels
-               and chords outside their tiles. At full width the track floor
-               still resolves to the same four columns. -->
-          <div class="grid w-full max-w-md grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-2">
-
+          <!-- Five actions, not sixteen. A launcher is a shortlist: everything cut
+               from here is still one keystroke away in ⌘K and in the page navigator,
+               and the pages that got cut (Charts, Diagrams, Timeline, Data Diff,
+               Codegen, Objects, Insights, Security, Logs, Schema, Dashboard, ORM) are
+               things you go to once you already know the database - not the first
+               thing you do when a tab opens. Sixteen equal-weight tiles asked the
+               user to read the whole grid to find the one they wanted.
+          
+               One column at every width: a row of four 6.5rem tiles was unreadable
+               as soon as the sidebar was dragged wider, and a five-item list does
+               not need a grid to hold its shape. -->
+          <!-- Column count comes from the space available, not a fixed number: the
+                 pane narrows whenever the sidebar is dragged wider. At full width
+                 the five tiles resolve to one clean row. -->
+            <div class="grid w-full max-w-lg grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-2">
             {#if isRedis}
-              {@render tile(KeyRound, 'Keyspace', openRedisTab, {})}
+              {@render row(KeyRound, "Keyspace", "Browse keys and values", openRedisTab, { wide: true })}
             {:else}
-              {@render tile(Terminal, 'SQL', openSqlTab, { keys: [mod, 'T'] })}
-              {@render tile(LayoutDashboard, 'Dashboard', openDashboardTab, { pro: true })}
+              {@render row(Terminal, "SQL", "Write and run a query", openSqlTab, { keys: [mod, "T"] })}
+              {@render row(Sparkles, "AI", "Ask about this database", openAiTab, { pro: true, keys: [mod, shiftKey, "E"] })}
             {/if}
-
-            {@render tile(Sparkles, 'AI', openAiTab, { pro: true, keys: [mod, shiftKey, 'E'] })}
-
-            {#if !isRedis}
-              {@render tile(Code2, 'ORM', openOrmTab, { pro: true, keys: [mod, shiftKey, 'O'] })}
-            {/if}
-
-            {#if hasSchemaExplorer}
-              {@render tile(LayoutTemplate, 'Schema', openSchemaTab, { pro: true })}
-            {/if}
-
-            {#if hasSecurity}
-              {@render tile(ShieldCheck, 'Security', openSecurityTab, { pro: true })}
-            {/if}
-
-            {@render tile(ScrollText, 'Logs', openLogsTab, { pro: true })}
-
-            {#if !isRedis}
-              {@render tile(Database, 'Insights', openInsightsTab, {})}
-              <!-- Advisor is reachable from ⌘K and the page navigator only. Quick
-                   access is the short list, not every page. -->
-              {@render tile(Boxes, 'Objects', openObjectsTab, {})}
-              {@render tile(FileCode2, 'Codegen', openOrmSchemaTab, { pro: true, hint: 'Codegen - schema as Prisma or Drizzle code' })}
-              {@render tile(BarChart2, 'Charts', openChartsTab, { pro: true })}
-              {@render tile(GitBranch, 'Diagrams', openDiagramsTab, { pro: true })}
-              {@render tile(History, 'Timeline', openSchemaTimelineTab, { pro: true })}
-              {@render tile(GitCompare, 'Data Diff', openDataDiffTab, { pro: true })}
-              {@render tile(Blocks, 'Extensions', openExtensionsTab, { pro: true })}
-            {/if}
-
-            {@render tile(Database, 'Connect', () => (showConnectionModal = true), {})}
+            {@render row(Blocks, "Extensions", "Add and manage extensions", openExtensionsTab, { pro: true })}
+            {@render row(Command, "Shortcuts", "Everything else lives here", () => (showShortcutsModal = true), { keys: [mod, "/"] })}
+            {@render row(Database, "Connect", "Switch or add a connection", () => (showConnectionModal = true), {})}
           </div>
 
 
           <!-- Footer -->
-          <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-ui-3xs text-muted-foreground/80">
+          <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-ui-3xs text-muted-foreground">
             <button
               type="button"
               onclick={() => showShortcutsModal = true}
@@ -8123,12 +8185,12 @@ let rowSearch = $state('')
               <Command class="size-3 shrink-0" />
               <span>Shortcuts</span>
             </button>
-            <span class="text-muted-foreground/40">·</span>
+            <span class="text-muted-foreground">·</span>
             <span class="flex items-center gap-1.5">
               {@render chord([mod, 'B'])}
               <span>sidebar</span>
             </span>
-            <span class="text-muted-foreground/40">·</span>
+            <span class="text-muted-foreground">·</span>
             <span class="flex items-center gap-1.5">
               {@render chord([mod, 'W'])}
               <span>close tab</span>
@@ -8161,10 +8223,10 @@ let rowSearch = $state('')
           {#snippet failed(err, reset)}
             <div class="flex h-full min-h-0 shrink-0 flex-col items-center justify-center gap-3 border-l border-border/50 bg-background p-4 text-center"
               style="width: {aiSidebarFallbackWidth}px; min-width: {aiSidebarFallbackWidth}px; max-width: {aiSidebarFallbackWidth}px">
-              <AlertTriangle class="size-5 text-destructive/60" />
+              <AlertTriangle class="size-5 text-destructive" />
               <div class="space-y-1">
                 <p class="text-ui-xs font-medium text-foreground">AI sidebar error</p>
-                <p class="font-mono text-ui-3xs text-muted-foreground/60 break-words">{err instanceof Error ? err.message : String(err)}</p>
+                <p class="font-mono text-ui-3xs text-muted-foreground break-words">{err instanceof Error ? err.message : String(err)}</p>
               </div>
               <button
                 type="button"

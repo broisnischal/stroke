@@ -173,7 +173,7 @@
   {#if phase === 'idle'}
     <!-- ── Not connected ── -->
     <div class="flex flex-col items-center gap-3 rounded-lg border border-border/60 bg-muted/30 px-4 py-5 text-center">
-      <GitBranch class="size-8 text-muted-foreground/60" />
+      <GitBranch class="size-8 text-muted-foreground" />
       <div>
         <p class="text-ui-sm font-medium text-foreground">Connect GitHub Copilot</p>
         <p class="mt-0.5 text-ui-xs text-muted-foreground">Sign in with your GitHub account to use Copilot models.</p>
@@ -222,7 +222,7 @@
         Open github.com/login/device
       </button>
 
-      <p class="text-center text-ui-xs text-muted-foreground/60">
+      <p class="text-center text-ui-xs text-muted-foreground">
         <Loader2 class="mr-1 inline size-3 animate-spin" />
         Waiting for authorization…
       </p>
@@ -253,7 +253,7 @@
       </div>
       <button
         type="button"
-        class="shrink-0 rounded p-1 text-muted-foreground/50 hover:bg-accent/20 hover:text-destructive"
+        class="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent/20 hover:text-destructive"
         title="Log out"
         onclick={handleLogout}
       >

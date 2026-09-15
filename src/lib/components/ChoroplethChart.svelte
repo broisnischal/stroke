@@ -133,9 +133,9 @@
   }
 
   function buildOption() {
-    const fg     = isDark ? '#e5e7eb' : '#111827'
-    const muted  = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)'
-    const land   = isDark ? '#1e2433' : '#d1d5db'
+    const fg = isDark ? '#e5e7eb' : '#111827'
+    const muted = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)'
+    const land = isDark ? '#1e2433' : '#d1d5db'
     const border = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.12)'
 
     return {
@@ -232,7 +232,7 @@
 </script>
 
 {#if !spec?.data?.length}
-  <div class="flex h-full items-center justify-center text-ui-xs text-muted-foreground/50">No data</div>
+  <div class="flex h-full items-center justify-center text-ui-xs text-muted-foreground">No data</div>
 {:else}
   <!-- Chart div stays mounted always, overlays handle loading/error states -->
   <div class="relative h-full w-full">
@@ -248,7 +248,7 @@
         >Retry</button>
       </div>
     {:else if loading}
-      <div class="absolute inset-0 flex items-center justify-center gap-2 text-ui-xs text-muted-foreground/50">
+      <div class="absolute inset-0 flex items-center justify-center gap-2 text-ui-xs text-muted-foreground">
         <span class="inline-block animate-spin">⟳</span> Loading map…
       </div>
     {/if}

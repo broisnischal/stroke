@@ -115,7 +115,7 @@
     <!-- Header -->
     <div class="flex flex-col items-start gap-4">
       <div class="flex size-11 items-center justify-center rounded-xl border border-warning/20 bg-warning/10">
-        <KeyRound class="size-5 text-warning/80" />
+        <KeyRound class="size-5 text-warning" />
       </div>
       <div class="flex flex-col gap-1">
         <h1 class="text-ui-lg font-semibold tracking-tight text-foreground">Stroke Pro</h1>
@@ -179,11 +179,11 @@
 
     <!-- What's included -->
     <div class="flex flex-col gap-3">
-      <p class="text-ui-2xs font-medium uppercase tracking-wider text-muted-foreground/70">What Pro unlocks</p>
+      <p class="text-ui-2xs font-medium uppercase tracking-wider text-muted-foreground">What Pro unlocks</p>
       <ul class="grid grid-cols-2 gap-x-4 gap-y-2.5">
         {#each features as f (f.label)}
           <li class="flex items-center gap-2 text-ui-xs text-muted-foreground">
-            <f.icon class="size-3.5 shrink-0 text-muted-foreground/60" />
+            <f.icon class="size-3.5 shrink-0 text-muted-foreground" />
             {f.label}
           </li>
         {/each}
@@ -197,7 +197,7 @@
         <button
           type="button"
           onclick={() => void openStore()}
-          class="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/70 bg-background px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-muted"
+          class= "field-surface inline-flex h-7 items-center gap-1.5 bg-background px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-muted"
         >
           Get Stroke Pro
           <ExternalLink class="size-3 text-muted-foreground" />

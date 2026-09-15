@@ -580,7 +580,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function extendColSelection(toColName) {
     if (!_lastHeaderClickedCol) { selectedCols = new Set([toColName]); _lastHeaderClickedCol = toColName; return }
     const startIdx = geom.cols.findIndex((c) => c.name === _lastHeaderClickedCol)
-    const endIdx   = geom.cols.findIndex((c) => c.name === toColName)
+    const endIdx = geom.cols.findIndex((c) => c.name === toColName)
     if (startIdx < 0 || endIdx < 0) return
     const [lo, hi] = [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)]
     selectedCols = new Set(geom.cols.slice(lo, hi + 1).map((c) => c.name))
@@ -6297,7 +6297,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                         <Loader class="size-3 animate-spin text-muted-foreground" />
                       {:else}
                         <Check
-                          class="size-3 cursor-pointer text-primary hover:text-primary/70"
+                          class="size-3 cursor-pointer text-primary hover:text-primary"
                           onclick={() => void submitNewRow()}
                           title="Insert row (⌘↵)"
                         />
@@ -6308,7 +6308,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     <div class="flex shrink-0 items-center justify-center border-r border-border/20 bg-primary/5" style="width:{GUTTER_SELECT_W}px">
                       <button
                         type="button"
-                        class="inline-flex size-4 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive"
+                        class="inline-flex size-4 items-center justify-center rounded text-muted-foreground hover:text-destructive"
                         onclick={cancelNewRow}
                         title="Cancel"
                       >
@@ -6326,8 +6326,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                          value the database will supply and recede accordingly -
                          nothing is wrong yet, so nothing is coloured as wrong. -->
                     {@const blankClass = omit === 'required'
-                      ? 'placeholder:text-muted-foreground/60'
-                      : 'placeholder:italic placeholder:text-muted-foreground/35'}
+                      ? 'placeholder:text-muted-foreground'
+                      : 'placeholder:italic placeholder:text-muted-foreground'}
                     {@const enumValues = getColumnEnumValues(col)}
                     {@const isBoolean = isBooleanType(dt)}
                     {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
@@ -6343,7 +6343,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                              refusing it means dropping to raw SQL for a one-cell
                              exception. Empty still omits the column entirely, so
                              the sequence is untouched unless you overrule it. -->
-                        <KeyRound class="mr-1 size-3 shrink-0 text-muted-foreground/40" />
+                        <KeyRound class="mr-1 size-3 shrink-0 text-muted-foreground" />
                         <input
                           data-new-row-input={col.name}
                           type="text"
@@ -6352,7 +6352,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                             ? 'auto-increment'
                             : 'generated'}
                           title="The database fills this in. Type a value only to override it."
-                          class="w-full min-w-0 bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:italic placeholder:text-muted-foreground/35 disabled:opacity-50"
+                          class="w-full min-w-0 bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:italic placeholder:text-muted-foreground disabled:opacity-50"
                           value={newRowDrafts[col.name] ?? ''}
                           oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
                           onfocus={() => (newRowFocusCol = col.name)}
@@ -6514,6 +6514,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 {@const eTimeOnly = !eIsArray && !eIsJson && isTimeOnlyType(eType)}
                 <div
                   in:fade={{ duration: 100, easing: cubicOut }}
+                  data-cell-editor
                   class="absolute z-30 box-border bg-background ring-2 ring-inset ring-primary"
                   style="top:{editOverlay.top}px; left:{editOverlay.left}px; width:{editOverlay.width}px; height:{editOverlay.height}px"
                 >
@@ -6608,9 +6609,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                         }
                       }}
                     >
-                      <Braces class="size-3.5 shrink-0 text-muted-foreground/60" />
+                      <Braces class="size-3.5 shrink-0 text-muted-foreground" />
                       <span class="truncate">{Array.isArray(eArrVal) ? arrayDisplay(eArrVal) : (editingCell?.draft || "{}")}</span>
-                      <Maximize2 class="ml-auto size-3 shrink-0 text-muted-foreground/50" />
+                      <Maximize2 class="ml-auto size-3 shrink-0 text-muted-foreground" />
                     </button>
                   {:else if eDateTime || eDateOnly}
                     <!-- Date/timestamp cell → calendar picker bound to the draft.
@@ -6628,6 +6629,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                         showTime={eDateTime}
                         disabled={saving}
                         value={editingCell?.draft ?? ''}
+                        oninput={(v) => {
+                          // Typing only stages. Committing here would end the
+                          // edit after the first character, which is what made
+                          // the field look like it refused input.
+                          if (editingCell) editingCell.draft = v;
+                        }}
                         onchange={(v) => {
                           if (!editingCell) return;
                           editingCell.draft = v;
@@ -6666,7 +6673,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                         disabled={saving}
                         title="Open JSON editor"
                         aria-label="Open JSON editor"
-                        class="mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/60 outline-none hover:bg-accent hover:text-foreground"
+                        class="mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none hover:bg-accent hover:text-foreground"
                         onclick={(e) => {
                           e.stopPropagation();
                           if (!editingCell) return;
@@ -6697,7 +6704,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {#if visibleColumns.length === 0}
             <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
-                <Table2 class="size-8 text-muted-foreground/25" />
+                <Table2 class="size-8 text-muted-foreground" />
                 <p class="text-ui-sm text-muted-foreground">No columns visible</p>
               </div>
             </div>
@@ -6711,10 +6718,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
                 {#if loading}
-                  <Loader class="size-5 animate-spin text-muted-foreground/40" />
+                  <Loader class="size-5 animate-spin text-muted-foreground" />
                   <p class="text-ui-sm text-muted-foreground">Loading rows…</p>
                 {:else}
-                  <Table2 class="size-8 text-muted-foreground/25" />
+                  <Table2 class="size-8 text-muted-foreground" />
                   <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
                 {/if}
               </div>
@@ -6753,13 +6760,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       Retry
                     </button>
                   {:else}
-                    <Loader class="size-3 shrink-0 animate-spin text-muted-foreground/60" />
+                    <Loader class="size-3 shrink-0 animate-spin text-muted-foreground" />
                     <span class="text-ui-2xs text-muted-foreground">
                       Loading rows {(loadingSpan.first + 1).toLocaleString()}-{(loadingSpan.last + 1).toLocaleString()}
-                      <span class="text-muted-foreground/50">of {rows.length.toLocaleString()}</span>
+                      <span class="text-muted-foreground">of {rows.length.toLocaleString()}</span>
                     </span>
                     {#if windowStatus?.slow}
-                      <span class="text-ui-2xs text-muted-foreground/50">· slow connection</span>
+                      <span class="text-ui-2xs text-muted-foreground">· slow connection</span>
                     {/if}
                   {/if}
                 </div>
@@ -6776,8 +6783,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             >
               <div class="flex items-center justify-center py-2">
                 <div class="flex items-center gap-1.5 rounded-full border border-border/20 bg-background px-3 py-1 elevate-2-rim">
-                  <Loader class="size-3 animate-spin text-muted-foreground/50" />
-                  <span class="text-ui-2xs text-muted-foreground/50">Loading more…</span>
+                  <Loader class="size-3 animate-spin text-muted-foreground" />
+                  <span class="text-ui-2xs text-muted-foreground">Loading more…</span>
                 </div>
               </div>
             </div>
@@ -6786,7 +6793,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                  knows scrolling won't fetch more (vs. "is it still loading?"). -->
             <div style="position:relative;width:100%;pointer-events:none;z-index:5">
               <div class="flex items-center justify-center py-2.5">
-                <span class="rounded-full border border-border/15 bg-muted/20 px-3 py-1 text-ui-2xs text-muted-foreground/40">
+                <span class="rounded-full border border-border/15 bg-muted/20 px-3 py-1 text-ui-2xs text-muted-foreground">
                   End of results, {rows.length.toLocaleString()} {rows.length === 1 ? 'row' : 'rows'}
                 </span>
               </div>
@@ -6950,7 +6957,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 </ContextMenu.Item>
               {/each}
             {:else}
-              <div class="px-2 py-1.5 text-ui-2xs italic text-muted-foreground/50">No transforms apply to this column</div>
+              <div class="px-2 py-1.5 text-ui-2xs italic text-muted-foreground">No transforms apply to this column</div>
             {/if}
             {#if colTransforms[hcol]}
               <ContextMenu.Separator />
@@ -7263,11 +7270,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       maxlength="24"
       spellcheck="false"
       placeholder="e.g. PII, money, deprecated"
-      class="h-9 w-full rounded-lg border-2 border-border bg-background px-3 text-ui-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+      class= "field-surface h-9 w-full bg-background px-3 text-ui-sm text-foreground outline-none transition-[border-color,box-shadow]"
       onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmTag(); } else if (e.key === 'Escape') { e.preventDefault(); tagDialogOpen = false; } }}
     />
     <Dialog.Footer class="gap-2 sm:justify-end">
-      <button type="button" class="inline-flex h-8 items-center rounded-lg border border-border/60 px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-muted" onclick={() => (tagDialogOpen = false)}>Cancel</button>
+      <button type= "field-surface button"class="inline-flex h-8 items-center px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-muted"onclick={() => (tagDialogOpen = false)}>Cancel</button>
       <button type="button" class="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90" onclick={confirmTag}>Save</button>
     </Dialog.Footer>
   </Dialog.Content>
@@ -7336,13 +7343,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     {#if dmlPreview}
       <Dialog.Header class="gap-1">
         <Dialog.Title class="text-ui-sm">{dmlPreview.title}</Dialog.Title>
-        <Dialog.Description class="text-ui-xs text-muted-foreground/70">
+        <Dialog.Description class="text-ui-xs text-muted-foreground">
           {dmlPreview.description}
         </Dialog.Description>
       </Dialog.Header>
 
       <div class="flex items-center justify-between gap-2">
-        <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">
+        <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">
           SQL to run{dmlPreview.statements.length > 1 ? ` · ${dmlPreview.statements.length} statements` : ''}
         </span>
         {#if dmlWasEdited}
@@ -7350,7 +7357,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             type="button"
             onclick={() => { dmlEditedSql = dmlOriginalSql }}
             disabled={dmlPreviewRunning}
-            class="inline-flex items-center gap-1 text-ui-2xs text-muted-foreground/60 transition-transform duration-100 ease-out hover:text-foreground active:scale-[0.97] disabled:opacity-50"
+            class="inline-flex items-center gap-1 text-ui-2xs text-muted-foreground transition-transform duration-100 ease-out hover:text-foreground active:scale-[0.97] disabled:opacity-50"
             title="Discard your edits and restore the generated SQL"
           >
             <RotateCcw class="size-3" />
@@ -7371,7 +7378,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       </div>
 
       {#if dmlWasEdited}
-        <p class="text-ui-2xs text-warning/80">
+        <p class="text-ui-2xs text-warning">
           You edited the SQL, Apply will run it exactly as written.
         </p>
       {/if}

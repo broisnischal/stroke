@@ -117,12 +117,12 @@
 <Popover bind:open>
   <PopoverTrigger
     class={cn(
-      "inline-flex h-7 min-w-[10rem] items-center gap-1.5 rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground transition-colors hover:bg-accent focus:outline-none",
+"field-surface inline-flex h-7 min-w-[10rem] items-center gap-1.5 bg-input/30 px-2 text-ui-sm text-foreground transition-colors hover:bg-accent focus:outline-none",
       !value && op !== "is_not_null" && "text-muted-foreground",
       className,
     )}
   >
-    <CalendarIcon class="size-3 shrink-0 text-muted-foreground/60" />
+    <CalendarIcon class="size-3 shrink-0 text-muted-foreground" />
     <span class="truncate">{label}</span>
   </PopoverTrigger>
   <PopoverContent class="flex w-auto p-0" align="start">
@@ -137,13 +137,13 @@
       {/each}
       <!-- In the last N … -->
       <div class="mt-1 flex flex-col gap-1.5 border-t border-border/40 px-1 pt-2">
-        <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">In the last</span>
+        <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">In the last</span>
         <div class="flex items-center gap-1">
           <button type="button" class="grid size-6 shrink-0 place-items-center rounded-md border border-border/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:scale-[0.96]" aria-label="Decrease" onclick={() => (lastN = Math.max(1, lastN - 1))}>
             <Minus class="size-3" />
           </button>
           <input
-            class="h-6 w-9 min-w-0 rounded-lg border-2 border-border bg-input/30 text-center font-mono text-ui-xs tabular-nums outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+          class= "field-surface h-6 w-9 min-w-0 bg-input/30 text-center font-mono text-ui-xs tabular-nums outline-none"
             inputmode="numeric"
             value={lastN}
             oninput={(e) => (lastN = Math.max(1, parseInt(e.currentTarget.value.replace(/\D/g, "")) || 1))}

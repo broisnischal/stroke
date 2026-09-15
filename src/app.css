@@ -24,9 +24,53 @@
      background regardless of CSS - the `.dark` block below flips it to dark for
      every dark theme. One declaration fixes every native dropdown at zero cost. */
   color-scheme: light;
-  --radius: 0.375rem;
+  --radius: 8px;
+  /* Boundary of a form control (input, textarea, select trigger, combobox).
+     `--border` is the hairline/divider role and sits at ~1.3:1 against every
+     surface, which is fine for a divider and invisible on a field: the filter
+     row's three controls had no readable edge at all. Derived from the theme's
+     own foreground so all 16 themes get it without a per-theme entry; 44% is
+     the mix where it measures >= 3:1 (WCAG 1.4.11) on every surface in both
+     schemes. 36% measures ~2.4:1 on dark and ~2.6:1 on light, so it misses WCAG
+     1.4.11's 3:1 for a control boundary - a deliberate call for the hairline
+     look, with the visible-state burden carried by the focus outline (4.63:1). */
+  --field-border: color-mix(in oklch, var(--foreground) 36%, var(--background));
+  /* 2px. A 1px edge at a 10px radius antialiases the corner arcs lighter than
+     the straight runs, so the border reads as four dashes with gaps at the
+     corners; 1.5px filled the arcs in but still sat back too far at rest. Two
+     whole pixels land on the device grid at 1x, so the edge is the same weight
+     all the way round and present without focus. */
+  --field-border-width: 2px;
+  /* Fields, dropdown triggers and buttons all share ONE corner, and it is the
+     same one `rounded-lg` resolves to - a second radius for fields is how an
+     input ended up rounder than the button beside it. Absolute px, not rem: a
+     corner is a physical size and has no reason to grow when the type scale
+     does. */
+  --radius-field: calc(var(--radius) + 2px);
+  /* No fill. A field is its border and its radius - a gradient made the edge
+     look brighter along the top than along the bottom, which reads as a badly
+     drawn border rather than as depth. */
   --app-zoom: 1;
   --app-font-size: 14px;
+  /* UI type scale, in whole pixels. applySettings() recomputes these for the
+     active OS base size and zoom level and writes them back to the root; these
+     are the 14px-base fallbacks that hold for the first paint before JS runs.
+     Whole pixels are the point: a fractional font-size makes WebKit rasterise
+     glyphs off the pixel grid, which is what made UI text look soft at 100%. */
+  --fs-3xl: 24px;
+  --lh-3xl: 30px;
+  --fs-2xl: 20px;
+  --lh-2xl: 28px;
+  --fs-xl: 18px;
+  --lh-xl: 26px;
+  --fs-lg: 16px;
+  --lh-lg: 24px;
+  --fs-base: 14px;
+  --fs-15: 15px;
+  --fs-sm: 13px;
+  --fs-xs: 12px;
+  --fs-2xs: 11px;
+  --fs-3xs: 10px;
   --editor-font-size: 14px;
   /* 1.5 ratio - matches VS Code / Cursor's default editor line height. */
   --editor-line-height: 21px;
@@ -121,24 +165,91 @@ html[data-icon-style="bold"]  svg.lucide { stroke-width: 2.5px; }
 /* ── Focus ring - one premium treatment for every text field, app-wide ───────
    Unlayered on purpose: unlayered CSS beats Tailwind's layered `ring-1
    ring-ring` utilities, so this overrides the ~40 per-component focus styles
-   at once without editing each call site. Instead of a hard, fully-opaque 2px
-   double-line (border + ring stacked in the same color), it draws a calm 1px
-   accent border plus a soft translucent halo - the Linear/shadcn look.
+   at once without editing each call site. Scoped to `.field-surface`, which is
+   the set of fields that draw their own frame: an outline follows the element's
+   OWN radius, so on a square-cornered textarea nested inside a rounded card it
+   drew a hard rectangle across the card's corners. Those fields show focus on
+   their container with `focus-within` instead. The field's own border never
+   moves; focus is a 2px outline just outside it. `--ring` at full strength
+   measures 4.63:1 against --background, so the indicator carries on its own;
+   the previous neutral `foreground/55` was fine on its own but left a text
+   input and the select beside it wearing two different focus states in the same
+   filter row. Select triggers are buttons, so they are listed explicitly.
    aria-invalid fields keep their own destructive ring. */
-input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([aria-invalid="true"]):not(.no-focus-ring):focus-visible,
-textarea:not([aria-invalid="true"]):not(.no-focus-ring):focus-visible {
-  border-color: color-mix(in oklch, var(--foreground) 55%, transparent);
+.field-surface:not([aria-invalid="true"]):not(.no-focus-ring):focus-visible,
+.cell-quiet:focus-visible,
+[data-slot="select-trigger"]:not([aria-invalid="true"]):focus-visible,
+[data-slot="select-trigger"][data-state="open"] {
+  /* The border is deliberately NOT touched here: a field's edge looks identical
+     whether it has focus or not. The indicator is an outline just outside that
+     edge - no shadow, no ring stacked on the border, no layout shift, and it
+     follows the corner radius. --ring measures 4.63:1 against --background. */
+  outline: 2px solid var(--ring);
+  /* Offset 0: the ring sits directly against the outside of the border with no
+     gap between them. An outline never participates in layout, so it costs no
+     shift either way. */
+  outline-offset: 0;
   box-shadow: none;
+}
+
+/* ── One frame for every text field in the app ───────────────────────────────
+   `.field-surface` fixed the primitives, but roughly thirty fields across the
+   pages are written as bare <input>/<textarea> elements with their own ad-hoc
+   `rounded-md border-border` classes, so the search box on one page and the
+   search box on the next were drawn differently. Unlayered on purpose: unlayered
+   author CSS beats every Tailwind layer, so a local radius or border cannot pull
+   one control back out of the system.
+
+   Three kinds of field opt out, and all three are genuinely frameless:
+     · `.no-focus-ring`  - nested inside a container that carries the frame
+                           (command palette, dropdown filters, AI composer)
+     · `.no-field-frame` - explicit escape hatch for anything else
+     · grid cell editors - they sit inside a canvas cell and must stay flush. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="submit"]):not([type="button"]):not(.no-focus-ring):not(.no-field-frame),
+textarea:not(.no-focus-ring):not(.no-field-frame) {
+  border-radius: var(--radius-field);
+  border: var(--field-border-width) solid var(--field-border);
+}
+.studio-data-table tbody td :is(input, textarea),
+.monaco-editor :is(input, textarea),
+.sql-editor-host :is(input, textarea) {
+  border: 0;
+  border-radius: 0;
+}
+
+/* An editing cell keeps its field frame - the rounded, bordered input inside the
+   cell is the look, and it is the same frame every other field in the app wears.
+   What it must NOT have is a focus ring: the overlay around the cell is already
+   ringed (`ring-2 ring-inset` in DataTable), which is what marks an edit on a
+   canvas with no DOM to highlight. Two rings is what the enum and timestamp
+   editors were drawing. The overlay is the focus indicator; the control inside
+   it keeps its border and loses its outline. */
+[data-cell-editor] :is(input, textarea, select, button, [data-slot="select-trigger"]) {
+  outline: none !important;
+  box-shadow: none !important;
+}
+/* The select trigger recolours its border while the menu is open, which reads as
+   a third accent line stacked on the overlay ring. Inside a cell it keeps the
+   resting field border. */
+[data-cell-editor] [data-slot="select-trigger"] {
+  border-color: var(--field-border) !important;
+}
+
+/* Fields that sit inside a container which already carries the frame (command
+   palette, dropdown filters, the AI composer card) opt out. The outline follows
+   the element's OWN border-radius, so on a square-cornered textarea inside a
+   rounded card it draws a hard rectangle across the card's corners. Those
+   containers show focus with `focus-within` on the frame instead. */
+input.no-focus-ring:focus-visible,
+textarea.no-focus-ring:focus-visible {
+  box-shadow: none;
+  border-color: transparent;
   outline: none;
 }
 
-/* Borderless search inputs (command palette, dropdown filters) opt out of the
-   halo - they already sit inside a bordered popover, so the ring reads as noise. */
-input.no-focus-ring:focus-visible { box-shadow: none; border-color: transparent; }
-
 /* OS-native border-radius conventions */
-html[data-os="macos"]   { --radius: 0.5rem; --window-radius: 10px; }  /* macOS Big Sur+ system radius */
-html[data-os="windows"] { --radius: 0.4375rem; --window-radius: 8px; } /* Windows 11 */
+html[data-os="macos"]   { --radius: 10px; --window-radius: 10px; } /* macOS Big Sur+ system radius */
+html[data-os="windows"] { --radius: 9px; --window-radius: 8px; } /* Windows 11 */
 html[data-os="linux"]   { --window-radius: 8px; }
 :root { --window-radius: 10px; }
 
@@ -167,6 +278,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-field-border: var(--field-border);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -353,8 +465,8 @@ html[data-os="linux"]   { --window-radius: 8px; }
      plain <button>s with no ring classes of their own - give them a visible
      theme-colored ring so tabbing through the app is followable. */
   [data-studio-chrome] :is(button, [role='button']):focus-visible {
-    outline: 2px solid color-mix(in oklch, var(--ring) 55%, transparent);
-    outline-offset: -1px;
+    outline: 2px solid var(--ring);
+    outline-offset: 0;
   }
 
   /* tabindex="-1" elements are programmatically focusable but never keyboard-navigable;
@@ -474,7 +586,7 @@ html[data-os="linux"]   { --window-radius: 8px; }
     height: 20px;
     padding: 0 6px;
     font-family: var(--font-mono);
-    font-size: calc(11 / 14 * 1rem);  /* text-ui-2xs - crisper than a fixed 10px */
+    font-size: var(--fs-2xs);  /* text-ui-2xs - crisper than a fixed 10px */
     font-weight: 500;
     line-height: 1;
     color: color-mix(in oklch, var(--muted-foreground) 85%, var(--foreground));
@@ -592,6 +704,49 @@ html[data-os="linux"]   { --window-radius: 8px; }
      Large UI type reads better with slightly negative tracking (better-typography
      principle 7). `text-display` is for hero/page titles; `text-heading` for
      section headers and dialog titles. Optical sizing sharpens stroke contrast. */
+  /* One surface for every field-shaped control: inputs, textareas, select
+     triggers, comboboxes and the outline/secondary buttons that sit beside
+     them. Hairline border plus a top-lit fill, both derived from the theme's own
+     foreground so all 16 themes get it. Set `background` (not `background-color`)
+     on anything that overrides this, or the gradient survives and the new colour
+     paints underneath it. */
+  .field-surface {
+    border-radius: var(--radius-field);
+    border: var(--field-border-width) solid var(--field-border);
+  }
+
+  /* A picker tile, not a field. Same geometry as .field-surface, so the two sit
+     in one view without a seam, but the frame only appears under the pointer:
+     twenty tiles each drawing a permanent 2px border read as twenty highlighted
+     things, and at rest it is the grid's own alignment that carries the
+     structure. The transparent border is always there, so nothing shifts when
+     it gains a colour. */
+  .cell-quiet {
+    border-radius: var(--radius-field);
+    border: var(--field-border-width) solid transparent;
+  }
+  .cell-quiet:hover:not(:disabled),
+  .cell-quiet:focus-visible {
+    border-color: var(--field-border);
+  }
+
+  /* Extends a small icon button's pointer/touch target to the WCAG 2.5.8
+     24x24 CSS-pixel baseline without changing how big it looks. Dense tree rows
+     (sidebar headers, inline row actions) keep their 16-20px glyph box and get a
+     transparent 24px target around it. The pseudo-element is the target, so
+     neighbouring controls must stay >= 4px apart or the areas overlap. */
+  .hit-area:where(:not(.absolute, .fixed, .sticky, .relative)) {
+    position: relative;
+  }
+  .hit-area::after {
+    content: "";
+    position: absolute;
+    inset: 50%;
+    width: 24px;
+    height: 24px;
+    translate: -50% -50%;
+  }
+
   .text-display {
     font-weight: 620;
     letter-spacing: -0.021em;
@@ -604,65 +759,66 @@ html[data-os="linux"]   { --window-radius: 8px; }
     font-optical-sizing: auto;
   }
 
-  /* UI type scale (1rem = --app-font-size = 14px).
-     Denominators match the base so each step lands on a whole pixel at 100% zoom,
-     eliminating the sub-pixel rounding differences that made text look
-     inconsistent across macOS / Windows / Linux.
-     See DESIGN_SYSTEM.md - this is the ONLY sanctioned font-size scale. */
+  /* UI type scale. Each step resolves to `--fs-*`, a whole-pixel value that
+     applySettings() computes from the OS base size and the zoom level. The old
+     `calc(N / 14 * 1rem)` form only landed on whole pixels when the root was
+     exactly 14px, so on Linux (15px base) every size in the app rendered
+     fractional - 13px captions came out at 13.93px and WebKit rasterised them
+     off the grid. See DESIGN_SYSTEM.md - this is the ONLY sanctioned scale. */
   .text-ui-3xl {
-    font-size: calc(24 / 14 * 1rem);  /* 24px - onboarding / full-screen hero */
-    line-height: calc(30 / 14 * 1rem);
+    font-size: var(--fs-3xl);  /* 24px - onboarding / full-screen hero */
+    line-height: var(--lh-3xl);
   }
 
   .text-ui-2xl {
-    font-size: calc(20 / 14 * 1rem);  /* 20px - page/section hero */
-    line-height: calc(28 / 14 * 1rem);
+    font-size: var(--fs-2xl);  /* 20px - page/section hero */
+    line-height: var(--lh-2xl);
   }
 
   .text-ui-xl {
-    font-size: calc(18 / 14 * 1rem);  /* 18px - dialog titles, empty-state */
-    line-height: calc(26 / 14 * 1rem);
+    font-size: var(--fs-xl);   /* 18px - dialog titles, empty-state */
+    line-height: var(--lh-xl);
   }
 
   .text-ui-lg {
-    font-size: calc(16 / 14 * 1rem);  /* 16px - card/panel titles */
-    line-height: calc(24 / 14 * 1rem);
+    font-size: var(--fs-lg);   /* 16px - card/panel titles */
+    line-height: var(--lh-lg);
   }
 
   .text-ui {
-    font-size: 1rem;           /* 14px */
+    font-size: var(--fs-base); /* 14px */
   }
 
   .text-ui-sm {
-    font-size: calc(13 / 14 * 1rem);  /* 13px */
+    font-size: var(--fs-sm);   /* 13px */
   }
 
   .text-ui-xs {
-    font-size: calc(12 / 14 * 1rem);  /* 12px */
+    font-size: var(--fs-xs);   /* 12px */
   }
 
   .text-ui-2xs {
-    font-size: calc(11 / 14 * 1rem);  /* 11px */
+    font-size: var(--fs-2xs);  /* 11px */
   }
 
   .text-ui-3xs {
-    font-size: calc(10 / 14 * 1rem);  /* 10px - minimum for legibility */
+    font-size: var(--fs-3xs);  /* 10px - minimum for legibility */
   }
 
-  /* ── Hardcoded text-[Npx] → rem equivalents ────────────────────────────────
-     371 uses of text-[8px]…text-[15px] across the codebase use fixed px sizes
-     that bypass --app-font-size and render differently per OS.
-     These overrides convert them to rem so they scale consistently and can be
-     zoomed. 8px/9px are bumped to 10px minimum for legibility on all screens. */
-  .text-\[8px\]  { font-size: calc(10 / 14 * 1rem); } /* ↑ bumped to 10px min */
-  .text-\[9px\]  { font-size: calc(10 / 14 * 1rem); } /* ↑ bumped to 10px min */
-  .text-\[10px\] { font-size: calc(10 / 14 * 1rem); }
-  .text-\[11px\] { font-size: calc(11 / 14 * 1rem); }
-  .text-\[12px\] { font-size: calc(12 / 14 * 1rem); }
-  .text-\[13px\] { font-size: calc(13 / 14 * 1rem); }
-  .text-\[14px\] { font-size: 1rem; }
-  .text-\[15px\] { font-size: calc(15 / 14 * 1rem); }
-  .text-\[16px\] { font-size: calc(16 / 14 * 1rem); }
+  /* -- Hardcoded text-[Npx] -> scale equivalents ------------------------------
+     371 uses of text-[8px]...text-[15px] across the codebase use fixed px sizes
+     that bypass the scale and render differently per OS. These overrides route
+     them onto the same whole-pixel steps so they scale and zoom consistently.
+     8px/9px are bumped to 10px minimum for legibility on all screens. */
+  .text-\[8px\]  { font-size: var(--fs-3xs); } /* bumped to 10px min */
+  .text-\[9px\]  { font-size: var(--fs-3xs); } /* bumped to 10px min */
+  .text-\[10px\] { font-size: var(--fs-3xs); }
+  .text-\[11px\] { font-size: var(--fs-2xs); }
+  .text-\[12px\] { font-size: var(--fs-xs); }
+  .text-\[13px\] { font-size: var(--fs-sm); }
+  .text-\[14px\] { font-size: var(--fs-base); }
+  .text-\[15px\] { font-size: var(--fs-15); }
+  .text-\[16px\] { font-size: var(--fs-lg); }
 
   /* Skeleton placeholders (shadcn-style pulse) */
   .skeleton {
@@ -871,3 +1027,107 @@ select optgroup {
 
 /* App-wide tooltips are rendered by the delegated GlobalTooltip component
    (src/lib/components/GlobalTooltip.svelte). */
+
+/* ── Reduced motion, app-wide ────────────────────────────────────────────────
+   Nine components carried their own `prefers-reduced-motion` block; everything
+   else (every `transition-*` utility, every `animate-*` keyframe, the smooth
+   scrollers) ran at full speed regardless of the OS setting. Unlayered and
+   `!important` on purpose: for important declarations the cascade reverses layer
+   order, so this is the only position that beats a layered `!important`.
+   The canvas grid reads the same media query in JS (DataTable.svelte). */
+/* The OS preference, unless Settings → Appearance has overridden it to "Full".
+   `data-motion` is absent when the setting is "System", so the media query is
+   the only thing deciding then. */
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion="full"]) :is(*, *::before, *::after) {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  html:not([data-motion="full"]) .animate-spin {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* The in-app override. Written out rather than shared with the block above: a
+   media query and an attribute selector cannot be OR'd into one rule, and the
+   alternative (a custom property gate) reads worse than the repetition. */
+html[data-motion="reduced"] :is(*, *::before, *::after) {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+/* A spinner is the only thing saying the app is still working, so killing it
+   would leave a state change with no cue at all. It keeps turning, slowly
+   enough to drop the strobe that causes vestibular symptoms. */
+html[data-motion="reduced"] .animate-spin {
+  animation-duration: 1.6s !important;
+  animation-iteration-count: infinite !important;
+}
+
+/* ── Hover-revealed row actions stay reachable by keyboard ───────────────────
+   Row actions across the app (remove-from-recent, copy-field, JSON row tools,
+   policy row menus) fade in on `group-hover`. A keyboard user tabs into them
+   perfectly well, but at `opacity: 0` both the control and its focus ring are
+   invisible - a focus indicator nobody can see. This reveals the control when
+   it, or anything inside it, takes visible focus. Unlayered so it beats the
+   `opacity-0` utility; the `:has()` arm covers wrappers around a button group.
+   `visibility: hidden` cannot be fixed this way - it drops the control out of
+   the tab order entirely - so those call sites were converted to `opacity-0`. */
+.opacity-0:focus-visible,
+.opacity-0:has(:focus-visible) {
+  opacity: 1;
+}
+
+/* ── Pressable things look pressable ─────────────────────────────────────────
+   Tailwind v4 dropped the preflight rule that gave buttons `cursor: pointer`,
+   so every button in the app inherited the text cursor and read as static.
+   Unlayered so a stray `cursor-default` in a utility class cannot undo it for
+   one control; genuinely inert states keep their own cursor below. */
+button:not(:disabled):not([aria-disabled="true"]),
+[role="button"]:not([aria-disabled="true"]),
+[role="tab"]:not([aria-disabled="true"]),
+[role="option"],
+[role="menuitem"],
+[role="menuitemcheckbox"],
+[role="menuitemradio"],
+summary,
+label:has(> input[type="checkbox"]),
+label:has(> input[type="radio"]) {
+  cursor: pointer;
+}
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+/* Sidebar list rows keep the arrow. They are a tree of tables, views and
+   databases - navigation you point at, the way a file tree or a mail list
+   behaves natively - not chrome you press. The strip, the schema chip and the
+   row actions above them are controls and keep the pointer. */
+[data-studio-region="sidebar"] li :is(button, [role="button"]):not(:disabled) {
+  cursor: default;
+}
+
+/* ── Full-width rows inset their focus ring ──────────────────────────────────
+   A field's ring sits flush OUTSIDE its border, which is right for a control
+   with space around it. A sidebar row is full-bleed inside its list, so the
+   same ring lands past the panel's own padding and reads as a box drawn around
+   the panel rather than around the row. Negative offset puts it inside the
+   row's box, where it still shows a 2px perimeter at the row's own radius.
+   Fields in the sidebar are untouched: this targets buttons only. */
+[data-studio-region="sidebar"] :is(button, [role="button"]):focus-visible {
+  outline-offset: -2px;
+}
+
+/* Horizontal scroller with no visible bar: used by the sidebar tab strip, which
+   has to yield at narrow widths rather than run under the actions beside it. */
+.app-scroll-x {
+  scrollbar-width: none;
+}
+.app-scroll-x::-webkit-scrollbar {
+  display: none;
+}

@@ -89,27 +89,27 @@
     }
   }
 
-  const lbl = 'mb-1.5 block text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/50'
-  const inp = 'h-8 w-full rounded-lg border-2 border-border bg-muted/[0.4] px-3 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-border/50 focus:ring-0'
+  const lbl = 'mb-1.5 block text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground'
+  const inp = 'h-8 w-full rounded-lg border-2 border-border bg-muted/[0.4] px-3 font-mono text-ui-xs outline-none placeholder:text-muted-foreground focus:border-border/50 focus:ring-0'
 </script>
 
 <Dialog.Root bind:open>
   <Dialog.Portal>
     <Dialog.Overlay />
-    <Dialog.Content showCloseButton={false} class="w-[min(460px,calc(100vw-2rem))] gap-0 overflow-hidden p-0 sm:max-w-none">
+    <Dialog.Content showCloseButton={false} class="w-[min(28.75rem,calc(100vw-2rem))] gap-0 overflow-hidden p-0 sm:max-w-none">
 
       <div class="flex items-start gap-3.5 border-b border-border/25 px-5 pt-5 pb-4">
         <div class="mt-px flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50">
-          <Icon name={isRename ? 'pencil' : 'copy'} class="size-3.5 text-muted-foreground/70" />
+          <Icon name={isRename ? 'pencil' : 'copy'} class="size-3.5 text-muted-foreground" />
         </div>
         <div class="min-w-0 flex-1">
           <Dialog.Title class="text-ui-sm font-semibold text-foreground">{isRename ? 'Rename database' : 'Duplicate database'}</Dialog.Title>
-          <p class="mt-0.5 text-ui-2xs break-all text-muted-foreground/60">
-            {isRename ? 'Renames' : 'Copies'} <span class="font-mono text-muted-foreground/80">{source}</span>
+          <p class="mt-0.5 text-ui-2xs break-all text-muted-foreground">
+            {isRename ? 'Renames' : 'Copies'} <span class="font-mono text-muted-foreground">{source}</span>
             {isRename ? 'on this server' : 'with all of its data'}
           </p>
         </div>
-        <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
+        <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
       </div>
 
       <div class="flex flex-col gap-4 px-5 py-4">
@@ -129,12 +129,12 @@
           {#if nameError}
             <p class="mt-1.5 text-ui-2xs text-destructive">{nameError}</p>
           {:else if trimmed && trimmed === source}
-            <p class="mt-1.5 text-ui-2xs text-muted-foreground/50">That is already its name</p>
+            <p class="mt-1.5 text-ui-2xs text-muted-foreground">That is already its name</p>
           {/if}
         </div>
 
         {#if !isRename}
-          <p class="rounded-lg border border-border/20 bg-muted/[0.25] px-3.5 py-2.5 text-ui-2xs leading-relaxed text-muted-foreground/70">
+          <p class="rounded-lg border border-border/20 bg-muted/[0.25] px-3.5 py-2.5 text-ui-2xs leading-relaxed text-muted-foreground">
             The copy is taken server-side, so a large database takes a while and needs the disk space twice over.
           </p>
         {/if}
@@ -143,7 +143,7 @@
           <p class="{lbl} mb-2">SQL preview</p>
           <!-- Wrapped, not scrolled: a confirmation you have to drag sideways to
                read is not a confirmation, and these names are long. -->
-          <pre class="rounded-lg border border-border/20 bg-muted/[0.15] px-4 py-3 font-mono text-ui-2xs leading-relaxed break-all whitespace-pre-wrap text-muted-foreground/70">{sql}</pre>
+          <pre class="rounded-lg border border-border/20 bg-muted/[0.15] px-4 py-3 font-mono text-ui-2xs leading-relaxed break-all whitespace-pre-wrap text-muted-foreground">{sql}</pre>
         </div>
 
         {#if error}
@@ -153,7 +153,7 @@
 
       <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
         <button type="button"
-          class="inline-flex h-8 items-center rounded-lg px-3.5 text-ui-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="inline-flex h-8 items-center rounded-lg px-3.5 text-ui-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={() => (open = false)}>Cancel</button>
         <button type="button"
           class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"

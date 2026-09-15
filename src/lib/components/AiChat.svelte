@@ -915,7 +915,7 @@
     } catch (e) {
       const msg = String(e).replace(/</g, "&lt;").replace(/>/g, "&gt;");
       _asyncDiagrams[asyncKey] =
-        `<div class="flex flex-col gap-1.5 p-3 rounded border border-destructive/30 bg-destructive/5"><p class="text-ui-xs font-medium text-destructive">Diagram render failed</p><p class="font-mono text-ui-3xs text-muted-foreground/70 whitespace-pre-wrap">${msg}</p></div>`;
+        `<div class="flex flex-col gap-1.5 p-3 rounded border border-destructive/30 bg-destructive/5"><p class="text-ui-xs font-medium text-destructive">Diagram render failed</p><p class="font-mono text-ui-3xs text-muted-foreground whitespace-pre-wrap">${msg}</p></div>`;
     }
   }
 
@@ -2838,18 +2838,18 @@
       {#if activeAiProfile && hasBrand(activeAiProfile.provider)}
         <BrandIcon
           name={activeAiProfile.provider}
-          class="size-2.5 text-primary transition-opacity duration-200 {thinkingVisible
+          class="size-3 text-primary transition-opacity duration-200 {thinkingVisible
             ? 'opacity-100'
             : 'opacity-40'}"
         />
       {:else}
-        <Icon class="size-2.5 text-primary transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-40'}" />
+        <Icon class="size-3 text-primary transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-40'}" />
       {/if}
     </div>
     <!-- The label's own shimmer carries the "working" signal; a trailing row of
          bouncing dots on top of it was a second animation saying the same thing. -->
     <span
-      class="agent-think-label text-ui-xs text-muted-foreground/70 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}"
+      class="agent-think-label text-ui-xs text-muted-foreground transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}"
       >{loadingText}</span
     >
   </div>
@@ -2870,13 +2870,13 @@
       : 'justify-start'}"
   >
     {#if ts}
-      <span class="px-1 text-ui-3xs tabular-nums text-muted-foreground/35"
+      <span class="px-1 text-ui-3xs tabular-nums text-muted-foreground"
         >{fmtMsgTime(ts)}</span
       >
     {/if}
     <button
       type="button"
-      class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+      class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       title="Copy message"
       aria-label="Copy message"
       onclick={() => void copyWithFeedback(`${key}:msg`, text)}
@@ -2890,7 +2890,7 @@
     {#if canQuote}
       <button
         type="button"
-        class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+        class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         title="Reply to this message"
         aria-label="Reply to this message"
         onclick={() => quoteToInput(text)}
@@ -2902,7 +2902,7 @@
            tweak, which is what re-running a prompt usually means. -->
       <button
         type="button"
-        class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+        class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         title="Edit and ask again"
         aria-label="Edit and ask again"
         onclick={() => reusePrompt(text)}
@@ -2930,7 +2930,7 @@
           <PanelLeft class="size-3.5" />
         </button>
         <span
-          class="flex-1 px-1 text-ui-xs font-medium text-muted-foreground/60"
+          class="flex-1 px-1 text-ui-xs font-medium text-muted-foreground"
           >History</span
         >
         <button
@@ -2956,7 +2956,7 @@
             <span class="truncate text-ui-xs font-medium text-foreground"
               >New chat</span
             >
-            <span class="text-ui-3xs text-muted-foreground/50">Draft</span>
+            <span class="text-ui-3xs text-muted-foreground">Draft</span>
           </button>
         {/if}
 
@@ -3010,7 +3010,7 @@
                 <span class="truncate text-ui-xs font-medium leading-snug"
                   >{conv.title}</span
                 >
-                <span class="mt-0.5 text-ui-3xs text-muted-foreground/50"
+                <span class="mt-0.5 text-ui-3xs text-muted-foreground"
                   >{relativeTime(conv.updatedAt)}</span
                 >
               </button>
@@ -3019,7 +3019,7 @@
               >
                 <button
                   type="button"
-                  class="flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-accent hover:text-foreground"
+                  class="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   title="Rename"
                   onclick={(e) => {
                     e.stopPropagation();
@@ -3030,7 +3030,7 @@
                 </button>
                 <button
                   type="button"
-                  class="flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-destructive"
+                  class="flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:text-destructive"
                   title="Delete"
                   onclick={(e) => {
                     e.stopPropagation();
@@ -3048,10 +3048,10 @@
           <div
             class="flex flex-col items-center gap-1.5 px-4 py-10 text-center"
           >
-            <p class="text-ui-2xs text-muted-foreground/50">
+            <p class="text-ui-2xs text-muted-foreground">
               No conversations yet
             </p>
-            <p class="text-ui-3xs text-muted-foreground/30">
+            <p class="text-ui-3xs text-muted-foreground">
               Chats save automatically
             </p>
           </div>
@@ -3162,7 +3162,7 @@
             </button>
             <button
               type="button"
-              class="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-[opacity,color] hover:text-foreground group-hover/tab:opacity-100"
+              class="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-[opacity,color] hover:text-foreground group-hover/tab:opacity-100"
               title="Close tab"
               onclick={(e) => {
                 e.stopPropagation();
@@ -3231,10 +3231,10 @@
               <div class="flex flex-col items-center gap-4 text-center">
                 {#if schemaContext.activeTable || schemaContext.tables?.length}
                   <div
-                    class="inline-flex items-center gap-1.5 rounded-full border border-border/40 bg-muted/30 px-3.5 py-1.5 font-mono text-ui-xs text-muted-foreground/55 transition-colors hover:border-border/60 hover:text-muted-foreground/75"
+                    class="inline-flex items-center gap-1.5 rounded-full border border-border/40 bg-muted/30 px-3.5 py-1.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:border-border/60 hover:text-muted-foreground"
                   >
                     <Database
-                      class="size-3 shrink-0 text-muted-foreground/40"
+                      class="size-3 shrink-0 text-muted-foreground"
                     />
                     {#if schemaContext.activeTable}
                       {schemaContext.activeSchema}.{schemaContext.activeTable}
@@ -3252,7 +3252,7 @@
                     What would you like<br />to explore?
                   </h1>
                   <p
-                    class="mx-auto max-w-sm text-ui-sm leading-relaxed text-muted-foreground/55"
+                    class="mx-auto max-w-sm text-ui-sm leading-relaxed text-muted-foreground"
                   >
                     Write queries, build charts, explore your schema, just
                     describe what you need.
@@ -3285,10 +3285,10 @@
                         onclick={() => void send([s.prompt])}
                       >
                         <SugIcon
-                          class="size-3.5 shrink-0 text-muted-foreground/35 transition-colors group-hover:text-muted-foreground/65"
+                          class="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-muted-foreground"
                         />
                         <span
-                          class="min-w-0 flex-1 text-ui-xs text-muted-foreground/65 transition-colors group-hover:text-foreground/80"
+                          class="min-w-0 flex-1 text-ui-xs text-muted-foreground transition-colors group-hover:text-foreground/80"
                           >{s.label}</span
                         >
                       </button>
@@ -3300,7 +3300,7 @@
           {:else}
             <!-- ── Tab-mode empty state: compact ── -->
             <div class="flex flex-col items-center gap-4 py-6 text-center">
-              <Sparkles class="size-7 text-muted-foreground/20" />
+              <Sparkles class="size-7 text-muted-foreground" />
               <p class="text-ui-sm font-medium text-muted-foreground">
                 Ask anything about your database
               </p>
@@ -3380,15 +3380,15 @@
                       class="absolute inset-0 animate-ping rounded-full bg-primary/10 [animation-duration:1.8s]"
                     ></span>
                     {#if item.op === "schema" || item.op === "describe"}
-                      <Layers class="relative size-2.5 text-primary/70" />
+                      <Layers class="relative size-3 text-primary" />
                     {:else if item.op === "diagram"}
-                      <GitBranch class="relative size-2.5 text-primary/70" />
+                      <GitBranch class="relative size-3 text-primary" />
                     {:else}
-                      <Database class="relative size-2.5 text-primary/70" />
+                      <Database class="relative size-3 text-primary" />
                     {/if}
                   </span>
                   <span class="shrink-0 text-ui-xs font-medium text-foreground/70">{meta.label}</span>
-                  <span class="min-w-0 flex-1 truncate font-mono text-ui-3xs text-muted-foreground/45">
+                  <span class="min-w-0 flex-1 truncate font-mono text-ui-3xs text-muted-foreground">
                     {#if item.op === "query" || item.op === "run"}{item.sql.trim().slice(0, 120)}{:else}{meta.detail}{/if}
                   </span>
                 </div>
@@ -3408,12 +3408,12 @@
                             class="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5"
                           >
                             <span
-                              class="text-ui-3xs font-medium text-muted-foreground/60 uppercase tracking-wider"
+                              class="text-ui-3xs font-medium text-muted-foreground uppercase tracking-wider"
                               >Diagram</span
                             >
                             <div class="flex items-center gap-0.5">
                               <span
-                                class="hidden text-ui-3xs text-muted-foreground/30 sm:block mr-1"
+                                class="hidden text-ui-3xs text-muted-foreground sm:block mr-1"
                                 >drag · Ctrl+scroll zoom</span
                               >
                               <button
@@ -3421,7 +3421,7 @@
                                 class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
                                 onclick={() => copyText(part.content)}
                                 title="Copy source"
-                                ><Copy class="size-2.5" />Source</button
+                                ><Copy class="size-3" />Source</button
                               >
                               <button
                                 type="button"
@@ -3498,7 +3498,7 @@
                               title={sqlOpen ? "Collapse" : "Expand"}
                             >
                               <span
-                                class="flex size-4 shrink-0 items-center justify-center text-muted-foreground/40 transition-colors group-hover/sqlbar:text-muted-foreground/70"
+                                class="flex size-4 shrink-0 items-center justify-center text-muted-foreground transition-colors group-hover/sqlbar:text-muted-foreground"
                               >
                                 {#if sqlOpen}<ChevronDown class="size-3" />{:else}<ChevronRight class="size-3" />{/if}
                               </span>
@@ -3508,13 +3508,13 @@
                                 class={cn(
                                   "shrink-0 rounded font-mono text-ui-3xs font-semibold uppercase tracking-wider px-1 py-px",
                                   sqlWrites
-                                    ? "bg-warning/12 text-warning/85"
-                                    : "bg-muted/50 text-muted-foreground/55",
+                                    ? "bg-warning/12 text-warning"
+                                    : "bg-muted/50 text-muted-foreground",
                                 )}>{sqlStatementKind(part.content)}</span
                               >
                               {#if !sqlOpen}
                                 <span
-                                  class="min-w-0 truncate font-mono text-ui-xs text-muted-foreground/45"
+                                  class="min-w-0 truncate font-mono text-ui-xs text-muted-foreground"
                                   >{part.content.trim().replace(/\s+/g, " ").slice(0, 90)}</span
                                 >
                               {/if}
@@ -3524,24 +3524,24 @@
                             <div class="flex shrink-0 items-center gap-0.5">
                               <button
                                 type="button"
-                                class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/40 opacity-0 transition-all duration-150 hover:bg-muted/60 hover:text-foreground group-hover/sqlbar:opacity-100 focus-visible:opacity-100"
+                                class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all duration-150 hover:bg-muted/60 hover:text-foreground group-hover/sqlbar:opacity-100 focus-visible:opacity-100"
                                 title="Copy SQL"
                                 onclick={() => copyText(part.content)}
                                 ><Copy class="size-3" /></button
                               >
                               <button
                                 type="button"
-                                class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/40 opacity-0 transition-all duration-150 hover:bg-muted/60 hover:text-foreground group-hover/sqlbar:opacity-100 focus-visible:opacity-100"
+                                class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-all duration-150 hover:bg-muted/60 hover:text-foreground group-hover/sqlbar:opacity-100 focus-visible:opacity-100"
                                 title="Write to editor"
                                 onclick={() => onwritesql(part.content)}
                                 ><PenLine class="size-3" /></button
                               >
                               <button
                                 type="button"
-                                class="ml-0.5 inline-flex h-6 items-center gap-1 rounded-md border border-border/50 bg-muted/40 px-2 text-ui-2xs font-medium text-foreground/80 transition-colors hover:border-primary/40 hover:bg-primary hover:text-primary-foreground disabled:opacity-40"
+                                class= "field-surface ml-0.5 inline-flex h-6 items-center gap-1 bg-muted/40 px-2 text-ui-2xs font-medium text-foreground/80 transition-colors hover:border-primary/40 hover:bg-primary hover:text-primary-foreground disabled:opacity-40"
                                 disabled={loading}
                                 onclick={() => void runSqlBlock(part.content)}
-                                ><Play class="size-2.5 fill-current" />Run</button
+                                ><Play class="size-3 fill-current" />Run</button
                               >
                             </div>
                           </div>
@@ -3636,35 +3636,35 @@
                       onclick={() => toggleResult(item.id)}
                     >
                       {#if resOpen}<ChevronDown
-                          class="size-3 shrink-0 text-muted-foreground/40"
+                          class="size-3 shrink-0 text-muted-foreground"
                         />{:else}<ChevronRight
-                          class="size-3 shrink-0 text-muted-foreground/40"
+                          class="size-3 shrink-0 text-muted-foreground"
                         />{/if}
                       {#if item.error}
-                        <AlertTriangle class="size-3 shrink-0 text-destructive/70" />
+                        <AlertTriangle class="size-3 shrink-0 text-destructive" />
                       {:else}
                         <Table2
                           class="size-3 shrink-0 {item.isSchema
-                            ? 'text-primary/50'
-                            : 'text-muted-foreground/35'}"
+                            ? 'text-primary'
+                            : 'text-muted-foreground'}"
                         />
                       {/if}
                       <span
-                        class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground/60"
+                        class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground"
                         >{item.sql || "Query"}</span
                       >
                     </button>
                     {#if item.sql}
                       <button
                         type="button"
-                        class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/30 opacity-0 transition-opacity group-hover/res:opacity-100 hover:bg-accent hover:text-foreground"
+                        class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/res:opacity-100 hover:bg-accent hover:text-foreground"
                         title="Copy SQL"
                         onclick={() => copyText(item.sql)}
                         ><Copy class="size-3" /></button
                       >
                       <button
                         type="button"
-                        class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/30 opacity-0 transition-opacity group-hover/res:opacity-100 hover:bg-accent hover:text-foreground"
+                        class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/res:opacity-100 hover:bg-accent hover:text-foreground"
                         title="Write to editor"
                         onclick={() => onwritesql(item.sql)}
                         ><PenLine class="size-3" /></button
@@ -3675,7 +3675,7 @@
                            into a chat, unlike the rendered card. -->
                       <button
                         type="button"
-                        class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/30 opacity-0 transition-opacity group-hover/res:opacity-100 hover:bg-accent hover:text-foreground"
+                        class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/res:opacity-100 hover:bg-accent hover:text-foreground"
                         title="Copy table as Markdown"
                         onclick={() =>
                           void copyWithFeedback(
@@ -3692,7 +3692,7 @@
                     {/if}
                     {#if !item.error}
                       <span
-                        class="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 text-ui-3xs tabular-nums text-muted-foreground/50"
+                        class="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 text-ui-3xs tabular-nums text-muted-foreground"
                         >{formatCompactCount(item.total)}
                         {item.total === 1 ? "row" : "rows"}</span
                       >
@@ -3712,11 +3712,11 @@
                         {#if humanizeDbError(item.error) !== item.error.replace(/^Error:\s*/i, "").trim()}
                           <button
                             type="button"
-                            class="mt-1.5 pl-2.5 text-ui-3xs text-muted-foreground/40 transition-colors hover:text-muted-foreground"
+                            class="mt-1.5 pl-2.5 text-ui-3xs text-muted-foreground transition-colors hover:text-muted-foreground"
                             onclick={() => (rawErrorId = rawErrorId === item.id ? null : item.id)}
                           >{rawErrorId === item.id ? "Hide" : "Show"} raw error</button>
                           {#if rawErrorId === item.id}
-                            <p class="mt-1.5 pl-2.5 font-mono text-ui-3xs leading-relaxed break-all text-muted-foreground/45">
+                            <p class="mt-1.5 pl-2.5 font-mono text-ui-3xs leading-relaxed break-all text-muted-foreground">
                               {item.error}
                             </p>
                           {/if}
@@ -3724,7 +3724,7 @@
                       </div>
                     {:else if item.rows.length === 0}
                       <p
-                        class="px-3 py-3 text-center text-ui-xs italic text-muted-foreground/50"
+                        class="px-3 py-3 text-center text-ui-xs italic text-muted-foreground"
                       >
                         No rows returned.
                       </p>
@@ -3739,7 +3739,7 @@
                       </div>
                       {#if item.total > 15}
                         <p
-                          class="border-t border-border/20 px-3 py-1.5 text-ui-3xs text-muted-foreground/40"
+                          class="border-t border-border/20 px-3 py-1.5 text-ui-3xs text-muted-foreground"
                         >
                           Showing 15 of {formatCompactCount(item.total)} rows{item.capped
                             ? ` (limited to ${AI_ROW_LIMIT})`
@@ -3751,12 +3751,12 @@
                         class="flex items-center gap-1 border-t border-border/20 px-3 py-1.5"
                       >
                         <Download
-                          class="mr-1 size-3 shrink-0 text-muted-foreground/35"
+                          class="mr-1 size-3 shrink-0 text-muted-foreground"
                         />
                         {#each [["csv", "CSV"], ["json", "JSON"], ["md", "Markdown"]] as [fmt, label]}
                           <button
                             type="button"
-                            class="rounded px-1.5 py-0.5 text-ui-3xs text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                            class="rounded px-1.5 py-0.5 text-ui-3xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                             onclick={() => exportResultAs(item, fmt)}
                             title={`Download as ${label}`}>{label}</button
                           >
@@ -3772,19 +3772,19 @@
                 <div class="mx-3.5 overflow-hidden rounded-lg border border-border/40 text-ui-xs">
                   <div class="flex items-center gap-1.5 px-3 py-1.5">
                     {#if item.error}
-                      <AlertTriangle class="size-3 shrink-0 text-destructive/70" />
+                      <AlertTriangle class="size-3 shrink-0 text-destructive" />
                     {:else if item.mode === "search"}
-                      <Search class="size-3 shrink-0 text-muted-foreground/35" />
+                      <Search class="size-3 shrink-0 text-muted-foreground" />
                     {:else}
-                      <Globe class="size-3 shrink-0 text-muted-foreground/35" />
+                      <Globe class="size-3 shrink-0 text-muted-foreground" />
                     {/if}
-                    <span class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground/60">
+                    <span class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground">
                       {item.mode === "search" ? "Searched" : "Read"} · {item.label}
                     </span>
                     {#if item.loading}
-                      <span class="shrink-0 text-ui-3xs text-muted-foreground/40">…</span>
+                      <span class="shrink-0 text-ui-3xs text-muted-foreground">…</span>
                     {:else if item.mode === "search" && !item.error}
-                      <span class="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 text-ui-3xs tabular-nums text-muted-foreground/50">
+                      <span class="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 text-ui-3xs tabular-nums text-muted-foreground">
                         {item.hits.length}
                         {item.hits.length === 1 ? "result" : "results"}
                       </span>
@@ -3806,7 +3806,7 @@
                           >
                             <span class="block truncate text-ui-2xs text-foreground/80 hover:underline">{hit.title}</span>
                             {#if hit.snippet}
-                              <span class="mt-0.5 line-clamp-2 block text-ui-3xs leading-relaxed text-muted-foreground/50">{hit.snippet}</span>
+                              <span class="mt-0.5 line-clamp-2 block text-ui-3xs leading-relaxed text-muted-foreground">{hit.snippet}</span>
                             {/if}
                           </button>
                         </li>
@@ -3833,13 +3833,13 @@
                   <div
                     class="flex items-center justify-between gap-2 border-t border-destructive/15 px-3 py-2"
                   >
-                    <p class="text-ui-xs text-muted-foreground/60">
+                    <p class="text-ui-xs text-muted-foreground">
                       This cannot be undone.
                     </p>
                     <div class="flex gap-1.5">
                       <button
                         type="button"
-                        class="inline-flex h-7 items-center rounded-lg border border-border px-3 text-ui-xs text-muted-foreground hover:bg-accent"
+                        class= "field-surface inline-flex h-7 items-center px-3 text-ui-xs text-muted-foreground hover:bg-accent"
                         onclick={() => item.resolve(false)}>Cancel</button
                       >
                       <button
@@ -3868,7 +3868,7 @@
                         >{item.spec.title || ""}</span
                       >
                       <span
-                        class="font-mono text-ui-3xs capitalize text-muted-foreground/25"
+                        class="font-mono text-ui-3xs capitalize text-muted-foreground"
                         >{item.spec.type}</span
                       >
                       <div
@@ -3877,7 +3877,7 @@
                         <!-- Reset / re-centre -->
                         <button
                           type="button"
-                          class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground"
+                          class="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
                           title="Reset view (or double-click chart)"
                           onclick={() => void resetChartView(item.id)}
                           ><RotateCcw class="size-3" /></button
@@ -3885,14 +3885,14 @@
                         <!-- Fullscreen / zoom mode -->
                         <button
                           type="button"
-                          class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground"
+                          class="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
                           title="Zoom / fullscreen"
                           onclick={() => openChartFullscreen(item.spec)}
                           ><Maximize2 class="size-3" /></button
                         >
                         <button
                           type="button"
-                          class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground"
+                          class="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
                           title="Download PNG"
                           onclick={() =>
                             void saveChartPng(
@@ -3906,7 +3906,7 @@
                             item.id,
                           )
                             ? 'text-primary'
-                            : 'text-muted-foreground/40 hover:text-foreground'}"
+                            : 'text-muted-foreground hover:text-foreground'}"
                           title={savedChartIds.has(item.id)
                             ? "Saved to Charts"
                             : "Save to Charts"}
@@ -4027,7 +4027,7 @@
                   >
                     <div class="flex items-center gap-2 min-w-0">
                       <GitBranch
-                        class="size-3 shrink-0 text-muted-foreground/50"
+                        class="size-3 shrink-0 text-muted-foreground"
                       />
                       <span
                         class="truncate text-ui-3xs font-medium text-foreground/70"
@@ -4038,7 +4038,7 @@
                       class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/diag:opacity-100"
                     >
                       <span
-                        class="hidden text-ui-3xs text-muted-foreground/30 sm:block mr-1"
+                        class="hidden text-ui-3xs text-muted-foreground sm:block mr-1"
                         >drag · Ctrl+scroll zoom</span
                       >
                       <button
@@ -4046,7 +4046,7 @@
                         class="inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"
                         onclick={() => copyText(item.code)}
                         title="Copy source"
-                        ><Copy class="size-2.5" />Source</button
+                        ><Copy class="size-3" />Source</button
                       >
                       <button
                         type="button"
@@ -4071,7 +4071,7 @@
                       <button
                         type="button"
                         class={savedDiagramIds.has(item.id)
-                          ? "inline-flex size-5 items-center justify-center rounded text-success/70"
+                          ? "inline-flex size-5 items-center justify-center rounded text-success"
                           : "inline-flex h-5 items-center gap-1 rounded px-1.5 text-ui-3xs text-muted-foreground hover:bg-accent hover:text-foreground"}
                         title={savedDiagramIds.has(item.id) ? "Saved to Diagrams library" : "Save to Diagrams library"}
                         disabled={savedDiagramIds.has(item.id)}
@@ -4136,7 +4136,7 @@
               <button
                 type="button"
                 onclick={() => (errorDetailOpen = !errorDetailOpen)}
-                class="mt-1 inline-flex items-center gap-1 rounded text-ui-2xs text-muted-foreground/60 transition-colors hover:text-foreground"
+                class="mt-1 inline-flex items-center gap-1 rounded text-ui-2xs text-muted-foreground transition-colors hover:text-foreground"
               >
                 <ChevronRight class={cn('size-3 transition-transform duration-150', errorDetailOpen && 'rotate-90')} />
                 {errorDetailOpen ? 'Hide details' : 'Details'}
@@ -4148,7 +4148,7 @@
                     type="button"
                     onclick={() => copyErrorDetail(failure.detail)}
                     title="Copy the provider's response"
-                    class="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+                    class="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   >
                     <Copy class="size-3" />
                   </button>
@@ -4158,7 +4158,7 @@
           </div>
           <button
             type="button"
-            class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+            class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             onclick={() => (error = "")}
             title="Dismiss"
           >
@@ -4195,7 +4195,7 @@
              weight (border, lift) once it has focus. -->
         <div
           class={cn(
-            "rounded-2xl border border-border/40 bg-card/30 transition-[background-color,border-color,box-shadow] duration-150",
+            "rounded-2xl border border-border/40 bg-card/30 transition-[background-color,border-color] duration-150 focus-within:border-ring",
             "focus-within:border-border/70 focus-within:bg-card/60 focus-within:shadow-[0_4px_16px_-10px_rgba(0,0,0,0.6)]",
             hasPendingConfirm && "opacity-50",
           )}
@@ -4205,7 +4205,7 @@
                set at the size you'll read it back at. -->
           <textarea
             bind:this={inputRef}
-            class="ai-composer-input block w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-foreground outline-none placeholder:text-muted-foreground/30 disabled:cursor-not-allowed"
+            class="ai-composer-input no-focus-ring block w-full resize-none bg-transparent px-4 pt-3.5 pb-2 text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
             style="height:auto;min-height:60px;max-height:200px;overflow-y:auto;font-family:inherit"
             placeholder={hasPendingConfirm
               ? "Confirm or cancel the operation above…"
@@ -4236,7 +4236,7 @@
               ></span>
               <button
                 type="button"
-                class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 font-mono text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-accent/60 hover:text-foreground select-none"
+                class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground select-none"
                 onclick={() => {
                   settingsOpen = true;
                   settingsTab = "context";
@@ -4263,7 +4263,7 @@
                  guidance for someone about to type, not a permanent label. -->
             {#if inputFocused && !inputText.trim() && !loading}
               <span
-                class="hidden shrink-0 text-ui-2xs text-muted-foreground/35 sm:block"
+                class="hidden shrink-0 text-ui-2xs text-muted-foreground sm:block"
               >
                 {hasPendingConfirm ? "Confirm or cancel above" : "↵ to send"}
               </span>
@@ -4296,7 +4296,7 @@
                   "flex size-6 shrink-0 items-center justify-center rounded-full transition-all duration-150 active:scale-95",
                   canSend
                     ? "bg-primary text-primary-foreground hover:opacity-85"
-                    : "text-muted-foreground/25 cursor-not-allowed",
+                    : "text-muted-foreground cursor-not-allowed",
                 )}
                 disabled={!canSend}
                 onclick={() => void send()}
@@ -4350,7 +4350,7 @@
               "relative flex flex-1 items-center justify-center gap-1.5 text-ui-xs transition-colors",
               active
                 ? "text-foreground font-medium"
-                : "text-muted-foreground/45 hover:text-muted-foreground",
+                : "text-muted-foreground hover:text-muted-foreground",
             )}
             onclick={() =>
               (settingsTab = /** @type {'model'|'chat'|'skills'|'context'} */ (
@@ -4404,7 +4404,7 @@
                   <div
                     class="flex items-center justify-between gap-3 px-3 py-2"
                   >
-                    <span class="shrink-0 text-ui-3xs text-muted-foreground/60"
+                    <span class="shrink-0 text-ui-3xs text-muted-foreground"
                       >{row.label}</span
                     >
                     <span
@@ -4420,14 +4420,14 @@
 
             <button
               type="button"
-              class="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background/60 text-ui-xs text-foreground transition-colors hover:bg-accent"
+              class= "field-surface flex h-8 w-full items-center justify-center gap-1.5 bg-background/60 text-ui-xs text-foreground transition-colors hover:bg-accent"
               onclick={onopenmodelsettings}
             >
               <Settings2 class="size-3.5 text-muted-foreground" />
               Configure model…
             </button>
 
-            <p class="text-center text-ui-3xs text-muted-foreground/40">
+            <p class="text-center text-ui-3xs text-muted-foreground">
               Shared with AI sidebar · <kbd class="font-mono">{modKey}I</kbd>
             </p>
           </div>
@@ -4460,7 +4460,7 @@
                   })}
                 class="w-full accent-primary"
               />
-              <p class="text-ui-3xs text-muted-foreground/50">
+              <p class="text-ui-3xs text-muted-foreground">
                 0 = deterministic · 1 = balanced · 2 = creative
               </p>
             </div>
@@ -4478,7 +4478,7 @@
                   >
                   <button
                     type="button"
-                    class="font-mono text-ui-3xs text-muted-foreground/50 hover:text-foreground"
+                    class="font-mono text-ui-3xs text-muted-foreground hover:text-foreground"
                     onclick={() =>
                       updateChatParams({
                         topK: $aiChatParams.topK === null ? 40 : null,
@@ -4502,7 +4502,7 @@
                   class="w-full accent-primary"
                 />
               {/if}
-              <p class="text-ui-3xs text-muted-foreground/50">
+              <p class="text-ui-3xs text-muted-foreground">
                 Limits token sampling pool. Not supported by all providers.
               </p>
             </div>
@@ -4550,9 +4550,9 @@
                   updateChatParams({
                     customInstructions: e.currentTarget.value,
                   })}
-                class="w-full resize-none rounded-lg border-2 border-border bg-background/60 px-2.5 py-2 font-mono text-ui-2xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                class="w-full resize-none rounded-lg border-2 border-border bg-background/60 px-2.5 py-2 font-mono text-ui-2xs text-foreground outline-none placeholder:text-muted-foreground focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
               ></textarea>
-              <p class="text-ui-3xs text-muted-foreground/50">
+              <p class="text-ui-3xs text-muted-foreground">
                 Prepended to the system prompt on every turn.
               </p>
             </div>
@@ -4560,7 +4560,7 @@
             <!-- Reset params -->
             <button
               type="button"
-              class="self-start font-mono text-ui-3xs text-muted-foreground/50 hover:text-foreground"
+              class="self-start font-mono text-ui-3xs text-muted-foreground hover:text-foreground"
               onclick={resetChatParams}>Reset to defaults</button
             >
 
@@ -4570,7 +4570,7 @@
             <!-- Clear all history -->
             <div class="flex flex-col gap-1.5">
               <p class="text-ui-xs font-medium text-foreground">Chat history</p>
-              <p class="text-ui-3xs text-muted-foreground/50">
+              <p class="text-ui-3xs text-muted-foreground">
                 Permanently delete all saved conversations for this connection.
               </p>
               <button
@@ -4600,11 +4600,11 @@
           <div class="flex flex-col gap-3 p-4">
             <!-- Action row -->
             <div class="flex items-center gap-1.5">
-              <p class="flex-1 text-ui-3xs text-muted-foreground/60">
+              <p class="flex-1 text-ui-3xs text-muted-foreground">
                 Inject domain knowledge into every request.
               </p>
               <label
-                class="inline-flex h-7 cursor-pointer items-center gap-1 rounded-lg border border-border/60 bg-background/60 px-2 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              class= "field-surface inline-flex h-7 cursor-pointer items-center gap-1 bg-background/60 px-2 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 <Upload class="size-3 shrink-0" />
                 Upload
@@ -4635,7 +4635,7 @@
                 <div class="flex flex-col gap-1">
                   <label
                     for="skill-name"
-                    class="text-ui-3xs text-muted-foreground/60">Name *</label
+                    class="text-ui-3xs text-muted-foreground">Name *</label
                   >
                   <Input
                     id="skill-name"
@@ -4647,7 +4647,7 @@
                 <div class="flex flex-col gap-1">
                   <label
                     for="skill-desc"
-                    class="text-ui-3xs text-muted-foreground/60"
+                    class="text-ui-3xs text-muted-foreground"
                     >Description</label
                   >
                   <Input
@@ -4660,12 +4660,12 @@
                 <div class="flex flex-col gap-1">
                   <label
                     for="skill-content"
-                    class="text-ui-3xs text-muted-foreground/60"
+                    class="text-ui-3xs text-muted-foreground"
                     >Content (Markdown) *</label
                   >
                   <textarea
                     id="skill-content"
-                    class="min-h-[90px] w-full resize-y rounded-lg border-2 border-border bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 placeholder:text-muted-foreground/40"
+                    class="min-h-[90px] w-full resize-y rounded-lg border-2 border-border bg-background px-2.5 py-2 font-mono text-ui-xs leading-relaxed text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 placeholder:text-muted-foreground"
                     placeholder="# My Skill&#10;&#10;Guidelines in Markdown..."
                     bind:value={newSkillContent}
                   ></textarea>
@@ -4673,7 +4673,7 @@
                 <div class="flex justify-end gap-1.5">
                   <button
                     type="button"
-                    class="inline-flex h-7 items-center rounded-lg border border-border px-3 text-ui-xs text-muted-foreground hover:bg-accent"
+                    class= "field-surface inline-flex h-7 items-center px-3 text-ui-xs text-muted-foreground hover:bg-accent"
                     onclick={() => (newSkillOpen = false)}>Cancel</button
                   >
                   <Button
@@ -4689,14 +4689,14 @@
             <!-- Built-in -->
             <div class="flex flex-col gap-1.5">
               <p
-                class="text-ui-3xs font-medium text-muted-foreground/50 uppercase tracking-wide"
+                class="text-ui-3xs font-medium text-muted-foreground uppercase tracking-wide"
               >
                 Built-in
               </p>
               <div class="flex flex-wrap gap-1">
                 {#each ["PostgreSQL", "MySQL", "SQLite", "Mermaid", "Charts"] as b}
                   <span
-                    class="inline-flex items-center gap-1 rounded-full border border-border/40 bg-muted/30 px-2 py-0.5 text-ui-3xs text-muted-foreground/70"
+                    class="inline-flex items-center gap-1 rounded-full border border-border/40 bg-muted/30 px-2 py-0.5 text-ui-3xs text-muted-foreground"
                   >
                     <span class="size-1.5 rounded-full bg-primary/50"></span>{b}
                   </span>
@@ -4709,15 +4709,15 @@
               <div
                 class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/40 py-7 text-center"
               >
-                <BookOpen class="size-5 text-muted-foreground/25" />
-                <p class="text-ui-2xs text-muted-foreground/50">
+                <BookOpen class="size-5 text-muted-foreground" />
+                <p class="text-ui-2xs text-muted-foreground">
                   No custom skills yet
                 </p>
               </div>
             {:else}
               <div class="flex flex-col gap-1">
                 <p
-                  class="text-ui-3xs font-medium text-muted-foreground/50 uppercase tracking-wide"
+                  class="text-ui-3xs font-medium text-muted-foreground uppercase tracking-wide"
                 >
                   Custom ({skills.length})
                 </p>
@@ -4726,7 +4726,7 @@
                     class="flex items-start gap-2 rounded-lg border border-border/40 bg-background/50 px-3 py-2.5"
                   >
                     <BookOpen
-                      class="mt-0.5 size-3.5 shrink-0 text-primary/50"
+                      class="mt-0.5 size-3.5 shrink-0 text-primary"
                     />
                     <div class="min-w-0 flex-1">
                       <p class="truncate text-ui-xs font-medium">
@@ -4734,7 +4734,7 @@
                       </p>
                       {#if skill.description}
                         <p
-                          class="mt-0.5 line-clamp-2 text-ui-3xs leading-relaxed text-muted-foreground/60"
+                          class="mt-0.5 line-clamp-2 text-ui-3xs leading-relaxed text-muted-foreground"
                         >
                           {skill.description}
                         </p>
@@ -4742,7 +4742,7 @@
                     </div>
                     <button
                       type="button"
-                      class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/30 hover:bg-destructive/10 hover:text-destructive"
+                      class="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       onclick={() => removeSkill(skill.id)}
                       title="Remove"
                     >
@@ -4762,7 +4762,7 @@
               <div class="flex items-center justify-between">
                 <span class="text-ui-xs font-medium">Context window</span>
                 <span
-                  class="font-mono text-ui-3xs tabular-nums text-muted-foreground/70"
+                  class="font-mono text-ui-3xs tabular-nums text-muted-foreground"
                   >{tokEst(contextStats.totalChars)} / {tokEst(
                     contextStats.maxChars,
                   )}</span
@@ -4783,7 +4783,7 @@
                   style="width: {Math.min(contextStats.pct, 100)}%"
                 ></div>
               </div>
-              <p class="text-ui-3xs text-muted-foreground/50">
+              <p class="text-ui-3xs text-muted-foreground">
                 {contextStats.pct}% used · auto-compresses at 30k tokens
               </p>
             </div>
@@ -4798,7 +4798,7 @@
                     class="font-mono text-ui font-semibold tabular-nums text-foreground"
                     >{stat.value}</span
                   >
-                  <span class="text-ui-3xs text-muted-foreground/60"
+                  <span class="text-ui-3xs text-muted-foreground"
                     >{stat.label}</span
                   >
                 </div>
@@ -4811,7 +4811,7 @@
             >
               {#each [{ color: "bg-primary/50", text: "Full history re-sent each turn for context." }, { color: "bg-primary/50", text: "Compresses at 30k, keeps last 10 turns." }, { color: "bg-primary/50", text: "Only schema for mentioned tables is injected." }, { color: "bg-warning/60", text: "Failed tool calls blocked after 2 retries." }] as item}
                 <div
-                  class="flex items-start gap-2 text-ui-3xs text-muted-foreground/70"
+                  class="flex items-start gap-2 text-ui-3xs text-muted-foreground"
                 >
                   <span
                     class="mt-1.5 size-1.5 shrink-0 rounded-full {item.color}"
@@ -4824,7 +4824,7 @@
             <!-- Clear button -->
             <button
               type="button"
-              class="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-destructive/25 text-ui-xs text-destructive/80 transition-colors hover:bg-destructive/6 hover:border-destructive/40 hover:text-destructive"
+              class="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-destructive/25 text-ui-xs text-destructive transition-colors hover:bg-destructive/6 hover:border-destructive/40 hover:text-destructive"
               onclick={() => {
                 apiHistory = [];
                 rawApiHistory = [];
@@ -4939,20 +4939,20 @@
         class="min-w-0 flex-1 truncate font-mono text-ui-sm font-semibold text-foreground/80"
         >{fullscreenChart.title}</span
       >
-      <span class="font-mono text-ui-3xs capitalize text-muted-foreground/40"
+      <span class="font-mono text-ui-3xs capitalize text-muted-foreground"
         >{fullscreenChart.spec.type}</span
       >
       <div class="flex items-center gap-1">
         <button
           type="button"
-          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           title="Download PNG"
           onclick={() =>
             void saveChartPng("[data-chart-fs] canvas", fullscreenChart?.title ?? "")}><ArrowDownToLine class="size-3.5" /></button
         >
         <button
           type="button"
-          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           title="Close (Esc)"
           onclick={closeChartFullscreen}><X class="size-4" /></button
         >
@@ -4967,7 +4967,7 @@
       />
     </div>
     <p
-      class="shrink-0 border-t border-border/30 px-4 py-1.5 text-center font-mono text-ui-3xs text-muted-foreground/30"
+      class="shrink-0 border-t border-border/30 px-4 py-1.5 text-center font-mono text-ui-3xs text-muted-foreground"
     >
       Ctrl+scroll to zoom · drag to pan · double-click to reset
     </p>
@@ -4991,7 +4991,7 @@
         <!-- Zoom controls -->
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          class= "field-surface inline-flex h-7 items-center gap-1 px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
           onclick={() => dispatchDiagramEvent("diagram:zoomout")}
           title="Zoom out"
         >
@@ -4999,7 +4999,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          class= "field-surface inline-flex h-7 items-center gap-1 px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
           onclick={() => dispatchDiagramEvent("diagram:reset")}
           title="Reset zoom (double-click canvas)"
         >
@@ -5007,7 +5007,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          class= "field-surface inline-flex h-7 items-center gap-1 px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
           onclick={() => dispatchDiagramEvent("diagram:zoomin")}
           title="Zoom in"
         >
@@ -5017,7 +5017,7 @@
         <!-- Export -->
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          class= "field-surface inline-flex h-7 items-center gap-1.5 px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
           onclick={() => void exportDiagramSvg()}
           title="Export as SVG"
         >
@@ -5025,7 +5025,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          class= "field-surface inline-flex h-7 items-center gap-1.5 px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
           onclick={() => void exportDiagramPng()}
           title="Export as PNG"
         >
@@ -5035,7 +5035,7 @@
         <!-- Close -->
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          class= "field-surface inline-flex h-7 items-center gap-1.5 px-2 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
           onclick={closeDiagramFullscreen}
           title="Close (Esc)"
         >
@@ -5054,7 +5054,7 @@
       </div>
     </div>
     <p
-      class="shrink-0 border-t border-border/40 px-4 py-1.5 text-center text-ui-3xs text-muted-foreground/40"
+      class="shrink-0 border-t border-border/40 px-4 py-1.5 text-center text-ui-3xs text-muted-foreground"
     >
       Drag to pan · Ctrl+scroll to zoom · Double-click to reset
     </p>

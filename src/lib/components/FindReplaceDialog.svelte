@@ -130,13 +130,13 @@
   const selectTriggerCls =
     'h-7 w-full min-w-0 justify-between gap-1.5 rounded-md border-border/60 bg-input/30 px-2 text-ui-xs font-normal text-foreground/80 shadow-none transition-colors hover:border-border data-[state=open]:border-border'
   const inputCls =
-    'h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none'
+    'h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground hover:border-border/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none'
 </script>
 
 <Dialog.Root bind:open>
   <Dialog.Content
     showCloseButton={false}
-    class="w-[min(640px,calc(100vw-2rem))] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-none"
+    class="w-[min(40rem,calc(100vw-2rem))] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-none"
   >
     <!-- Header -->
     <div class="flex h-12 items-center gap-2.5 border-b border-border/60 pl-4 pr-2.5">
@@ -145,7 +145,7 @@
       </span>
       <Dialog.Title class="min-w-0 flex-1 truncate text-ui-sm font-medium text-foreground">
         Find & replace
-        <span class="text-muted-foreground/50">·</span>
+        <span class="text-muted-foreground">·</span>
         <span class="font-mono text-ui-sm">{tableName}</span>
       </Dialog.Title>
       <Dialog.Close
@@ -158,7 +158,7 @@
 
     <!-- Controls -->
     <div class="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 border-b border-border/60 bg-panel/50 px-4 py-3">
-      <span class="select-none text-right text-ui-2xs text-muted-foreground/60">Column</span>
+      <span class="select-none text-right text-ui-2xs text-muted-foreground">Column</span>
       <div class="grid grid-cols-[minmax(0,1fr)_8rem_auto] items-center gap-2">
         <!-- Themed dropdowns (bits-ui), the native <select> popup is unstyled
              OS chrome (broken on Linux/WebKitGTK) and clashed with the app. -->
@@ -177,12 +177,12 @@
               class={cn('inline-flex w-full min-w-0 items-center border', selectTriggerCls, colMenuOpen && 'border-border')}
             >
               <span class="min-w-0 flex-1 truncate text-left font-mono">{editableCols.find((c) => c.idx === colIdx)?.name ?? 'Column…'}</span>
-              <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground/50" />
+              <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground" />
             </button>
           {/snippet}
           {#snippet item(it)}
             <span class="min-w-0 flex-1 truncate font-mono text-ui-xs">{it.label}</span>
-            {#if it.dataType}<span class="shrink-0 text-ui-3xs text-muted-foreground/40">{it.dataType}</span>{/if}
+            {#if it.dataType}<span class="shrink-0 text-ui-3xs text-muted-foreground">{it.dataType}</span>{/if}
             {#if it.active}<span class="shrink-0 text-primary">✓</span>{/if}
           {/snippet}
         </SearchableMenu>
@@ -216,10 +216,10 @@
         </button>
       </div>
 
-      <label for="fr-find" class="select-none text-right text-ui-2xs text-muted-foreground/60">Find</label>
+      <label for="fr-find" class="select-none text-right text-ui-2xs text-muted-foreground">Find</label>
       <input id="fr-find" type="text" class={inputCls} placeholder={mode === 'regex' ? '^(\\w+)@, regular expression' : 'text to find'} bind:value={findText} />
 
-      <label for="fr-replace" class="select-none text-right text-ui-2xs text-muted-foreground/60">Replace</label>
+      <label for="fr-replace" class="select-none text-right text-ui-2xs text-muted-foreground">Replace</label>
       <input id="fr-replace" type="text" class={inputCls} placeholder={mode === 'regex' ? '$1 uses capture groups' : 'replacement'} bind:value={replaceText} />
 
       {#if regexError}
@@ -232,11 +232,11 @@
     <div class="flex h-[260px] min-h-0 flex-col bg-panel">
       {#if !findText}
         <div class="flex flex-1 items-center justify-center px-6 text-center">
-          <p class="text-ui-xs text-muted-foreground/45">Type a search to preview replacements on the loaded page.</p>
+          <p class="text-ui-xs text-muted-foreground">Type a search to preview replacements on the loaded page.</p>
         </div>
       {:else if matches.length === 0}
         <div class="flex flex-1 items-center justify-center px-6 text-center">
-          <p class="text-ui-xs text-muted-foreground/45">No matching cells on this page.</p>
+          <p class="text-ui-xs text-muted-foreground">No matching cells on this page.</p>
         </div>
       {:else}
         <div class="flex shrink-0 items-center gap-1.5 border-b border-border/40 px-4 py-1.5">
@@ -248,14 +248,14 @@
         <div class="app-scroll min-h-0 flex-1 divide-y divide-border/25 overflow-y-auto">
           {#each matches.slice(0, PREVIEW_CAP) as m (m.rowIdx)}
             <div class="grid grid-cols-[2.5rem_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-4 py-1">
-              <span class="select-none font-mono text-ui-3xs tabular-nums text-muted-foreground/35">{m.rowIdx + 1}</span>
-              <span class="truncate font-mono text-ui-xs text-muted-foreground/70 line-through decoration-destructive/40" title={m.old}>{clip(m.old)}</span>
-              <Icon name="arrow-right" class="size-3.5 shrink-0 text-muted-foreground/35" />
+              <span class="select-none font-mono text-ui-3xs tabular-nums text-muted-foreground">{m.rowIdx + 1}</span>
+              <span class="truncate font-mono text-ui-xs text-muted-foreground line-through decoration-destructive/40" title={m.old}>{clip(m.old)}</span>
+              <Icon name="arrow-right" class="size-3.5 shrink-0 text-muted-foreground" />
               <span class="truncate font-mono text-ui-xs text-success" title={m.value}>{clip(m.value)}</span>
             </div>
           {/each}
           {#if matches.length > PREVIEW_CAP}
-            <p class="px-4 py-2 text-ui-2xs text-muted-foreground/50">…and {(matches.length - PREVIEW_CAP).toLocaleString('en-US')} more</p>
+            <p class="px-4 py-2 text-ui-2xs text-muted-foreground">…and {(matches.length - PREVIEW_CAP).toLocaleString('en-US')} more</p>
           {/if}
         </div>
       {/if}
@@ -263,11 +263,11 @@
 
     <!-- Footer -->
     <div class="flex h-13 items-center gap-2 border-t border-border/60 bg-background px-4">
-      <p class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground/60" title="Only string cells on the currently loaded page are affected. Each change is written as its own parameterized per-primary-key UPDATE.">
+      <p class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground" title="Only string cells on the currently loaded page are affected. Each change is written as its own parameterized per-primary-key UPDATE.">
         String cells on this page · per-row updates
       </p>
       <Dialog.Close
-        class="inline-flex h-8 shrink-0 items-center rounded-md border border-border px-3 text-ui-xs text-muted-foreground transition-[background-color,color,scale] hover:bg-accent hover:text-foreground active:scale-[0.96]"
+      class= "field-surface inline-flex h-8 shrink-0 items-center px-3 text-ui-xs text-muted-foreground transition-[background-color,color,scale] hover:bg-accent hover:text-foreground active:scale-[0.96]"
       >
         Cancel
       </Dialog.Close>

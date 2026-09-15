@@ -31,13 +31,13 @@
    */
 
   // ── State ─────────────────────────────────────────────────────────────────
-  let loading      = $state(false)
-  let loadedCount  = $state(0)
-  let totalCount   = $state(0)
-  let error        = $state('')
+  let loading = $state(false)
+  let loadedCount = $state(0)
+  let totalCount = $state(0)
+  let error = $state('')
   let activeSchema = $state(untrack(() => schema))
-  let schemaOpen   = $state(false)
-  let listSearch   = $state('')
+  let schemaOpen = $state(false)
+  let listSearch = $state('')
   let listSearchEl = $state(/** @type {HTMLInputElement | null} */ (null))
   /** @type {string|null} */
   let focusedTable = $state(null)
@@ -203,12 +203,12 @@
   <!-- ── Left: table list ──────────────────────────────────────────────────── -->
   <div class="flex w-56 shrink-0 flex-col border-r border-border/50 bg-panel">
     <div class="studio-chrome flex h-10 shrink-0 items-center gap-2 border-b border-border/60 px-3" data-studio-chrome>
-      <GitBranch class="size-3.5 shrink-0 text-muted-foreground/50" />
+      <GitBranch class="size-3.5 shrink-0 text-muted-foreground" />
       <span class="font-mono text-ui-xs font-semibold text-foreground/70">Relation Tree</span>
       <button
         type="button"
         disabled={loading}
-        class="ml-auto flex size-6 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+        class="ml-auto flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
         onclick={() => void load()}
       >
         <RefreshCw class="size-3 {loading ? 'animate-spin' : ''}" />
@@ -217,13 +217,13 @@
 
     <!-- Search -->
     <div class="relative px-2 py-1.5">
-      <Search class="pointer-events-none absolute left-4 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/40" />
+      <Search class="pointer-events-none absolute left-4 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
       <input
         type="text"
         bind:this={listSearchEl}
         bind:value={listSearch}
         placeholder="Filter tables…"
-        class="h-7 w-full rounded-lg border-2 border-border bg-background/60 pl-7 pr-2 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+        class= "field-surface h-7 w-full bg-background/60 pl-7 pr-2 font-mono text-ui-xs outline-none placeholder:text-muted-foreground"
       />
     </div>
 
@@ -238,31 +238,31 @@
     <div class="min-h-0 flex-1 overflow-y-auto">
       {#if loading && tableMeta.size === 0}
         <div class="flex items-center gap-2 px-3 py-3">
-          <Loader class="size-3.5 animate-spin text-muted-foreground/40" />
-          <span class="font-mono text-ui-xs text-muted-foreground/50">Loading…</span>
+          <Loader class="size-3.5 animate-spin text-muted-foreground" />
+          <span class="font-mono text-ui-xs text-muted-foreground">Loading…</span>
         </div>
       {:else if error}
         <p class="px-3 py-3 font-mono text-ui-xs text-destructive">{error}</p>
       {:else}
         {#each filteredTables as t (t.name)}
           {@const hasOut = (outbound.get(t.name)?.length ?? 0) > 0}
-          {@const hasIn  = (inbound.get(t.name)?.length ?? 0) > 0}
+          {@const hasIn = (inbound.get(t.name)?.length ?? 0) > 0}
           {@const active = focusedTable === t.name}
           <button
             type="button"
             class="flex w-full items-center gap-2 border-b border-border/10 px-3 py-1.5 text-left transition-colors last:border-0
-              {active ? 'bg-primary/10 text-foreground' : 'text-muted-foreground/70 hover:bg-accent/30 hover:text-foreground'}"
+              {active ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:bg-accent/30 hover:text-foreground'}"
             onclick={() => (focusedTable = t.name)}
           >
-            <Table2 class="size-3 shrink-0 {active ? 'text-primary/70' : 'text-muted-foreground/30'}" />
+            <Table2 class="size-3 shrink-0 {active ? 'text-primary' : 'text-muted-foreground'}" />
             <span class="min-w-0 flex-1 truncate font-mono text-ui-xs">{t.name}</span>
             <span class="flex shrink-0 items-center gap-0.5">
-              {#if hasOut}<ArrowUpRight class="size-2.5 text-info/60" />{/if}
-              {#if hasIn}<ArrowDownRight class="size-2.5 text-success/60" />{/if}
+              {#if hasOut}<ArrowUpRight class="size-3 text-info" />{/if}
+              {#if hasIn}<ArrowDownRight class="size-3 text-success" />{/if}
             </span>
           </button>
         {:else}
-          <p class="px-3 py-4 font-mono text-ui-xs text-muted-foreground/40">No tables</p>
+          <p class="px-3 py-4 font-mono text-ui-xs text-muted-foreground">No tables</p>
         {/each}
       {/if}
     </div>
@@ -272,14 +272,14 @@
   <div class="min-h-0 min-w-0 flex-1 overflow-y-auto bg-background p-4">
     {#if !focusedTable || !tableMeta.has(focusedTable)}
       <div class="flex h-full min-h-[200px] flex-col items-center justify-center gap-3">
-        <GitBranch class="size-10 text-muted-foreground/15" />
-        <p class="font-mono text-ui-xs text-muted-foreground/40">Select a table to explore its relationships</p>
+        <GitBranch class="size-10 text-muted-foreground" />
+        <p class="font-mono text-ui-xs text-muted-foreground">Select a table to explore its relationships</p>
       </div>
     {:else}
       {@const rootMeta = tableMeta.get(focusedTable)}
-      {@const rootOut  = outbound.get(focusedTable) ?? []}
-      {@const rootIn   = inbound.get(focusedTable) ?? []}
-      {@const shared   = { tableMeta, outbound, inbound, expanded, showCols, rowCounts, toggleExpand, toggleCols, activeSchema, onopentable, onfocustable: (name) => (focusedTable = name) }}
+      {@const rootOut = outbound.get(focusedTable) ?? []}
+      {@const rootIn = inbound.get(focusedTable) ?? []}
+      {@const shared = { tableMeta, outbound, inbound, expanded, showCols, rowCounts, toggleExpand, toggleCols, activeSchema, onopentable, onfocustable: (name) => (focusedTable = name) }}
       {@const rootCount = rowCounts.get(focusedTable)}
 
       <div class="mx-auto max-w-4xl">
@@ -287,11 +287,11 @@
         <div class="mb-6 overflow-hidden rounded-lg border border-primary/30 bg-primary/5 shadow-sm">
           <div class="flex items-center gap-3 border-b border-primary/20 px-4 py-3">
             <div class="flex size-8 items-center justify-center rounded-lg bg-primary/15">
-              <Table2 class="size-4 text-primary/80" />
+              <Table2 class="size-4 text-primary" />
             </div>
             <div class="min-w-0 flex-1">
               <p class="font-mono text-ui-sm font-bold text-foreground">{focusedTable}</p>
-              <p class="font-mono text-ui-2xs text-muted-foreground/60">
+              <p class="font-mono text-ui-2xs text-muted-foreground">
                 {rootMeta?.columns.length ?? 0} columns ·
                 {rootOut.length} outgoing FK ·
                 {rootIn.length} incoming FK{#if rootCount !== undefined} · <span class="tabular-nums text-foreground/70">{formatTableRowCount(rootCount)}</span> rows{/if}
@@ -315,8 +315,8 @@
               class="flex w-full items-center gap-2 px-4 py-2 text-left transition-colors hover:bg-primary/5"
               onclick={() => toggleCols(ck)}
             >
-              {#if open}<ChevronDown class="size-3 text-muted-foreground/50" />{:else}<ChevronRight class="size-3 text-muted-foreground/50" />{/if}
-              <span class="font-mono text-ui-2xs text-muted-foreground/60">Columns ({rootMeta.columns.length})</span>
+              {#if open}<ChevronDown class="size-3 text-muted-foreground" />{:else}<ChevronRight class="size-3 text-muted-foreground" />{/if}
+              <span class="font-mono text-ui-2xs text-muted-foreground">Columns ({rootMeta.columns.length})</span>
             </button>
             {#if open}
               <div class="border-t border-primary/10 bg-background/60 px-4 pb-2 pt-1">
@@ -324,11 +324,11 @@
                   {@const isPk = rootMeta.pkCols.has(col.name)}
                   {@const isFk = !!col.foreignKey}
                   <div class="flex items-center gap-2 py-0.5">
-                    {#if isPk}<KeyRound class="size-3 shrink-0 text-warning/80" />
-                    {:else if isFk}<Link class="size-3 shrink-0 text-info/60" />
+                    {#if isPk}<KeyRound class="size-3 shrink-0 text-warning" />
+                    {:else if isFk}<Link class="size-3 shrink-0 text-info" />
                     {:else}<span class="size-3 shrink-0"></span>{/if}
-                    <span class="font-mono text-ui-3xs {isPk ? 'font-semibold text-warning/90' : isFk ? 'text-info/75' : 'text-foreground/60'}">{col.name}</span>
-                    <span class="ml-auto font-mono text-ui-3xs text-muted-foreground/35">{col.dataType}</span>
+                    <span class="font-mono text-ui-3xs {isPk ? 'font-semibold text-warning' : isFk ? 'text-info' : 'text-foreground/60'}">{col.name}</span>
+                    <span class="ml-auto font-mono text-ui-3xs text-muted-foreground">{col.dataType}</span>
                   </div>
                 {/each}
               </div>
@@ -340,12 +340,12 @@
         {#if rootOut.length > 0}
           <section class="mb-6">
             <div class="mb-3 flex items-center gap-2">
-              <ArrowUpRight class="size-4 text-info/70" />
+              <ArrowUpRight class="size-4 text-info" />
               <h3 class="font-mono text-ui-xs font-semibold text-foreground/70">
-                References <span class="text-muted-foreground/50">({rootOut.length})</span>
+                References <span class="text-muted-foreground">({rootOut.length})</span>
               </h3>
               <div class="flex-1 border-t border-border/30"></div>
-              <span class="font-mono text-ui-3xs text-muted-foreground/40">this FK → other PK</span>
+              <span class="font-mono text-ui-3xs text-muted-foreground">this FK → other PK</span>
             </div>
             <div class="flex flex-col gap-2 pl-4">
               {#each rootOut as rel (rel.col)}
@@ -367,12 +367,12 @@
         {#if rootIn.length > 0}
           <section class="mb-6">
             <div class="mb-3 flex items-center gap-2">
-              <ArrowDownRight class="size-4 text-success/70" />
+              <ArrowDownRight class="size-4 text-success" />
               <h3 class="font-mono text-ui-xs font-semibold text-foreground/70">
-                Referenced by <span class="text-muted-foreground/50">({rootIn.length})</span>
+                Referenced by <span class="text-muted-foreground">({rootIn.length})</span>
               </h3>
               <div class="flex-1 border-t border-border/30"></div>
-              <span class="font-mono text-ui-3xs text-muted-foreground/40">other FK → this PK</span>
+              <span class="font-mono text-ui-3xs text-muted-foreground">other FK → this PK</span>
             </div>
             <div class="flex flex-col gap-2 pl-4">
               {#each rootIn as rel (`${rel.fromTable}${rel.fromCol}`)}
@@ -392,8 +392,8 @@
 
         {#if rootOut.length === 0 && rootIn.length === 0}
           <div class="flex flex-col items-center gap-2 py-10 text-center">
-            <Table2 class="size-8 text-muted-foreground/15" />
-            <p class="font-mono text-ui-xs text-muted-foreground/40">No FK relationships found for this table</p>
+            <Table2 class="size-8 text-muted-foreground" />
+            <p class="font-mono text-ui-xs text-muted-foreground">No FK relationships found for this table</p>
           </div>
         {/if}
       </div>

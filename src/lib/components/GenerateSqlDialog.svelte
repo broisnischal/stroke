@@ -118,7 +118,7 @@
 <Dialog.Root bind:open>
   <Dialog.Content
     showCloseButton={false}
-    class="w-[min(720px,calc(100vw-2rem))] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-none"
+    class="w-[min(45rem,calc(100vw-2rem))] gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-none"
   >
     <!-- Header -->
     <div class="flex h-12 items-center gap-2.5 border-b border-border/60 pl-4 pr-2.5">
@@ -127,7 +127,7 @@
       </span>
       <Dialog.Title class="min-w-0 flex-1 truncate text-ui-sm font-medium text-foreground">
         Generate SQL
-        <span class="text-muted-foreground/50">·</span>
+        <span class="text-muted-foreground">·</span>
         <span class="font-mono text-ui-sm">{table}</span>
       </Dialog.Title>
       <span class="shrink-0 select-none rounded-md bg-muted/60 px-1.5 py-0.5 font-mono text-ui-3xs uppercase tracking-wide text-muted-foreground">{dialect}</span>
@@ -177,14 +177,14 @@
 
     <!-- Footer -->
     <div class="flex h-13 items-center gap-2 border-t border-border/60 bg-background px-4">
-      <p class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground/60">
+      <p class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground">
         {#if hasPlaceholders}
           Values use <span class="rounded bg-muted/60 px-1 font-mono text-foreground/70">:name</span> placeholders, replace before running.
         {/if}
       </p>
       <button
         type="button"
-        class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border px-3 text-ui-xs text-muted-foreground transition-[background-color,color,scale] hover:bg-accent hover:text-foreground active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40"
+        class= "field-surface inline-flex h-8 shrink-0 items-center gap-1.5 px-3 text-ui-xs text-muted-foreground transition-[background-color,color,scale] hover:bg-accent hover:text-foreground active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40"
         disabled={!currentSql}
         onclick={handleCopy}
       >

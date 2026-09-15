@@ -17,7 +17,7 @@
   aria-label="Loading"
 >
   <div class="flex flex-col items-center gap-2.5">
-    <Loader class="size-5 animate-spin text-muted-foreground/50" aria-hidden="true" />
-    <p class="font-mono text-ui-sm text-muted-foreground/70">{message}</p>
+    <Loader class="size-5 animate-spin text-muted-foreground" aria-hidden="true" />
+    <p class="font-mono text-ui-sm text-muted-foreground">{message}</p>
   </div>
 </div>

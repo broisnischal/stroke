@@ -96,13 +96,13 @@
   <Dialog.Content showCloseButton={false} class="max-w-2xl gap-0 overflow-hidden p-0">
     <!-- Header: what this is, and the one number that identifies it. -->
     <div class="flex h-11 shrink-0 items-center gap-2 border-b border-border/50 px-4">
-      <Icon name="bar-chart-2" class="size-3.5 shrink-0 text-primary/60" />
+      <Icon name="bar-chart-2" class="size-3.5 shrink-0 text-primary" />
       <span class="min-w-0 truncate font-mono text-ui-sm font-medium">{column}</span>
-      <span class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs text-muted-foreground/70">
+      <span class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs text-muted-foreground">
         {dataType}{#if info}({info.dim}){/if}
       </span>
       {#if nullable}
-        <span class="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">nullable</span>
+        <span class="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground">nullable</span>
       {/if}
 
       <div class="ml-auto flex shrink-0 items-center gap-0.5 rounded-md bg-muted/40 p-0.5">
@@ -119,7 +119,7 @@
       </div>
 
       <Dialog.Close
-        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none"
+        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none"
         aria-label="Close"
       >
         <Icon name="x" class="size-3.5" />
@@ -129,7 +129,7 @@
     {#if !info}
       <div class="px-4 py-10 text-center">
         <p class="text-ui-sm text-muted-foreground">This value isn't a vector literal.</p>
-        <p class="mt-1 font-mono text-ui-2xs text-muted-foreground/50">{String(value ?? '').slice(0, 120)}</p>
+        <p class="mt-1 font-mono text-ui-2xs text-muted-foreground">{String(value ?? '').slice(0, 120)}</p>
       </div>
     {:else}
       <!-- ── Shape ─────────────────────────────────────────────────────────── -->
@@ -189,7 +189,7 @@
                   </div>
                 {/each}
               </div>
-              <div class="pointer-events-none absolute inset-x-1.5 bottom-0.5 flex justify-between font-mono text-ui-3xs text-muted-foreground/40">
+              <div class="pointer-events-none absolute inset-x-1.5 bottom-0.5 flex justify-between font-mono text-ui-3xs text-muted-foreground">
                 <span>{short(hist.from)}</span>
                 <span>value distribution</span>
                 <span>{short(hist.to)}</span>
@@ -207,12 +207,12 @@
           <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(96px,1fr))] gap-2">
             {#each stats as s (s.label)}
               <div class="rounded-md border border-border/40 bg-muted/10 px-2.5 py-1.5">
-                <p class="text-ui-3xs uppercase tracking-wider text-muted-foreground/45">{s.label}</p>
+                <p class="text-ui-3xs uppercase tracking-wider text-muted-foreground">{s.label}</p>
                 <p class="mt-0.5 font-mono text-ui-sm tabular-nums text-foreground/90">{s.value}</p>
                 {#if s.hint}
                   <p class={cn(
                     'mt-0.5 truncate text-ui-3xs',
-                    s.label === 'norm' && !info.unit ? 'text-warning/80' : 'text-muted-foreground/40',
+                    s.label === 'norm' && !info.unit ? 'text-warning' : 'text-muted-foreground',
                   )}>{s.hint}</p>
                 {/if}
               </div>
@@ -227,7 +227,7 @@
             <div class="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-1">
               {#each info.entries ?? [] as e (e.index)}
                 <div class="flex items-baseline gap-2 rounded px-1.5 py-1 hover:bg-muted/30">
-                  <span class="w-10 shrink-0 text-right font-mono text-ui-3xs text-muted-foreground/40">{e.index}</span>
+                  <span class="w-10 shrink-0 text-right font-mono text-ui-3xs text-muted-foreground">{e.index}</span>
                   <span class="font-mono text-ui-2xs tabular-nums">{short(e.value)}</span>
                 </div>
               {/each}
@@ -241,10 +241,10 @@
                   'flex items-baseline gap-2 rounded px-1.5 py-0.5 hover:bg-muted/30',
                   (i === info.maxIndex || i === info.minIndex) && 'bg-primary/5',
                 )}>
-                  <span class="w-9 shrink-0 text-right font-mono text-ui-3xs text-muted-foreground/40">{i}</span>
+                  <span class="w-9 shrink-0 text-right font-mono text-ui-3xs text-muted-foreground">{i}</span>
                   <span class={cn(
                     'font-mono text-ui-2xs tabular-nums',
-                    v === 0 ? 'text-muted-foreground/35' : 'text-foreground/85',
+                    v === 0 ? 'text-muted-foreground' : 'text-foreground/85',
                   )}>{short(v)}</span>
                 </div>
               {/each}
@@ -275,7 +275,7 @@
         <Icon name="copy" class="size-3.5" />
         Copy
       </Button>
-      <span class="ml-auto font-mono text-ui-3xs text-muted-foreground/40">
+      <span class="ml-auto font-mono text-ui-3xs text-muted-foreground">
         {String(value ?? '').length.toLocaleString()} chars
       </span>
       <Button variant="ghost" size="sm" class="h-7 px-2 text-ui-xs" onclick={() => (open = false)}>

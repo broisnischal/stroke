@@ -82,18 +82,18 @@
 
   <!-- Header -->
   <div class="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-3">
-    <Terminal class="size-3.5 shrink-0 text-muted-foreground/50" />
+    <Terminal class="size-3.5 shrink-0 text-muted-foreground" />
     <span class="text-ui-xs font-medium text-foreground/80">Query log</span>
-    <div class="ml-1 inline-flex h-6 items-center rounded-md border border-border/60 bg-muted/30 p-px">
-      <button type="button" class={cn('h-full rounded px-2 text-ui-2xs font-medium transition-colors', scope === 'all' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground/60 hover:text-foreground')} onclick={() => (scope = 'all')}>All</button>
-      <button type="button" disabled={!activeTable} class={cn('h-full rounded px-2 text-ui-2xs font-medium transition-colors disabled:opacity-40', scope === 'table' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground/60 hover:text-foreground')} onclick={() => (scope = 'table')}>This table</button>
+      <div class= "field-surface ml-1 inline-flex h-6 items-center bg-muted/30 p-px">
+      <button type="button" class={cn('h-full rounded px-2 text-ui-2xs font-medium transition-colors', scope === 'all' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')} onclick={() => (scope = 'all')}>All</button>
+      <button type="button" disabled={!activeTable} class={cn('h-full rounded px-2 text-ui-2xs font-medium transition-colors disabled:opacity-40', scope === 'table' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')} onclick={() => (scope = 'table')}>This table</button>
     </div>
-    <span class="text-ui-2xs text-muted-foreground/35">{visible.length} {visible.length === 1 ? 'query' : 'queries'}</span>
+    <span class="text-ui-2xs text-muted-foreground">{visible.length} {visible.length === 1 ? 'query' : 'queries'}</span>
     <div class="ml-auto flex items-center gap-0.5">
-      <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/50 hover:text-foreground" onclick={() => clearQueryLog()} title="Clear the query log">
+      <button type="button" class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground" onclick={() => clearQueryLog()} title="Clear the query log">
         <Trash2 class="size-3" /> Clear
       </button>
-      <button type="button" class="flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground" onclick={onclose} aria-label="Close query log">
+      <button type="button" class="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground" onclick={onclose} aria-label="Close query log">
         <X class="size-3.5" />
       </button>
     </div>
@@ -103,20 +103,20 @@
   <div class="app-scroll min-h-0 flex-1 overflow-y-auto px-3 py-2">
     {#if visible.length === 0}
       <div class="flex h-full flex-col items-center justify-center gap-1.5 text-center">
-        <Terminal class="size-4 text-muted-foreground/20" />
-        <p class="text-ui-xs text-muted-foreground/40">No queries yet, browse a table or run SQL.</p>
+        <Terminal class="size-4 text-muted-foreground" />
+        <p class="text-ui-xs text-muted-foreground">No queries yet, browse a table or run SQL.</p>
       </div>
     {:else}
       {#each visible as e (e.id)}
         <div class="border-b border-border/15 py-2 last:border-b-0">
-          <div class="mb-1 flex items-center gap-2 font-mono text-ui-3xs text-muted-foreground/45">
+          <div class="mb-1 flex items-center gap-2 font-mono text-ui-3xs text-muted-foreground">
             <span>[{fmtTime(e.timestamp)}]</span>
             {#if e.durationMs != null}<span class="tabular-nums">· {e.durationMs.toFixed(2)} ms</span>{/if}
-            {#if e.source}<span class="rounded bg-muted/40 px-1 text-ui-3xs uppercase tracking-wide text-muted-foreground/40">{e.source}</span>{/if}
-            {#if !e.success}<span class="text-destructive/70">· failed</span>{/if}
+            {#if e.source}<span class="rounded bg-muted/40 px-1 text-ui-3xs uppercase tracking-wide text-muted-foreground">{e.source}</span>{/if}
+            {#if !e.success}<span class="text-destructive">· failed</span>{/if}
           </div>
           <pre class="ql-sql whitespace-pre-wrap break-words font-mono text-ui-xs leading-relaxed text-foreground/85">{@html highlight(e.sql)}</pre>
-          {#if e.error}<div class="mt-0.5 font-mono text-ui-3xs text-destructive/70">{e.error}</div>{/if}
+          {#if e.error}<div class="mt-0.5 font-mono text-ui-3xs text-destructive">{e.error}</div>{/if}
         </div>
       {/each}
     {/if}

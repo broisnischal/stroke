@@ -1,8 +1,12 @@
 /** @typedef {'light' | 'dark'} ThemeGroup */
 
-/** @typedef {'light' | 'parchment' | 'ice' | 'github-light' | 'light-high-contrast' | 'dark' | 'graphite' | 'midnight' | 'vitesse' | 'slate' | 'forest' | 'mono' | 'rose-pine' | 'catppuccin' | 'solarized' | 'dark-high-contrast'} ThemeId */
+/** @typedef {'matte' | 'light' | 'parchment' | 'clay' | 'claude-light' | 'moss-light' | 'orchid-light' | 'ice' | 'github-light' | 'light-high-contrast' | 'dark' | 'obsidian' | 'claude' | 'moss' | 'orchid' | 'graphite' | 'midnight' | 'vitesse' | 'slate' | 'forest' | 'mono' | 'rose-pine' | 'catppuccin' | 'solarized' | 'dark-high-contrast' | 'hotdog'} ThemeId */
 
-/** @typedef {{ id: ThemeId, name: string, description: string, isDark: boolean, group: ThemeGroup, preview: { bg: string, fg: string, accent: string } }} ThemeDefinition */
+/**
+ * `hidden` keeps a theme out of the picker until it is found. Only the easter
+ * egg uses it; everything else is listed normally.
+ * @typedef {{ id: ThemeId, name: string, description: string, isDark: boolean, group: ThemeGroup, hidden?: boolean, preview: { bg: string, fg: string, accent: string } }} ThemeDefinition
+ */
 
 export const DEFAULT_THEME_ID = /** @type {const} */ ('dark')
 
@@ -35,6 +39,38 @@ export const APP_THEMES = [
     preview: { bg: '#faf7f0', fg: '#2a1c10', accent: '#3a50c4' },
   },
   {
+    id: 'clay',
+    name: 'Clay',
+    description: 'Warm paper, terracotta accent',
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#f7f3ec', fg: '#2b2119', accent: '#a85631' },
+  },
+  {
+    id: 'claude-light',
+    name: 'Claude',
+    description: "Anthropic's cream and coral",
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#f0eee7', fg: '#1b1915', accent: '#af5629' },
+  },
+  {
+    id: 'moss-light',
+    name: 'Moss',
+    description: 'Pale linen, jade accent',
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#f4f6f1', fg: '#151c13', accent: '#116d45' },
+  },
+  {
+    id: 'orchid-light',
+    name: 'Orchid',
+    description: 'Blush white, magenta accent',
+    isDark: false,
+    group: 'light',
+    preview: { bg: '#f9f4f8', fg: '#221620', accent: '#953585' },
+  },
+  {
     id: 'ice',
     name: 'Ice',
     description: 'Cool blue-steel',
@@ -58,6 +94,56 @@ export const APP_THEMES = [
     isDark: true,
     group: 'dark',
     preview: { bg: '#1c1c1c', fg: '#f0f0f0', accent: '#f0f0f0' },
+  },
+  {
+    id: 'obsidian',
+    name: 'Obsidian',
+    description: 'Cool near-black, teal accent',
+    isDark: true,
+    group: 'dark',
+    preview: { bg: '#131419', fg: '#eeeff4', accent: '#67cfd8' },
+  },
+  {
+    id: 'matte',
+    name: 'Matte',
+    description: 'Flat matte black, no accent hue',
+    isDark: true,
+    group: 'dark',
+    preview: { bg: '#121212', fg: '#d9d9d9', accent: '#dcdcdc' },
+  },
+  {
+    id: 'claude',
+    name: 'Claude',
+    description: 'Warm charcoal, coral accent',
+    isDark: true,
+    group: 'dark',
+    preview: { bg: '#131210', fg: '#f1f0ec', accent: '#e18b6a' },
+  },
+  {
+    id: 'moss',
+    name: 'Moss',
+    description: 'Deep moss, jade accent',
+    isDark: true,
+    group: 'dark',
+    preview: { bg: '#090d09', fg: '#e8ede6', accent: '#78c594' },
+  },
+  {
+    id: 'orchid',
+    name: 'Orchid',
+    description: 'Aubergine black, orchid accent',
+    isDark: true,
+    group: 'dark',
+    preview: { bg: '#0e090e', fg: '#efe9f0', accent: '#e492c9' },
+  },
+  {
+    // Hidden until unlocked - see EASTER_EGG_THEME_ID below.
+    id: 'hotdog',
+    name: 'Hotdog Stand',
+    description: 'You found it. Sorry.',
+    isDark: true,
+    group: 'dark',
+    hidden: true,
+    preview: { bg: '#2b0707', fg: '#ffd83d', accent: '#d41710' },
   },
   {
     id: 'graphite',
@@ -302,6 +388,62 @@ export function mermaidThemeFor(id) {
       accent: '#268bd2',
       border: '#0f3d49',
     },
+    'moss-light': {
+      bg: '#f4f6f1',
+      fg: '#151c13',
+      muted: '#50584e',
+      line: '#cbd1c5',
+      accent: '#116d45',
+      border: '#cad0c4',
+    },
+    'moss': {
+      bg: '#090d09',
+      fg: '#e8ede6',
+      muted: '#a3aaa1',
+      line: '#2c312a',
+      accent: '#78c594',
+      border: '#2a2f28',
+    },
+    'orchid-light': {
+      bg: '#f9f4f8',
+      fg: '#221620',
+      muted: '#5e515c',
+      line: '#d8ccd7',
+      accent: '#953585',
+      border: '#d7cbd5',
+    },
+    'orchid': {
+      bg: '#0e090e',
+      fg: '#efe9f0',
+      muted: '#aea4ae',
+      line: '#342c34',
+      accent: '#e492c9',
+      border: '#322a32',
+    },
+    'claude-light': {
+      bg: '#f0eee7',
+      fg: '#1b1915',
+      muted: '#59554e',
+      line: '#cdc9be',
+      accent: '#af5629',
+      border: '#ccc8bd',
+    },
+    'matte': {
+      bg: '#121212',
+      fg: '#d9d9d9',
+      muted: '#a0a0a0',
+      line: '#373737',
+      accent: '#dcdcdc',
+      border: '#343434',
+    },
+    'claude': {
+      bg: '#131210',
+      fg: '#f1f0ec',
+      muted: '#aba9a4',
+      line: '#363531',
+      accent: '#e18b6a',
+      border: '#34332f',
+    },
     'light-high-contrast': {
       bg: '#ffffff', fg: '#000000', muted: '#3a3a3a', line: '#5a5a5a', accent: '#1a3fd0', border: '#5a5a5a',
     },
@@ -317,8 +459,47 @@ export function themesByGroup() {
   return THEME_GROUP_ORDER.map((id) => ({
     id,
     label: THEME_GROUP_LABELS[id],
-    themes: APP_THEMES.filter((t) => t.group === id),
+    // visibleThemes(), not APP_THEMES: the easter egg stays out of the picker
+    // until it has been found.
+    themes: visibleThemes().filter((t) => t.group === id),
   })).filter((g) => g.themes.length > 0)
 }
 
 export { MONACO_THEME_SPECS as MONACO_THEMES } from './monaco-presets.js'
+
+/**
+ * The easter egg, and how it is found: click the version number in the status
+ * bar seven times. Kept out of the picker until then so nobody lands on it by
+ * scrolling a list, and stored so it stays found once found.
+ */
+export const EASTER_EGG_THEME_ID = /** @type {const} */ ('hotdog')
+export const EASTER_EGG_KEY = 'stroke:egg-found'
+export const EASTER_EGG_CLICKS = 7
+
+/** @returns {boolean} */
+export function easterEggFound() {
+  try {
+    return localStorage.getItem(EASTER_EGG_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function markEasterEggFound() {
+  try {
+    localStorage.setItem(EASTER_EGG_KEY, '1')
+  } catch {
+    // Private mode or a full quota: the theme still applies for this session.
+  }
+}
+
+/**
+ * Themes to offer in the picker. The egg is filtered out until found, and stays
+ * listed afterwards so it can be selected again - and, more to the point, so it
+ * can be escaped from.
+ * @returns {readonly ThemeDefinition[]}
+ */
+export function visibleThemes() {
+  const found = easterEggFound()
+  return APP_THEMES.filter((t) => !t.hidden || found)
+}

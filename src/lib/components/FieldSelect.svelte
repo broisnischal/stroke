@@ -44,7 +44,7 @@
       'inline-flex max-w-full items-center truncate font-mono',
       size === 'sm' ? 'h-7' : 'h-8',
       className,
-      !label && 'text-muted-foreground/50',
+      !label && 'text-muted-foreground',
     )}
     {...rest}
   >{label || placeholder}</span>
@@ -59,7 +59,7 @@
   }}
 >
   <Select.Trigger {size} class={cn('font-mono', className)} {...rest}>
-    <span class={cn('truncate', !label && 'text-muted-foreground/50')}>{label || placeholder}</span>
+    <span class={cn('truncate', !label && 'text-muted-foreground')}>{label || placeholder}</span>
   </Select.Trigger>
   <Select.Content class={cn('z-[130] max-h-[18rem] min-w-[10rem] p-1', contentClass)} sideOffset={6}>
     {#each options as opt (opt.value)}

@@ -120,7 +120,7 @@
         <!-- Input stays mounted (Command needs it for keyboard nav) but is only
              shown for longer lists; short menus hide it and are just scannable. -->
         <div class={cn("flex items-center gap-2 border-b border-border/50 px-2.5 py-2", !showSearch && "sr-only")}>
-          <SearchIcon class="size-3.5 shrink-0 text-muted-foreground/45" />
+          <SearchIcon class="size-3.5 shrink-0 text-muted-foreground" />
           <Command.Input bind:value={search} {placeholder}>
             {#snippet child({ props })}
               <input
@@ -129,14 +129,14 @@
                 bind:this={inputEl}
                 onkeydown={(e) => { /** @type {any} */ (props).onkeydown?.(e); onInputKeydown(e); }}
                 {placeholder}
-                class="no-focus-ring min-w-0 flex-1 bg-transparent text-ui-sm text-foreground outline-none placeholder:text-muted-foreground/40"
+                class="no-focus-ring min-w-0 flex-1 bg-transparent text-ui-sm text-foreground outline-none placeholder:text-muted-foreground"
               />
             {/snippet}
           </Command.Input>
         </div>
         {@render header?.()}
         <Command.List bind:ref={listEl} class="sm-item-list min-h-0 flex-1 overflow-y-auto p-1">
-          <Command.Empty class="px-2 py-5 text-center text-ui-xs text-muted-foreground/50">{empty}</Command.Empty>
+          <Command.Empty class="px-2 py-5 text-center text-ui-xs text-muted-foreground">{empty}</Command.Empty>
           {#each items as it (it.value)}
             <!-- cmdk scores a row against `value` + `keywords`, never its rendered
                  content. `value` is the selection key, so whenever it is an id

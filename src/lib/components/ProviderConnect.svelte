@@ -273,7 +273,7 @@
         bind:value={tokenInput}
         placeholder="postgres://…"
         aria-label="{meta?.name} connection string"
-        class="h-9 w-full rounded-lg border-2 border-border bg-muted/25 px-3 font-mono text-ui-2xs outline-none transition-[border-color] focus:border-foreground/55"
+        class= "field-surface h-9 w-full bg-muted/25 px-3 font-mono text-ui-2xs outline-none transition-[border-color] focus:"
         onkeydown={(e) => { if (e.key === 'Enter') saveToken() }}
       />
     {:else}
@@ -341,12 +341,12 @@
           {meta?.name}
           <span class="inline-flex items-center gap-1 text-ui-3xs font-normal text-success"><Check class="size-3" />Connected</span>
         </p>
-        <p class="text-ui-3xs text-muted-foreground/50">Pick a database to connect</p>
+        <p class="text-ui-3xs text-muted-foreground">Pick a database to connect</p>
       </div>
       <button
         type="button"
         title="Disconnect"
-        class="shrink-0 rounded p-1 text-muted-foreground/40 transition-colors hover:text-destructive"
+        class="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-destructive"
         onclick={handleLogout}
       >
         <LogOut class="size-3.5" />
@@ -359,7 +359,7 @@
         <p class="text-ui-xs text-foreground">
           Database password for <span class="font-medium">{resolved?.name}</span>
         </p>
-        <p class="text-ui-2xs leading-relaxed text-muted-foreground/70">
+        <p class="text-ui-2xs leading-relaxed text-muted-foreground">
           {meta?.name} doesn't expose the database password through its API, enter it once.
           Find or reset it in your {meta?.name} dashboard under Database settings.
         </p>
@@ -371,14 +371,14 @@
             autocomplete="current-password"
             autofocus
             placeholder="Database password"
-            class="h-9 w-full rounded-lg border-2 border-border bg-muted/30 pl-3 pr-9 text-ui-xs outline-none transition-[border-color] focus:border-foreground/55"
+            class= "field-surface h-9 w-full bg-muted/30 pl-3 pr-9 text-ui-xs outline-none transition-[border-color] focus:"
             onkeydown={(e) => { if (e.key === 'Enter') confirmPassword() }}
           />
           <button
             type="button"
             tabindex={-1}
             aria-label={showPw ? 'Hide password' : 'Show password'}
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/50 transition-colors hover:text-foreground"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
             onclick={() => (showPw = !showPw)}
           >
             {#if showPw}<EyeOff class="size-3.5" />{:else}<Eye class="size-3.5" />{/if}
@@ -408,13 +408,13 @@
       <div class="flex flex-col overflow-hidden rounded-lg border border-border/60">
         {#if databases.length > 6}
           <div class="relative border-b border-border/50">
-            <Search class="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground/40" />
+            <Search class="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
               aria-label="Search databases"
               placeholder="Search databases…"
               bind:value={search}
-              class="no-focus-ring h-8 w-full bg-transparent pl-9 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/35"
+              class="no-focus-ring h-8 w-full bg-transparent pl-9 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
               onkeydown={onSearchKeydown}
             />
           </div>
@@ -434,22 +434,22 @@
               )}
               onclick={() => pick(db.db_ref)}
             >
-              <DbIcon id={provider} class={cn('size-4 shrink-0', active ? 'text-foreground' : 'text-muted-foreground/50')} />
+              <DbIcon id={provider} class={cn('size-4 shrink-0', active ? 'text-foreground' : 'text-muted-foreground')} />
               <span class="min-w-0 flex-1 truncate font-mono text-ui-xs leading-snug {active ? 'font-medium text-foreground' : 'text-foreground/85'}">{db.name}</span>
-              {#if db.region}<span class="shrink-0 text-ui-3xs text-muted-foreground/40">{db.region}</span>{/if}
+              {#if db.region}<span class="shrink-0 text-ui-3xs text-muted-foreground">{db.region}</span>{/if}
               {#if active && phase === 'building'}<Loader2 class="size-3.5 shrink-0 animate-spin text-primary" />{:else if active}<Check class="size-3.5 shrink-0 text-primary" />{/if}
             </button>
           {/each}
           {#if filtered.length === 0}
-            <p class="px-2.5 py-3 text-center text-ui-2xs text-muted-foreground/45">No match for “{search}”</p>
+            <p class="px-2.5 py-3 text-center text-ui-2xs text-muted-foreground">No match for “{search}”</p>
           {/if}
         </div>
       </div>
     {:else}
       <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-5 text-center">
-        <DbIcon id={provider} class="size-5 text-muted-foreground/25" />
-        <p class="text-ui-2xs text-muted-foreground/50">No databases found on this account.</p>
-        <button type="button" class="flex items-center gap-1 text-ui-3xs text-muted-foreground/40 hover:text-muted-foreground" onclick={loadDatabases}>
+        <DbIcon id={provider} class="size-5 text-muted-foreground" />
+        <p class="text-ui-2xs text-muted-foreground">No databases found on this account.</p>
+        <button type="button" class="flex items-center gap-1 text-ui-3xs text-muted-foreground hover:text-muted-foreground" onclick={loadDatabases}>
           <RefreshCw class="size-3" /> Retry
         </button>
       </div>

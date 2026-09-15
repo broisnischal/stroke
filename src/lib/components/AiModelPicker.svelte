@@ -29,7 +29,7 @@
   <!-- Carries the provider's mark, so the model in play is recognisable at a
        glance instead of having to be read. -->
   <DropdownMenu.Trigger
-    class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-ui-2xs text-muted-foreground/70 transition-colors hover:bg-accent/60 hover:text-foreground select-none data-[state=open]:bg-accent data-[state=open]:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+    class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground select-none data-[state=open]:bg-accent data-[state=open]:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
     title="Switch model"
   >
     {#if activeProfile && hasBrand(activeProfile.provider)}
@@ -51,11 +51,11 @@
           {#if hasBrand(profile.provider)}
             <BrandIcon name={profile.provider} class="size-3.5 shrink-0 text-muted-foreground" />
           {:else}
-            <Sparkles class="size-3.5 shrink-0 text-muted-foreground/60" />
+            <Sparkles class="size-3.5 shrink-0 text-muted-foreground" />
           {/if}
           <div class="flex flex-col min-w-0">
             <span class="truncate text-ui-xs font-medium text-foreground leading-tight">{profile.name}</span>
-            <span class="truncate font-mono text-ui-3xs text-muted-foreground/60 leading-tight">{profile.model}</span>
+            <span class="truncate font-mono text-ui-3xs text-muted-foreground leading-tight">{profile.model}</span>
           </div>
         </DropdownMenu.RadioItem>
       {/each}

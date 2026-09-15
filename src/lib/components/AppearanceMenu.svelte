@@ -9,24 +9,24 @@
   import { detectOs } from '$lib/platform.js'
 
   const isMac = typeof navigator !== 'undefined' && detectOs() === 'macos'
-  const mod   = isMac ? '⌘' : 'Ctrl'
+  const mod = isMac ? '⌘' : 'Ctrl'
 
   let {
-    sidebarVisible        = true,
-    tabBarVisible         = true,
-    tableToolbarVisible   = true,
-    statusBarVisible      = true,
-    ontoggleSidebar       = () => {},
-    ontoggletabbar        = () => {},
-    ontoggletabletoolbar  = () => {},
-    ontogglestatusbar     = () => {},
-    class: extraClass      = '',
+    sidebarVisible = true,
+    tabBarVisible = true,
+    tableToolbarVisible = true,
+    statusBarVisible = true,
+    ontoggleSidebar = () => {},
+    ontoggletabbar = () => {},
+    ontoggletabletoolbar = () => {},
+    ontogglestatusbar = () => {},
+    class: extraClass = '',
   } = $props()
 </script>
 
 <DropdownMenu.Root>
   <DropdownMenu.Trigger
-    class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground {extraClass}"
+    class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-muted/50 data-[state=open]:text-foreground {extraClass}"
     title="Appearance"
     aria-label="Appearance"
   >
@@ -40,7 +40,7 @@
       <PanelLeft class="size-3.5 shrink-0 text-muted-foreground" />
       <span class="min-w-0 flex-1 truncate whitespace-nowrap">Sidebar</span>
       <span class="ml-auto flex shrink-0 items-center gap-2">
-        {#if sidebarVisible}<Check class="size-3 shrink-0 text-muted-foreground/70" />{:else}<span class="size-3 shrink-0"></span>{/if}
+        {#if sidebarVisible}<Check class="size-3 shrink-0 text-muted-foreground" />{:else}<span class="size-3 shrink-0"></span>{/if}
         <span class="flex items-center gap-[3px]"><kbd>{mod}</kbd><kbd>B</kbd></span>
       </span>
     </DropdownMenu.Item>
@@ -49,7 +49,7 @@
       <PanelTop class="size-3.5 shrink-0 text-muted-foreground" />
       <span class="min-w-0 flex-1 truncate whitespace-nowrap">Tab Bar</span>
       <span class="ml-auto flex shrink-0 items-center gap-2">
-        {#if tabBarVisible}<Check class="size-3 shrink-0 text-muted-foreground/70" />{:else}<span class="size-3 shrink-0"></span>{/if}
+        {#if tabBarVisible}<Check class="size-3 shrink-0 text-muted-foreground" />{:else}<span class="size-3 shrink-0"></span>{/if}
         <span class="flex items-center gap-[3px]"><kbd>{mod}</kbd><kbd>⇧</kbd><kbd>T</kbd></span>
       </span>
     </DropdownMenu.Item>
@@ -58,7 +58,7 @@
       <Rows3 class="size-3.5 shrink-0 text-muted-foreground" />
       <span class="min-w-0 flex-1 truncate whitespace-nowrap">Table Toolbar</span>
       <span class="ml-auto flex shrink-0 items-center">
-        {#if tableToolbarVisible}<Check class="size-3 shrink-0 text-muted-foreground/70" />{:else}<span class="size-3 shrink-0"></span>{/if}
+        {#if tableToolbarVisible}<Check class="size-3 shrink-0 text-muted-foreground" />{:else}<span class="size-3 shrink-0"></span>{/if}
       </span>
     </DropdownMenu.Item>
 
@@ -68,7 +68,7 @@
       <PanelBottom class="size-3.5 shrink-0 text-muted-foreground" />
       <span class="min-w-0 flex-1 truncate whitespace-nowrap">Status Bar</span>
       <span class="ml-auto flex shrink-0 items-center gap-2">
-        {#if statusBarVisible}<Check class="size-3 shrink-0 text-muted-foreground/70" />{:else}<span class="size-3 shrink-0"></span>{/if}
+        {#if statusBarVisible}<Check class="size-3 shrink-0 text-muted-foreground" />{:else}<span class="size-3 shrink-0"></span>{/if}
         <span class="flex items-center gap-[3px]"><kbd>{mod}</kbd><kbd>⇧</kbd><kbd>B</kbd></span>
       </span>
     </DropdownMenu.Item>

@@ -142,12 +142,12 @@
   })
 
   const numericCols = $derived(effectiveColumns.filter(c => colType(c) === 'number'))
-  const allCols     = $derived(effectiveColumns.map(c => c.name))
+  const allCols = $derived(effectiveColumns.map(c => c.name))
   const requiredAxes = $derived(getRequiredAxes(chartType))
 
-  let xCol     = $state('')
-  let yCol     = $state('')
-  let zCol     = $state('')
+  let xCol = $state('')
+  let yCol = $state('')
+  let zCol = $state('')
   let groupCol = $state('')
 
   // Seed / repair the axis selections when the available columns change, but
@@ -285,11 +285,11 @@
   }
 
   // ── Save panel ────────────────────────────────────────────────────────────
-  let saveOpen      = $state(false)
-  let saveName      = $state('')
-  let saveGroup     = $state('Default')
-  let newGroupMode  = $state(false)
-  let newGroupName  = $state('')
+  let saveOpen = $state(false)
+  let saveName = $state('')
+  let saveGroup = $state('Default')
+  let newGroupMode = $state(false)
+  let newGroupName = $state('')
 
   function openSavePanel() {
     saveName = ''; saveGroup = $chartGroups[0] ?? 'Default'
@@ -316,22 +316,22 @@
   // token IS the Select trigger, so the border, hover and focus ring are drawn
   // once by the primitive instead of a wrapper and a nested control each
   // painting their own (which is what made the focused state look doubled).
-  const axisToken = 'group h-7 shrink-0 gap-0 overflow-hidden rounded-md border-border/40 bg-muted/20 p-0 pr-1.5 transition-colors hover:border-border/60 hover:bg-muted/30 [&_svg]:size-3 [&_svg]:text-muted-foreground/40'
-  const axisLabel = 'flex h-full shrink-0 select-none items-center border-r border-border/30 px-2 text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/35'
+  const axisToken = 'group h-7 shrink-0 gap-0 overflow-hidden rounded-md border-border/40 bg-muted/20 p-0 pr-1.5 transition-colors hover:border-border/60 hover:bg-muted/30 [&_svg]:size-3 [&_svg]:text-muted-foreground'
+  const axisLabel = 'flex h-full shrink-0 select-none items-center border-r border-border/30 px-2 text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground'
   const axisValue = 'truncate px-2 font-mono text-ui-xs text-foreground'
   const axisContent = 'z-[120] max-h-[20rem] min-w-[11rem] p-1'
   // No radius here: Select.Item's own rounded-lg is derived from the panel's
   // radius minus its padding, and overriding it breaks that relationship.
   const axisItem = 'py-1.5 pl-2 font-mono text-ui-xs'
-  const iconBtn = 'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground'
+  const iconBtn = 'inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
 
   {#if !chartable}
     <div class="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-      <BarChart2 class="size-9 text-muted-foreground/20" />
-      <p class="text-ui-sm text-muted-foreground/50">Need at least one numeric column to chart</p>
+      <BarChart2 class="size-9 text-muted-foreground" />
+      <p class="text-ui-sm text-muted-foreground">Need at least one numeric column to chart</p>
     </div>
   {:else}
 
@@ -356,7 +356,7 @@
         >
           <BarChart2 class="size-3.5 shrink-0 text-muted-foreground" />
           <span>{currentEntry?.label ?? 'Chart'}</span>
-          <ChevronDown class={cn('size-3 shrink-0 text-muted-foreground/60 transition-transform', pickerOpen && 'rotate-180')} />
+          <ChevronDown class={cn('size-3 shrink-0 text-muted-foreground transition-transform', pickerOpen && 'rotate-180')} />
         </button>
 
         <!-- Searchable chart picker popover -->
@@ -370,15 +370,15 @@
           >
             <!-- Search -->
             <div class="flex items-center gap-2 border-b border-border/40 px-3 py-2">
-              <Search class="size-3.5 shrink-0 text-muted-foreground/50" />
+              <Search class="size-3.5 shrink-0 text-muted-foreground" />
               <input
                 type="text"
                 placeholder="Search chart types…"
                 bind:value={pickerSearch}
-                class="flex-1 bg-transparent font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40"
+                class="flex-1 bg-transparent font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
               />
               {#if pickerSearch}
-                <button type="button" onclick={() => (pickerSearch = '')} class="text-muted-foreground/40 hover:text-muted-foreground">
+                <button type="button" onclick={() => (pickerSearch = '')} class="text-muted-foreground hover:text-muted-foreground">
                   <X class="size-3.5" />
                 </button>
               {/if}
@@ -387,11 +387,11 @@
             <!-- Chart grid -->
             <div class="max-h-72 overflow-y-auto p-2">
               {#if filteredByGroup.length === 0}
-                <p class="py-6 text-center text-ui-xs text-muted-foreground/40">No charts match "{pickerSearch}"</p>
+                <p class="py-6 text-center text-ui-xs text-muted-foreground">No charts match "{pickerSearch}"</p>
               {:else}
                 {#each filteredByGroup as grp (grp.group)}
                   <div class="mb-2">
-                    <p class="mb-1 px-1 text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/40">{grp.group}</p>
+                    <p class="mb-1 px-1 text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground">{grp.group}</p>
                     <div class="flex flex-wrap gap-1">
                       {#each grp.charts as t (t.id)}
                         <button
@@ -478,7 +478,7 @@
 
       <!-- Right actions -->
       <div class="ml-auto flex items-center gap-0.5">
-        <span class="mr-1.5 tabular-nums font-mono text-ui-2xs text-muted-foreground/30">{rows.length.toLocaleString()} rows</span>
+        <span class="mr-1.5 tabular-nums font-mono text-ui-2xs text-muted-foreground">{rows.length.toLocaleString()} rows</span>
         <button type="button" class={iconBtn} title="Save chart" onclick={openSavePanel}>
           <Bookmark class="size-3.5" />
         </button>
@@ -494,12 +494,12 @@
     <!-- ── Save panel (inline below toolbar) ─────────────────────────── -->
     {#if saveOpen}
       <div class="flex shrink-0 items-center gap-2 border-b border-border/40 bg-muted/20 px-3 py-1.5">
-        <span class="text-ui-2xs font-medium text-muted-foreground/60">Save as</span>
+        <span class="text-ui-2xs font-medium text-muted-foreground">Save as</span>
         <input
           type="text"
           placeholder="Chart name…"
           bind:value={saveName}
-          class="h-6 w-40 rounded-lg border-2 border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+          class= "field-surface h-6 w-40 bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
         />
 
         {#if !newGroupMode}
@@ -507,7 +507,7 @@
             <Select.Trigger
               size="sm"
               aria-label="Chart group"
-              class="h-6 gap-1.5 rounded-md border-border/50 bg-background/60 px-2 font-mono text-ui-xs [&_svg]:size-3 [&_svg]:text-muted-foreground/50"
+              class= "field-surface h-6 gap-1.5 bg-background/60 px-2 font-mono text-ui-xs [&_svg]:size-3 [&_svg]:text-muted-foreground"
             >
               <span class="truncate">{saveGroup}</span>
             </Select.Trigger>
@@ -515,7 +515,7 @@
               {#each $chartGroups as g (g)}<Select.Item value={g} label={g} class={axisItem}>{g}</Select.Item>{/each}
             </Select.Content>
           </Select.Root>
-          <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:text-foreground" title="New group" onclick={() => { newGroupMode = true }}>
+          <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" title="New group" onclick={() => { newGroupMode = true }}>
             <Plus class="size-3.5" />
           </button>
         {:else}
@@ -523,9 +523,9 @@
             type="text"
             placeholder="New group name…"
             bind:value={newGroupName}
-            class="h-6 w-36 rounded-lg border-2 border-border bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class= "field-surface h-6 w-36 bg-background/80 px-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
           />
-          <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 hover:text-foreground" onclick={() => (newGroupMode = false)}>
+          <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground" onclick={() => (newGroupMode = false)}>
             <X class="size-3" />
           </button>
         {/if}
@@ -554,7 +554,7 @@
       <svelte:boundary>
         {#if rows.length === 0}
           <div class="absolute inset-0 flex items-center justify-center">
-            <p class="text-ui-sm text-muted-foreground/40">No data to display</p>
+            <p class="text-ui-sm text-muted-foreground">No data to display</p>
           </div>
         {:else if chartType === 'meter' && meterSpec}
           <CarbonMeterChart spec={meterSpec} />
@@ -562,14 +562,14 @@
           <EChartPanel {option} {renderer} class="absolute inset-0" />
         {/if}
         {#if sampled}
-          <div class="pointer-events-none absolute bottom-1 right-2 rounded bg-background/70 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/70">
+          <div class="pointer-events-none absolute bottom-1 right-2 rounded bg-background/70 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground">
             sampled {MAX_CHART_ROWS.toLocaleString()} of {rows.length.toLocaleString()} rows
           </div>
         {/if}
         {#snippet failed(error, reset)}
           <div class="absolute inset-0 flex flex-col items-center justify-center gap-2 p-6 text-center">
             <p class="text-ui-sm font-medium text-foreground/80">This chart couldn't render</p>
-            <p class="max-w-md font-mono text-ui-2xs text-muted-foreground/60">{error instanceof Error ? error.message : String(error)}</p>
+            <p class="max-w-md font-mono text-ui-2xs text-muted-foreground">{error instanceof Error ? error.message : String(error)}</p>
             <button type="button" class="mt-1 rounded-md border border-border px-2 py-1 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" onclick={reset}>Retry</button>
           </div>
         {/snippet}

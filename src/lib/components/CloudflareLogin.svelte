@@ -243,13 +243,13 @@
           <span class="inline-flex items-center gap-1 text-ui-3xs font-normal text-success"><Check class="size-3" />Connected</span>
         </p>
         {#if email}
-          <p class="truncate text-ui-3xs text-muted-foreground/50">{email}</p>
+          <p class="truncate text-ui-3xs text-muted-foreground">{email}</p>
         {/if}
       </div>
       <button
         type="button"
         title="Disconnect"
-        class="shrink-0 rounded p-1 text-muted-foreground/40 hover:text-destructive transition-colors"
+        class="shrink-0 rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
         onclick={handleLogout}
       >
         <LogOut class="size-3.5" />
@@ -259,7 +259,7 @@
     <!-- Account selector -->
     {#if accounts.length > 1}
       <div class="flex flex-col gap-1.5">
-        <span class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">Account</span>
+        <span class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">Account</span>
         <SearchableMenu
           items={accounts.map((a) => ({ value: a.id, label: a.name }))}
           placeholder="Search accounts…"
@@ -271,7 +271,7 @@
             <button
               {...props}
               type="button"
-              class="flex h-9 w-full items-center gap-2 rounded-lg border-2 border-border/60 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none data-[state=open]:border-ring"
+              class= "field-surface flex h-9 w-full items-center gap-2 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover: focus:outline-none data-[state=open]:border-ring"
             >
               <span class={cn('min-w-0 flex-1 truncate', !selectedAccountId && 'text-muted-foreground')}>
                 {selectedAccountName || '- select account -'}
@@ -280,20 +280,20 @@
             </button>
           {/snippet}
           {#snippet item(it)}
-            <DbIcon id="d1" class="size-3.5 shrink-0 text-muted-foreground/45" />
+            <DbIcon id="d1" class="size-3.5 shrink-0 text-muted-foreground" />
             <span class="min-w-0 flex-1 truncate">{it.label}</span>
             {#if it.value === selectedAccountId}<Check class="size-3.5 shrink-0 text-primary" />{/if}
           {/snippet}
         </SearchableMenu>
       </div>
     {:else if accounts.length === 1}
-      <p class="text-ui-2xs text-muted-foreground/50">Account · <span class="text-foreground/70">{accounts[0].name}</span></p>
+      <p class="text-ui-2xs text-muted-foreground">Account · <span class="text-foreground/70">{accounts[0].name}</span></p>
     {/if}
 
     <!-- Database selector -->
     {#if selectedAccountId}
       <div class="flex flex-col gap-1.5">
-        <span class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">D1 Database</span>
+        <span class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">D1 Database</span>
 
         {#if databases.length > 0}
           <SearchableMenu
@@ -308,9 +308,9 @@
               <button
                 {...props}
                 type="button"
-                class="flex h-9 w-full items-center gap-2 rounded-lg border-2 border-border/60 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none data-[state=open]:border-ring"
+                class= "field-surface flex h-9 w-full items-center gap-2 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover: focus:outline-none data-[state=open]:border-ring"
               >
-                <DbIcon id="d1" class={cn('size-4 shrink-0', selectedDbName ? 'text-foreground' : 'text-muted-foreground/45')} />
+                <DbIcon id="d1" class={cn('size-4 shrink-0', selectedDbName ? 'text-foreground' : 'text-muted-foreground')} />
                 <span class={cn('min-w-0 flex-1 truncate font-mono', !selectedDbName && 'font-sans text-muted-foreground')}>
                   {selectedDbName || '- select database -'}
                 </span>
@@ -318,7 +318,7 @@
               </button>
             {/snippet}
             {#snippet item(it)}
-              <DbIcon id="d1" class={cn('size-4 shrink-0', it.value === selectedDbUuid ? 'text-foreground' : 'text-muted-foreground/50')} />
+              <DbIcon id="d1" class={cn('size-4 shrink-0', it.value === selectedDbUuid ? 'text-foreground' : 'text-muted-foreground')} />
               <span class="min-w-0 flex-1 truncate font-mono leading-snug">{it.label}</span>
               {#if it.value === selectedDbUuid}<Check class="size-3.5 shrink-0 text-primary" />{/if}
             {/snippet}
@@ -326,17 +326,17 @@
         {:else if loadingDbs}
           <!-- Hold the control's footprint while the list loads so the form does
                not jump once the databases arrive. -->
-          <div class="flex h-9 w-full items-center gap-2 rounded-lg border border-border/60 bg-muted/15 pl-3 pr-2.5 text-ui-xs text-muted-foreground/50">
+                 <div class= "field-surface flex h-9 w-full items-center gap-2 bg-muted/15 pl-3 pr-2.5 text-ui-xs text-muted-foreground">
             <Loader2 class="size-3.5 shrink-0 animate-spin" />
             <span class="min-w-0 flex-1 truncate">Loading databases…</span>
           </div>
         {:else}
           <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-6 text-center">
-            <DbIcon id="d1" class="size-5 text-muted-foreground/25" />
-            <p class="text-ui-2xs text-muted-foreground/50">No D1 databases in this account.</p>
+            <DbIcon id="d1" class="size-5 text-muted-foreground" />
+            <p class="text-ui-2xs text-muted-foreground">No D1 databases in this account.</p>
             <button
               type="button"
-              class="flex items-center gap-1 text-ui-3xs text-muted-foreground/40 hover:text-muted-foreground"
+              class="flex items-center gap-1 text-ui-3xs text-muted-foreground hover:text-muted-foreground"
               onclick={() => selectAccount(selectedAccountId)}
             >
               <RefreshCw class="size-3" /> Retry

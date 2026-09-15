@@ -125,7 +125,7 @@
           {#if t.code}
             <pre class="app-scroll mt-1 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/40 bg-muted/30 px-2 py-1.5 font-mono text-ui-2xs leading-snug text-foreground/85">{t.description}</pre>
           {:else}
-            <div class="mt-0.5 text-ui-2xs leading-snug text-muted-foreground/80">
+            <div class="mt-0.5 text-ui-2xs leading-snug text-muted-foreground">
               {t.description}
             </div>
           {/if}
@@ -144,7 +144,7 @@
       <button
         type="button"
         aria-label="Close"
-        class="absolute right-1.5 top-1.5 z-10 flex size-5 items-center justify-center rounded-md text-muted-foreground/45 opacity-0 transition-[opacity,background-color,color,transform] duration-200 hover:bg-foreground/[0.06] hover:text-foreground active:scale-95 group-hover/toast:opacity-100 dark:hover:bg-white/[0.08]"
+        class="absolute right-1.5 top-1.5 z-10 flex size-5 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,background-color,color,transform] duration-200 hover:bg-foreground/[0.06] hover:text-foreground active:scale-95 group-hover/toast:opacity-100 dark:hover:bg-white/[0.08]"
         onclick={() => toast.dismiss(t.id)}
       >
         <X class="size-3" strokeWidth={2.25} />

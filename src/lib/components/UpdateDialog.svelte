@@ -18,17 +18,17 @@
   } = $props()
 
   /** @type {'idle'|'available'|'downloading'|'done'|'error'|'up-to-date'} */
-  let status          = $state('idle')
-  let updateVersion   = $state('')
-  let releaseNotes    = $state('')
-  let progress        = $state(0)
+  let status = $state('idle')
+  let updateVersion = $state('')
+  let releaseNotes = $state('')
+  let progress = $state(0)
   let downloadedBytes = $state(0)
-  let totalBytes      = $state(0)
-  let errorMsg        = $state('')
+  let totalBytes = $state(0)
+  let errorMsg = $state('')
   /** @type {import('@tauri-apps/plugin-updater').Update | null} */
-  let pendingUpdate   = $state(null)
-  let dismissed       = $state(false)
-  let checking        = $state(false)
+  let pendingUpdate = $state(null)
+  let dismissed = $state(false)
+  let checking = $state(false)
 
   /** Manually trigger an update check (e.g. from the command palette). */
   export async function checkNow() {
@@ -144,7 +144,7 @@
       console.info('[updater] update available:', update.version)
       pendingUpdate = update
       updateVersion = update.version
-      releaseNotes  = update.body ?? ''
+      releaseNotes = update.body ?? ''
       status = 'available'
       onupdatefound()
     } catch (e) {
@@ -222,7 +222,7 @@
     {/if}
 
     <div
-      class="pointer-events-auto relative w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border/60 bg-background elevate-3-rim"
+      class="pointer-events-auto relative w-[min(26.25rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border/60 bg-background elevate-3-rim"
     >
       <!-- header row -->
       <div class="flex items-center gap-3 border-b border-border/40 px-5 py-3.5">
@@ -232,11 +232,11 @@
           {:else if status === 'error'}
             <AlertCircle class="size-4 text-destructive" />
           {:else if checking}
-            <Loader2 class="size-4 animate-spin text-primary/70" />
+            <Loader2 class="size-4 animate-spin text-primary" />
           {:else if status === 'available'}
             <Sparkles class="size-4 text-primary" />
           {:else}
-            <Download class="size-4 text-primary/70" />
+            <Download class="size-4 text-primary" />
           {/if}
         </div>
 
@@ -260,7 +260,7 @@
           <button
             type="button"
             onclick={() => (dismissed = true)}
-            class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+            class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             aria-label="Dismiss"
           >
             <X class="size-4" />
@@ -277,7 +277,7 @@
             <button
               type="button"
               onclick={openChangelog}
-              class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-ui-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              class= "field-surface inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-ui-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <ScrollText class="size-3.5 shrink-0" />
               Release Notes
@@ -318,7 +318,7 @@
               <button
                 type="button"
                 onclick={openChangelog}
-                class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-ui-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                class= "field-surface inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-ui-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <ScrollText class="size-3.5 shrink-0" />
                 What's New
@@ -345,11 +345,11 @@
             <button
               type="button"
               onclick={openChangelog}
-              class="mt-4 inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-ui-sm text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.97]"
+              class= "field-surface mt-4 inline-flex h-9 items-center gap-1.5 px-3 text-ui-sm text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted hover:text-foreground active:scale-[0.97]"
             >
               <ScrollText class="size-3.5 shrink-0" />
               View changelog
-              <ExternalLink class="ml-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+              <ExternalLink class="ml-0.5 size-3.5 shrink-0 text-muted-foreground" />
             </button>
           {/if}
         {/if}

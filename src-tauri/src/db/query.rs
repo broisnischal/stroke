@@ -1123,6 +1123,43 @@ fn is_date_only(s: &str) -> bool {
         && b[8..10].iter().all(u8::is_ascii_digit)
 }
 
+/// Whether `v` can be parsed as the type `cast` names.
+///
+/// A filter value is typed by the user, so "asdf" on a uuid column is routine,
+/// not exceptional - but the comparison binds it as `$1::uuid` and Postgres
+/// rejects the whole statement, so the grid showed "invalid input syntax for
+/// type uuid" where it should have shown an empty table. A value that cannot be
+/// parsed also cannot equal any row, which is a *result*, not an error: callers
+/// below turn a `false` here into a constant condition and the query returns
+/// zero rows.
+///
+/// Deliberately permissive about shape, strict only about what Postgres itself
+/// would refuse. Timestamps are left to the server: the accepted grammar is far
+/// wider than anything worth reimplementing here, and a malformed one is rare
+/// enough that erroring is acceptable.
+fn value_parses_as(cast: &str, v: &str) -> bool {
+    let t = v.trim();
+    match cast {
+        "::bigint" => t.parse::<i64>().is_ok(),
+        "::float8" => t.parse::<f64>().is_ok(),
+        "::numeric" => {
+            !t.is_empty()
+                && t.parse::<f64>().is_ok()
+        }
+        "::boolean" => matches!(
+            t.to_ascii_lowercase().as_str(),
+            "t" | "f" | "true" | "false" | "y" | "n" | "yes" | "no" | "on" | "off" | "1" | "0"
+        ),
+        "::uuid" => {
+            // 32 hex digits, with or without the four dashes, optionally braced.
+            let core = t.trim_start_matches('{').trim_end_matches('}');
+            let hex: Vec<char> = core.chars().filter(|c| *c != '-').collect();
+            hex.len() == 32 && hex.iter().all(|c| c.is_ascii_hexdigit())
+        }
+        _ => true,
+    }
+}
+
 fn build_filter_condition(
     builder: &mut QueryBuilder,
     column: &str,
@@ -1133,6 +1170,17 @@ fn build_filter_condition(
 ) -> Result<(), String> {
     let col = quoted_column(column)?;
     let cast = pg_param_cast(data_type);
+    // A value the column's type cannot represent matches nothing, so say that in
+    // SQL rather than letting the cast blow up the statement. `neq` inverts: a
+    // value no row can hold is distinct from every row, so every row matches.
+    if matches!(op, "eq" | "neq" | "gt" | "gte" | "lt" | "lte") {
+        let v = value.unwrap_or("");
+        if !cast.is_empty() && !value_parses_as(cast, v) {
+            let cond = if op == "neq" { "TRUE" } else { "FALSE" };
+            builder.push_condition(cond.to_string(), conjunct);
+            return Ok(());
+        }
+    }
     // A bare date on a timestamp column means "the whole day", handled per-op
     // below (half-open [date, date+1) ranges). Pure `date`/`time` columns and
     // values that carry a time-of-day keep exact comparison.

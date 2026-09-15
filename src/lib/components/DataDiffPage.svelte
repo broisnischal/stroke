@@ -237,12 +237,12 @@
   })
 
   const vStart = $derived(Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER))
-  const vEnd   = $derived(Math.min(displayRows.length, Math.ceil((scrollTop + clientHeight) / ROW_HEIGHT) + BUFFER))
+  const vEnd = $derived(Math.min(displayRows.length, Math.ceil((scrollTop + clientHeight) / ROW_HEIGHT) + BUFFER))
   const topPad = $derived(vStart * ROW_HEIGHT)
   const bottomPad = $derived(Math.max(0, (displayRows.length - vEnd) * ROW_HEIGHT))
 
   // ── Helpers ───────────────────────────────────────────────────────────────────
-  const connById  = (/** @type {string} */ id) => connections.find((c) => c.id === id) ?? null
+  const connById = (/** @type {string} */ id) => connections.find((c) => c.id === id) ?? null
   const isCurrent = (/** @type {string} */ id) => id === currentConnectionId
 
   /** @param {SourceState} src @returns {SavedConnection|null} */
@@ -475,22 +475,22 @@
       class={cn(
         'flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-ui-xs transition-colors select-none',
         loading
-          ? 'border-border/30 bg-muted/15 text-muted-foreground/40'
+          ? 'border-border/30 bg-muted/15 text-muted-foreground'
           : value
             ? 'border-border/40 bg-muted/25 text-foreground/90 hover:bg-muted/45'
             : options.length
-              ? 'border-dashed border-border/40 bg-transparent text-muted-foreground/45 hover:border-border/60 hover:text-muted-foreground/75'
-              : 'cursor-default border-border/20 bg-transparent text-muted-foreground/20 pointer-events-none',
+              ? 'border-dashed border-border/40 bg-transparent text-muted-foreground hover:border-border/60 hover:text-muted-foreground'
+              : 'cursor-default border-border/20 bg-transparent text-muted-foreground pointer-events-none',
         isOpen && 'border-border/70 bg-muted/50 text-foreground',
       )}
     >
       {#if loading}
-        <Loader2 class="size-3 animate-spin text-muted-foreground/30" />
-        <span class="text-muted-foreground/40">{placeholder}</span>
+        <Loader2 class="size-3 animate-spin text-muted-foreground" />
+        <span class="text-muted-foreground">{placeholder}</span>
       {:else}
         <span class={cn('max-w-[140px] truncate', value && 'font-medium')}>{value || placeholder}</span>
         {#if options.length > 0 || value}
-          <ChevronDown class={cn('ml-auto size-3 shrink-0 text-muted-foreground/40 transition-transform', isOpen && 'rotate-180')} />
+          <ChevronDown class={cn('ml-auto size-3 shrink-0 text-muted-foreground transition-transform', isOpen && 'rotate-180')} />
         {/if}
       {/if}
     </button>
@@ -502,14 +502,14 @@
         onpointerdown={(e) => e.stopPropagation()}
       >
         <div class="flex items-center gap-2 border-b border-border/25 px-3 py-2">
-          <Search class="size-3 shrink-0 text-muted-foreground/35" />
+          <Search class="size-3 shrink-0 text-muted-foreground" />
           <input use:focusNode type="text" bind:value={dropdownSearch} placeholder="Search…"
-            class="flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground/25" />
-          {#if dropdownSearch}<button onclick={() => { dropdownSearch = '' }} class="text-muted-foreground/35 hover:text-foreground"><X class="size-3" /></button>{/if}
+            class="flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground" />
+          {#if dropdownSearch}<button onclick={() => { dropdownSearch = '' }} class="text-muted-foreground hover:text-foreground"><X class="size-3" /></button>{/if}
         </div>
         <div class="max-h-52 overflow-y-auto py-1">
           {#if filtered.length === 0}
-            <p class="px-3 py-2 text-ui-xs text-muted-foreground/35">No results</p>
+            <p class="px-3 py-2 text-ui-xs text-muted-foreground">No results</p>
           {:else}
             {#each filtered as opt}
               <button type="button" onclick={() => { onchange(opt); closeDd() }}
@@ -538,7 +538,7 @@
     >
       {#if value === currentConnectionId}<span class="size-1.5 shrink-0 rounded-full bg-info" title="Active connection"></span>{/if}
       <span class="max-w-[140px] truncate">{selected?.name ?? 'Connection'}</span>
-      <ChevronDown class={cn('ml-auto size-3 shrink-0 text-muted-foreground/40 transition-transform', isOpen && 'rotate-180')} />
+      <ChevronDown class={cn('ml-auto size-3 shrink-0 text-muted-foreground transition-transform', isOpen && 'rotate-180')} />
     </button>
     {#if isOpen}
       <div
@@ -548,13 +548,13 @@
         onpointerdown={(e) => e.stopPropagation()}
       >
         <div class="flex items-center gap-2 border-b border-border/25 px-3 py-2">
-          <Search class="size-3 shrink-0 text-muted-foreground/35" />
+          <Search class="size-3 shrink-0 text-muted-foreground" />
           <input use:focusNode type="text" bind:value={dropdownSearch} placeholder="Search connections…"
-            class="flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground/25" />
+            class="flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground" />
         </div>
         <div class="max-h-52 overflow-y-auto py-1">
           {#if filtered.length === 0}
-            <p class="px-3 py-2 text-ui-xs text-muted-foreground/35">No results</p>
+            <p class="px-3 py-2 text-ui-xs text-muted-foreground">No results</p>
           {:else}
             {#each filtered as conn}
               <button type="button" onclick={() => { onchange(conn.id); closeDd() }}
@@ -562,7 +562,7 @@
               >
                 <span class={cn('w-3 shrink-0 text-center text-ui-3xs', value === conn.id ? 'text-primary' : 'opacity-0')}>✓</span>
                 <span class="flex-1 truncate text-left">{conn.name}</span>
-                {#if conn.id === currentConnectionId}<span class="shrink-0 text-ui-3xs text-info/60">active</span>{/if}
+                {#if conn.id === currentConnectionId}<span class="shrink-0 text-ui-3xs text-info">active</span>{/if}
               </button>
             {/each}
           {/if}
@@ -576,9 +576,9 @@
 {#snippet ModeToggle({ mode, onset })}
   <div class="flex shrink-0 items-center rounded-md border border-border/40 bg-muted/15 p-0.5 text-ui-2xs">
     <button onclick={() => onset('table')}
-      class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'table' ? 'bg-muted text-foreground' : 'text-muted-foreground/45 hover:text-muted-foreground/80')}>Table</button>
+      class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'table' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-muted-foreground')}>Table</button>
     <button onclick={() => onset('sql')}
-      class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'sql' ? 'bg-muted text-foreground' : 'text-muted-foreground/45 hover:text-muted-foreground/80')}>SQL</button>
+      class={cn('rounded px-2 py-0.5 font-medium transition-colors', mode === 'sql' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-muted-foreground')}>SQL</button>
   </div>
 {/snippet}
 
@@ -595,7 +595,7 @@
         <div class="flex items-center gap-2.5 px-5 py-2.5">
           <span class="flex w-[74px] shrink-0 items-center gap-1.5">
             <span class="size-1.5 shrink-0 rounded-full bg-info"></span>
-            <span class="text-ui-3xs font-semibold uppercase tracking-wider text-info/90">Source</span>
+            <span class="text-ui-3xs font-semibold uppercase tracking-wider text-info">Source</span>
           </span>
           {@render ConnSelect({ id: 'L.conn', value: L.connId, onchange: (v) => { L = { ...L, connId: v }; onConnChange('L') } })}
           {#if L.mode === 'table'}
@@ -613,7 +613,7 @@
             onclick={swapSources}
             title="Swap source and target"
             aria-label="Swap source and target"
-            class="mx-2 flex size-6 items-center justify-center rounded-md border border-border/40 bg-muted/20 text-muted-foreground/50 transition-colors hover:bg-muted/50 hover:text-foreground"
+            class="mx-2 flex size-6 items-center justify-center rounded-md border border-border/40 bg-muted/20 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
           >
             <ArrowUpDown class="size-3" />
           </button>
@@ -624,7 +624,7 @@
         <div class="flex items-center gap-2.5 px-5 py-2.5">
           <span class="flex w-[74px] shrink-0 items-center gap-1.5">
             <span class="size-1.5 shrink-0 rounded-full bg-success"></span>
-            <span class="text-ui-3xs font-semibold uppercase tracking-wider text-success/90">Target</span>
+            <span class="text-ui-3xs font-semibold uppercase tracking-wider text-success">Target</span>
           </span>
           {@render ConnSelect({ id: 'R.conn', value: R.connId, onchange: (v) => { R = { ...R, connId: v }; onConnChange('R') } })}
           {#if R.mode === 'table'}
@@ -646,7 +646,7 @@
 
     <!-- Key cols + compare -->
     <div class="flex items-center gap-2.5 border-t border-border/15 px-5 py-2.5">
-      <span class="w-[74px] shrink-0 text-ui-3xs font-semibold uppercase tracking-wider text-muted-foreground/40" title="Columns used to match rows between source and target">Key cols</span>
+      <span class="w-[74px] shrink-0 text-ui-3xs font-semibold uppercase tracking-wider text-muted-foreground" title="Columns used to match rows between source and target">Key cols</span>
       <div class="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {#each [...selectedKeyCols] as col}
           <button onclick={() => toggleKeyCol(col)}
@@ -655,11 +655,11 @@
         {/each}
         {#each keyColSuggestions.filter((c) => !selectedKeyCols.has(c)) as col}
           <button onclick={() => toggleKeyCol(col)}
-            class="flex items-center gap-1 rounded-full border border-dashed border-border/40 px-2.5 py-0.5 text-ui-2xs text-muted-foreground/40 transition-colors hover:border-primary/40 hover:text-primary"
-          ><Plus class="size-2.5" />{col}</button>
+            class="flex items-center gap-1 rounded-full border border-dashed border-border/40 px-2.5 py-0.5 text-ui-2xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+          ><Plus class="size-3" />{col}</button>
         {/each}
         {#if !keyColSuggestions.length && !selectedKeyCols.size}
-          <span class="text-ui-2xs italic text-muted-foreground/20">auto, uses first column</span>
+          <span class="text-ui-2xs italic text-muted-foreground">auto, uses first column</span>
         {/if}
       </div>
       <button onclick={compare} disabled={comparing}
@@ -683,12 +683,12 @@
     <div class="flex shrink-0 items-end gap-0 px-5">
 
       {#each [
-        { key: 'all',       label: 'All',       count: diffRows.length,                          badge: 'bg-muted/30 text-muted-foreground/50',           active: 'text-foreground' },
-        { key: 'changed',   label: 'Changed',   count: stats.added+stats.modified+stats.removed, badge: 'bg-muted/30 text-muted-foreground/50',           active: 'text-foreground' },
+        { key: 'all',       label: 'All',       count: diffRows.length,                          badge: 'bg-muted/30 text-muted-foreground',           active: 'text-foreground' },
+        { key: 'changed',   label: 'Changed',   count: stats.added+stats.modified+stats.removed, badge: 'bg-muted/30 text-muted-foreground',           active: 'text-foreground' },
         { key: 'added',     label: 'Added',     count: stats.added,                              badge: 'bg-success/10 text-success',                     active: 'text-success' },
         { key: 'modified',  label: 'Modified',  count: stats.modified,                           badge: 'bg-warning/10 text-warning',                     active: 'text-warning' },
         { key: 'removed',   label: 'Removed',   count: stats.removed,                            badge: 'bg-destructive/10 text-destructive',             active: 'text-destructive' },
-        { key: 'unchanged', label: 'Unchanged', count: stats.unchanged,                          badge: 'bg-muted/30 text-muted-foreground/50',           active: 'text-foreground' },
+        { key: 'unchanged', label: 'Unchanged', count: stats.unchanged,                          badge: 'bg-muted/30 text-muted-foreground',           active: 'text-foreground' },
       ] as f}
         <button
           onclick={() => { activeFilter = f.key }}
@@ -696,29 +696,29 @@
             'flex items-center gap-1.5 border-b-2 pb-2.5 pt-2 px-3 text-ui-xs transition-all',
             activeFilter === f.key
               ? cn('border-current font-medium', f.active)
-              : 'border-transparent text-muted-foreground/55 hover:text-muted-foreground/80'
+              : 'border-transparent text-muted-foreground hover:text-muted-foreground'
           )}
         >
           {f.label}
           {#if f.count > 0}
             <span class={cn(
               'rounded px-1.5 py-0.5 font-mono text-ui-3xs leading-none transition-colors',
-              activeFilter === f.key ? f.badge : 'bg-muted/30 text-muted-foreground/45'
+              activeFilter === f.key ? f.badge : 'bg-muted/30 text-muted-foreground'
             )}>{f.count}</span>
           {/if}
         </button>
       {/each}
 
       <div class="ml-auto flex items-center gap-2 pb-2.5 pl-4">
-        <Search class="size-3 shrink-0 text-muted-foreground/50" />
+        <Search class="size-3 shrink-0 text-muted-foreground" />
         <input type="text" bind:value={searchQuery} placeholder="Search rows…"
-          class="w-36 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground/40 focus:w-52 transition-all" />
+          class="w-36 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground focus:w-52 transition-all" />
         {#if searchQuery}
-          <button onclick={() => { searchQuery = '' }} class="text-muted-foreground/50 hover:text-foreground transition-colors">
+          <button onclick={() => { searchQuery = '' }} class="text-muted-foreground hover:text-foreground transition-colors">
             <X class="size-3" />
           </button>
         {:else}
-          <span class="text-ui-2xs text-muted-foreground/40 tabular-nums">
+          <span class="text-ui-2xs text-muted-foreground tabular-nums">
             {displayRows.length}{displayRows.length !== diffRows.length ? `/${diffRows.length}` : ''}
           </span>
         {/if}
@@ -749,7 +749,7 @@
               >
                 <div class="flex min-w-0 items-baseline gap-1.5 px-3 py-2.5 pr-5">
                   <span class="truncate font-semibold text-foreground/75 text-ui-2xs">{col.name}</span>
-                  {#if col.dataType && col.dataType.toLowerCase() !== 'null'}<span class="shrink-0 font-normal text-muted-foreground/35 text-ui-3xs">{col.dataType}</span>{/if}
+                  {#if col.dataType && col.dataType.toLowerCase() !== 'null'}<span class="shrink-0 font-normal text-muted-foreground text-ui-3xs">{col.dataType}</span>{/if}
                 </div>
                 <!-- Resize handle -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -767,8 +767,8 @@
         <tbody>
           {#if topPad > 0}<tr style="height:{topPad}px"><td colspan={columns.length + 2}></td></tr>{/if}
           {#each displayRows.slice(vStart, vEnd) as row}
-            {@const isAdded    = row.status === 'added'}
-            {@const isRemoved  = row.status === 'removed'}
+            {@const isAdded = row.status === 'added'}
+            {@const isRemoved = row.status === 'removed'}
             {@const isModified = row.status === 'modified'}
             {@const rowBg =
               isAdded    ? 'bg-success/[0.04]' :
@@ -779,8 +779,8 @@
             {@const statusColor =
               isAdded   ? 'text-success' :
               isRemoved ? 'text-destructive' :
-              isModified? 'text-warning/80' :
-              'text-muted-foreground/15'}
+              isModified? 'text-warning' :
+              'text-muted-foreground'}
             {@const accentColor =
               isAdded   ? 'bg-success/35' :
               isRemoved ? 'bg-destructive/35' :
@@ -792,35 +792,35 @@
               </td>
               {#each columns as _col, ci}
                 {@const isChanged = isModified && row.changedCols?.has(ci)}
-                {@const oldVal    = row.left?.[ci] ?? null}
-                {@const newVal    = row.right?.[ci] ?? null}
-                {@const dispVal   = isRemoved ? oldVal : newVal}
-                {@const dispStr   = dispVal === null ? '' : String(dispVal)}
+                {@const oldVal = row.left?.[ci] ?? null}
+                {@const newVal = row.right?.[ci] ?? null}
+                {@const dispVal = isRemoved ? oldVal : newVal}
+                {@const dispStr = dispVal === null ? '' : String(dispVal)}
                 <td class="overflow-hidden border-b border-border/8 px-3 font-mono text-ui-2xs">
                   {#if isChanged}
                     <div class="flex min-w-0 items-center gap-1.5">
                       {#if oldVal === null}
-                        <span class="shrink-0 text-ui-3xs italic text-destructive/45 line-through">NULL</span>
+                        <span class="shrink-0 text-ui-3xs italic text-destructive line-through">NULL</span>
                       {:else}
-                        <span class="min-w-0 flex-1 truncate text-ui-3xs text-destructive/55 line-through">{String(oldVal)}</span>
+                        <span class="min-w-0 flex-1 truncate text-ui-3xs text-destructive line-through">{String(oldVal)}</span>
                       {/if}
-                      <span class="shrink-0 font-sans text-ui-3xs text-muted-foreground/25">→</span>
+                      <span class="shrink-0 font-sans text-ui-3xs text-muted-foreground">→</span>
                       {#if newVal === null}
-                        <span class="shrink-0 text-ui-3xs italic text-success/70">NULL</span>
+                        <span class="shrink-0 text-ui-3xs italic text-success">NULL</span>
                       {:else}
-                        <span class="min-w-0 flex-1 truncate text-success/90">{String(newVal)}</span>
+                        <span class="min-w-0 flex-1 truncate text-success">{String(newVal)}</span>
                       {/if}
                     </div>
                   {:else if dispVal === null}
-                    <span class="italic text-muted-foreground/15">NULL</span>
+                    <span class="italic text-muted-foreground">NULL</span>
                   {:else if debouncedQuery}
-                    <span class="block overflow-hidden text-ellipsis whitespace-nowrap {isAdded ? 'text-success/80' : isRemoved ? 'text-destructive/60' : ''}">
+                    <span class="block overflow-hidden text-ellipsis whitespace-nowrap {isAdded ? 'text-success' : isRemoved ? 'text-destructive' : ''}">
                       {#each splitHighlight(dispStr, debouncedQuery) as seg}
                         {#if seg.match}<mark class="rounded-[2px] bg-primary/20 text-primary not-italic">{seg.text}</mark>{:else}{seg.text}{/if}
                       {/each}
                     </span>
                   {:else}
-                    <span class="block overflow-hidden text-ellipsis whitespace-nowrap {isAdded ? 'text-success/80' : isRemoved ? 'text-destructive/60' : ''}">{dispStr}</span>
+                    <span class="block overflow-hidden text-ellipsis whitespace-nowrap {isAdded ? 'text-success' : isRemoved ? 'text-destructive' : ''}">{dispStr}</span>
                   {/if}
                 </td>
               {/each}
@@ -834,7 +834,7 @@
 
   {:else if comparing}
     <div class="flex flex-1 items-center justify-center">
-      <Loader2 class="size-5 animate-spin text-muted-foreground/30" />
+      <Loader2 class="size-5 animate-spin text-muted-foreground" />
     </div>
   {:else}
     <div class="flex flex-1 flex-col items-center justify-center gap-4">
@@ -843,7 +843,7 @@
       </div>
       <div class="text-center">
         <p class="text-ui-sm font-medium text-foreground/40">Compare any two data sources</p>
-        <p class="mt-1 text-ui-xs text-muted-foreground/25">Tables or SQL, even across different hosts</p>
+        <p class="mt-1 text-ui-xs text-muted-foreground">Tables or SQL, even across different hosts</p>
       </div>
     </div>
   {/if}

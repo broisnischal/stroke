@@ -66,15 +66,15 @@
     {/if}
   {#if !tableState.table}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-      <Table2 class="size-6 text-muted-foreground/30" />
-      <p class="font-mono text-ui-xs text-muted-foreground/60">No table</p>
+      <Table2 class="size-6 text-muted-foreground" />
+      <p class="font-mono text-ui-xs text-muted-foreground">No table</p>
     </div>
   <!-- windowedHead: a huge result set whose rows live outside the tab state (only
        the focused pane holds the sparse array), so there is nothing to preview. -->
   {:else if tableState.columns.length === 0 || tableState.windowedHead}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-      <Table2 class="size-6 text-muted-foreground/30" />
-      <p class="font-mono text-ui-xs text-muted-foreground/60">Focus this pane to load {tableState.table}</p>
+      <Table2 class="size-6 text-muted-foreground" />
+      <p class="font-mono text-ui-xs text-muted-foreground">Focus this pane to load {tableState.table}</p>
     </div>
   {:else if tableState.dataViewMode === 'chart'}
     <!-- Preserve the active data-view when this pane is demoted from focused to
@@ -169,13 +169,13 @@
       </div>
     {:else}
       <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-        <TerminalSquare class="size-6 text-muted-foreground/25" />
+        <TerminalSquare class="size-6 text-muted-foreground" />
         {#if sqlState.sqlError}
-          <p class="max-w-md font-mono text-ui-2xs text-destructive/70">{sqlState.sqlError}</p>
+          <p class="max-w-md font-mono text-ui-2xs text-destructive">{sqlState.sqlError}</p>
         {:else if sqlState.sqlMessage}
-          <p class="font-mono text-ui-xs text-muted-foreground/60">{sqlState.sqlMessage}</p>
+          <p class="font-mono text-ui-xs text-muted-foreground">{sqlState.sqlMessage}</p>
         {:else}
-          <p class="font-mono text-ui-xs text-muted-foreground/50">
+          <p class="font-mono text-ui-xs text-muted-foreground">
             {sqlState.sqlText?.trim() ? 'No results yet' : 'Empty query'}
           </p>
         {/if}
@@ -184,10 +184,10 @@
   </div>
 {:else}
   <div class="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-    <PanelLeft class="size-7 text-muted-foreground/25" />
+    <PanelLeft class="size-7 text-muted-foreground" />
     <div class="space-y-1">
       <p class="text-ui-sm font-medium text-foreground/70">{tab ? tabDisplayTitle(tab) : 'Empty pane'}</p>
-      <p class="max-w-xs text-ui-xs text-muted-foreground/60">
+      <p class="max-w-xs text-ui-xs text-muted-foreground">
         Click this pane to focus it and interact with this view.
       </p>
     </div>

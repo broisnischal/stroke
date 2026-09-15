@@ -37,7 +37,7 @@
     { id: 'sql',     label: 'SQL',     engines: SQL_ENGINES,     ext: 'sql',    file: 'schema.sql' },
   ]
 
-  let target  = $state(/** @type {'prisma'|'drizzle'|'sql'} */ ('prisma'))
+  let target = $state(/** @type {'prisma'|'drizzle'|'sql'} */ ('prisma'))
   /** 'schema' = the schema in the sidebar; 'database' = every schema, one script.
    *  Only offered for the SQL target: DDL names are schema-qualified, so two
    *  schemas owning a `users` table produce two statements rather than a clash,
@@ -54,10 +54,10 @@
   // column, every index - and it is replaced wholesale by `load` and never
   // mutated. Deep $state proxied every one of those objects on a hundred-table
   // database for a value only ever read by the two renderers.
-  let model   = $state.raw(/** @type {import('$lib/orm-schema.js').OrmSchemaModel | null} */ (null))
+  let model = $state.raw(/** @type {import('$lib/orm-schema.js').OrmSchemaModel | null} */ (null))
   let loading = $state(true)
-  let error   = $state('')
-  let copied  = $state(false)
+  let error = $state('')
+  let copied = $state(false)
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let copyTimer
   onDestroy(() => clearTimeout(copyTimer))
@@ -84,7 +84,7 @@
     )
   }
 
-  const active    = $derived(TARGETS.find((t) => t.id === target) ?? TARGETS[0])
+  const active = $derived(TARGETS.find((t) => t.id === target) ?? TARGETS[0])
   const supported = $derived(active.engines.includes(dbType))
 
   /** The database scope is SQL-only, so anything else falls back to the schema. */
@@ -306,7 +306,7 @@
       {:else}
         {schema}
       {/if}
-      {#if tableCount}<span class="text-muted-foreground/50"> · {tableCount} {tableCount === 1 ? 'table' : 'tables'}</span>{/if}
+      {#if tableCount}<span class="text-muted-foreground"> · {tableCount} {tableCount === 1 ? 'table' : 'tables'}</span>{/if}
     </span>
 
     <span class="ml-auto flex shrink-0 items-center gap-1">
@@ -350,7 +350,7 @@
   {#if error}
     <div class="flex min-h-0 flex-1 items-center justify-center p-8">
       <div class="max-w-md text-center">
-        <Icon name="alert-circle" class="mx-auto size-5 text-destructive/70" />
+        <Icon name="alert-circle" class="mx-auto size-5 text-destructive" />
         <p class="mt-2 text-ui-sm text-foreground">Couldn't read this schema</p>
         <p class="mt-1 text-ui-xs text-muted-foreground">{error}</p>
       </div>
@@ -359,9 +359,9 @@
     <div class="flex min-h-0 flex-1 items-center justify-center p-8">
       <div class="max-w-md text-center">
         {#if active.id === 'sql'}
-          <Icon name="terminal" class="mx-auto size-6 text-muted-foreground/40" />
+          <Icon name="terminal" class="mx-auto size-6 text-muted-foreground" />
         {:else}
-          <DbIcon id={active.id} class="mx-auto size-6 text-muted-foreground/40" />
+          <DbIcon id={active.id} class="mx-auto size-6 text-muted-foreground" />
         {/if}
         <p class="mt-2 text-ui-sm text-foreground">{active.label} doesn't support this engine</p>
         <p class="mt-1 text-ui-xs text-muted-foreground">

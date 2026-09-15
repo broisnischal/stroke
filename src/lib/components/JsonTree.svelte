@@ -129,7 +129,7 @@
     {#if isContainer}
       <button
         type="button"
-        class="mt-[3px] flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-accent/50 hover:text-foreground"
+        class="mt-[3px] flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
         aria-label={expanded ? "Collapse" : "Expand"}
         aria-expanded={expanded}
         onclick={() => (expanded = !expanded)}
@@ -160,18 +160,18 @@
               if (isContainer) expanded = !expanded;
             }}
             tabindex={isContainer ? 0 : -1}>{label}</button
-          ><span class="text-muted-foreground/60">:</span>
+          ><span class="text-muted-foreground">:</span>
         {/if}
 
         {#if isContainer}
           <button
             type="button"
-            class="cursor-pointer select-none bg-transparent p-0 text-left text-muted-foreground/70 hover:text-foreground"
+            class="cursor-pointer select-none bg-transparent p-0 text-left text-muted-foreground hover:text-foreground"
             onclick={() => (expanded = !expanded)}
           >
             <span class="text-muted-foreground">{isArray ? "[" : "{"}</span
             >{#if !expanded}<span
-                class="px-1 text-ui-xs text-muted-foreground/60">{summary}</span
+                class="px-1 text-ui-xs text-muted-foreground">{summary}</span
               ><span class="text-muted-foreground">{isArray ? "]" : "}"}</span
               >{/if}
           </button>
@@ -181,11 +181,11 @@
 
         <!-- Hover actions -->
         <span
-          class="invisible ml-1 inline-flex shrink-0 items-center gap-0.5 group-hover/jsonrow:visible"
+          class="opacity-0 ml-1 inline-flex shrink-0 items-center gap-0.5 group-hover/jsonrow:opacity-100"
         >
           <button
             type="button"
-            class="flex size-4.5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent/50 hover:text-foreground"
+            class="flex size-4.5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
             title="Copy value"
             onclick={() => oncopy(value)}
           >
@@ -194,7 +194,7 @@
           {#if openable}
             <button
               type="button"
-              class="flex size-4.5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent/50 hover:text-foreground"
+              class="flex size-4.5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
               title="Open in JSON viewer"
               onclick={handleOpen}
             >

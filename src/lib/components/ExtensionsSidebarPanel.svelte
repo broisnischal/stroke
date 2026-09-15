@@ -141,12 +141,12 @@
 <div class="flex min-h-0 flex-1 flex-col">
   <!-- Sticky header -->
   <div class="flex h-9 shrink-0 items-center gap-1 px-2.5">
-    <span class="min-w-0 flex-1 truncate text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/50">
+    <span class="min-w-0 flex-1 truncate text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground">
       Extensions
     </span>
     <button
       type="button"
-      class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40"
+      class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40"
       title="Install a plugin from a folder"
       aria-label="Install a plugin from a folder"
       onclick={install}
@@ -156,7 +156,7 @@
     </button>
     <button
       type="button"
-      class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-accent/40 hover:text-foreground"
+      class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
       title="Rescan the plugins folder"
       aria-label="Rescan the plugins folder"
       onclick={() => void refreshExternalPlugins()}
@@ -170,14 +170,14 @@
     <div class="relative">
       <Icon
         name="search"
-        class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/60"
+        class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
       />
       <input
         type="text"
         bind:value={filter}
         placeholder="Search extensions"
         aria-label="Search extensions"
-        class="h-7 w-full min-w-0 rounded-lg border-2 border-border bg-background/40 pl-8 pr-2.5 text-ui-sm text-foreground shadow-none outline-none transition-colors hover:bg-background/55 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring"
+        class= "field-surface h-7 w-full min-w-0 bg-background/40 pl-8 pr-2.5 text-ui-sm text-foreground shadow-none outline-none transition-colors hover:bg-background/55 focus-visible:border-ring/55 focus-visible:ring-1 focus-visible:ring-ring"
       />
     </div>
   </div>
@@ -189,7 +189,7 @@
          Third-party plugins. Each runs in its own Worker with the network
          globals removed, so the worst a broken one can do is stop formatting. -->
     {#if filteredExternal.length > 0}
-      <p class="px-2.5 pt-1 pb-1 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/40">
+      <p class="px-2.5 pt-1 pb-1 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground">
         Installed
       </p>
       {#each filteredExternal as p (p.id)}
@@ -212,7 +212,7 @@
                 title="Reload from disk"
                 aria-label="Reload {p.name}"
                 onclick={() => void reload(p)}
-                class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-opacity hover:text-foreground group-hover/ext:opacity-100"
+                class="inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/ext:opacity-100"
               >
                 <Icon name="refresh-cw" class="size-3" />
               </button>
@@ -221,7 +221,7 @@
                 title="Remove, deleting its folder"
                 aria-label="Remove {p.name}"
                 onclick={() => void remove(p)}
-                class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-opacity hover:text-destructive group-hover/ext:opacity-100"
+                class="inline-flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/ext:opacity-100"
               >
                 <Icon name="trash-2" class="size-3" />
               </button>
@@ -250,29 +250,29 @@
             </div>
           </div>
           {#if p.error || err}
-            <p class="px-2.5 pb-1.5 text-ui-2xs text-destructive/80">{p.error || err}</p>
+            <p class="px-2.5 pb-1.5 text-ui-2xs text-destructive">{p.error || err}</p>
           {:else if p.permissions.length > 0}
-            <p class="px-2.5 pb-1.5 text-ui-2xs text-muted-foreground/50">Permissions: {p.permissions.join(", ")}</p>
+            <p class="px-2.5 pb-1.5 text-ui-2xs text-muted-foreground">Permissions: {p.permissions.join(", ")}</p>
           {/if}
         </div>
       {/each}
       <div class="my-1.5 h-px bg-border/40"></div>
     {:else if !filter}
       <div class="mx-1 my-1.5 rounded-md border border-dashed border-border/60 px-2.5 py-2">
-        <p class="text-ui-2xs text-muted-foreground/70">No plugins installed.</p>
-        <p class="mt-0.5 text-ui-2xs text-muted-foreground/40">
+        <p class="text-ui-2xs text-muted-foreground">No plugins installed.</p>
+        <p class="mt-0.5 text-ui-2xs text-muted-foreground">
           A plugin is a folder with a manifest.json and one .js file. Install one with +, or drop it in
           {pluginsDir || "the plugins folder"}.
         </p>
       </div>
     {/if}
 
-    <p class="px-2.5 pt-1 pb-1 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/40">
+    <p class="px-2.5 pt-1 pb-1 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground">
       Built in
     </p>
     {#if filtered.length === 0}
       <div class="flex flex-col items-center gap-2 px-4 py-10 text-center">
-        <Icon name="blocks" class="size-5 text-muted-foreground/40" />
+        <Icon name="blocks" class="size-5 text-muted-foreground" />
         <p class="text-ui-xs text-muted-foreground">No extensions match "{filter}"</p>
       </div>
     {:else}

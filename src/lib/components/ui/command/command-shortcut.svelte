@@ -25,7 +25,7 @@
 		{...restProps}
 	>
 		{#each tokens as token}
-			<kbd class="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[5px] border border-border/60 bg-muted/40 px-1.5 font-mono text-ui-3xs font-medium leading-none text-muted-foreground/75 shadow-[0_1px_0_color-mix(in_oklch,var(--border)_50%,transparent)] group-data-[selected]/command-item:border-border/70 group-data-[selected]/command-item:bg-muted/70 group-data-[selected]/command-item:text-foreground/90">
+			<kbd class="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[5px] border border-border/60 bg-muted/40 px-1.5 font-mono text-ui-3xs font-medium leading-none text-muted-foreground shadow-[0_1px_0_color-mix(in_oklch,var(--border)_50%,transparent)] group-data-[selected]/command-item:border-border/70 group-data-[selected]/command-item:bg-muted/70 group-data-[selected]/command-item:text-foreground/90">
 				{token}
 			</kbd>
 		{/each}
@@ -34,7 +34,7 @@
 	<span
 		bind:this={ref}
 		data-slot="command-shortcut"
-		class={cn("ml-auto shrink-0 pl-3 font-mono text-ui-3xs tabular-nums text-muted-foreground/40 group-data-[selected]/command-item:text-muted-foreground/60", className)}
+		class={cn("ml-auto shrink-0 pl-3 font-mono text-ui-3xs tabular-nums text-muted-foreground group-data-[selected]/command-item:text-muted-foreground", className)}
 		{...restProps}
 	>
 		{@render children?.()}

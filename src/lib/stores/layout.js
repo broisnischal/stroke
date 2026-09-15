@@ -1,3 +1,5 @@
+import { get, writable } from 'svelte/store'
+
 const STORAGE_KEY = 'stroke:layout'
 
 /** @typedef {'normal' | 'json'} InspectorView */
@@ -19,6 +21,25 @@ export const DEFAULT_LAYOUT = {
   statusBarVisible: true,
   tabBarVisible: true,
   tableToolbarVisible: true,
+}
+
+/**
+ * Which side the nav sidebar sits on, as a store.
+ *
+ * The rest of the layout is read once at mount and written on drag, which is
+ * fine for sizes nobody changes from two places. The side is different: it can
+ * be set from the sidebar's own context menu AND from Settings → Appearance, so
+ * it needs a single value both can write and the shell can react to. Seeded from
+ * the persisted layout; `setSidebarSide` is the only writer and it persists.
+ * @type {import('svelte/store').Writable<'left' | 'right'>}
+ */
+export const sidebarSideStore = writable(loadLayout().navSidebarSide)
+
+/** @param {'left' | 'right'} side */
+export function setSidebarSide(side) {
+  const next = side === 'right' ? 'right' : 'left'
+  if (get(sidebarSideStore) !== next) sidebarSideStore.set(next)
+  saveLayout({ navSidebarSide: next })
 }
 
 export const NAV_SIDEBAR_MIN = 180

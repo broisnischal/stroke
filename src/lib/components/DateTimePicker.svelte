@@ -18,12 +18,23 @@
 
   let {
     value = $bindable(""),
+    /** A committed value: a calendar pick, a time change, or "now". */
     onchange,
+    /**
+     * A keystroke in the text field. Split from `onchange` because a caller may
+     * want to COMMIT on a pick but only stage on typing - the grid's inline cell
+     * editor does exactly that, and while both went through `onchange` it
+     * committed after the first character and tore its own editor down, so the
+     * field accepted exactly one keypress. Defaults to `onchange` so callers
+     * that genuinely want both are unaffected.
+     */
+    oninput = undefined,
     showTime = true,
     disabled = false,
     colName,
     onfocus,
   } = $props();
+  const onType = $derived(oninput ?? onchange);
 
   let open = $state(false);
 
@@ -158,7 +169,7 @@
       {disabled}
       tabindex={-1}
       aria-label="Open calendar"
-      class="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:text-foreground disabled:opacity-50"
+      class="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
       onclick={() => (open = !open)}
     >
       <CalendarIcon class="size-3" />
@@ -174,9 +185,9 @@
       title={parsed ? displayLabel : undefined}
       class={cn(
         "w-full min-w-0 bg-transparent font-mono text-ui-sm text-foreground outline-none",
-        "placeholder:text-muted-foreground/40 disabled:opacity-50",
+        "placeholder:text-muted-foreground disabled:opacity-50",
       )}
-      oninput={(e) => onchange(e.currentTarget.value)}
+      oninput={(e) => onType(e.currentTarget.value)}
       onfocus={onfocus}
       onkeydown={(e) => {
         // The calendar is opt-in from the keyboard too, and Escape closes it
@@ -194,11 +205,11 @@
     {#if showTime}
       <div class="border-t border-border/20 px-3 pb-3 pt-2.5">
         <div class="mb-2 flex items-center justify-between">
-          <span class="text-ui-2xs font-medium text-muted-foreground/70 uppercase tracking-wider">Time</span>
+          <span class="text-ui-2xs font-medium text-muted-foreground uppercase tracking-wider">Time</span>
           <button
             type="button"
             onclick={setNow}
-            class="rounded px-1.5 py-0.5 text-ui-2xs text-muted-foreground/60 hover:bg-muted hover:text-foreground transition-colors"
+            class="rounded px-1.5 py-0.5 text-ui-2xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >Now</button>
         </div>
         <div class="flex items-center gap-1.5">
@@ -213,7 +224,7 @@
               placeholder="HH"
             />
           </div>
-          <span class="shrink-0 font-mono text-ui font-bold text-muted-foreground/50">:</span>
+          <span class="shrink-0 font-mono text-ui font-bold text-muted-foreground">:</span>
           <div class="flex flex-1 items-center overflow-hidden rounded-md border border-border/40 bg-muted/20 focus-within:border-primary/50">
             <input
               type="number"

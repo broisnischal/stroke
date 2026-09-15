@@ -121,16 +121,16 @@
             <span class={
               'flex items-center gap-1.5 rounded-full px-2 py-1 text-ui-2xs font-medium transition-colors duration-200 ' +
               (state === 'current' ? 'bg-primary/10 text-foreground'
-               : state === 'done'  ? 'text-muted-foreground/70'
-               : 'text-muted-foreground/35')
+               : state === 'done'  ? 'text-muted-foreground'
+               : 'text-muted-foreground')
             }>
               <span class={
                 'grid size-4 place-items-center rounded-full text-ui-3xs font-semibold transition-colors duration-200 ' +
                 (state === 'current' ? 'bg-primary text-primary-foreground'
                  : state === 'done'  ? 'bg-primary/25 text-foreground'
-                 : 'bg-muted text-muted-foreground/50')
+                 : 'bg-muted text-muted-foreground')
               }>
-                {#if state === 'done'}<Icon name="check" class="size-2.5" strokeWidth={2.5} />{:else}{n}{/if}
+                {#if state === 'done'}<Icon name="check" class="size-3" strokeWidth={2.5} />{:else}{n}{/if}
               </span>
               <span class="hidden sm:inline">{label}</span>
             </span>
@@ -142,7 +142,7 @@
       </nav>
 
       {#if step < TOTAL}
-        <button type="button" class="text-ui-sm text-muted-foreground/70 transition-colors hover:text-foreground" onclick={headerSkip}>
+        <button type="button" class="text-ui-sm text-muted-foreground transition-colors hover:text-foreground" onclick={headerSkip}>
           {step === LICENSE_STEP ? 'Skip for now' : 'Skip'}
         </button>
       {:else}
@@ -190,10 +190,10 @@
 
               <!-- Supported brands strip -->
               <div class="flex flex-col items-center gap-3">
-                <span class="text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground/45">Works with</span>
+                <span class="text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Works with</span>
                 <div class="flex flex-wrap items-center justify-center gap-x-5 gap-y-2.5">
                   {#each BRANDS as id}
-                    <DbIcon {id} class="size-[18px] text-muted-foreground/45 transition-colors hover:text-foreground" />
+                    <DbIcon {id} class="size-[18px] text-muted-foreground transition-colors hover:text-foreground" />
                   {/each}
                 </div>
               </div>
@@ -205,14 +205,14 @@
 
                 <div class="flex items-center justify-center gap-5">
                   {#each LICENSE_PERKS as perk (perk.label)}
-                    <span class="flex items-center gap-1.5 text-ui-2xs text-muted-foreground/55">
+                    <span class="flex items-center gap-1.5 text-ui-2xs text-muted-foreground">
                       <Icon name={perk.icon} class="size-3 shrink-0" />
                       {perk.label}
                     </span>
                   {/each}
                 </div>
 
-                <p class="text-center text-ui-xs text-muted-foreground/60">
+                <p class="text-center text-ui-xs text-muted-foreground">
                   No license yet?
                   <a href="https://stroke.click" target="_blank" rel="noopener noreferrer"
                     class="font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline">stroke.click →</a>
@@ -271,12 +271,12 @@
         Back
       </button>
 
-      <span class="text-ui-sm text-muted-foreground/70 tabular-nums">Step {step} of {TOTAL}</span>
+      <span class="text-ui-sm text-muted-foreground tabular-nums">Step {step} of {TOTAL}</span>
 
       {#if step === LICENSE_STEP}
         <button
           type="button"
-          class="group flex h-9 items-center gap-2 rounded-lg border border-border/60 bg-card/40 px-6 text-ui-sm font-semibold text-foreground transition-all hover:bg-muted/60 active:scale-[0.98]"
+          class= "field-surface group flex h-9 items-center gap-2 bg-card/40 px-6 text-ui-sm font-semibold text-foreground transition-all hover:bg-muted/60 active:scale-[0.98]"
           onclick={next}
         >
           Start free trial

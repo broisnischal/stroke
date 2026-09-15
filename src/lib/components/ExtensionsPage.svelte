@@ -219,7 +219,7 @@
   const selTrigger =
     "h-7 w-[12rem] justify-between gap-2 border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none";
   const ruleInput =
-    "h-7 min-w-0 rounded-lg border-2 border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15";
+"field-surface h-7 min-w-0 bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none";
 </script>
 
 <!-- Compact Linear/Resend-style toggle -->
@@ -260,7 +260,7 @@
   <div class="flex items-center justify-between gap-4 py-2.5">
     <div class="flex min-w-0 flex-col">
       <span class="text-ui-sm text-foreground">{label}</span>
-      {#if hint}<span class="mt-0.5 text-ui-2xs text-muted-foreground/70">{hint}</span>{/if}
+      {#if hint}<span class="mt-0.5 text-ui-2xs text-muted-foreground">{hint}</span>{/if}
     </div>
     {@render control()}
   </div>
@@ -268,7 +268,7 @@
 
 <!-- Group label + hairline-bordered list -->
 {#snippet sectionLabel(text)}
-  <h3 class="mb-2 px-0.5 text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/50">{text}</h3>
+  <h3 class="mb-2 px-0.5 text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">{text}</h3>
 {/snippet}
 
 <div class="app-scroll min-h-0 flex-1 overflow-y-auto bg-background">
@@ -296,13 +296,13 @@
            Plugins loaded off disk. Each runs in its own Worker with the network
            globals removed, so a broken one stops formatting and nothing else. -->
       <div class="mt-7 flex items-center gap-2">
-        <h3 class="px-0.5 text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/50">Installed</h3>
+        <h3 class="px-0.5 text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Installed</h3>
         {#if $externalPlugins.length > 0}
-          <span class="text-ui-3xs tabular-nums text-muted-foreground/40">{$externalPlugins.length}</span>
+          <span class="text-ui-2xs tabular-nums text-muted-foreground">{$externalPlugins.length}</span>
         {/if}
         <button
           type="button"
-          class="ml-auto inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-card px-2.5 text-ui-2xs font-medium text-foreground/80 transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground disabled:opacity-50"
+          class="field-surface ml-auto inline-flex h-7 shrink-0 items-center gap-1.5 bg-card px-3 text-ui-2xs font-medium text-foreground transition-colors hover:bg-accent/40 disabled:opacity-50"
           onclick={installPlugin}
           disabled={installing}
         >
@@ -311,7 +311,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
+          class="field-surface inline-flex size-7 shrink-0 items-center justify-center bg-card text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
           title="Rescan the plugins folder"
           aria-label="Rescan the plugins folder"
           onclick={() => void refreshExternalPlugins()}
@@ -323,7 +323,7 @@
       {#if $externalPlugins.length === 0}
         <div class="mt-2.5 rounded-lg border border-dashed border-border/60 bg-card/40 px-4 py-3.5">
           <p class="text-ui-xs text-foreground/80">Nothing installed yet.</p>
-          <p class="mt-1 text-ui-2xs leading-relaxed text-muted-foreground/70">
+          <p class="mt-1 text-ui-2xs leading-relaxed text-muted-foreground">
             A plugin is a folder holding a <code class="font-mono">manifest.json</code> and one
             <code class="font-mono">.js</code> file. Install one above, or drop the folder in
             {#if pluginsDir}<code class="font-mono text-muted-foreground">{pluginsDir}</code>{:else}the app's plugins folder{/if}
@@ -336,20 +336,25 @@
             {@const on = pluginEnabledIn($pluginState, pluginKey(p.id))}
             {@const err = $externalPluginErrors[p.id] ?? ""}
             <div class="group relative flex h-full flex-col gap-2.5 rounded-lg border border-border/60 bg-card p-3">
-              <Blocks class={cn("size-4 shrink-0", on && p.loadable ? "text-success" : "text-muted-foreground")} />
+              <span class="flex h-[18px] w-full items-center gap-2">
+                <Blocks class={cn("size-4 shrink-0", on && p.loadable ? "text-success" : "text-muted-foreground")} />
+                <!-- Reserves the toggle / "Broken" badge, both of which are
+                     layered over the card and invisible to normal flow. -->
+                <span class="ml-auto h-[18px] w-12 shrink-0" aria-hidden="true"></span>
+              </span>
               <span class="flex min-w-0 flex-col">
-                <span class="truncate text-ui-xs font-medium leading-tight text-foreground/85" title={p.description || p.name}>{p.name}</span>
-                <span class="mt-0.5 truncate text-ui-3xs text-muted-foreground/60">
+                <span class="truncate text-ui-xs font-medium leading-tight text-foreground" title={p.description || p.name}>{p.name}</span>
+                <span class="mt-0.5 truncate text-ui-2xs text-muted-foreground">
                   {p.version ? `v${p.version}` : p.id}{p.author ? ` · ${p.author}` : ""}
                 </span>
               </span>
               {#if p.error || err}
-                <p class="text-ui-3xs leading-snug text-destructive/80">{p.error || err}</p>
+                <p class="text-ui-2xs leading-snug text-destructive">{p.error || err}</p>
               {/if}
               <div class="mt-auto flex items-center gap-1 pt-0.5">
                 <button
                   type="button"
-                  class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground"
+                  class="hit-area inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
                   title="Reload from disk"
                   aria-label="Reload {p.name}"
                   onclick={() => void reloadPlugin(p)}
@@ -358,7 +363,7 @@
                 </button>
                 <button
                   type="button"
-                  class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-destructive"
+                  class="hit-area inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:text-destructive"
                   title="Remove, deleting its folder"
                   aria-label="Remove {p.name}"
                   onclick={() => void removePlugin(p)}
@@ -366,16 +371,16 @@
                   <Trash2 class="size-3" />
                 </button>
                 {#if p.permissions.length > 0}
-                  <span class="ml-auto truncate text-ui-3xs text-muted-foreground/35" title="Permissions: {p.permissions.join(', ')}">
+                  <span class="ml-auto truncate text-ui-2xs text-muted-foreground" title="Permissions: {p.permissions.join(', ')}">
                     {p.permissions.length} permission{p.permissions.length === 1 ? "" : "s"}
                   </span>
                 {/if}
               </div>
-              <div class="absolute right-3 top-3">
+              <div class="absolute right-3 top-3 flex h-[18px] items-center">
                 {#if p.loadable}
                   {@render toggle(on, () => void setExternalEnabled(p.id, !on), `Toggle ${p.name}`)}
                 {:else}
-                  <span class="rounded bg-destructive/10 px-1.5 py-0.5 text-ui-3xs font-medium text-destructive">Broken</span>
+                  <span class="rounded bg-destructive/10 px-1.5 py-0.5 text-ui-2xs font-medium text-destructive">Broken</span>
                 {/if}
               </div>
             </div>
@@ -385,10 +390,10 @@
 
       {#each SECTIONS as section (section.title)}
         {@const items = EXTENSIONS.filter((e) => section.kinds.includes(e.kind))}
-        <h3 class="mb-2.5 mt-7 px-0.5 text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/50">{section.title}</h3>
+        <h3 class="mb-2.5 mt-7 px-0.5 text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">{section.title}</h3>
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {#each items as ext (ext.id)}
-            {@const Icon = ICONS[ext.id]}
+            {@const Icon = ICONS[ext.id] ?? Blocks}
             {@const on = isOn(ext.id)}
             <div class="relative">
               <button
@@ -396,16 +401,20 @@
                 onclick={() => (selectedId = ext.id)}
                 class="group relative flex h-full w-full flex-col gap-2.5 rounded-lg border border-border/60 bg-card p-3 text-left transition-[border-color,background-color] hover:border-border hover:bg-accent/40"
               >
-                {#if Icon}
+                <span class="flex h-[18px] w-full items-center gap-2">
                   <Icon class={cn("size-4 shrink-0 transition-colors", on ? "text-success" : "text-muted-foreground group-hover:text-foreground")} />
-                {/if}
+                  <!-- Holds the toggle's place. The toggle is layered over the
+                       card (so it is not a button inside a button), which means
+                       nothing in normal flow knows it is there. -->
+                  <span class="ml-auto h-[18px] w-8 shrink-0" aria-hidden="true"></span>
+                </span>
                 <span class="flex min-w-0 flex-col">
-                  <span class="truncate text-ui-xs font-medium leading-tight text-foreground/85 transition-colors group-hover:text-foreground">{ext.name}</span>
-                  <span class="mt-0.5 truncate text-ui-3xs text-muted-foreground/60">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
+                  <span class="truncate text-ui-xs font-medium leading-tight text-foreground transition-colors">{ext.name}</span>
+                  <span class="mt-0.5 truncate text-ui-2xs text-muted-foreground">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
                 </span>
               </button>
-              <!-- Toggle overlays the card so it isn't a nested button -->
-              <div class="absolute right-3 top-3">
+              <!-- Layered over the card so it is not a button inside a button. -->
+              <div class="absolute right-3 top-3 flex h-[18px] items-center">
                 {@render toggle(on, () => setPluginEnabled(ext.id, !on), `Toggle ${ext.name}`)}
               </div>
             </div>
@@ -455,7 +464,7 @@
             <ol class="space-y-2">
               {#each USAGE_BY_ID[selected.id] ?? USAGE[selected.kind] as step, i (i)}
                 <li class="flex items-start gap-2.5">
-                  <span class="mt-px grid size-4 shrink-0 place-items-center rounded-full border border-border/60 text-ui-3xs font-semibold text-muted-foreground/70">{i + 1}</span>
+                  <span class="mt-px grid size-4 shrink-0 place-items-center rounded-full border border-border/60 text-ui-3xs font-semibold text-muted-foreground">{i + 1}</span>
                   <span class="text-ui-xs leading-relaxed text-foreground/75">{step}</span>
                 </li>
               {/each}
@@ -472,8 +481,8 @@
               {#each list as it, i (it.id)}
                 <li class="flex items-center gap-3 px-3 py-2 {i > 0 ? 'border-t border-border/40' : ''}">
                   <span class="min-w-0 shrink-0 text-ui-sm text-foreground/85">{it.label}</span>
-                  {#if it.hint}<span class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground/55">{it.hint}</span>{:else}<span class="flex-1"></span>{/if}
-                  <span class="shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-ui-3xs text-muted-foreground/50">{selected.kind === "generators" ? "Insert" : "Copy"}</span>
+                  {#if it.hint}<span class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground">{it.hint}</span>{:else}<span class="flex-1"></span>{/if}
+                  <span class="shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-ui-3xs text-muted-foreground">{selected.kind === "generators" ? "Insert" : "Copy"}</span>
                 </li>
               {/each}
             </ul>
@@ -547,7 +556,7 @@
                 {@render settingRow("Palette", "Color scale for the value gradient", ctl)}
               {:else if selected.id === "linkify"}
                 <div class="py-3">
-                  <p class="text-ui-xs leading-relaxed text-muted-foreground/80">
+                  <p class="text-ui-xs leading-relaxed text-muted-foreground">
                     When a cell matches a <span class="font-mono text-foreground/80">pattern</span> (regex), clicking it opens the
                     <span class="font-mono text-foreground/80">template</span>. Use <span class="font-mono text-foreground/80">{"{value}"}</span> for the cell value.
                   </p>

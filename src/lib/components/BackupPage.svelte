@@ -379,7 +379,7 @@
     <span class="min-w-0 flex-1">
       <span class="block text-ui-xs text-foreground/80">{label}</span>
       {#if hint}
-        <span class="block text-ui-3xs text-muted-foreground/50">{hint}</span>
+        <span class="block text-ui-3xs text-muted-foreground">{hint}</span>
       {/if}
     </span>
   </button>
@@ -398,7 +398,7 @@
       {#if exportPhase === "running"}
         <Loader class="ml-auto size-3 animate-spin text-muted-foreground" />
       {:else if exportLogs.length > 0}
-        <span class="ml-auto text-ui-3xs text-muted-foreground/50"
+        <span class="ml-auto text-ui-3xs text-muted-foreground"
           >{exportLogs.length} entries</span
         >
       {/if}
@@ -408,7 +408,7 @@
       class="min-h-0 flex-1 overflow-y-auto bg-muted/10 p-4 font-mono"
     >
       {#if exportLogs.length === 0}
-        <p class="text-ui-2xs text-muted-foreground/30">
+        <p class="text-ui-2xs text-muted-foreground">
           Run an export to see progress here.
         </p>
       {:else}
@@ -422,7 +422,7 @@
         {/each}
         {#if exportPhase === "running"}
           <div
-            class="mt-1 flex items-center gap-1.5 text-ui-2xs text-muted-foreground/50"
+            class="mt-1 flex items-center gap-1.5 text-ui-2xs text-muted-foreground"
           >
             <Loader class="size-3 animate-spin" /><span>Running…</span>
           </div>
@@ -445,7 +445,7 @@
       {#if importPhase === "running"}
         <Loader class="ml-auto size-3 animate-spin text-muted-foreground" />
       {:else if restoreLogs.length > 0}
-        <span class="ml-auto text-ui-3xs text-muted-foreground/50"
+        <span class="ml-auto text-ui-3xs text-muted-foreground"
           >{restoreLogs.length} entries</span
         >
       {/if}
@@ -455,7 +455,7 @@
       class="min-h-0 flex-1 overflow-y-auto bg-muted/10 p-4 font-mono"
     >
       {#if restoreLogs.length === 0}
-        <p class="text-ui-2xs text-muted-foreground/30">
+        <p class="text-ui-2xs text-muted-foreground">
           {importPhase === "idle"
             ? "Run a restore to see progress here."
             : "Waiting for log entries…"}
@@ -471,7 +471,7 @@
         {/each}
         {#if importPhase === "running"}
           <div
-            class="mt-1 flex items-center gap-1.5 text-ui-2xs text-muted-foreground/50"
+            class="mt-1 flex items-center gap-1.5 text-ui-2xs text-muted-foreground"
           >
             <Loader class="size-3 animate-spin" /><span>Running…</span>
           </div>
@@ -617,7 +617,7 @@
               >
                 Tables
                 {#if tables.length > 0}
-                  <span class="ml-1 text-muted-foreground/50"
+                  <span class="ml-1 text-muted-foreground"
                     >{selectedTables.size}/{tables.length}</span
                   >
                 {/if}
@@ -640,7 +640,7 @@
             </div>
 
             {#if tables.length === 0}
-              <p class="text-ui-2xs text-muted-foreground/40">
+              <p class="text-ui-2xs text-muted-foreground">
                 No tables found.
               </p>
             {:else}
@@ -660,7 +660,7 @@
                       <SquareCheck class="size-3.5 shrink-0 text-primary" />
                     {:else}
                       <Square
-                        class="size-3.5 shrink-0 text-muted-foreground/30"
+                        class="size-3.5 shrink-0 text-muted-foreground"
                       />
                     {/if}
                     <span
@@ -669,7 +669,7 @@
                     >
                     {#if t.rowCount != null && t.rowCount >= 0}
                       <span
-                        class="shrink-0 font-mono text-ui-3xs text-muted-foreground/50"
+                        class="shrink-0 font-mono text-ui-3xs text-muted-foreground"
                         >{fmtRows(t.rowCount)}</span
                       >
                     {/if}
@@ -787,7 +787,7 @@
                 <div
                   class="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background"
                 >
-                  <FileText class="size-4 text-muted-foreground/60" />
+                  <FileText class="size-4 text-muted-foreground" />
                 </div>
                 <div class="min-w-0 flex-1">
                   <p class="truncate text-ui-xs font-medium text-foreground">
@@ -833,13 +833,13 @@
                   <div
                     class="flex size-11 items-center justify-center rounded-lg border border-border/50 bg-background shadow-sm"
                   >
-                    <FileText class="size-5 text-muted-foreground/40" />
+                    <FileText class="size-5 text-muted-foreground" />
                   </div>
                   <div>
                     <p class="text-ui-xs font-medium text-foreground">
                       Select a SQL backup file
                     </p>
-                    <p class="mt-0.5 text-ui-3xs text-muted-foreground/60">
+                    <p class="mt-0.5 text-ui-3xs text-muted-foreground">
                       Supports <span class="font-mono">.sql</span> and
                       <span class="font-mono">.txt</span>
                     </p>
@@ -946,7 +946,7 @@
               >
                 <div>
                   <p
-                    class="text-ui-3xs uppercase tracking-wide text-muted-foreground/60"
+                    class="text-ui-3xs uppercase tracking-wide text-muted-foreground"
                   >
                     OK
                   </p>
@@ -957,7 +957,7 @@
                 {#if importResult.statementsErr > 0}
                   <div>
                     <p
-                      class="text-ui-3xs uppercase tracking-wide text-muted-foreground/60"
+                      class="text-ui-3xs uppercase tracking-wide text-muted-foreground"
                     >
                       Failed
                     </p>
@@ -985,7 +985,7 @@
                     class="mt-2 max-h-36 overflow-y-auto rounded-lg border border-border/40 bg-background p-2.5"
                   >
                     {#each importResult.errors as err, i (i)}
-                      <p class="font-mono text-ui-3xs text-destructive/80">
+                      <p class="font-mono text-ui-3xs text-destructive">
                         {err}
                       </p>
                     {/each}
@@ -1007,7 +1007,7 @@
                   <p class="mb-1 text-ui-xs font-semibold text-foreground">
                     Restore failed
                   </p>
-                  <p class="break-words text-ui-2xs text-destructive/80">
+                  <p class="break-words text-ui-2xs text-destructive">
                     {importError}
                   </p>
                 </div>

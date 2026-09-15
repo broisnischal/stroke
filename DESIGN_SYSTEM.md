@@ -46,8 +46,35 @@ mismatched control heights, or one-off selected states.
   `font-mono tabular-nums`.
 
 ### Base size
-`1rem = --app-font-size = 14px`. Everything scales off this; the app supports
-zoom by design, so **rem-based tokens only** (the `text-ui-*` classes are rem).
+`1rem = --app-font-size`. Each platform's 100% rung is its own comfortable
+reading size, so "zoom 0" means the same thing everywhere:
+
+| Platform | 100% root | Why |
+|---|---|---|
+| Linux, Windows | 18px | 1x-DPI desktops; a 14px stroke is too thin to read reliably |
+| macOS | 14px | Retina plus SF's own hinting; 18 is oversized there |
+
+Windows used to reach ~17.5px by shipping a **1.25 default zoom** instead, which
+made its 100% rung a lie and left no headroom below it. That is gone: zoom 1 is
+the default on every platform. The app supports zoom by design, so **never
+hard-code a px font size**.
+
+**The root steps by one whole pixel per zoom rung**, taken from the rung's index
+in `ZOOM_STEPS` rather than from `basePx × zoom`. Multiplying and rounding
+collapses rungs into each other - at a 16px base, 110% and 115% both round to
+18px - so the window stayed pixel-identical between them while the `--fs-*`
+steps, rounded independently from different numerators, still moved. That is
+zoom which changes the text and not the layout. Indexing guarantees a strictly
+increasing root on every base, so a zoom step always moves both.
+
+The `text-ui-*` classes resolve to `--fs-*` rather than a rem calc.
+`applySettings()` (`src/lib/stores/settings.js`) recomputes every step for the
+active base size and zoom level and **rounds each one to a whole pixel**. The
+rounding is the point: the old `calc(N / 14 * 1rem)` form only landed on whole
+pixels when the root happened to be exactly 14px, so at the 15px Linux base a
+13px caption rendered at 13.93px and WebKit rasterised it off the pixel grid.
+That is what made the whole UI look soft at 100% zoom. Add a step by editing
+`UI_TYPE_SCALE` in `settings.js` and its `:root` fallback in `app.css` together.
 
 ---
 
@@ -97,9 +124,35 @@ literal colors.
 | `ring` | focus ring |
 
 **Opacity conventions (consistency matters most here):**
-- Secondary text: `text-muted-foreground`. Tertiary: `text-muted-foreground/60`.
+- Secondary text: `text-muted-foreground`. There is no contrast-safe tertiary
+  text tier. Measured on the dark theme, `--muted-foreground` is a clean 7.85:1
+  at full strength, but every alpha step below **74%** drops under the 4.5:1 text
+  floor: `/70` is 4.27:1, `/60` 3.40:1, `/50` 2.69:1, `/40` 2.11:1. On light
+  themes the cutoff is 89%, so `/60` and below fail there too. **De-emphasise
+  with size, weight, or position - not with alpha on the text colour.** The
+  codebase still carries ~1,370 `text-muted-foreground/NN` uses from before this
+  was measured; treat each one as a bug when you touch its component, and never
+  add a new one to text a user has to read.
+- Decorative marks that carry no meaning (separator dots, watermarks) may go
+  below the floor. Anything that carries meaning needs 3:1, which is 58% alpha
+  on dark and 69% on light.
 - Hairlines: `border-border` (structural) · `border-border/50` (internal dividers).
 - Idle icon buttons: `text-muted-foreground` → hover `text-foreground`.
+- **Field chrome is one class: `.field-surface`** (`app.css`). It sets the field
+  radius and a 1px `--field-border` hairline, and nothing else - no fill, no
+  gradient, no shadow. Inputs, textareas, select triggers, the filter-row
+  controls, the connection form and the outline/secondary buttons all wear it, so
+  a text field and the select beside it are drawn the same way. Anything that
+  needs a background adds its own `bg-*`.
+- **The border never changes.** Hover does not move it and neither does focus.
+  Focus is `outline: 2px solid var(--ring)` at `outline-offset: 1px`, sitting
+  just outside the edge - one focus language for fields and buttons, no layout
+  shift, and no shadow anywhere in the system.
+- `--field-border` is `color-mix(in oklch, var(--foreground) 30%, var(--background))`,
+  derived per theme. It measures 1.87-1.96:1 on dark and 2.21-2.44:1 on light, so
+  it misses WCAG 1.4.11's 3:1 for a control boundary - a deliberate call for the
+  hairline look, with the visible-state burden carried by the focus outline
+  (4.63:1) instead. Do not raise it without raising the whole system together.
 - **Selected/active row (canonical):** `bg-accent text-foreground` for chrome;
   `bg-primary/10 text-foreground ring-1 ring-primary/25` for prominent pick lists
   (provider DB lists, account lists). **Pick one per context and never mix
@@ -110,6 +163,12 @@ literal colors.
 ---
 
 ## 4. Radius
+
+`--radius` is **absolute px**, not rem: a corner is a physical size and has no
+reason to grow when the type scale or the zoom level does. 6px by default, 8px on
+macOS, 7px on Windows. Fields and the buttons beside them use `--radius-field`
+(10px), which is rounder on purpose; small buttons step down from it rather than
+running their own ladder.
 
 | Class | Use |
 |---|---|
@@ -136,6 +195,17 @@ No other radii. No `rounded-xl`/`rounded-sm` in new code unless matching a
 - Always `shrink-0` on icons inside flex rows.
 - Square sizing via `size-*` (never `w-4 h-4`).
 - One icon set. No custom SVG unless truly bespoke.
+- **`size-3` (12px) is the floor.** Below that a Lucide glyph is sub-pixel mush
+  at 1x DPI, which is where the old `size-2.5` RLS lock and Pro badge ended up.
+- An icon that carries meaning on its own (table vs view, locked vs unlocked,
+  a status glyph) needs **3:1 against its surface**. On the dark theme that is
+  `text-muted-foreground` at 58% alpha or stronger, so anything at
+  `text-muted-foreground/50` or below fails. Do not stack `opacity-*` on top of
+  an already-thinned colour - they multiply.
+- An icon button smaller than `size-6` needs the `.hit-area` class, which grows
+  the pointer/touch target to the WCAG 2.5.8 24x24 baseline without changing how
+  big the button looks. Keep 4px between neighbouring ones so the targets do not
+  overlap.
 
 ---
 
@@ -245,8 +315,9 @@ flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-col
 <idle>     hover:bg-muted/50   text-foreground/85
 <selected> bg-primary/10 text-foreground ring-1 ring-primary/25
 ```
-- Leading `size-4` icon (`text-muted-foreground/45` idle, `text-foreground`
-  selected), `shrink-0`.
+- Leading `size-4` icon (`text-muted-foreground` idle, `text-foreground`
+  selected), `shrink-0`. The old `/45` measured 2.38:1 against `--background`,
+  under the 3:1 floor a meaning-carrying glyph needs.
 - Label: `min-w-0 flex-1 truncate` (+ `font-mono` for identifiers).
 - Trailing metadata: `text-ui-2xs text-muted-foreground/40`, `ml-auto` or after
   the flex-1 label; selected → trailing `Check size-3.5 text-primary`.

@@ -5,6 +5,8 @@
   import LicenseGate from './lib/components/LicenseGate.svelte'
   import AppLockGate from './lib/components/AppLockGate.svelte'
   import AppErrorBoundary from './lib/components/AppErrorBoundary.svelte'
+  import CrashNow from './lib/components/CrashNow.svelte'
+  import { crashArmed } from './lib/games/easter-eggs.js'
   import GlobalTooltip from './lib/components/GlobalTooltip.svelte'
   import { loadSettings, applySettings, installZoomShortcuts } from '$lib/stores/settings.js'
   import { installPlatformClass } from '$lib/platform.js'
@@ -75,6 +77,11 @@
 
 <Toaster position="top-right" offset={{ top: '52px', right: '12px' }} closeButton />
 <AppErrorBoundary>
+  <!-- Mounts only when armed, throws on mount, and disarms itself first. Inside
+       the boundary so the crash screen catches it; a sibling of the app rather
+       than a child of it so the throw does not depend on anything below
+       rendering successfully. -->
+  {#if $crashArmed}<CrashNow />{/if}
   <!-- The PIN sits outside the license gate: if the app is locked, nothing
        behind it runs - not the license check, not a reconnect. -->
   <AppLockGate>

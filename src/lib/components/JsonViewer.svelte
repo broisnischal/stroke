@@ -204,13 +204,13 @@
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
   <!-- JSONPath bar -->
   <div class="studio-chrome relative flex h-8 shrink-0 items-center gap-1.5 border-b border-border bg-panel px-3">
-    <span class="select-none font-mono text-ui-xs text-muted-foreground/60">$</span>
+    <span class="select-none font-mono text-ui-xs text-muted-foreground">$</span>
     <input
       bind:this={pathInput}
       type="text"
       bind:value={jsonPath}
       placeholder=".field  ·  [0]  ·  .items[*].name  ·  ..key"
-      class="min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/35 focus:outline-none"
+      class="min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
       spellcheck="false"
       autocomplete="off"
       onfocus={() => { pathFocused = true }}
@@ -221,7 +221,7 @@
     {#if pathResult && !pathResult.ok}
       <span class="shrink-0 font-mono text-ui-2xs text-destructive">{pathResult.error}</span>
     {:else if pathResult?.ok}
-      <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/50">{describeResult(pathResult.value)}</span>
+      <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground">{describeResult(pathResult.value)}</span>
     {/if}
 
     {#if pathFocused && completions.length > 0}

@@ -89,19 +89,44 @@ export function loadSavedConnections() {
       }
       return conn
     }).filter((c) => c != null)
-  } catch {
+  } catch (err) {
+    // The stored value exists but did not parse. Returning [] is safe by itself,
+    // but the very next upsert would write that empty list straight back over a
+    // payload that was merely unreadable, not gone. Move it aside first so it
+    // stays recoverable by hand, and let the app carry on from a clean slate.
+    console.error('Saved connections were unreadable:', err)
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      if (raw) localStorage.setItem(`${STORAGE_KEY}:unreadable`, raw)
+    } catch {}
     return []
   }
 }
 
-/** @param {SavedConnection[]} connections */
+/**
+ * @param {SavedConnection[]} connections
+ * @returns {boolean} false when the write was rejected (quota exhausted), so the
+ * caller can tell the user rather than let them believe the save landed.
+ */
 export function saveConnections(connections) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(connections))
+    return true
   } catch (err) {
     // Quota/serialization failure must not throw into connect/disconnect flows.
     console.error('Failed to persist connections:', err)
+    return false
   }
+}
+
+/**
+ * True when the last `saveConnections` call was rejected. Read it straight after
+ * an upsert: a silently dropped write is indistinguishable from a successful one
+ * until the app restarts and the connection is gone.
+ */
+let _persistFailed = false
+export function lastPersistFailed() {
+  return _persistFailed
 }
 
 /** @param {SavedConnection} conn */
@@ -110,7 +135,7 @@ export function upsertConnection(conn) {
   const idx  = list.findIndex((c) => c.id === conn.id)
   if (idx >= 0) list[idx] = conn
   else list.push(conn)
-  saveConnections(list)
+  _persistFailed = !saveConnections(list)
   return list
 }
 

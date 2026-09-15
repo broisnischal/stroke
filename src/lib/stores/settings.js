@@ -5,6 +5,7 @@ import {
   isDarkTheme,
   THEME_IDS,
   normalizeThemeId,
+  getThemeDefinition,
 } from '$lib/themes/registry.js'
 import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js'
 import { detectOs } from '$lib/platform.js'
@@ -16,11 +17,34 @@ const STORAGE_KEY = 'stroke:settings'
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, zebraRows: boolean, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, motion: MotionId, zebraRows: boolean, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
+
+/**
+ * UI type scale in design pixels: `[step, font-size, line-height?]`, matching
+ * DESIGN_SYSTEM.md §4. applySettings() rounds each step to a whole pixel for the
+ * active base size and zoom, then publishes it as `--fs-<step>` / `--lh-<step>`;
+ * app.css's `.text-ui-*` classes read those vars. The rounding lives here rather
+ * than in a CSS calc so a non-14px base can never push a step off the pixel grid.
+ * The `15` step exists only to back the legacy `text-[15px]` compatibility class.
+ */
+const UI_TYPE_SCALE = [
+  ['3xl', 24, 30],
+  ['2xl', 20, 28],
+  ['xl', 18, 26],
+  ['lg', 16, 24],
+  ['base', 14],
+  ['15', 15],
+  ['sm', 13],
+  ['xs', 12],
+  ['2xs', 11],
+  ['3xs', 10],
+]
 
 /** UI zoom scale (font + layout). 1 = 100%. */
 export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
 const DEFAULT_ZOOM = 1
+/** Index of the 100% rung - the root size steps out from here, one px per rung. */
+export const ZOOM_DEFAULT_INDEX = ZOOM_STEPS.indexOf(DEFAULT_ZOOM)
 
 /**
  * Selectable font stacks. Each sets the UI (`--font-sans`) and data/SQL/grid
@@ -168,10 +192,34 @@ export const DEFAULT_TABLE_STYLE = 'lines'
  * @type {Record<RowSpacingId, { label: string, height: number }>}
  */
 export const ROW_SPACINGS = {
-  compact: { label: 'Compact', height: 20 },
-  standard: { label: 'Standard', height: 24 },
-  relaxed: { label: 'Relaxed', height: 32 },
+  compact: { label: 'Compact', height: 22 },
+  standard: { label: 'Standard', height: 28 },
+  relaxed: { label: 'Relaxed', height: 36 },
 }
+/**
+ * How much motion the interface is allowed.
+ *
+ * `system` follows `prefers-reduced-motion`, which is the right default and what
+ * the app did before. The override exists because the OS setting is one switch
+ * for every app on the machine: somebody who wants animation in their window
+ * manager but not in a tool they stare at all day had no way to say so, and
+ * somebody on a locked-down machine could not turn it back on.
+ * @typedef {'system' | 'reduced' | 'full'} MotionId
+ * @type {Record<MotionId, { label: string, description: string }>}
+ */
+export const MOTION_MODES = {
+  system:  { label: 'System',  description: 'Follow the OS reduced-motion setting' },
+  reduced: { label: 'Reduced', description: 'Transitions and animations off' },
+  full:    { label: 'Full',    description: 'Always animate, whatever the OS says' },
+}
+/** @type {MotionId} */
+export const DEFAULT_MOTION = 'system'
+export const MOTION_IDS = /** @type {MotionId[]} */ (Object.keys(MOTION_MODES))
+/** @param {unknown} id @returns {MotionId} */
+function normalizeMotion(id) {
+  return MOTION_MODES[/** @type {MotionId} */ (id)] ? /** @type {MotionId} */ (id) : DEFAULT_MOTION
+}
+
 /** @type {RowSpacingId} */
 export const DEFAULT_ROW_SPACING = 'standard'
 export const ROW_SPACING_IDS = /** @type {RowSpacingId[]} */ (Object.keys(ROW_SPACINGS))
@@ -310,6 +358,7 @@ export const DEFAULT_SETTINGS = {
   // second-guess.
   nativeScroll: false,
   rowSpacing: DEFAULT_ROW_SPACING,
+  motion: DEFAULT_MOTION,
   // SQL formatter preferences. Defaults live with the formatter (format-sql.js)
   // so there is one source for what a valid option set is.
   sqlFormat: { ...SQL_FORMAT_DEFAULTS },
@@ -345,6 +394,8 @@ export const appFont = writable(/** @type {FontId} */ (DEFAULT_FONT))
 
 /** Reactive app icon style (synced by applySettings). */
 export const appIconStyle = writable(/** @type {IconStyleId} */ (DEFAULT_ICON_STYLE))
+/** Reactive motion preference. */
+export const appMotion = writable(/** @type {MotionId} */ (DEFAULT_MOTION))
 
 /** Reactive app icon set / family (synced by applySettings). */
 export const appIconSet = writable(/** @type {IconSetId} */ (DEFAULT_ICON_SET))
@@ -410,6 +461,11 @@ const LAST_LIGHT_KEY = 'stroke:last-light-theme'
 
 /** @param {ThemeId} id */
 function saveLastForMode(id) {
+  // A hidden theme is never remembered. The easter egg is a dark theme, so
+  // wearing it once made it the theme ⌘M returned to every time you toggled back
+  // to dark - you would have to escape it twice. You can still switch INTO it
+  // from Appearance and toggle away from it; it just is not what "dark" means.
+  if (getThemeDefinition(id)?.hidden) return
   try {
     if (isDarkTheme(id)) localStorage.setItem(LAST_DARK_KEY, id)
     else                  localStorage.setItem(LAST_LIGHT_KEY, id)
@@ -465,19 +521,6 @@ function systemPreferredTheme() {
   return DEFAULT_THEME_ID
 }
 
-/**
- * Windows renders the UI a touch small at 100% (higher default DPI handling than
- * macOS), so new installs there default to 125%. Other platforms keep 100%.
- * First-launch only - the user's saved zoom always wins afterwards.
- * @returns {number}
- */
-function defaultZoomForPlatform() {
-  try {
-    if (detectOs() === 'windows' && ZOOM_STEPS.includes(1.25)) return 1.25
-  } catch {}
-  return DEFAULT_ZOOM
-}
-
 /** @returns {AppSettings} */
 export function loadSettings() {
   if (_settingsCache) return { ..._settingsCache }
@@ -487,7 +530,9 @@ export function loadSettings() {
       _settingsCache = {
         ...DEFAULT_SETTINGS,
         theme: systemPreferredTheme(),
-        zoom: defaultZoomForPlatform(),
+        // Every platform's 100% rung is already its comfortable size (see
+        // `basePx` in applySettings), so nobody starts off-rung.
+        zoom: DEFAULT_ZOOM,
       }
       return { ..._settingsCache }
     }
@@ -531,6 +576,7 @@ export function loadSettings() {
     const jsonWordWrap = parsed.jsonWordWrap === true
     const nativeScroll = parsed.nativeScroll === true
     const rowSpacing = normalizeRowSpacing(parsed.rowSpacing)
+    const motion = normalizeMotion(parsed.motion)
     const sqlFormat = normalizeSqlFormat(parsed.sqlFormat)
     const zebraRows = parsed.zebraRows === true
     const autoSaveQueries = parsed.autoSaveQueries === true
@@ -542,7 +588,7 @@ export function loadSettings() {
     const agentShowQueryCards = parsed.agentShowQueryCards !== false
     const agentWebAccess = parsed.agentWebAccess === true
     const tableTextAlign = TABLE_ALIGN_IDS.includes(parsed.tableTextAlign) ? parsed.tableTextAlign : DEFAULT_TABLE_ALIGN
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, zebraRows, autoSaveQueries, sqlFormat }
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, motion, zebraRows, autoSaveQueries, sqlFormat }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -574,6 +620,12 @@ function setStyleVar(el, prop, value) {
 }
 /** @param {HTMLElement} el @param {string} name @param {string} value */
 function setAttr(el, name, value) {
+  // null removes the attribute: "follow the system" has to be the ABSENCE of an
+  // override, not a third value CSS would have to know about.
+  if (value === null) {
+    if (el.hasAttribute(name)) el.removeAttribute(name)
+    return
+  }
   if (el.getAttribute(name) !== value) el.setAttribute(name, value)
 }
 /** @param {import('svelte/store').Writable<any>} store @param {any} value */
@@ -595,19 +647,51 @@ export function applySettings(settings) {
   setMode(dark ? 'dark' : 'light')
   setStore(appThemeId, theme)
   setStore(isCurrentThemeDark, dark)
-  // Linux/WebKitGTK at 1x DPI: 14px strokes are too thin for reliable readability.
-  // Bump the base from 14 → 15px so the zoom ladder scales from a legible root.
-  // The canvas table reads --app-font-size, so it scales with zoom automatically.
-  const basePx = root.dataset.os === 'linux' ? 15 : 14
+  // Each platform's 100% rung is its own comfortable reading size, so "zoom 0"
+  // means the same thing everywhere: the size you should not have to change.
+  //
+  //   linux / windows  18px - 1x-DPI desktops where a 14px stroke is too thin to
+  //                          read reliably. Windows used to reach ~17.5px by
+  //                          shipping a 1.25 DEFAULT zoom instead, which made its
+  //                          100% rung a lie and left no headroom below it.
+  //   macos            14px - Retina plus SF's own hinting; 18 there is oversized.
+  const basePx =
+    root.dataset.os === 'macos' ? 14 : 18
+
+  // The root size steps by ONE WHOLE PIXEL per rung, taken from the rung's index
+  // rather than from `basePx * zoom`.
+  //
+  // Multiplying and rounding collapses rungs into each other: at a 16px base,
+  // 110% and 115% both round to 18px, so the window was pixel-identical between
+  // them while the `--fs-*` steps (rounded independently, from different
+  // numerators) still moved - zoom that changed the text and not the layout.
+  // Base 14 collides the same way at 90/95% and 105/110%. Indexing guarantees a
+  // strictly increasing root on every base, so a zoom step always moves both.
+  const stepIdx = ZOOM_STEPS.indexOf(zoom)
+  const rootPx =
+    stepIdx === -1
+      ? Math.max(1, Math.round(basePx * zoom))
+      : basePx + (stepIdx - ZOOM_DEFAULT_INDEX)
+
+  // Every type step is rounded to a whole pixel against that root. Resolving the
+  // scale in CSS as `calc(N / 14 * 1rem)` only landed on whole pixels when the
+  // root happened to be 14px; anywhere else a 13px caption came out fractional
+  // and WebKit rasterised it off the pixel grid, which is what made UI text look
+  // soft. The canvas table reads --app-font-size, so it follows automatically.
+  const stepPx = (n) => `${Math.max(1, Math.round((n * rootPx) / 14))}px`
   setStyleVar(root, '--app-zoom', String(zoom))
-  setStyleVar(root, '--app-font-size', `${Math.round(basePx * zoom)}px`)
+  setStyleVar(root, '--app-font-size', `${rootPx}px`)
+  for (const [step, size, leading] of UI_TYPE_SCALE) {
+    setStyleVar(root, `--fs-${step}`, stepPx(size))
+    if (leading) setStyleVar(root, `--lh-${step}`, stepPx(leading))
+  }
 
   // Monaco editors read --editor-font-size / --editor-line-height directly (Monaco
   // takes pixel values, not CSS units, so it can't inherit --app-font-size). Scale
   // them off the same base + zoom so the editor grows in lockstep with the UI.
   // The appZoom subscription in monaco-env.js pushes these to live editor instances.
-  setStyleVar(root, '--editor-font-size', `${Math.round(basePx * zoom)}px`)
-  setStyleVar(root, '--editor-line-height', `${Math.round(basePx * 1.5 * zoom)}px`)
+  setStyleVar(root, '--editor-font-size', `${rootPx}px`)
+  setStyleVar(root, '--editor-line-height', `${Math.round(rootPx * 1.5)}px`)
   setStore(appZoom, zoom)
 
   // Font family - overrides the stylesheet :root defaults inline (inline style
@@ -628,6 +712,12 @@ export function applySettings(settings) {
 
   // Icon weight - a single [data-icon-style] attribute drives the global Lucide
   // stroke-width rule in app.css. No per-icon or per-component changes needed.
+  // Motion preference. `system` leaves the attribute off so only the media
+  // query in app.css decides; the other two override it in either direction.
+  const motion = normalizeMotion(settings.motion)
+  setAttr(root, 'data-motion', motion === 'system' ? null : motion)
+  setStore(appMotion, motion)
+
   const iconStyle = normalizeIconStyle(settings.iconStyle)
   setAttr(root, 'data-icon-style', iconStyle)
   setStore(appIconStyle, iconStyle)

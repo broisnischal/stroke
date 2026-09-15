@@ -17,7 +17,9 @@
   import ResizeHandle from "./ResizeHandle.svelte";
   import ConnectionsSidebarPanel from "./ConnectionsSidebarPanel.svelte";
   import ExtensionsSidebarPanel from "./ExtensionsSidebarPanel.svelte";
+  import { Button } from '$lib/components/ui/button/index.js'
   import { cn } from "$lib/utils.js";
+  import { CRASH_WORD, isMagic, armCrash } from '$lib/games/easter-eggs.js'
   import { t } from "$lib/i18n.js";
   import { formatTableRowCount } from "$lib/table-list.js";
   import { virtualWindow, offsetWithin, measureRowStride, VIRT_THRESHOLD, VIRT_BUFFER } from "$lib/virtual-window.js";
@@ -78,6 +80,7 @@
     /** Switch the live connection to another database on the same server.
      *  @type {(entry: { key: string, label: string }) => void} */
     onswitchdatabase = () => {},
+    onswitchdatabasenow = /** @type {(db: { key: string, label: string }) => void} */ (() => {}),
     /** Open the Create database dialog. */
     onnewdatabase = () => {},
     /** Server-level database actions. Each takes the row's name, plus the full
@@ -146,19 +149,12 @@
     } catch {}
   }
 
-  const _initial = loadSidebarSections()
-  let recentOpen = $state(_initial.recent ?? false);
-  let databasesOpen = $state(_initial.databases ?? false);
+  const databasesOpen = $derived(sidebarTab === 'databases')
   /** @type {import('$lib/databases.js').DatabaseEntry[]} */
   let dbEntries = $state([]);
   let dbEntriesLoading = $state(false);
   let dbEntriesLoaded = $state(false);
   let dbEntriesError = $state('');
-  let tablesOpen = $state(_initial.tables ?? true);
-  let viewsOpen = $state(_initial.views ?? false);
-  let matViewsOpen = $state(_initial.matViews ?? false);
-  $effect(() => { saveSidebarSection('recent', recentOpen) })
-  $effect(() => { saveSidebarSection('databases', databasesOpen) })
 
   // Listing databases costs a round trip (a catalog query, or a Cloudflare /
   // provider API call), so it waits for the section to be expanded rather than
@@ -175,10 +171,6 @@
     } finally {
       dbEntriesLoading = false
     }
-  }
-
-  function toggleDatabases() {
-    databasesOpen = !databasesOpen
   }
 
   // Load whenever the section is open and holds nothing for this connection.
@@ -225,9 +217,6 @@
     const blocker = dbActionBlocker(action, connection, { isCurrent })
     return { disabled: !!blocker, title: blocker || undefined }
   }
-  $effect(() => { saveSidebarSection('tables', tablesOpen) })
-  $effect(() => { saveSidebarSection('views', viewsOpen) })
-  $effect(() => { saveSidebarSection('matViews', matViewsOpen) })
 
   // ── Pinned tables ─────────────────────────────────────────────────────────
   const PINNED_KEY = 'stroke:pinned-tables'
@@ -280,12 +269,154 @@
   }
 
   const _dp = loadDisplayPrefs()
-  let showTables = $state(_dp.showTables ?? true)
-  let showViews = $state(_dp.showViews ?? true)
-  let showMatViews = $state(_dp.showMatViews ?? true)
-  let showRecent = $state(_dp.showRecent ?? true)
-  let showPins = $state(_dp.showPins ?? true)
-  let showDatabases = $state(_dp.showDatabases ?? true)
+
+  /**
+   * One list at a time, chosen from the strip at the top of the sidebar.
+   *
+   * This replaces six independently-collapsible sections stacked in one scroll
+   * container. That layout had two problems no amount of styling fixes: the
+   * height of everything below a section moved every time one was opened, so
+   * nothing in the panel held still; and with several open at once the list you
+   * were actually looking for was usually below the fold, which is what the
+   * accordion was supposed to prevent. A tab strip costs one fixed row and the
+   * list underneath always starts at the same place.
+   *
+   * Materialized views ride in the Views tab - they are views, and splitting
+   * them out is what produced six sections in the first place.
+   * @typedef {'tables' | 'views' | 'recent' | 'pins' | 'databases'} SidebarTab
+   */
+  const SIDEBAR_TAB_KEY = 'stroke:sidebar-tab'
+  /** @type {{ id: SidebarTab, label: string, icon: string }[]} */
+  const SIDEBAR_TABS = [
+    { id: 'tables',    label: 'Tables',    icon: 'table-2' },
+    // Second, not last: switching database is a navigation move you make as
+    // often as switching schema, and it was sitting behind three lists you visit
+    // far less.
+    { id: 'databases', label: 'Databases', icon: 'database' },
+    { id: 'views',     label: 'Views',     icon: 'table-view' },
+    { id: 'recent',    label: 'Recent',    icon: 'clock' },
+    { id: 'pins',      label: 'Pins',      icon: 'pin' },
+  ]
+  function loadSidebarTab() {
+    try {
+      const raw = localStorage.getItem(SIDEBAR_TAB_KEY)
+      if (SIDEBAR_TABS.some((t) => t.id === raw)) return /** @type {SidebarTab} */ (raw)
+    } catch {}
+    return /** @type {SidebarTab} */ ('tables')
+  }
+  let sidebarTab = $state(loadSidebarTab())
+
+  /**
+   * Keyboard access to the strip. Registered here rather than in StudioShell
+   * because the state and the tab list both live here - a hotkey that has to
+   * reach across a component boundary to set one field is how that field ends up
+   * lifted for no other reason.
+   *
+   *   ⌘⇧1-5      jump straight to a tab
+   *   ⌘⌥← / ⌘⌥→  cycle, wrapping at both ends
+   *
+   * ⌘1-9 is already "go to editor tab" and ⌘⌥1-9 is "switch saved connection",
+   * so neither of those ranges was free.
+   */
+  const modLabel =
+    typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '\u2318' : 'Ctrl+'
+
+  /** @param {number} delta */
+  function cycleSidebarTab(delta) {
+    const i = SIDEBAR_TABS.findIndex((t) => t.id === sidebarTab)
+    const next = (i + delta + SIDEBAR_TABS.length) % SIDEBAR_TABS.length
+    sidebarTab = SIDEBAR_TABS[next].id
+  }
+  SIDEBAR_TABS.forEach((tab, i) => {
+    createHotkey(`Mod+Shift+${i + 1}`, (e) => {
+      if (!connectionName) return
+      e.preventDefault()
+      sidebarTab = tab.id
+    })
+  })
+  createHotkey('Mod+Alt+ArrowRight', (e) => {
+    if (!connectionName) return
+    e.preventDefault()
+    cycleSidebarTab(1)
+  })
+  createHotkey('Mod+Alt+ArrowLeft', (e) => {
+    if (!connectionName) return
+    e.preventDefault()
+    cycleSidebarTab(-1)
+  })
+  /** Pending single-click database switch, held so a second click can cancel it. */
+  let dbClickTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null)
+  /** @param {{ key: string, label: string }} db */
+  function onDbClick(db) {
+    if (dbClickTimer) clearTimeout(dbClickTimer)
+    dbClickTimer = setTimeout(() => { dbClickTimer = null; onswitchdatabase(db) }, 220)
+  }
+  /** @param {{ key: string, label: string }} db */
+  function onDbDblClick(db) {
+    if (dbClickTimer) { clearTimeout(dbClickTimer); dbClickTimer = null }
+    onswitchdatabasenow(db)
+  }
+
+  /**
+   * What an empty tab says. `filtered` fires when the list has rows but the
+   * filter matched none - a different problem from having nothing at all, and
+   * one the user can fix by clearing the box rather than by creating anything.
+   * @type {Record<SidebarTab, { icon: string, title: string, hint: string }>}
+   */
+  const TAB_EMPTY = {
+    tables:    { icon: 'table-2',    title: 'No tables',    hint: 'Nothing in this schema yet.' },
+    views:     { icon: 'table-view', title: 'No views',     hint: 'Views and materialized views show up here.' },
+    recent:    { icon: 'clock',      title: 'No recents',   hint: 'Tables you open appear here.' },
+    pins:      { icon: 'pin',        title: 'No pins',      hint: 'Right-click a table to pin it here.' },
+    databases: { icon: 'database',   title: 'No databases', hint: 'Nothing else on this server.' },
+  }
+  const tabIsEmpty = $derived(!loadingTables && !!connectionName && tabCounts[sidebarTab] === 0)
+  /** True when the tab has rows but the filter hid all of them. */
+  const tabEmptyFromFilter = $derived(
+    tabIsEmpty &&
+      !!debouncedFilter &&
+      (sidebarTab === 'tables'
+        ? regularTablesUnpinned.length > 0
+        : sidebarTab === 'views'
+          ? views.length + matViews.length > 0
+          : sidebarTab === 'databases'
+            ? dbEntries.length > 0
+            : sidebarTab === 'pins'
+              ? pinnedTables.length > 0
+              : recentTables.length > 0),
+  )
+
+  /** How many rows each tab holds BEFORE the filter. @type {Record<SidebarTab, number>} */
+  const tabTotals = $derived({
+    tables: regularTablesUnpinned.length,
+    views: views.length + matViews.length,
+    // The recents list is capped at 5 rows, so that is the denominator too.
+    recent: Math.min(recentTabs.length, 5),
+    pins: pinnedTables.length,
+    databases: dbEntries.length,
+  })
+
+  /** How many rows each tab holds, after the filter. @type {Record<SidebarTab, number>} */
+  const tabCounts = $derived({
+    tables: filteredRegularTables.length,
+    views: filteredViews.length + filteredMatViews.length,
+    recent: Math.min(filteredRecent.length, 5),
+    pins: visiblePinnedTables.length,
+    databases: filteredDbEntries.length,
+  })
+  $effect(() => { try { localStorage.setItem(SIDEBAR_TAB_KEY, sidebarTab) } catch {} })
+
+  // The old per-section visibility flags are now just "is this the open tab".
+  // Keeping the names means the ~900 lines of list markup below did not have to
+  // be rewritten to ask a different question.
+  const showTables    = $derived(sidebarTab === 'tables')
+  const showViews     = $derived(sidebarTab === 'views')
+  const showMatViews  = $derived(sidebarTab === 'views')
+  const showRecent    = $derived(sidebarTab === 'recent')
+  const showPins      = $derived(sidebarTab === 'pins')
+  const showDatabases = $derived(sidebarTab === 'databases')
+  // Nothing collapses any more, so every list in the open tab is open.
+  const recentOpen = true, tablesOpen = true, viewsOpen = true, matViewsOpen = true
   let showRowCount = $state(_dp.showRowCount ?? true)
   let hideEmpty = $state(_dp.hideEmpty ?? false)
   let hideSystem = $state(_dp.hideSystem ?? false)
@@ -294,7 +425,7 @@
   /** @type {'asc' | 'desc'} */
   let sortDir = $state(_dp.sortDir ?? 'asc')
 
-  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, showDatabases, sortBy, showPins, showRowCount, sortDir, hideEmpty, hideSystem }) })
+  $effect(() => { saveDisplayPrefs({ sortBy, showRowCount, sortDir, hideEmpty, hideSystem }) })
 
   /** System / migration tables that are usually noise: `_prisma_migrations`, `pg_*`, `sqlite_*`, leading-underscore. */
   function isSystemTable(/** @type {string} */ name) {
@@ -386,6 +517,18 @@
 
   /** @param {string} value */
   function handleFilterInput(value) {
+    // The fake crash. Exact whole-value match, so filtering for a `crash_logs`
+    // table still filters - only a bare "crash" is the joke. Handled before the
+    // debounce, so the filter never actually runs with it.
+    if (isMagic(value, CRASH_WORD)) {
+      localFilter = "";
+      if (filterDebounce) clearTimeout(filterDebounce);
+      filterDebounce = null;
+      debouncedFilter = "";
+      ontablefilter("");
+      armCrash();
+      return;
+    }
     localFilter = value;
     if (filterDebounce) clearTimeout(filterDebounce);
     filterDebounce = setTimeout(() => {
@@ -525,9 +668,6 @@
     hideSystem = false;
     sortBy = 'name';
     sortDir = 'asc';
-  }
-  function setAllSections(/** @type {boolean} */ open) {
-    recentOpen = open; tablesOpen = open; viewsOpen = open; matViewsOpen = open;
   }
   // ── Virtual lists (tables, views, materialized views, databases) ─────────
   // The window maths lives in $lib/virtual-window.js; this block owns the two
@@ -672,7 +812,7 @@
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
-    "h-7 w-full min-w-0 rounded-lg border-2 border-border bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:border-foreground/30 hover:bg-background/55 focus-visible:border-ring/55 focus-visible:ring-2 focus-visible:ring-ring/15";
+"field-surface h-7 w-full min-w-0 bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover: hover:bg-background/55";
 </script>
 
 <svelte:window onkeydown={(e) => {
@@ -693,7 +833,7 @@
 {#snippet countBadge(visible, total)}
   {#if visible !== total}
     <span class="ml-auto font-mono text-ui-2xs text-muted-foreground" title="{visible} shown · {total - visible} hidden of {total}"
-      >{visible}<span class="text-muted-foreground/55">/{total}</span></span>
+      >{visible}<span class="text-muted-foreground">/{total}</span></span>
   {:else}
     <span class="ml-auto font-mono text-ui-2xs text-muted-foreground">{total}</span>
   {/if}
@@ -707,52 +847,101 @@
   <ContextMenu.Root>
   <ContextMenu.Trigger class="flex h-full min-w-0 flex-1">
   <aside
-    class="studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
+    class="@container/sb studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
     data-studio-chrome
   >
     {#if navSidebarPanel === "tables"}
     <div class="flex min-h-0 flex-1 flex-col">
 
       <div class="flex shrink-0 flex-col">
-        <div class="flex h-9 min-w-0 items-center gap-1 px-2">
-          <div class="min-w-0 flex-1">
-            {#if schemas.length === 0}
-              <span
+        <!-- Top row. One list at a time, chosen from the strip: the old sidebar
+             stacked six independently-collapsible sections in one scroller, so
+             opening any of them moved everything below it and the list you
+             wanted was usually past the fold.
+
+             Top row: the tabs on the left, the list actions pushed to the right.
+             They act on whichever list the tab picked, so they belong on the line
+             with the tabs rather than wedged against a filter they have nothing to
+             do with. `ml-auto` is the gap - a fixed one would drift as the sidebar
+             is dragged wider. The tablist stays its own element: a tablist holding
+             three non-tab buttons is a lie to every screen reader. -->
+        <div class="flex h-9 shrink-0 items-center gap-1 border-b border-sidebar-border px-2">
+          <div
+            role="tablist"
+            aria-label="Sidebar sections"
+            class="app-scroll-x flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+          >
+            {#each SIDEBAR_TABS as tab (tab.id)}
+              {@const active = sidebarTab === tab.id}
+              {@const count = tabCounts[tab.id]}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={active}
+                aria-label={count > 0 ? `${tab.label}, ${count}` : tab.label}
+                title={`${tab.label} · ${modLabel}⇧${SIDEBAR_TABS.indexOf(tab) + 1}`}
+                tabindex={active ? 0 : -1}
+                disabled={!connectionName}
                 class={cn(
-                  sidebarFieldClass,
-                  "flex items-center px-2.5 font-medium",
+                  // Full row height, 32px wide: the whole strip is the target, which
+                  // clears 24x24 with room over and lets the accent rail sit on the
+                  // row's own bottom edge. It was a 28px pill with the rail pushed
+                  // 7px below it, so the rail floated in the gap between the pill and
+                  // the border, attached to neither.
+                  "group/tab relative inline-flex h-9 w-8 shrink-0 items-center justify-center transition-colors disabled:pointer-events-none disabled:opacity-40",
+                  // Two cues, not one. Colour alone does not separate five line icons
+                  // at this size, so the selected tab also carries a filled surface and
+                  // an accent rail - the same "which panel am I in" signal the VS Code
+                  // activity bar uses.
+                  active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                 )}
-                id="sidebar-schema"
+                onclick={() => (sidebarTab = tab.id)}
+                onkeydown={(e) => {
+                  // Arrow keys move between tabs (ARIA APG tablist); the roving
+                  // tabindex above is what keeps the strip to one tab stop.
+                  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return
+                  e.preventDefault()
+                  const i = SIDEBAR_TABS.findIndex((t) => t.id === sidebarTab)
+                  const next = (i + (e.key === "ArrowRight" ? 1 : -1) + SIDEBAR_TABS.length) % SIDEBAR_TABS.length
+                  sidebarTab = SIDEBAR_TABS[next].id
+                  /** @type {HTMLElement | null} */ (
+                    e.currentTarget.parentElement?.children[next] ?? null
+                  )?.focus()
+                }}
               >
-                -
-              </span>
-            {:else}
-              <SearchableMenu
-                contentClass="w-[var(--bits-popover-anchor-width)] min-w-[180px]"
-                placeholder="Search schemas…"
-                empty="No schema"
-                items={schemas.map((s) => ({ value: s, label: s }))}
-                onselect={(it) => { if (it.value) onschemachange(it.value); }}
-              >
-                {#snippet trigger(props)}
-                  <button
-                    {...props}
-                    id="sidebar-schema"
-                    type="button"
-                    class={cn(sidebarFieldClass, "flex h-7 w-full items-center justify-between gap-2 px-2.5 font-normal")}
-                  >
-                    <span class="truncate">{activeSchema}</span>
-                    <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground" />
-                  </button>
-                {/snippet}
-                {#snippet item(it)}
-                  <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground/50" />
-                  <span class="min-w-0 flex-1 truncate">{it.label}</span>
-                  {#if it.value === activeSchema}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
-                {/snippet}
-              </SearchableMenu>
-            {/if}
+                <!-- The pill is a child, not the button's own background: the
+                     button spans the full row so its target is generous, while
+                     the shape you see stays 28px and centred. -->
+                <span
+                  class={cn(
+                    "pointer-events-none absolute inset-x-0.5 inset-y-1 rounded-md transition-colors",
+                    active ? "bg-sidebar-accent" : "group-hover/tab:bg-sidebar-accent/50",
+                  )}
+                  aria-hidden="true"
+                ></span>
+                <Icon name={tab.icon} class="relative size-4 shrink-0" />
+                {#if active}
+                  <span
+                    class="pointer-events-none absolute inset-x-1 bottom-0 h-0.5 rounded-t-full bg-primary"
+                    aria-hidden="true"
+                  ></span>
+                {/if}
+                {#if connectionName && count > 0}
+                  <!-- The count is a cue, not a label: it says "there is something in
+                       here" without stealing the width an icon-only strip is for. The
+                       number itself is in the accessible name above. -->
+                  <span
+                    class={cn(
+                      "pointer-events-none absolute top-1.5 right-1 size-1.5 rounded-full",
+                      active ? "bg-primary" : "bg-muted-foreground",
+                    )}
+                    aria-hidden="true"
+                  ></span>
+                {/if}
+              </button>
+            {/each}
           </div>
+          <div class="ml-auto flex shrink-0 items-center gap-0.5">
           <DropdownMenu.Root>
             <DropdownMenu.Trigger
               class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground disabled:pointer-events-none disabled:opacity-40"
@@ -762,36 +951,10 @@
               <Icon name="list-filter" class="size-3.5" />
             </DropdownMenu.Trigger>
             <DropdownMenu.Content align="start" class="min-w-52">
-              <div class="px-2 pt-1 pb-1.5 text-ui-2xs text-muted-foreground/70 leading-relaxed">
+              <div class="px-2 pt-1 pb-1.5 text-ui-2xs text-muted-foreground leading-relaxed">
                 <span class="font-mono text-foreground/80">{regularTables.length}</span> tables{#if views.length} · <span class="font-mono text-foreground/80">{views.length}</span> views{/if}{#if matViews.length} · <span class="font-mono text-foreground/80">{matViews.length}</span> mat.{/if}
                 {#if hiddenCount > 0}<br /><span class="text-warning">{hiddenCount} hidden by filters</span>{/if}
               </div>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Label class="px-2 py-0.5 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
-              <DropdownMenu.CheckboxItem
-                checked={showDatabases}
-                onCheckedChange={(v) => (showDatabases = v)}
-              ><Icon name="database" class="text-muted-foreground" />Databases</DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showRecent}
-                onCheckedChange={(v) => (showRecent = v)}
-              ><Icon name="clock" class="text-muted-foreground" />Recent</DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showTables}
-                onCheckedChange={(v) => (showTables = v)}
-              ><Icon name="table-2" class="text-muted-foreground" />Tables</DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showViews}
-                onCheckedChange={(v) => (showViews = v)}
-              ><Icon name="table-view" class="text-muted-foreground" />Views</DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showMatViews}
-                onCheckedChange={(v) => (showMatViews = v)}
-              ><Icon name="layers" class="text-muted-foreground" />Materialized Views</DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showPins}
-                onCheckedChange={(v) => (showPins = v)}
-              ><Icon name="pin" class="text-muted-foreground" />Pins</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
               <DropdownMenu.CheckboxItem
                 checked={showRowCount}
@@ -806,7 +969,7 @@
                 onCheckedChange={(v) => (hideSystem = v)}
               ><Icon name="cog" class="text-muted-foreground" />Hide system tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
-              <DropdownMenu.Label class="px-2 py-0.5 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sort by</DropdownMenu.Label>
+              <DropdownMenu.Label class="px-2 py-0.5 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">Sort by</DropdownMenu.Label>
               <!-- Field + direction merged: pick a field, click it again to flip. -->
               <DropdownMenu.Item
                 closeOnSelect={false}
@@ -816,7 +979,7 @@
                 <Icon name={sortBy === 'name' && sortDir === 'desc' ? 'arrow-up-a-z' : 'arrow-down-a-z'} class="text-muted-foreground" />
                 Name
                 {#if sortBy === 'name'}
-                  <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/50">{sortDir === 'asc' ? 'A→Z' : 'Z→A'}</span>
+                  <span class="ml-auto font-mono text-ui-2xs text-muted-foreground">{sortDir === 'asc' ? 'A→Z' : 'Z→A'}</span>
                 {/if}
               </DropdownMenu.Item>
               <DropdownMenu.Item
@@ -827,18 +990,10 @@
                 <Icon name={sortBy === 'rowCount' && sortDir === 'asc' ? 'arrow-up-0-1' : 'arrow-down-0-1'} class="text-muted-foreground" />
                 Row count
                 {#if sortBy === 'rowCount'}
-                  <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/50">{sortDir === 'desc' ? '9→0' : '0→9'}</span>
+                  <span class="ml-auto font-mono text-ui-2xs text-muted-foreground">{sortDir === 'desc' ? '9→0' : '0→9'}</span>
                 {/if}
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
-              <DropdownMenu.Item onSelect={() => setAllSections(true)} closeOnSelect={false}>
-                <Icon name="chevrons-up-down" class="text-muted-foreground" />
-                Expand all
-              </DropdownMenu.Item>
-              <DropdownMenu.Item onSelect={() => setAllSections(false)} closeOnSelect={false}>
-                <Icon name="chevrons-down-up" class="text-muted-foreground" />
-                Collapse all
-              </DropdownMenu.Item>
               <DropdownMenu.Item onSelect={resetFilters} disabled={!filtersActive}>
                 <Icon name="rotate-ccw" class="text-muted-foreground" />
                 Reset filters &amp; sort
@@ -897,10 +1052,48 @@
               <Icon name="plus" class="size-3.5" />
             </button>
           {/if}
+          </div>
         </div>
 
-        <div class="flex h-9 items-center border-b border-sidebar-border px-2">
-          <div class="relative min-w-0 w-full">
+        <!-- Filter row: the schema the list belongs to, and the filter itself. -->
+        <div class="flex h-9 shrink-0 items-center gap-1.5 border-b border-sidebar-border px-2">
+          <!-- Shown when the engine actually has schemas to pick between, which
+               is not the same question as `supportsSchemas` - that flag is
+               postgres-only because Postgres is the only driver with a CREATE
+               SCHEMA namespace, and it gates the "New schema" action below.
+               MySQL and SQL Server both LIST schemas without supporting that,
+               so gating the picker on it hid theirs. SQLite, D1 and Redis have
+               no schemas at all and correctly show nothing. -->
+          {#if schemas.length > 0}
+            <div class="max-w-[8rem] shrink-0">
+                    <SearchableMenu
+                      contentClass="w-[var(--bits-popover-anchor-width)] min-w-[180px]"
+                      placeholder="Search schemas…"
+                      empty="No schema"
+                      items={schemas.map((s) => ({ value: s, label: s }))}
+                      onselect={(it) => { if (it.value) onschemachange(it.value); }}
+                    >
+                      {#snippet trigger(props)}
+                        <button
+                          {...props}
+                          id="sidebar-schema"
+                          type="button"
+                          class={cn(sidebarFieldClass, "flex h-7 w-full items-center gap-1 px-2 font-normal")}
+                        >
+                          <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground" />
+                          <span class="min-w-0 truncate">{activeSchema}</span>
+                          <Icon name="chevron-down" class="size-3 shrink-0 text-muted-foreground" />
+                        </button>
+                      {/snippet}
+                      {#snippet item(it)}
+                        <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground" />
+                        <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                        {#if it.value === activeSchema}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
+                      {/snippet}
+                    </SearchableMenu>
+            </div>
+          {/if}
+          <div class="relative min-w-0 flex-1">
           <Icon name="search"
             class="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
           />
@@ -926,6 +1119,22 @@
             data-sidebar-filter
           />
           </div>
+          {#if connectionName && tabTotals[sidebarTab] > 0}
+            <!-- shown/total for the open tab. The tab strip is icon-only, so its dot
+                 can only say "something is in here"; the number belongs next to the
+                 filter that changes it. Hidden on a narrow sidebar, where the filter
+                 needs the width more than the count does. -->
+            <span
+              class="shrink-0 pl-0.5 font-mono text-ui-2xs tabular-nums text-muted-foreground @max-[13rem]/sb:hidden"
+              title="{tabCounts[sidebarTab]} shown of {tabTotals[sidebarTab]}"
+            >
+              {#if tabCounts[sidebarTab] !== tabTotals[sidebarTab]}
+                <span class="text-foreground">{tabCounts[sidebarTab]}</span>/{tabTotals[sidebarTab]}
+              {:else}
+                {tabTotals[sidebarTab]}
+              {/if}
+            </span>
+          {/if}
         </div>
       </div>
 
@@ -974,28 +1183,11 @@
                  cannot switch in place (SQLite, Redis) never render it. -->
             {#if showDatabases && canSwitchDb && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
-                <button
-                  type="button"
-                  class="flex min-w-0 flex-1 items-center gap-1 text-left"
-                  onclick={toggleDatabases}
-                >
-                  <Icon name="chevron-down"
-                    class={cn(
-                      "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                      !databasesOpen && "-rotate-90",
-                    )}
-                  />
-                  <Icon name="database" class="size-3 shrink-0 text-muted-foreground/60" />
-                  <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Databases</span>
-                  {#if filteredDbEntries.length > 0}
-                    <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{filteredDbEntries.length}</span>
-                  {/if}
-                </button>
-                {#if databasesOpen}
+                {#if true}
                   {#if dbAdmin}
                     <button
                       type="button"
-                      class="ml-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground disabled:opacity-40"
+                      class="hit-area ml-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                       onclick={onnewdatabase}
                       title={$readOnlyMode ? READ_ONLY_HINT : "New database"}
                       disabled={$readOnlyMode}
@@ -1005,7 +1197,7 @@
                   {/if}
                   <button
                     type="button"
-                    class={cn("inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground", !dbAdmin && "ml-auto")}
+                    class={cn("hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground", !dbAdmin && "ml-auto")}
                     onclick={() => void loadDatabases()}
                     title="Refresh databases"
                     disabled={dbEntriesLoading}
@@ -1016,11 +1208,11 @@
               </div>
               {#if databasesOpen}
                 {#if dbEntriesLoading && dbEntries.length === 0}
-                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground/40">Loading…</p>
+                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground">Loading…</p>
                 {:else if dbEntriesError && dbEntries.length === 0}
-                  <p class="px-4 pb-1.5 text-ui-2xs text-destructive/70">{dbEntriesError}</p>
+                  <p class="px-4 pb-1.5 text-ui-2xs text-destructive">{dbEntriesError}</p>
                 {:else if filteredDbEntries.length === 0}
-                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground/40">
+                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground">
                     {!dbEntriesLoaded ? 'Loading…' : lf ? 'No matching databases' : 'No other databases'}
                   </p>
                 {:else}
@@ -1040,8 +1232,9 @@
                                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                                   : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
                               )}
-                              onclick={() => !isCurrent && onswitchdatabase(db)}
-                              title={isCurrent ? `${db.label} (current)` : `Switch to ${db.label}`}
+                              onclick={() => !isCurrent && onDbClick(db)}
+                              ondblclick={() => !isCurrent && onDbDblClick(db)}
+                              title={isCurrent ? `${db.label} (current)` : `Switch to ${db.label} · double-click to switch without confirming`}
                             >
                               <Icon name="database" class="size-3 shrink-0 opacity-50" />
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{db.label}</span>
@@ -1103,25 +1296,12 @@
 
             <!-- ── Recent ─────────────────────────────────────────── -->
             {#if showRecent && filteredRecent.length > 0 && connectionName}
+              <!-- The tab carries the count, so this row keeps only the one
+                   action that belongs to this list. -->
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <button
                   type="button"
-                  class="flex min-w-0 flex-1 items-center gap-1 text-left"
-                  onclick={() => (recentOpen = !recentOpen)}
-                >
-                  <Icon name="chevron-down"
-                    class={cn(
-                      "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                      !recentOpen && "-rotate-90",
-                    )}
-                  />
-                  <Icon name="clock" class="size-3 shrink-0 text-muted-foreground/60" />
-                  <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Recent</span>
-                  <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{Math.min(filteredRecent.length, 5)}</span>
-                </button>
-                <button
-                  type="button"
-                  class="ml-auto font-mono text-ui-2xs text-muted-foreground/50 hover:text-destructive transition-colors"
+                  class="ml-auto font-mono text-ui-2xs text-muted-foreground transition-colors hover:text-destructive"
                   onclick={onrecentclear}
                   title="Clear recent"
                 >Clear</button>
@@ -1140,7 +1320,12 @@
                         role="button"
                         tabindex="0"
                         onclick={() => onrecentselect(item.schema, item.table)}
-                        onkeydown={(e) => e.key === 'Enter' && onrecentselect(item.schema, item.table)}
+                        onkeydown={(e) => {
+                          // role="button" has to answer Space as well as Enter (ARIA APG).
+                          if (e.key !== 'Enter' && e.key !== ' ') return
+                          e.preventDefault()
+                          onrecentselect(item.schema, item.table)
+                        }}
                       >
                         {#if item.tableKind === 'view'}
                           <Icon name="table-view" class="size-3 shrink-0 opacity-50" />
@@ -1152,8 +1337,8 @@
                         <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{item.table}</span>
                         <button
                           type="button"
-                          title="Remove from recent"
-                          class="invisible inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground group-hover/recent:inline-flex"
+                          aria-label="Remove {item.table} from recent"
+                          class="hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/recent:opacity-100 hover:text-foreground focus-visible:opacity-100"
                           onclick={(e) => { e.stopPropagation(); onrecentremove(item.schema, item.table) }}
                         >
                           <Icon name="x" class="size-3" />
@@ -1168,13 +1353,13 @@
             <!-- ── Pinned ─────────────────────────────────────────── -->
             {#if showPins && visiblePinnedTables.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
-                <Icon name="pin" class="size-3 shrink-0 text-muted-foreground/60" />
-                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Pinned</span>
-                <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{visiblePinnedTables.length}</span>
+                <Icon name="pin" class="size-3 shrink-0 text-muted-foreground" />
+                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Pinned</span>
+                <span class="ml-1 font-mono text-ui-2xs text-muted-foreground">{visiblePinnedTables.length}</span>
                 {#if pinnedTables.length > 5}
                   <button
                     type="button"
-                    class="ml-auto font-mono text-ui-2xs text-muted-foreground/50 hover:text-destructive transition-colors"
+                    class="ml-auto font-mono text-ui-2xs text-muted-foreground hover:text-destructive transition-colors"
                     onclick={clearAllPins}
                     title="Clear all pinned tables"
                   >Clear all</button>
@@ -1213,13 +1398,13 @@
                             {#if isSelected}
                               <Icon name="square-check" class="size-3 text-primary" />
                             {:else}
-                              <Icon name="pin" class="size-3 text-muted-foreground/45 group-hover:hidden" />
+                              <Icon name="pin" class="size-3 text-muted-foreground group-hover:hidden" />
                               <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
                             {/if}
                           </span>
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{tableName}</span>
                           {#if showRowCount}
-                          <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground/85">
+                          <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground">
                             {formatTableRowCount(_rowCountByName.get(tableName))}
                           </span>
                           {/if}
@@ -1320,27 +1505,7 @@
 
             <!-- ── Tables ─────────────────────────────────────────── -->
             {#if showTables}
-            <button
-              type="button"
-              class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1 text-left"
-              onclick={() => {
-                tablesOpen = !tablesOpen;
-              }}
-            >
-              <Icon name="chevron-down"
-                class={cn(
-                  "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                  !tablesOpen && "-rotate-90",
-                )}
-              />
-              <span
-                class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
-                >{$t('sidebar.tables')}</span
-              >
-              {#if regularTablesUnpinned.length > 0}
-                {@render countBadge(filteredRegularTables.length, regularTablesUnpinned.length)}
-              {/if}
-            </button>
+
             {#if tablesOpen}
               <div
                 role="none"
@@ -1363,16 +1528,10 @@
                   <li
                     class="flex w-full flex-col items-center gap-2 px-4 py-8 text-center"
                   >
-                    <Icon name="table-2" class="size-7 text-muted-foreground/25" />
+                    <Icon name="table-2" class="size-7 text-muted-foreground" />
                     <p class="text-ui-sm text-muted-foreground">
                       No tables in {activeSchema || "schema"}
                     </p>
-                  </li>
-                {:else if filteredRegularTables.length === 0 && lf}
-                  <li
-                    class="px-3 py-3 text-center text-ui-xs text-muted-foreground"
-                  >
-                    No tables match
                   </li>
                 {:else}
                   {#if tableWin.topPad > 0}<li style="height:{tableWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
@@ -1408,14 +1567,19 @@
                               {#if isSelected}
                                 <Icon name="square-check" class="size-3.5 text-primary" />
                               {:else}
-                                <Icon name="table-2" class="size-3.5 opacity-45 group-hover:hidden" />
-                                <Icon name="square" class="size-3.5 hidden opacity-40 group-hover:block" />
+                                <Icon name="table-2" class="size-3.5 opacity-70 group-hover:hidden" />
+                                <Icon name="square" class="size-3.5 hidden opacity-70 group-hover:block" />
                               {/if}
                             </span>
                             <span class="flex min-w-0 items-center gap-1.5">
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{table.name}</span>
                               {#if table.rlsEnabled}
-                                <Icon name="lock" class="size-2.5 shrink-0 text-muted-foreground/50" title="Row-level security enabled" />
+                                <Icon
+                                  name="lock"
+                                  class="size-3 shrink-0 text-muted-foreground"
+                                  role="img"
+                                  aria-label="Row-level security enabled"
+                                />
                               {/if}
                             </span>
                             {#if showRowCount}
@@ -1425,7 +1589,7 @@
                                  on every row made a long list read as a column of
                                  dashes, which says "empty" far louder than "counting". -->
                             <span
-                              class="flex min-w-[4ch] shrink-0 items-center justify-end font-mono text-ui-2xs leading-4 tabular-nums text-muted-foreground/55"
+                              class="flex min-w-[4ch] shrink-0 items-center justify-end font-mono text-ui-2xs leading-4 tabular-nums text-muted-foreground"
                               title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : "Counting rows…"}
                             >
                               {#if table.rowCount != null}{formatTableRowCount(table.rowCount)}{/if}
@@ -1560,35 +1724,19 @@
 
             <!-- ── Views ──────────────────────────────────────────── -->
             {#if showViews && (views.length > 0 || filteredViews.length > 0)}
-              <button
-                type="button"
-                class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1 text-left"
-                onclick={() => {
-                  viewsOpen = !viewsOpen;
-                }}
-              >
-                <Icon name="chevron-down"
-                  class={cn(
-                    "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                    !viewsOpen && "-rotate-90",
-                  )}
-                />
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <span
-                  class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
+                  class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase"
                   >{$t('sidebar.views')}</span
                 >
                 {#if views.length > 0}
                   {@render countBadge(filteredViews.length, views.length)}
                 {/if}
-              </button>
+              </div>
               {#if viewsOpen}
                 <ul bind:this={viewListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
                   {#if filteredViews.length === 0}
-                    <li
-                      class="px-3 py-3 text-center text-ui-xs text-muted-foreground"
-                    >
-                      No views match
-                    </li>
+                    <!-- The tab-level empty state covers this. -->
                   {:else}
                     {#if viewWin.topPad > 0}<li style="height:{viewWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                     {#each viewsToRender as view (view.name)}
@@ -1654,66 +1802,57 @@
               {/if}
             {/if}
 
-            <!-- ── All sections hidden ───────────────────────────── -->
-            {#if !showTables && !showViews && !showMatViews && !showRecent}
-              <div class="flex flex-col items-center justify-center gap-2 px-4 py-16 text-center">
-                <p class="text-ui-xs text-muted-foreground/50">All sections are hidden</p>
-                <p class="text-ui-2xs text-muted-foreground/30">Use the filter menu to show them</p>
-              </div>
-            {/if}
 
-            <!-- ── Empty state ───────────────────────────────────── -->
-            {#if !loadingTables && connectionName && tables.length === 0}
-              <div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center">
-                <div class="flex size-10 items-center justify-center rounded-lg border border-border/50 bg-muted/30">
-                  <Icon name="table-2" class="size-5 text-muted-foreground/30" />
+            <!-- ── Empty state, one per tab ──────────────────────── -->
+            {#if tabIsEmpty}
+              {@const empty = TAB_EMPTY[sidebarTab]}
+              <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+                <div class="flex size-10 items-center justify-center rounded-lg border border-border bg-muted/30">
+                  <Icon name={tabEmptyFromFilter ? 'search' : empty.icon} class="size-5 text-muted-foreground" />
                 </div>
-                <div>
-                  <p class="text-ui-xs font-medium text-muted-foreground">No tables found</p>
-                  <p class="mt-0.5 text-ui-2xs text-muted-foreground/50">{activeSchema ? `in "${activeSchema}"` : 'in this database'}</p>
+                <div class="max-w-[16rem]">
+                  <p class="text-ui-xs font-medium text-foreground">
+                    {tabEmptyFromFilter ? 'No matches' : empty.title}
+                  </p>
+                  <p class="mt-1 text-ui-2xs leading-relaxed text-muted-foreground">
+                    {#if tabEmptyFromFilter}
+                      Nothing here matches “{debouncedFilter}”.
+                    {:else if sidebarTab === 'tables' && activeSchema}
+                      Nothing in “{activeSchema}” yet.
+                    {:else}
+                      {empty.hint}
+                    {/if}
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-3 py-1.5 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  onclick={onrefresh}
-                >
-                  <Icon name="refresh-cw" class="size-3" />
-                  Retry
-                </button>
+                {#if tabEmptyFromFilter}
+                  <Button variant="outline" size="sm" onclick={() => handleFilterInput('')}>
+                    <Icon name="x" class="size-3.5" />
+                    Clear filter
+                  </Button>
+                {:else if sidebarTab === 'tables' || sidebarTab === 'databases'}
+                  <Button variant="outline" size="sm" onclick={onrefresh}>
+                    <Icon name="refresh-cw" class="size-3.5" />
+                    Refresh
+                  </Button>
+                {/if}
               </div>
             {/if}
 
             <!-- ── Materialized Views ─────────────────────────────── -->
             {#if showMatViews && (matViews.length > 0 || filteredMatViews.length > 0)}
-              <button
-                type="button"
-                class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1 text-left"
-                onclick={() => {
-                  matViewsOpen = !matViewsOpen;
-                }}
-              >
-                <Icon name="chevron-down"
-                  class={cn(
-                    "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                    !matViewsOpen && "-rotate-90",
-                  )}
-                />
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <span
-                  class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
+                  class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase"
                   >Materialized Views</span
                 >
                 {#if matViews.length > 0}
                   {@render countBadge(filteredMatViews.length, matViews.length)}
                 {/if}
-              </button>
+              </div>
               {#if matViewsOpen}
                 <ul bind:this={matViewListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
                   {#if filteredMatViews.length === 0}
-                    <li
-                      class="px-3 py-3 text-center text-ui-xs text-muted-foreground"
-                    >
-                      No materialized views match
-                    </li>
+                    <!-- The tab-level empty state covers this. -->
                   {:else}
                     {#if matViewWin.topPad > 0}<li style="height:{matViewWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                     {#each matViewsToRender as mv (mv.name)}

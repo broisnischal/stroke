@@ -9,6 +9,8 @@
   import SearchableMenu from "$lib/components/SearchableMenu.svelte";
   import SelectMenu from "$lib/components/SelectMenu.svelte";
   import { getThemeDefinition, themesByGroup } from "$lib/themes/registry.js";
+  import { sidebarSideStore, setSidebarSide } from "$lib/stores/layout.js";
+  import { pluginState, isPluginEnabled, setPluginEnabled } from "$lib/stores/plugins.js";
   import { t, locale, LOCALES, setLocale } from "$lib/i18n.js";
   import { licenseStatus } from "$lib/stores/license.js";
   import {
@@ -26,6 +28,7 @@
     TABLE_STYLES,
     TABLE_ALIGN_OPTIONS,
     ROW_SPACINGS,
+    MOTION_MODES,
     DEFAULT_MAX_QUERY_HISTORY,
     DEFAULT_CONNECT_TIMEOUT_MS,
     DEFAULT_SOCKET_TIMEOUT_MS,
@@ -223,6 +226,24 @@
   }
 
   const rowSpacingEntries = Object.entries(ROW_SPACINGS);
+  const motionEntries = Object.entries(MOTION_MODES);
+  // NULL rendering is already an extension ("Empty & NULL Markers"), and a
+  // second implementation in Settings would be two switches for one behaviour.
+  // What was missing is discoverability: nobody goes looking in Extensions for
+  // how NULL is drawn. Same extension, surfaced where people look for it.
+  const NULLISH_ID = 'nullish-values';
+  const nullishOn = $derived.by(() => { void $pluginState; return isPluginEnabled(NULLISH_ID); });
+
+  const sidebarSideItems = [
+    { value: 'left', label: 'Left' },
+    { value: 'right', label: 'Right' },
+  ];
+
+  /** @param {string | undefined} id */
+  function setMotion(id) {
+    if (!id || id === settings.motion) return;
+    settings = updateSettings({ motion: /** @type {any} */ (id) });
+  }
 
   /** @param {string | undefined} id */
   function setRowSpacing(id) {
@@ -413,11 +434,11 @@
       <!-- ── Left: search + category nav ─────────────────────────── -->
       <aside class="flex min-h-0 flex-col gap-3 border-r border-border/40 bg-muted/[0.015] p-3">
         <div class="relative">
-          <Icon name="search" class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/45" />
+          <Icon name="search" class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             bind:value={query}
             placeholder="Search settings…"
-            class="h-8 w-full rounded-lg border-2 border-border bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class= "field-surface h-8 w-full bg-transparent pl-8 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
         <nav class="flex flex-col gap-0.5">
@@ -481,7 +502,7 @@
 <!-- ── Content snippets ──────────────────────────────────────────── -->
 {#snippet secLabel(/** @type {string} */ text)}
   {#if !searching}
-    <p class="mt-8 mb-1 text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/45 first:mt-0">{text}</p>
+    <p class="mt-8 mb-1 text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground first:mt-0">{text}</p>
     <div class="mb-1 border-b border-border/40"></div>
   {/if}
 {/snippet}
@@ -529,7 +550,7 @@
       'inline-flex size-8 shrink-0 items-center justify-center rounded-lg border transition-[background-color,color,border-color,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.96]',
       dirty
         ? 'border-border/60 text-muted-foreground hover:bg-muted hover:text-foreground'
-        : 'cursor-default border-transparent text-muted-foreground/20',
+        : 'cursor-default border-transparent text-muted-foreground',
     )}
   >
     <RotateCcw class="size-3.5" />
@@ -554,7 +575,7 @@
             unit ? 'pr-11' : 'pr-2.5',
           )}
         />
-        {#if unit}<span class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ui-3xs text-muted-foreground/50">{unit}</span>{/if}
+        {#if unit}<span class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ui-2xs text-muted-foreground">{unit}</span>{/if}
       </div>
       {@render resetBtn(key, def, settings[key] !== def)}
     </div>
@@ -573,7 +594,7 @@
         value={settings[key]}
         aria-label={label}
         onchange={(e) => setText(/** @type {any} */ (key), e.currentTarget.value, def)}
-        class="h-8 w-48 rounded-lg border-2 border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+        class= "field-surface h-8 w-48 bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow]"
       />
       {@render resetBtn(key, def, settings[key] !== def)}
     </div>
@@ -1083,6 +1104,46 @@
       />
     </div>
   {/if}
+  {#if show('Empty and NULL markers', 'Tell NULL, empty string and whitespace-only cells apart')}
+    {@render switchRow(
+      'Empty and NULL markers',
+      'Draw NULL as ∅, an empty string as "", and a whitespace-only value as ·····, so three things that all look blank stop looking the same. This is the Empty & NULL Markers extension - the same switch lives in Extensions.',
+      nullishOn,
+      () => setPluginEnabled(NULLISH_ID, !nullishOn),
+    )}
+  {/if}
+  {#if show('Sidebar position', 'Which side of the window the sidebar sits on')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">Sidebar position</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Which side of the window the tables sidebar sits on. Also on its own right-click menu.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="Sidebar position"
+        value={$sidebarSideStore}
+        onValueChange={(v) => { if (v === 'left' || v === 'right') setSidebarSide(v) }}
+        items={sidebarSideItems.map((i) => ({ ...i, keywords: [i.label] }))}
+      />
+    </div>
+  {/if}
+  {#if show('Motion', 'How much the interface animates')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">Motion</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          System follows your OS reduced-motion setting. Override it when you want animation in your window manager but not in a tool you stare at all day, or when the machine's setting isn't yours to change. A loading spinner keeps turning either way.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="Motion"
+        value={settings.motion}
+        onValueChange={setMotion}
+        items={motionEntries.map(([id, m]) => ({ value: id, label: m.label, keywords: [m.label, m.description] }))}
+      />
+    </div>
+  {/if}
   {#if show('Alternating row colors', 'Shade every other grid row')}
     {@render switchRow(
       'Alternating row colors',
@@ -1166,14 +1227,14 @@
         <p class="text-ui-sm font-medium text-foreground">{$t('settings.website')}</p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">{$t('settings.website.desc')}</p>
       </div>
-      <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-muted active:scale-[0.98]">
+        <a href= "field-surface https://stroke.click"target="_blank"rel="noopener noreferrer"class="inline-flex h-8 shrink-0 items-center gap-1.5 bg-background px-3 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-muted active:scale-[0.98]">
         stroke.click <Icon name="external-link" class="size-3.5" />
       </a>
     </div>
   {/if}
 
   {#if !searching}
-    <p class="mt-8 mb-1 text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/45">{$t('settings.sec.keyboard')}</p>
+    <p class="mt-8 mb-1 text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">{$t('settings.sec.keyboard')}</p>
     <div class="mb-3 border-b border-border/40"></div>
     <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
       {@render shortcut('⌘M', $t('settings.kbd.cycleTheme'))}

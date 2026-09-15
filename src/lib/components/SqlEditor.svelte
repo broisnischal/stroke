@@ -478,7 +478,7 @@
   {#if $appVimMode}
     <div
       bind:this={vimStatusEl}
-      class="shrink-0 border-t border-border/40 bg-muted/20 px-3 py-0.5 font-mono text-ui-2xs leading-5 text-muted-foreground/70"
+      class="shrink-0 border-t border-border/40 bg-muted/20 px-3 py-0.5 font-mono text-ui-2xs leading-5 text-muted-foreground"
     ></div>
   {/if}
 </div>

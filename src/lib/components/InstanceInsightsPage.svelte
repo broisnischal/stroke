@@ -525,7 +525,7 @@
         <p class="mt-0.5 flex min-w-0 items-center gap-1.5 text-ui-2xs text-muted-foreground">
           <span class="truncate font-mono text-foreground/70">{connectionName || '—'}</span>
           {#if version}
-            <span class="text-muted-foreground/40">·</span>
+            <span class="text-muted-foreground">·</span>
             <span class="shrink-0 truncate">{isPg ? 'PostgreSQL' : 'MySQL'} {version.version}</span>
           {/if}
         </p>
@@ -535,7 +535,7 @@
     {#if supported}
       <div class="flex shrink-0 items-center gap-2">
         {#if lastUpdated}
-          <span class="hidden text-ui-2xs tabular-nums text-muted-foreground/70 sm:inline">Updated {agoLabel}</span>
+          <span class="hidden text-ui-2xs tabular-nums text-muted-foreground sm:inline">Updated {agoLabel}</span>
         {/if}
         <button
           type="button"
@@ -560,7 +560,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground focus-visible:border-ring/55 focus-visible:ring-2 focus-visible:ring-ring/18 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+          class= "field-surface inline-flex h-7 items-center gap-1.5 px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground focus-visible:border-ring/55 focus-visible:ring-2 focus-visible:ring-ring/18 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
           disabled={refreshing}
           onclick={() => void refreshAll()}
         >
@@ -573,9 +573,9 @@
 
   {#if !supported}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-      <Database class="size-5 text-muted-foreground/40" />
+      <Database class="size-5 text-muted-foreground" />
       <p class="text-ui-sm text-muted-foreground">Instance Insights needs a server-based engine</p>
-      <p class="max-w-sm text-ui-xs text-muted-foreground/60">
+      <p class="max-w-sm text-ui-xs text-muted-foreground">
         Live sessions, transaction rates and server configuration come from PostgreSQL and MySQL catalogs.
         Embedded engines don't expose them.
       </p>
@@ -686,7 +686,7 @@
         </div>
 
         {#if !autoRefresh}
-          <p class="mt-3 flex items-center gap-1.5 text-ui-2xs text-muted-foreground/70">
+          <p class="mt-3 flex items-center gap-1.5 text-ui-2xs text-muted-foreground">
             Rates are sampled per refresh - turn on <span class="font-medium text-foreground/80">Live</span> to watch them move.
           </p>
         {/if}
@@ -779,7 +779,7 @@
             </div>
             <button
               type="button"
-              class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              class= "field-surface inline-flex h-7 shrink-0 items-center gap-1.5 px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
               disabled={refreshing}
               onclick={() => void withSpinner(refreshConfig)}
             >
@@ -794,11 +794,11 @@
                at a fixed size, and status stays a real segmented control. -->
           <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
             <div class="relative min-w-0 flex-1">
-              <Search class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
+              <Search class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
                 bind:value={configSearch}
                 placeholder="Search settings by name, category, or description…"
-                class="h-9 w-full rounded-lg border-2 border-border bg-muted/30 pl-9 pr-9 text-ui-sm text-foreground transition-[border-color,box-shadow] outline-none placeholder:text-muted-foreground/50 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                class= "field-surface h-9 w-full bg-muted/30 pl-9 pr-9 text-ui-sm text-foreground transition-[border-color,box-shadow] outline-none placeholder:text-muted-foreground"
               />
               {#if configSearch}
                 <button
@@ -836,14 +836,14 @@
                 {/snippet}
                 {#snippet item(it)}
                   <span class="min-w-0 flex-1 truncate">{it.label}</span>
-                  <span class="shrink-0 text-ui-2xs tabular-nums text-muted-foreground/60">
+                  <span class="shrink-0 text-ui-2xs tabular-nums text-muted-foreground">
                     {it.value === 'all' ? config.length : (configGroups.find((g) => g.id === it.value)?.n ?? 0)}
                   </span>
                   {#if it.value === configGroup}<Check class="size-3.5 shrink-0 text-primary" />{/if}
                 {/snippet}
               </SearchableMenu>
 
-              <div class="inline-flex h-9 shrink-0 items-center gap-0.5 rounded-lg border-2 border-border bg-muted/30 p-0.5">
+                <div class= "field-surface inline-flex h-9 shrink-0 items-center gap-0.5 bg-muted/30 p-0.5">
                 {#each statusOptions as o (o.id)}
                   <button
                     type="button"
@@ -888,8 +888,8 @@
               <section>
                 {#if sec.group}
                   <div class="mb-1.5 flex items-baseline gap-2">
-                    <h3 class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">{sec.group}</h3>
-                    <span class="text-ui-3xs tabular-nums text-muted-foreground/40">{sec.rows.length}</span>
+                    <h3 class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">{sec.group}</h3>
+                    <span class="text-ui-3xs tabular-nums text-muted-foreground">{sec.rows.length}</span>
                   </div>
                 {/if}
                 <!-- One row per setting; content-visibility keeps the ~350-row list
@@ -914,11 +914,11 @@
                             {/if}
                             {#if row.pendingRestart}
                               <span class="inline-flex shrink-0 items-center gap-1 rounded bg-warning/12 px-1 py-px text-ui-3xs text-warning">
-                                <PowerOff class="size-2.5" /> restart pending
+                                <PowerOff class="size-3" /> restart pending
                               </span>
                             {/if}
                             {#if row.editable === false}
-                              <Lock class="size-3 shrink-0 text-muted-foreground/50" aria-label="Read-only setting" />
+                              <Lock class="size-3 shrink-0 text-muted-foreground" aria-label="Read-only setting" />
                             {/if}
                           </div>
                           {#if row.description}
@@ -928,9 +928,9 @@
 
                         <span class="flex shrink-0 items-baseline gap-1.5">
                           <span class="max-w-[14rem] truncate rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-ui-2xs tabular-nums text-foreground">{shownValue(row)}</span>
-                          {#if row.unit}<span class="font-mono text-ui-3xs text-muted-foreground/70">{row.unit}</span>{/if}
+                          {#if row.unit}<span class="font-mono text-ui-3xs text-muted-foreground">{row.unit}</span>{/if}
                         </span>
-                        <ChevronRight class={cn('size-3.5 shrink-0 self-center text-muted-foreground/50 transition-transform duration-150', open && 'rotate-90')} />
+                        <ChevronRight class={cn('size-3.5 shrink-0 self-center text-muted-foreground transition-transform duration-150', open && 'rotate-90')} />
                       </button>
 
                       {#if open}
@@ -938,13 +938,13 @@
                           <div class="flex flex-wrap items-end gap-2">
                             <div class="min-w-[13rem] flex-1">
                               <div class="mb-1 flex items-baseline justify-between gap-2">
-                                <span class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">New value</span>
-                                <span class="truncate font-mono text-ui-3xs text-muted-foreground/60">
+                                <span class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">New value</span>
+                                <span class="truncate font-mono text-ui-3xs text-muted-foreground">
                                   current: {shownValue(row)}{row.unit ? ` ${row.unit}` : ''}
                                 </span>
                               </div>
                               {#if row.vartype === 'bool'}
-                                <div class="inline-flex h-9 items-center gap-0.5 rounded-lg border-2 border-border bg-muted/30 p-0.5">
+                              <div class= "field-surface inline-flex h-9 items-center gap-0.5 bg-muted/30 p-0.5">
                                   {#each ['on', 'off'] as v (v)}
                                     <button
                                       type="button"
@@ -958,7 +958,7 @@
                                 <select
                                   bind:value={draft}
                                   disabled={!editable}
-                                  class="h-9 w-full rounded-lg border-2 border-border bg-muted/30 px-2.5 font-mono text-ui-sm text-foreground transition-[border-color,box-shadow] outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 disabled:opacity-40"
+                                  class= "field-surface h-9 w-full bg-muted/30 px-2.5 font-mono text-ui-sm text-foreground transition-[border-color,box-shadow] outline-none disabled:opacity-40"
                                 >
                                   {#each row.enumVals as v (v)}<option value={v}>{v}</option>{/each}
                                 </select>
@@ -972,7 +972,7 @@
                                     if (e.key === 'Enter' && editable && draft !== row.value) { e.preventDefault(); void applySetting(row) }
                                     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); openSetting = '' }
                                   }}
-                                  class="h-9 w-full rounded-lg border-2 border-border bg-muted/30 px-3 font-mono text-ui-sm tabular-nums text-foreground transition-[border-color,box-shadow] outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 disabled:opacity-40"
+                                  class= "field-surface h-9 w-full bg-muted/30 px-3 font-mono text-ui-sm tabular-nums text-foreground transition-[border-color,box-shadow] outline-none placeholder:text-muted-foreground disabled:opacity-40"
                                 />
                               {/if}
                             </div>
@@ -1005,7 +1005,7 @@
                             {#each [['Category', row.category], ['Type', row.vartype], ['Unit', row.unit], ['Default', row.bootVal], ['Range', (row.minVal || row.maxVal) ? `${row.minVal || '−∞'} … ${row.maxVal || '∞'}` : ''], ['Source', row.source]] as [k, v] (k)}
                               {#if v}
                                 <div class="flex min-w-0 items-baseline gap-2">
-                                  <dt class="w-[4.5rem] shrink-0 text-ui-3xs uppercase tracking-[0.06em] text-muted-foreground/55">{k}</dt>
+                                  <dt class="w-[4.5rem] shrink-0 text-ui-3xs uppercase tracking-[0.06em] text-muted-foreground">{k}</dt>
                                   <dd class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-foreground/85" title={String(v)}>{v}</dd>
                                 </div>
                               {/if}
@@ -1023,7 +1023,7 @@
                               Applying writes the value now, but the server has to restart before it takes effect.
                             </p>
                           {:else if isPg}
-                            <p class="mt-3 text-ui-2xs text-muted-foreground/70">
+                            <p class="mt-3 text-ui-2xs text-muted-foreground">
                               Written with <span class="font-mono">ALTER SYSTEM</span> and reloaded - persists across restarts. Needs a superuser role.{row.context && CONTEXT_HELP[row.context] ? ` ${CONTEXT_HELP[row.context]}.` : ''}
                             </p>
                           {/if}
@@ -1087,7 +1087,7 @@
       </svg>
     {:else}
       <!-- Placeholder keeps every card the same height while samples accumulate. -->
-      <svg viewBox="0 0 100 28" preserveAspectRatio="none" class="size-full text-muted-foreground/25" aria-hidden="true">
+      <svg viewBox="0 0 100 28" preserveAspectRatio="none" class="size-full text-muted-foreground" aria-hidden="true">
         <line x1="0" y1="14" x2="100" y2="14" stroke="currentColor" stroke-width="1" stroke-dasharray="3 4" vector-effect="non-scaling-stroke" />
       </svg>
     {/if}
@@ -1099,7 +1099,7 @@
     <!-- Row 1: label + status hint. Every card shares this grid so the four
          cards line up line-for-line across the row (DESIGN_SYSTEM §9). -->
     <div class="flex items-baseline justify-between gap-2">
-      <span class="truncate text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/60" title={s.help}>{s.label}</span>
+      <span class="truncate text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground" title={s.help}>{s.label}</span>
       {#if s.hint}
         <span class={cn('shrink-0 text-ui-3xs tabular-nums', toneClass(s.tone))}>{s.hint}</span>
       {/if}
@@ -1160,7 +1160,7 @@
     {:else}
       <div class="flex h-52 flex-col items-center justify-center gap-1 rounded-md bg-muted/20 text-center">
         <p class="text-ui-xs text-muted-foreground">Collecting samples…</p>
-        <p class="max-w-[18rem] text-ui-2xs text-muted-foreground/60">
+        <p class="max-w-[18rem] text-ui-2xs text-muted-foreground">
           Rates need two readings. {autoRefresh ? 'The next one lands in a few seconds.' : 'Turn on Live, or hit Refresh again.'}
         </p>
       </div>
@@ -1182,7 +1182,7 @@
     {#if s.onRefresh}
       <button
         type="button"
-        class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+        class= "field-surface inline-flex h-7 shrink-0 items-center gap-1.5 px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
         disabled={refreshing}
         onclick={s.onRefresh}
       >
@@ -1195,7 +1195,7 @@
 
 {#snippet dataGrid(/** @type {any[]} */ rows, /** @type {string} */ empty)}
   {#if !rows || rows.length === 0}
-    <div class="rounded-lg border border-border/40 bg-muted/[0.04] py-10 text-center text-ui-xs text-muted-foreground/70">{empty}</div>
+    <div class="rounded-lg border border-border/40 bg-muted/[0.04] py-10 text-center text-ui-xs text-muted-foreground">{empty}</div>
   {:else}
     <!-- Column list computed ONCE per grid. It used to be re-derived inside the
          row loop, so a 200-session table allocated 200 throwaway Object.keys()
@@ -1205,7 +1205,7 @@
       <table class="w-full border-collapse text-ui-2xs">
         <thead>
           <tr>
-            <th class="sticky top-0 z-10 w-8 whitespace-nowrap border-b border-border/50 bg-panel px-2 py-1.5 text-right font-medium text-muted-foreground/60">#</th>
+            <th class="sticky top-0 z-10 w-8 whitespace-nowrap border-b border-border/50 bg-panel px-2 py-1.5 text-right font-medium text-muted-foreground">#</th>
             {#each cols as k (k)}
               <th class="sticky top-0 z-10 whitespace-nowrap border-b border-border/50 bg-panel px-2.5 py-1.5 text-left font-medium text-muted-foreground">{humanize(k)}</th>
             {/each}
@@ -1214,7 +1214,7 @@
         <tbody>
           {#each rows as row, i (i)}
             <tr class={cn('transition-colors hover:bg-accent/30', isBlocked(row) && 'bg-destructive/[0.06]')}>
-              <td class="border-b border-border/20 px-2 py-1 text-right tabular-nums text-muted-foreground/50">{i + 1}</td>
+              <td class="border-b border-border/20 px-2 py-1 text-right tabular-nums text-muted-foreground">{i + 1}</td>
               {#each cols as k (k)}
                 {@const raw = row[k]}
                 {@const text = cell(raw)}
@@ -1223,7 +1223,7 @@
                     {#if raw}
                       <span class={cn('inline-flex items-center rounded px-1.5 py-px font-sans text-ui-3xs', stateTone(raw))}>{raw}</span>
                     {:else}
-                      <span class="text-muted-foreground/40">–</span>
+                      <span class="text-muted-foreground">–</span>
                     {/if}
                   {:else}
                     {text}

@@ -143,12 +143,12 @@
       {#if databases.length > 5}
         <div class="relative shrink-0 border-b border-border/40 px-2 py-1.5">
           <Search
-            class="pointer-events-none absolute top-1/2 left-4 size-3 -translate-y-1/2 text-muted-foreground/50"
+            class="pointer-events-none absolute top-1/2 left-4 size-3 -translate-y-1/2 text-muted-foreground"
           />
           <input
             type="text"
             placeholder="Filter…"
-            class="h-6 w-full rounded-lg border-2 border-border bg-background/40 pl-7 pr-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class= "field-surface h-6 w-full bg-background/40 pl-7 pr-2 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
             bind:value={search}
           />
         </div>
@@ -157,7 +157,7 @@
       <div class="db-list-scroll app-scroll min-h-0 flex-1 overflow-y-auto p-1">
         {#if loading}
           <div
-            class="flex items-center justify-center gap-2 py-6 text-muted-foreground/50"
+            class="flex items-center justify-center gap-2 py-6 text-muted-foreground"
           >
             <RefreshCw class="size-3.5 animate-spin" /><span
               class="font-mono text-ui-xs">Loading…</span
@@ -165,13 +165,13 @@
           </div>
         {:else if error}
           <div
-            class="px-2 py-4 text-center font-mono text-ui-xs text-destructive/80"
+            class="px-2 py-4 text-center font-mono text-ui-xs text-destructive"
           >
             {error}
           </div>
         {:else if filtered.length === 0}
           <div
-            class="px-2 py-4 text-center font-mono text-ui-xs text-muted-foreground/50"
+            class="px-2 py-4 text-center font-mono text-ui-xs text-muted-foreground"
           >
             {search ? "No match" : "No databases found"}
           </div>
@@ -191,7 +191,7 @@
               <Database
                 class={cn(
                   "size-3.5 shrink-0",
-                  isCurrent ? "text-primary" : "text-muted-foreground/40",
+                  isCurrent ? "text-primary" : "text-muted-foreground",
                 )}
               />
               <span class="min-w-0 flex-1 truncate font-mono text-ui-xs"
@@ -208,12 +208,12 @@
       <div
         class="shrink-0 border-t border-border/40 px-2.5 py-1.5 flex items-center justify-between"
       >
-        <p class="font-mono text-ui-2xs text-muted-foreground/40">
+        <p class="font-mono text-ui-2xs text-muted-foreground">
           {databases.length} database{databases.length === 1 ? "" : "s"}
         </p>
         <button
           type="button"
-          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground"
+          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
           onclick={fetchDatabases}
           title="Refresh"
           ><RefreshCw class={cn("size-3", loading && "animate-spin")} /></button

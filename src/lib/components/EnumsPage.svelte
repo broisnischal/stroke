@@ -39,10 +39,10 @@
   <div class="app-scroll min-h-0 flex-1 overflow-y-auto [will-change:transform]">
     {#if enums.length === 0}
       <div class="flex h-full flex-col items-center justify-center gap-3 text-center">
-        <Tags class="size-8 text-muted-foreground/20" />
+        <Tags class="size-8 text-muted-foreground" />
         <div>
           <p class="font-mono text-ui-sm text-muted-foreground">No enum types</p>
-          <p class="mt-0.5 text-ui-xs text-muted-foreground/50">
+          <p class="mt-0.5 text-ui-xs text-muted-foreground">
             Enum types defined in this schema will appear here
           </p>
         </div>
@@ -67,11 +67,11 @@
                 {#if e.values.length > 0}
                   <div class="flex flex-wrap gap-x-2 gap-y-1">
                     {#each e.values as val (val)}
-                      <span class="font-mono text-ui-xs text-muted-foreground/70">{val}</span>
+                      <span class="font-mono text-ui-xs text-muted-foreground">{val}</span>
                     {/each}
                   </div>
                 {:else}
-                  <span class="font-mono text-ui-xs text-muted-foreground/30">—</span>
+                  <span class="font-mono text-ui-xs text-muted-foreground">—</span>
                 {/if}
               </td>
               <td class="px-3 py-2.5">
@@ -82,10 +82,10 @@
                     {/each}
                   </div>
                 {:else}
-                  <span class="font-mono text-ui-xs text-muted-foreground/25">unused</span>
+                  <span class="font-mono text-ui-xs text-muted-foreground">unused</span>
                 {/if}
               </td>
-              <td class="px-3 py-2.5 text-right font-mono text-ui-xs tabular-nums text-muted-foreground/40">
+              <td class="px-3 py-2.5 text-right font-mono text-ui-xs tabular-nums text-muted-foreground">
                 {e.values.length}
               </td>
             </tr>

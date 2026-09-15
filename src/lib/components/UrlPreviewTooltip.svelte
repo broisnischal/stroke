@@ -91,7 +91,7 @@
 
   {:else if type === 'pdf'}
     <div class="flex items-center gap-2.5 px-3 py-3">
-      <FileText class="size-6 shrink-0 text-destructive/80" />
+      <FileText class="size-6 shrink-0 text-destructive" />
       <div class="min-w-0">
         <p class="text-ui-sm font-medium text-foreground">PDF Document</p>
         <p class="truncate text-ui-xs text-muted-foreground">{filename}</p>

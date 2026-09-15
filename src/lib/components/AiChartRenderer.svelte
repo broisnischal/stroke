@@ -196,7 +196,7 @@
 {:else if hasData}
   <div bind:this={el} class="h-full w-full"></div>
 {:else}
-  <div class="flex items-center justify-center h-full text-ui-xs text-muted-foreground/50">
+  <div class="flex items-center justify-center h-full text-ui-xs text-muted-foreground">
     No data
   </div>
 {/if}

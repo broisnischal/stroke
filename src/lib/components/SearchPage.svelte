@@ -162,12 +162,12 @@
         regexError ? 'border-destructive/50' : 'border-border/40 focus-within:border-border',
       )}
     >
-      <Search class="size-3.5 shrink-0 text-muted-foreground/50" />
+      <Search class="size-3.5 shrink-0 text-muted-foreground" />
       <input
         bind:this={inputEl}
         type="text"
         placeholder={useRegex ? 'Regex pattern…' : `Search across all tables in ${schema}…`}
-        class="min-w-0 flex-1 bg-transparent text-ui-sm outline-none placeholder:text-muted-foreground/30"
+        class="min-w-0 flex-1 bg-transparent text-ui-sm outline-none placeholder:text-muted-foreground"
         bind:value={query}
         onkeydown={handleKeydown}
         oninput={() => { regexError = '' }}
@@ -184,7 +184,7 @@
             'flex size-6 shrink-0 items-center justify-center rounded text-ui-xs font-mono transition-colors',
             matchCase
               ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/30'
-              : 'text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground',
+              : 'text-muted-foreground hover:bg-muted hover:text-muted-foreground',
           )}
           onclick={() => (matchCase = !matchCase)}
         >Aa</button>
@@ -196,7 +196,7 @@
             'flex size-6 shrink-0 items-center justify-center rounded text-ui-xs font-mono transition-colors',
             wholeWord
               ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/30'
-              : 'text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground',
+              : 'text-muted-foreground hover:bg-muted hover:text-muted-foreground',
           )}
           onclick={() => (wholeWord = !wholeWord)}
         ><span class="underline underline-offset-2">ab</span></button>
@@ -208,13 +208,13 @@
             'flex size-6 shrink-0 items-center justify-center rounded text-ui-xs font-mono transition-colors',
             useRegex
               ? 'bg-primary/15 text-primary ring-1 ring-inset ring-primary/30'
-              : 'text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground',
+              : 'text-muted-foreground hover:bg-muted hover:text-muted-foreground',
           )}
           onclick={() => { useRegex = !useRegex; regexError = '' }}
         >.*</button>
       {/if}
       {#if searching}
-        <Loader class="size-3.5 shrink-0 animate-spin text-muted-foreground/40" />
+        <Loader class="size-3.5 shrink-0 animate-spin text-muted-foreground" />
       {:else}
         <button
           type="button"
@@ -227,17 +227,17 @@
       {/if}
     </div>
     {#if regexError}
-      <p class="mt-1 px-1 text-ui-xs text-destructive/80">{regexError}</p>
+      <p class="mt-1 px-1 text-ui-xs text-destructive">{regexError}</p>
     {/if}
   </div>
 
   <!-- Progress bar (only while searching) -->
   {#if searching}
     <div class="shrink-0 border-b border-border/30 px-3 py-2">
-      <div class="mb-1.5 flex items-center justify-between text-ui-xs text-muted-foreground/50">
+      <div class="mb-1.5 flex items-center justify-between text-ui-xs text-muted-foreground">
         <span>{progress.done} / {progress.total} tables searched</span>
         {#if results.length > 0}
-          <span class="text-primary/70">{results.length} with matches</span>
+          <span class="text-primary">{results.length} with matches</span>
         {/if}
       </div>
       <div class="h-0.5 overflow-hidden rounded-full bg-muted">
@@ -261,25 +261,25 @@
             onclick={() => onopentable(hit.table, query.trim())}
           >
             <div class="flex min-w-0 items-center gap-2">
-              <Icon class="size-3.5 shrink-0 text-muted-foreground/40" />
+              <Icon class="size-3.5 shrink-0 text-muted-foreground" />
               <span class="flex-1 truncate font-mono text-ui-sm font-medium">{hit.table}</span>
-              <span class="shrink-0 text-ui-xs font-medium text-primary/80 tabular-nums">
+              <span class="shrink-0 text-ui-xs font-medium text-primary tabular-nums">
                 {hit.count.toLocaleString()} {hit.count === 1 ? 'match' : 'matches'}
               </span>
-              <ArrowRight class="size-3.5 shrink-0 text-muted-foreground/25" />
+              <ArrowRight class="size-3.5 shrink-0 text-muted-foreground" />
             </div>
             {#if hit.sampleRow && hit.columns.length > 0}
               <div class="ml-5 flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
                 {#each hit.columns.slice(0, 5) as col, ci (col.name)}
                   {@const val = hit.sampleRow[ci]}
                   <div class="flex min-w-0 items-baseline gap-1">
-                    <span class="shrink-0 text-ui-3xs text-muted-foreground/35">{col.name}</span>
+                    <span class="shrink-0 text-ui-3xs text-muted-foreground">{col.name}</span>
                     <span
                       class={cn(
                         'max-w-[160px] truncate font-mono text-ui-2xs',
                         val === null || val === undefined
-                          ? 'italic text-muted-foreground/25'
-                          : 'text-muted-foreground/60',
+                          ? 'italic text-muted-foreground'
+                          : 'text-muted-foreground',
                       )}
                     >
                       {displayValue(val)}
@@ -294,30 +294,30 @@
     {:else if searching && progress.done === 0}
       <!-- initial loading state before first result -->
       <div class="flex flex-col items-center justify-center gap-2 py-12 text-center">
-        <Loader class="size-6 animate-spin text-muted-foreground/20" />
-        <p class="text-ui-xs text-muted-foreground/40">Searching…</p>
+        <Loader class="size-6 animate-spin text-muted-foreground" />
+        <p class="text-ui-xs text-muted-foreground">Searching…</p>
       </div>
     {:else if searched && !searching}
       <div class="flex flex-col items-center justify-center gap-2 py-12 text-center">
-        <Search class="size-8 text-muted-foreground/15" />
-        <p class="text-ui-sm text-muted-foreground/50">
+        <Search class="size-8 text-muted-foreground" />
+        <p class="text-ui-sm text-muted-foreground">
           No matches for <span class="font-mono">"{query}"</span>
         </p>
-        <p class="text-ui-xs text-muted-foreground/30">
+        <p class="text-ui-xs text-muted-foreground">
           Searched {progress.total} table{progress.total === 1 ? '' : 's'}
         </p>
       </div>
     {:else if !searching}
       <div class="flex flex-col items-center justify-center gap-2 py-12 text-center">
-        <Search class="size-8 text-muted-foreground/12" />
-        <p class="text-ui-sm text-muted-foreground/40">Search across all {tables.length} tables</p>
-        <p class="text-ui-xs text-muted-foreground/25">Type a value and press <kbd>Enter</kbd></p>
+        <Search class="size-8 text-muted-foreground" />
+        <p class="text-ui-sm text-muted-foreground">Search across all {tables.length} tables</p>
+        <p class="text-ui-xs text-muted-foreground">Type a value and press <kbd>Enter</kbd></p>
       </div>
     {/if}
   </div>
 
   {#if searched && !searching && results.length > 0}
-    <div class="shrink-0 border-t border-border/30 px-4 py-1.5 text-ui-xs text-muted-foreground/35">
+    <div class="shrink-0 border-t border-border/30 px-4 py-1.5 text-ui-xs text-muted-foreground">
       {results.length} table{results.length === 1 ? '' : 's'} with matches · click to open with search pre-filled
     </div>
   {/if}

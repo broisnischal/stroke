@@ -139,7 +139,7 @@
               'group/pt relative flex h-full shrink-0 items-center gap-1 px-2 text-ui-2xs transition-colors',
               active
                 ? 'font-medium text-foreground'
-                : 'font-normal text-muted-foreground/55 hover:text-foreground',
+                : 'font-normal text-muted-foreground hover:text-foreground',
             )}
           >
             <Icon
@@ -160,7 +160,7 @@
       </div>
       <button
         type="button"
-        class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+        class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
         title="Hide panel ({modKey}⇧B)"
         onclick={onclose}
       >
@@ -170,18 +170,18 @@
 
     <!-- Search -->
     <div class="relative border-b border-border/60 px-2 py-1.5">
-      <Search class="pointer-events-none absolute left-3.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/50" />
+      <Search class="pointer-events-none absolute left-3.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" />
       <input
         type="search"
         bind:this={filterEl}
         bind:value={filter}
         placeholder="Search…"
-        class="h-6 w-full rounded border border-transparent bg-muted/40 py-0 pl-6 pr-5 font-mono text-ui-2xs text-foreground placeholder:text-muted-foreground/50 focus-visible:border-border focus-visible:bg-background focus-visible:outline-none"
+        class="h-6 w-full rounded border border-transparent bg-muted/40 py-0 pl-6 pr-5 font-mono text-ui-2xs text-foreground placeholder:text-muted-foreground focus-visible:border-border focus-visible:bg-background focus-visible:outline-none"
       />
       {#if filter}
         <button
           type="button"
-          class="absolute right-3 top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/50 hover:text-foreground"
+          class="absolute right-3 top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:text-foreground"
           aria-label="Clear"
           onclick={() => (filter = '')}
         >
@@ -200,12 +200,12 @@
               class="flex w-full min-w-0 items-start gap-1.5 px-2.5 py-1.5 pr-12 text-left transition-colors hover:bg-accent/30"
               onclick={() => onselect(entry.sql)}
             >
-              <History class="mt-px size-3 shrink-0 text-muted-foreground/40" />
+              <History class="mt-px size-3 shrink-0 text-muted-foreground" />
               <div class="min-w-0 flex-1">
                 <span class="block truncate font-mono text-ui-2xs leading-snug text-foreground/90">
                   {entry.title}
                 </span>
-                <span class="flex items-center gap-1 text-ui-3xs leading-tight text-muted-foreground/60">
+                <span class="flex items-center gap-1 text-ui-3xs leading-tight text-muted-foreground">
                   <span>{relativeTime(entry.executedAt)}</span>
                   {#if entry.queryMs}
                     <span class="tabular-nums opacity-70">{entry.queryMs}ms</span>
@@ -220,7 +220,7 @@
               type="button"
               class={cn(
                 'absolute right-6 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded transition-colors hover:!text-warning',
-                entry.favorite ? 'text-warning' : 'text-muted-foreground/0 group-hover:text-muted-foreground/40',
+                entry.favorite ? 'text-warning' : 'text-muted-foreground group-hover:text-muted-foreground',
               )}
               title={entry.favorite ? 'Unfavorite' : 'Favorite'}
               onclick={(e) => { e.stopPropagation(); void toggleFavorite(entry.id, entry.favorite) }}
@@ -229,7 +229,7 @@
             </button>
             <button
               type="button"
-              class="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/40 hover:!text-destructive"
+              class="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors group-hover:text-muted-foreground hover:!text-destructive"
               title="Remove"
               onclick={(e) => { e.stopPropagation(); void removeHistory(entry.id) }}
             >
@@ -238,12 +238,12 @@
           </div>
         {:else}
           <div class="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
-            <History class="size-5 text-muted-foreground/20" />
-            <p class="text-ui-2xs text-muted-foreground/60">
+            <History class="size-5 text-muted-foreground" />
+            <p class="text-ui-2xs text-muted-foreground">
               {filter ? 'No matches' : 'No history yet'}
             </p>
             {#if !filter}
-              <p class="text-ui-3xs text-muted-foreground/40">{modKey}↵ to run</p>
+              <p class="text-ui-3xs text-muted-foreground">{modKey}↵ to run</p>
             {/if}
           </div>
         {/each}
@@ -251,7 +251,7 @@
         {#if history.length > 0 && !filter}
           <button
             type="button"
-            class="mx-2 mt-1 rounded px-2 py-1 text-center text-ui-3xs text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+            class="mx-2 mt-1 rounded px-2 py-1 text-center text-ui-3xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
             onclick={() => void clearAllHistory()}
           >
             Clear all
@@ -266,19 +266,19 @@
               class="flex w-full min-w-0 items-start gap-1.5 px-2.5 py-1.5 pr-7 text-left transition-colors hover:bg-accent/30"
               onclick={() => onselect(entry.sql)}
             >
-              <Bookmark class="mt-px size-3 shrink-0 text-primary/50" />
+              <Bookmark class="mt-px size-3 shrink-0 text-primary" />
               <div class="min-w-0 flex-1">
                 <span class="block truncate text-ui-2xs leading-snug text-foreground/90">
                   {entry.name}
                 </span>
-                <span class="text-ui-3xs leading-tight text-muted-foreground/60">
+                <span class="text-ui-3xs leading-tight text-muted-foreground">
                   {relativeTime(entry.updatedAt)}
                 </span>
               </div>
             </button>
             <button
               type="button"
-              class="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/40 hover:!text-destructive"
+              class="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors group-hover:text-muted-foreground hover:!text-destructive"
               title="Delete"
               onclick={(e) => { e.stopPropagation(); void removeSaved(entry.id) }}
             >
@@ -287,12 +287,12 @@
           </div>
         {:else}
           <div class="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
-            <Bookmark class="size-5 text-muted-foreground/20" />
-            <p class="text-ui-2xs text-muted-foreground/60">
+            <Bookmark class="size-5 text-muted-foreground" />
+            <p class="text-ui-2xs text-muted-foreground">
               {filter ? 'No matches' : 'No saved queries'}
             </p>
             {#if !filter}
-              <p class="text-ui-3xs text-muted-foreground/40">{modKey}S to save</p>
+              <p class="text-ui-3xs text-muted-foreground">{modKey}S to save</p>
             {/if}
           </div>
         {/each}
@@ -304,12 +304,12 @@
               class="flex w-full min-w-0 items-start gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-accent/30"
               onclick={() => onselect(chart.sql)}
             >
-              <BarChart2 class="mt-px size-3 shrink-0 text-muted-foreground/40" />
+              <BarChart2 class="mt-px size-3 shrink-0 text-muted-foreground" />
               <div class="min-w-0 flex-1">
                 <span class="block truncate text-ui-2xs leading-snug text-foreground/90">
                   {chart.name}
                 </span>
-                <span class="text-ui-3xs leading-tight text-muted-foreground/60">
+                <span class="text-ui-3xs leading-tight text-muted-foreground">
                   {chart.group}
                 </span>
               </div>
@@ -317,8 +317,8 @@
           </div>
         {:else}
           <div class="flex flex-col items-center gap-1.5 px-4 py-8 text-center">
-            <BarChart2 class="size-5 text-muted-foreground/20" />
-            <p class="text-ui-2xs text-muted-foreground/60">No saved charts yet</p>
+            <BarChart2 class="size-5 text-muted-foreground" />
+            <p class="text-ui-2xs text-muted-foreground">No saved charts yet</p>
           </div>
         {/each}
       {/if}

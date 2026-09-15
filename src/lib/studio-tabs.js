@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license' | 'orm-schema' | 'map' | 'advisor'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license' | 'orm-schema' | 'map' | 'advisor' | 'golf'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -220,6 +220,7 @@ const SINGLETON_TAB_TITLES = {
   search: 'Find in database',
   'schema-timeline': 'Schema Timeline',
   'data-diff': 'Data Diff',
+  golf: 'VACUUM',
 }
 
 /** @param {StudioTabKind} kind */
@@ -246,6 +247,7 @@ export const createSecurityTab = () => createKindTab('security')
 export const createLogsTab = () => createKindTab('logs')
 export const createInsightsTab = () => createKindTab('insights')
 export const createAdvisorTab = () => createKindTab('advisor')
+export const createGolfTab = () => createKindTab('golf')
 export const createObjectsTab = () => createKindTab('objects')
 export const createRedisTab = () => createKindTab('redis')
 export const createMapTab = () => createKindTab('map')
@@ -278,6 +280,7 @@ export const findLogsTab = (tabs) => findTabByKind(tabs, 'logs')
 export const findInsightsTab = (tabs) => findTabByKind(tabs, 'insights')
 /** @type {(tabs: StudioTab[]) => StudioTab | null} */
 export const findAdvisorTab = (tabs) => findTabByKind(tabs, 'advisor')
+export const findGolfTab = (tabs) => findTabByKind(tabs, 'golf')
 /** @type {(tabs: StudioTab[]) => StudioTab | null} */
 export const findObjectsTab = (tabs) => findTabByKind(tabs, 'objects')
 /** @type {(tabs: StudioTab[]) => StudioTab | null} */

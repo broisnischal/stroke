@@ -30,7 +30,7 @@
     <div class="flex items-center justify-between gap-4 px-5 py-3.5">
       <div>
         <p class="text-ui-xs font-medium text-foreground">Cascade</p>
-        <p class="mt-0.5 text-ui-2xs text-muted-foreground/55">Also drop all dependent objects</p>
+        <p class="mt-0.5 text-ui-2xs text-muted-foreground">Also drop all dependent objects</p>
       </div>
       <button
         type="button"
@@ -54,13 +54,13 @@
 
   <!-- The exact statement, so the confirmation is against what actually runs. -->
   <div class="px-5 py-4">
-    <p class="mb-2 text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/35">Will execute</p>
+    <p class="mb-2 text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground">Will execute</p>
     <div class="rounded-lg border border-border/20 bg-muted/[0.3] px-3.5 py-2.5">
       <code class="break-all font-mono text-ui-xs">
         <span class="text-destructive">{isDropAction ? 'DROP TABLE' : 'TRUNCATE TABLE'}</span>
         <span class="text-foreground/70"> "{schema}"."{table}"</span>
         {#if isDropAction && cascade}
-          <span class="text-muted-foreground/70"> CASCADE</span>
+          <span class="text-muted-foreground"> CASCADE</span>
         {/if}
       </code>
     </div>

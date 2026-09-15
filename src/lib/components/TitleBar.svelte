@@ -15,7 +15,7 @@
   import * as Dialog from '$lib/components/ui/dialog/index.js'
 
   const isMac = typeof navigator !== 'undefined' && detectOs() === 'macos'
-  const mod   = isMac ? '⌘' : 'Ctrl'
+  const mod = isMac ? '⌘' : 'Ctrl'
 
   // Window is frameless everywhere (see src-tauri/src/lib.rs), so this bar is
   // the drag region and double-click-to-maximize target.
@@ -37,15 +37,15 @@
   }
 
   let {
-    title = 'studio',
+    title = 'Stroke',
     canGoBack = false,
     canGoForward = false,
     sidebarOpen = true,
     connected = false,
     aiSidebarOpen = false,
-    ongoback          = () => {},
-    ongoforward       = () => {},
-    ontogglesidebar   = () => {},
+    ongoback = () => {},
+    ongoforward = () => {},
+    ontogglesidebar = () => {},
     ontoggleaisidebar = () => {},
   } = $props()
 
@@ -56,7 +56,7 @@
   )
   const trialUrgent = $derived(trialDays <= 3)
 
-  const iconBtn = 'inline-flex size-[24px] items-center justify-center rounded-md text-muted-foreground/50 transition-[background-color,color] duration-150 hover:bg-foreground/[0.06] hover:text-foreground'
+  const iconBtn = 'inline-flex size-[24px] items-center justify-center rounded-md text-muted-foreground transition-[background-color,color] duration-150 hover:bg-foreground/[0.06] hover:text-foreground'
 </script>
 
 <!--
@@ -123,7 +123,7 @@
        path, a verbose connection name) truncates instead of running under the
        controls on either side. -->
   <div class="pointer-events-none absolute inset-x-0 flex items-center justify-center px-40">
-    <span class="max-w-full truncate font-mono text-ui-2xs font-medium tracking-widest text-muted-foreground/30 lowercase select-none">
+    <span class="max-w-full truncate font-mono text-ui-2xs font-medium tracking-widest text-muted-foreground select-none">
       {title}
     </span>
   </div>
@@ -191,8 +191,8 @@
       </div>
       <LicenseActivation compact onactivated={() => { showActivationDialog = false }} />
       <div class="border-t border-border/60 px-5 py-3">
-        <p class="text-ui-xs text-muted-foreground/50">
-          No license? <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="text-primary/70 underline-offset-2 hover:underline">stroke.click →</a>
+        <p class="text-ui-xs text-muted-foreground">
+          No license? <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="text-primary underline-offset-2 hover:underline">stroke.click →</a>
         </p>
       </div>
     </Dialog.Content>

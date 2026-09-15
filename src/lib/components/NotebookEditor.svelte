@@ -188,20 +188,20 @@
     class="flex shrink-0 items-center gap-0 border-b border-border/50 px-4 py-0"
     style="height: 38px;"
   >
-    <FileCode2 class="size-3.5 shrink-0 text-muted-foreground/40" />
+    <FileCode2 class="size-3.5 shrink-0 text-muted-foreground" />
     <input
       value={notebook.title}
       oninput={onTitleInput}
-      class="ml-2 min-w-0 flex-1 bg-transparent text-ui-sm font-medium text-foreground/80 outline-none placeholder:text-muted-foreground/30"
+      class="ml-2 min-w-0 flex-1 bg-transparent text-ui-sm font-medium text-foreground/80 outline-none placeholder:text-muted-foreground"
       placeholder="Untitled Notebook"
       spellcheck="false"
     />
     {#if dirty}
-      <span class="mr-3 shrink-0 text-ui-3xs text-muted-foreground/35">●</span>
+      <span class="mr-3 shrink-0 text-ui-3xs text-muted-foreground">●</span>
     {/if}
     {#if filePath}
       <span
-        class="mr-3 max-w-[180px] shrink-0 truncate text-ui-3xs text-muted-foreground/30"
+        class="mr-3 max-w-[180px] shrink-0 truncate text-ui-3xs text-muted-foreground"
         title={filePath}
       >
         {filePath.split(/[/\\]/).pop()}
@@ -211,7 +211,7 @@
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
       <button
         onclick={openFile}
-        class="flex items-center gap-1.5 rounded px-2.5 py-1 text-ui-xs text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+        class="flex items-center gap-1.5 rounded px-2.5 py-1 text-ui-xs text-muted-foreground hover:bg-muted hover:text-foreground"
         title="Open notebook"
       >
         <FolderOpen class="size-3.5" />
@@ -219,7 +219,7 @@
       </button>
       <button
         onclick={save}
-        class="flex items-center gap-1.5 rounded px-2.5 py-1 text-ui-xs text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+        class="flex items-center gap-1.5 rounded px-2.5 py-1 text-ui-xs text-muted-foreground hover:bg-muted hover:text-foreground"
         title="Save (⌘S)"
       >
         <Save class="size-3.5" />
@@ -319,14 +319,14 @@
       onclick={() => { addCell(addMenuAfterIdx, 'sql'); addMenuOpen = false }}
       class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm hover:bg-accent hover:text-foreground"
     >
-      <span class="font-mono font-semibold text-info/70">SQL</span>
+      <span class="font-mono font-semibold text-info">SQL</span>
       <span class="text-muted-foreground">SQL cell</span>
     </button>
     <button
       onclick={() => { addCell(addMenuAfterIdx, 'markdown'); addMenuOpen = false }}
       class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm hover:bg-accent hover:text-foreground"
     >
-      <span class="font-mono font-semibold text-success/70">MD</span>
+      <span class="font-mono font-semibold text-success">MD</span>
       <span class="text-muted-foreground">Markdown cell</span>
     </button>
   </div>
@@ -341,11 +341,11 @@
     <div class="h-px flex-1 bg-border/30 transition-colors group-hover/adder:bg-border/60"></div>
     <button
       onclick={(e) => openAddMenu(idx, e)}
-      class="mx-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-ui-3xs text-muted-foreground/50 hover:bg-muted hover:text-foreground"
+      class="mx-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-ui-3xs text-muted-foreground hover:bg-muted hover:text-foreground"
     >
-      <Plus class="size-2.5" />
+      <Plus class="size-3" />
       Add cell
-      <ChevronDown class="size-2.5 opacity-60" />
+      <ChevronDown class="size-3 opacity-60" />
     </button>
     <div class="h-px flex-1 bg-border/30 transition-colors group-hover/adder:bg-border/60"></div>
   </div>

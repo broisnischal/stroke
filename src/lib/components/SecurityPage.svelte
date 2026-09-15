@@ -344,10 +344,10 @@
       libsql: 'LibSQL', clickhouse: 'ClickHouse', duckdb: 'DuckDB', mssql: 'SQL Server',
     }[connectionType ?? ''] ?? (connectionType ?? 'This engine')}
     <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-      <ShieldCheck class="size-10 text-muted-foreground/20" />
+      <ShieldCheck class="size-10 text-muted-foreground" />
       <div class="space-y-1.5">
         <p class="font-mono text-ui font-medium text-foreground">{engineLabel} does not support roles or RLS</p>
-        <p class="font-mono text-ui-xs text-muted-foreground/60">
+        <p class="font-mono text-ui-xs text-muted-foreground">
           Row Level Security and role management require PostgreSQL or CockroachDB.<br />
           Use the SQL console to manage {engineLabel} users and permissions directly.
         </p>
@@ -363,7 +363,7 @@
           "relative flex h-8 items-center px-3 font-mono text-ui-xs transition-colors",
           activeTab === tab.id
             ? "text-foreground"
-            : "text-muted-foreground/50 hover:text-muted-foreground",
+            : "text-muted-foreground hover:text-muted-foreground",
         )}
         onclick={() => { activeTab = /** @type {any} */ (tab.id) }}
       >
@@ -376,7 +376,7 @@
     <div class="flex-1"></div>
     <button
       type="button"
-      class="mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:text-foreground"
+      class="mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
       title="Refresh (⌘R)"
       onclick={refresh}
     >
@@ -396,7 +396,7 @@
         >
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
+          class= "field-surface inline-flex h-7 items-center gap-1.5 bg-background px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
           onclick={() => openRoleModal()}
         >
           <Plus class="size-3.5" />New role
@@ -427,7 +427,7 @@
         <div
           class="flex h-full flex-col items-center justify-center gap-3 py-16 text-center"
         >
-          <Users class="size-10 text-muted-foreground/20" />
+          <Users class="size-10 text-muted-foreground" />
           <p class="font-mono text-ui text-muted-foreground">No roles found</p>
         </div>
       {:else}
@@ -502,25 +502,25 @@
                     {#if bool(role[f.col])}
                       <Check class={cn("mx-auto size-3.5", f.c)} />
                     {:else}
-                      <span class="text-muted-foreground/20">—</span>
+                      <span class="text-muted-foreground">—</span>
                     {/if}
                   </td>
                 {/each}
                 <td
-                  class="px-3 py-2 font-mono text-ui-xs tabular-nums text-muted-foreground/70"
+                  class="px-3 py-2 font-mono text-ui-xs tabular-nums text-muted-foreground"
                 >
                   {role.rolconnlimit === -1 || role.rolconnlimit == null
                     ? "∞"
                     : role.rolconnlimit}
                 </td>
                 <td
-                  class="px-3 py-2 font-mono text-ui-xs text-muted-foreground/60"
+                  class="px-3 py-2 font-mono text-ui-xs text-muted-foreground"
                   >{role.rolvaliduntil ?? "—"}</td
                 >
                 <td class="px-2 py-2">
                   <button
                     type="button"
-                    class="invisible inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground group-hover/row:visible"
+                    class="opacity-0 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground group-hover/row:opacity-100"
                     onclick={() => openRoleModal(role)}
                     title="Edit"><KeyRound class="size-3.5" /></button
                   >
@@ -547,7 +547,7 @@
           <!-- Left: role tree -->
           <aside class="w-56 shrink-0 overflow-y-auto border-r border-border/40">
             {#each roleGroups as group (group.id)}
-              <div class="px-3 pt-3 pb-1 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground/45">
+              <div class="px-3 pt-3 pb-1 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground">
                 {group.label} · {group.items.length}
               </div>
               {#each group.items as r (r.rolname)}
@@ -577,7 +577,7 @@
           <div class="min-w-0 flex-1 overflow-y-auto">
             {#if !selectedRoleObj}
               <div class="flex h-full flex-col items-center justify-center gap-3 py-16 text-center">
-                <Users class="size-9 text-muted-foreground/20" />
+                <Users class="size-9 text-muted-foreground" />
                 <p class="font-mono text-ui-xs text-muted-foreground">Select a role to inspect its permissions</p>
               </div>
             {:else}
@@ -590,44 +590,44 @@
                   )}>{String(role.rolname).slice(0, 2)}</span>
                 <div class="min-w-0">
                   <p class="truncate font-mono text-ui-sm font-medium text-foreground">{role.rolname}</p>
-                  <p class="font-mono text-ui-3xs text-muted-foreground/60">
+                  <p class="font-mono text-ui-3xs text-muted-foreground">
                     {bool(role.rolsuper) ? "Superuser" : bool(role.rolcanlogin) ? "Login role" : "Group role"}
                   </p>
                 </div>
                 <button
                   type="button"
-                  class="ml-auto inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
+                  class= "field-surface ml-auto inline-flex h-7 items-center gap-1.5 bg-background px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
                   onclick={() => openRoleModal(role)}
                 ><KeyRound class="size-3.5" />Edit</button>
               </div>
 
               <!-- Role attributes -->
               <section class="border-b border-border/40 px-4 py-3">
-                <p class="mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground/50">Role attributes</p>
+                <p class="mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground">Role attributes</p>
                 <div class="flex flex-wrap gap-1.5">
                   {#each ROLE_ATTRS as attr (attr.key)}
                     {@const on = bool(role[attr.key])}
                     <span
                       class={cn(
                         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-ui-3xs font-medium",
-                        on ? "bg-primary/10 text-primary" : "bg-muted/60 text-muted-foreground/45",
+                        on ? "bg-primary/10 text-primary" : "bg-muted/60 text-muted-foreground",
                       )}
                     >
-                      {#if on}<Check class="size-2.5" />{/if}{attr.label}
+                      {#if on}<Check class="size-3" />{/if}{attr.label}
                     </span>
                   {/each}
-                  <span class="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 font-mono text-ui-3xs text-muted-foreground/70">
+                  <span class="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 font-mono text-ui-3xs text-muted-foreground">
                     Conn limit: {role.rolconnlimit === -1 || role.rolconnlimit == null ? "∞" : role.rolconnlimit}
                   </span>
                   {#if role.rolvaliduntil}
-                    <span class="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 font-mono text-ui-3xs text-muted-foreground/70">Expires: {role.rolvaliduntil}</span>
+                    <span class="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 font-mono text-ui-3xs text-muted-foreground">Expires: {role.rolvaliduntil}</span>
                   {/if}
                 </div>
               </section>
 
               <!-- Membership -->
               <section class="border-b border-border/40 px-4 py-3">
-                <p class="mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground/50">Inherited from · member of</p>
+                <p class="mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground">Inherited from · member of</p>
                 {#if memberOf.length}
                   <div class="flex flex-wrap gap-1.5">
                     {#each memberOf as m (m)}
@@ -635,13 +635,13 @@
                     {/each}
                   </div>
                 {:else}
-                  <p class="font-mono text-ui-2xs text-muted-foreground/50">Not a member of any role</p>
+                  <p class="font-mono text-ui-2xs text-muted-foreground">Not a member of any role</p>
                 {/if}
                 {#if membersOfSelected.length}
-                  <p class="mt-3 mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground/50">Granted to · members</p>
+                  <p class="mt-3 mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground">Granted to · members</p>
                   <div class="flex flex-wrap gap-1.5">
                     {#each membersOfSelected as m (m)}
-                      <button type="button" class="rounded-full bg-muted/60 px-2 py-0.5 font-mono text-ui-3xs text-muted-foreground/80 transition-colors hover:bg-accent/40" onclick={() => selectRole(m)}>{m}</button>
+                      <button type="button" class="rounded-full bg-muted/60 px-2 py-0.5 font-mono text-ui-3xs text-muted-foreground transition-colors hover:bg-accent/40" onclick={() => selectRole(m)}>{m}</button>
                     {/each}
                   </div>
                 {/if}
@@ -649,13 +649,13 @@
 
               <!-- Database access -->
               <section class="px-4 py-3">
-                <p class="mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground/50">Database access</p>
+                <p class="mb-2 font-mono text-ui-3xs uppercase tracking-wider text-muted-foreground">Database access</p>
                 {#if dbGrantsLoading || dbGrants === null}
                   <div class="flex items-center gap-2 py-6 text-muted-foreground"><RefreshCw class="size-3.5 animate-spin" /><span class="font-mono text-ui-xs">Loading grants…</span></div>
                 {:else if dbGrantsError}
                   <p class="font-mono text-ui-2xs text-destructive">{dbGrantsError}</p>
                 {:else if dbGrants.length === 0}
-                  <p class="font-mono text-ui-2xs text-muted-foreground/50">No databases</p>
+                  <p class="font-mono text-ui-2xs text-muted-foreground">No databases</p>
                 {:else}
                   <div class="overflow-hidden rounded-md border border-border/40">
                     <table class="w-full text-ui-xs">
@@ -676,7 +676,7 @@
                                 {#if bool(g[col])}
                                   <Check class="mx-auto size-3.5 text-primary" />
                                 {:else}
-                                  <span class="text-muted-foreground/20">—</span>
+                                  <span class="text-muted-foreground">—</span>
                                 {/if}
                               </td>
                             {/each}
@@ -704,7 +704,7 @@
         >
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
+          class= "field-surface inline-flex h-7 items-center gap-1.5 bg-background px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
           onclick={openPolicyModal}
         >
           <Plus class="size-3.5" />New policy
@@ -735,16 +735,16 @@
         <div
           class="flex h-full flex-col items-center justify-center gap-3 py-20 text-center"
         >
-          <ShieldCheck class="size-10 text-muted-foreground/20" />
+          <ShieldCheck class="size-10 text-muted-foreground" />
           <p class="font-mono text-ui text-muted-foreground">
             No policies found
           </p>
-          <p class="mt-1 text-ui-xs text-muted-foreground/60">
+          <p class="mt-1 text-ui-xs text-muted-foreground">
             Enable RLS on a table and create a policy to control row access
           </p>
           <button
             type="button"
-            class="mt-3 inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
+            class= "field-surface mt-3 inline-flex h-7 items-center gap-1.5 bg-background px-2.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground"
             onclick={openPolicyModal}
             ><Plus class="size-3.5" />Create first policy</button
           >
@@ -784,7 +784,7 @@
                 )}
               >
                 <td class="px-3 py-2 font-mono">
-                  <span class="text-muted-foreground/50">{pol.schemaname}.</span
+                  <span class="text-muted-foreground">{pol.schemaname}.</span
                   ><span class="text-foreground">{pol.tablename}</span>
                 </td>
                 <td class="px-3 py-2 font-mono text-foreground/80"
@@ -797,7 +797,7 @@
                   >
                 </td>
                 <td
-                  class="max-w-[100px] truncate px-3 py-2 font-mono text-muted-foreground/70"
+                  class="max-w-[100px] truncate px-3 py-2 font-mono text-muted-foreground"
                   >{pol.roles || "public"}</td
                 >
                 <td class="px-3 py-2">
@@ -813,7 +813,7 @@
                 <td class="px-2 py-2">
                   <button
                     type="button"
-                    class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:text-foreground"
+                    class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
                     onclick={() => {
                       expandedPolicy = expandedPolicy === i ? null : i;
                     }}
@@ -840,7 +840,7 @@
                       {#if pol.qual}
                         <div>
                           <p
-                            class="mb-1.5 font-mono text-ui-2xs text-muted-foreground/60 uppercase tracking-wider"
+                            class="mb-1.5 font-mono text-ui-2xs text-muted-foreground uppercase tracking-wider"
                           >
                             USING
                           </p>
@@ -851,7 +851,7 @@
                       {#if pol.with_check}
                         <div>
                           <p
-                            class="mb-1.5 font-mono text-ui-2xs text-muted-foreground/60 uppercase tracking-wider"
+                            class="mb-1.5 font-mono text-ui-2xs text-muted-foreground uppercase tracking-wider"
                           >
                             WITH CHECK
                           </p>
@@ -937,7 +937,7 @@
               <tr
                 class="group/row border-b border-border/30 outline-none hover:bg-accent/25"
               >
-                <td class="px-3 py-2 font-mono text-muted-foreground/60"
+                <td class="px-3 py-2 font-mono text-muted-foreground"
                   >{row.schema}</td
                 >
                 <td class="px-3 py-2 font-mono font-medium text-foreground"
@@ -948,13 +948,13 @@
                     <span
                       class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-px font-mono text-ui-3xs font-medium text-primary"
                     >
-                      <Lock class="size-2.5" />On
+                      <Lock class="size-3" />On
                     </span>
                   {:else}
                     <span
-                      class="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-px font-mono text-ui-3xs text-muted-foreground/60"
+                      class="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-px font-mono text-ui-3xs text-muted-foreground"
                     >
-                      <LockOpen class="size-2.5" />Off
+                      <LockOpen class="size-3" />Off
                     </span>
                   {/if}
                 </td>
@@ -962,14 +962,14 @@
                   {#if forced}
                     <Check class="mx-auto size-3.5 text-primary" />
                   {:else}
-                    <span class="text-muted-foreground/20">—</span>
+                    <span class="text-muted-foreground">—</span>
                   {/if}
                 </td>
                 <td class="px-3 py-2">
                   <button
                     type="button"
                     class={cn(
-                      "invisible h-6 w-full rounded-md px-2 font-mono text-ui-2xs transition-colors group-hover/row:visible",
+                      "opacity-0 h-6 w-full rounded-md px-2 font-mono text-ui-2xs transition-colors group-hover/row:opacity-100",
                       enabled
                         ? "border border-border/50 text-muted-foreground hover:bg-accent/35 hover:text-foreground"
                         : "bg-primary/10 text-primary hover:bg-primary/15",

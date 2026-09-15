@@ -236,7 +236,7 @@
 {#if !connection}
   <div class="flex min-h-0 flex-1 items-center justify-center bg-panel">
     <div class="flex flex-col items-center gap-2 text-center">
-      <LayoutGrid class="size-8 text-muted-foreground/25" />
+      <LayoutGrid class="size-8 text-muted-foreground" />
       <p class="text-ui-sm text-muted-foreground">Connect to a database to view dashboards</p>
     </div>
   </div>
@@ -248,13 +248,13 @@
     class="studio-chrome flex h-10 shrink-0 items-center gap-2 border-b border-border bg-panel px-3"
     data-studio-chrome
   >
-    <LayoutGrid class="size-4 shrink-0 text-muted-foreground/50" />
+    <LayoutGrid class="size-4 shrink-0 text-muted-foreground" />
 
     <!-- Dashboard selector -->
     <div class="relative">
       <button
         type="button"
-        class="flex h-7 items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-2.5 text-ui-xs font-medium transition-colors hover:bg-accent"
+        class= "field-surface flex h-7 items-center gap-1.5 bg-background/60 px-2.5 text-ui-xs font-medium transition-colors hover:bg-accent"
         onclick={() => (dashDropdownOpen = !dashDropdownOpen)}
       >
         {#if editingName}
@@ -282,7 +282,7 @@
           </span>
         {:else}
           <span>{activeDash?.name ?? "Select dashboard"}</span>
-          <ChevronDown class="size-3 text-muted-foreground/60" />
+          <ChevronDown class="size-3 text-muted-foreground" />
         {/if}
       </button>
 
@@ -309,7 +309,7 @@
                 <span
                   role="button"
                   tabindex="0"
-                  class="cursor-pointer text-muted-foreground/30 hover:text-destructive"
+                  class="cursor-pointer text-muted-foreground hover:text-destructive"
                   onclick={(e) => { e.stopPropagation(); deleteDashboard(d.id); }}
                   onkeydown={(e) => { if (e.key === "Enter") { e.stopPropagation(); deleteDashboard(d.id); } }}
                 >
@@ -326,7 +326,7 @@
                   type="text"
                   bind:value={nameInput}
                   placeholder="Dashboard name…"
-                  class="h-7 flex-1 rounded-md border-2 border-border bg-background px-2 font-mono text-ui-xs outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                  class= "field-surface h-7 flex-1 bg-background px-2 font-mono text-ui-xs outline-none"
                   onkeydown={(e) => {
                     if (e.key === "Enter") handleCreateDashboard();
                     if (e.key === "Escape") namingOpen = false;
@@ -339,7 +339,7 @@
             {:else}
               <button
                 type="button"
-                class="flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-ui-xs text-muted-foreground/60 transition-colors hover:text-foreground"
+                class="flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
                 onclick={() => { namingOpen = true; nameInput = ""; }}
               >
                 <Plus class="size-3" />
@@ -355,7 +355,7 @@
       <!-- Rename -->
       <button
         type="button"
-        class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+        class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
         title="Rename dashboard"
         onclick={startEditName}
       >
@@ -371,7 +371,7 @@
               "flex h-7 w-7 items-center justify-center text-ui-2xs transition-colors first:rounded-l-md last:rounded-r-md",
               activeDash.columns === cols
                 ? "bg-primary/15 text-primary font-medium"
-                : "text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground",
+                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
             )}
             title="{cols} columns"
             onclick={() => updateDashboard(activeDash.id, { columns: cols })}
@@ -386,7 +386,7 @@
           "inline-flex size-7 items-center justify-center rounded-md transition-colors",
           confirmDeleteDash
             ? "bg-destructive/15 text-destructive hover:bg-destructive/25"
-            : "text-muted-foreground/30 hover:bg-muted/60 hover:text-destructive",
+            : "text-muted-foreground hover:bg-muted/60 hover:text-destructive",
         )}
         title={confirmDeleteDash ? "Click again to confirm delete" : "Delete dashboard"}
         onclick={handleDeleteDashboard}
@@ -400,7 +400,7 @@
         {#if activeDash.items.length > 0}
           <button
             type="button"
-            class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/50 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            class= "field-surface inline-flex h-7 items-center gap-1.5 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             title="View only - hide every control (Esc to exit)"
             onclick={() => setViewOnly(true)}
           >
@@ -427,7 +427,7 @@
       <!-- Only affordance left on screen: a corner pill that fades in on hover. -->
       <button
         type="button"
-        class="fixed right-4 top-4 z-30 inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 bg-background/85 px-2.5 text-ui-xs text-muted-foreground opacity-0 backdrop-blur transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/dash:opacity-100"
+        class= "field-surface fixed right-4 top-4 z-30 inline-flex h-7 items-center gap-1.5 bg-background/85 px-2.5 text-ui-xs text-muted-foreground opacity-0 backdrop-blur transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/dash:opacity-100"
         title="Exit view only (Esc)"
         onclick={() => setViewOnly(false)}
       >
@@ -438,11 +438,11 @@
     {#if !activeDash}
       <div class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4">
         <div class="flex size-16 items-center justify-center rounded-lg bg-muted/30">
-          <LayoutGrid class="size-8 text-muted-foreground/20" />
+          <LayoutGrid class="size-8 text-muted-foreground" />
         </div>
         <div class="text-center">
           <p class="font-medium text-foreground/60">No dashboard yet</p>
-          <p class="mt-1 text-ui-sm text-muted-foreground/50">
+          <p class="mt-1 text-ui-sm text-muted-foreground">
             Create a dashboard to arrange your saved charts
           </p>
         </div>
@@ -459,12 +459,12 @@
     {:else if activeDash.items.length === 0}
       <div class="flex h-full min-h-[300px] flex-col items-center justify-center gap-4">
         <div class="flex size-16 items-center justify-center rounded-lg border-2 border-dashed border-border/40">
-          <BarChart2 class="size-8 text-muted-foreground/20" />
+          <BarChart2 class="size-8 text-muted-foreground" />
         </div>
-        <p class="text-ui-sm text-muted-foreground/50">Add charts to build your dashboard</p>
+        <p class="text-ui-sm text-muted-foreground">Add charts to build your dashboard</p>
         <button
           type="button"
-          class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-4 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          class= "field-surface inline-flex h-8 items-center gap-1.5 px-4 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onclick={() => (pickerOpen = true)}
         >
           <Plus class="size-4" />
@@ -502,7 +502,7 @@
                   <!-- Drag handle -->
                   <div
                     data-swapy-handle
-                    class="flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground/30 transition-colors hover:text-muted-foreground active:cursor-grabbing"
+                    class="flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-muted-foreground active:cursor-grabbing"
                     title="Drag to reorder"
                   >
                     <Grip class="size-3.5" />
@@ -525,7 +525,7 @@
                         "flex size-5 items-center justify-center rounded-md text-ui-2xs font-mono transition-colors",
                         span === s
                           ? "bg-primary/15 text-primary"
-                          : "text-muted-foreground/40 hover:bg-muted/60 hover:text-foreground",
+                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                       )}
                       title="{s} column{s > 1 ? 's' : ''}"
                     >{s}</button>
@@ -536,7 +536,7 @@
                 <button
                   type="button"
                   onclick={() => removeChartFromDashboard(activeDash.id, item.id)}
-                  class="ml-1 flex size-5 items-center justify-center rounded-md text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/40 hover:!text-destructive"
+                  class="ml-1 flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors group-hover:text-muted-foreground hover:!text-destructive"
                   title="Remove from dashboard"
                 >
                   <X class="size-3" />
@@ -553,7 +553,7 @@
                     <AiChartRenderer spec={chart.aiSpec} noTitle={true} />
                   </div>
                 {:else}
-                  <div class="absolute inset-0 flex items-center justify-center gap-2 text-muted-foreground/30">
+                  <div class="absolute inset-0 flex items-center justify-center gap-2 text-muted-foreground">
                     <BarChart2 class="size-6" />
                     <span class="text-ui-xs">No preview</span>
                   </div>
@@ -579,13 +579,13 @@
     <div class="flex w-[480px] max-h-[70vh] flex-col overflow-hidden rounded-2xl border border-border/60 bg-background elevate-3-rim">
       <div class="flex h-11 shrink-0 items-center justify-between border-b border-border px-4">
         <span class="text-ui-sm font-semibold">Add chart to dashboard</span>
-        <button type="button" onclick={() => (pickerOpen = false)} class="text-muted-foreground/50 hover:text-foreground">
+        <button type="button" onclick={() => (pickerOpen = false)} class="text-muted-foreground hover:text-foreground">
           <X class="size-4" />
         </button>
       </div>
       <div class="min-h-0 flex-1 overflow-y-auto p-3">
         {#if $savedCharts.length === 0}
-          <div class="py-10 text-center text-ui-sm text-muted-foreground/50">
+          <div class="py-10 text-center text-ui-sm text-muted-foreground">
             No saved charts yet. Save a chart from the Query Editor first.
           </div>
         {:else}
@@ -604,14 +604,14 @@
                       <AiChartRenderer spec={chart.aiSpec} noTitle={true} />
                     </div>
                   {:else}
-                    <div class="absolute inset-0 flex items-center justify-center text-muted-foreground/25">
+                    <div class="absolute inset-0 flex items-center justify-center text-muted-foreground">
                       <BarChart2 class="size-8" />
                     </div>
                   {/if}
                 </div>
                 <div class="px-2.5 py-1.5">
                   <p class="truncate text-ui-xs font-medium text-foreground/80">{chart.name}</p>
-                  <p class="text-ui-3xs text-muted-foreground/50">{chart.group}</p>
+                  <p class="text-ui-3xs text-muted-foreground">{chart.group}</p>
                 </div>
               </button>
             {/each}

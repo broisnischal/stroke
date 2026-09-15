@@ -30,6 +30,7 @@
   import {
     loadSavedConnections,
     upsertConnection,
+    lastPersistFailed,
     removeConnection,
     newConnectionId,
     getLastConnectionId,
@@ -215,7 +216,7 @@
     redis: "text-red-500/80",
   };
   function engineTint(id) {
-    return ENGINE_TINT[id] ?? "text-muted-foreground/60";
+    return ENGINE_TINT[id] ?? "text-muted-foreground";
   }
 
   /** Most recently connected first; never-connected rows sink to the bottom. */
@@ -402,6 +403,43 @@
   }
 
   /** Back to the picker, keeping whatever has been typed so far. */
+  // The mouse's back/forward buttons, inside the dialog.
+  //
+  // StudioShell owns these globally but bails while a modal is open, because
+  // walking the app's tab history behind a dialog is not what the button means
+  // there. It does mean something here though: back is the same step the header
+  // arrow takes, form → engine picker. Registered in the capture phase and
+  // stopped, so the global handler never sees it, and `preventDefault` runs even
+  // when there is nowhere to go - left alone the webview walks its own document
+  // history, which in a Tauri window navigates away from the app.
+  $effect(() => {
+    if (!open) return;
+    /** @param {MouseEvent} e */
+    function onMouseNav(e) {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.button !== 3) return; // nothing to go forward to
+      if (step === "form") backToPick();
+      else requestClose();
+    }
+    /** Swallow the paired auxclick/mouseup so the webview cannot act on them. */
+    function swallowAux(/** @type {MouseEvent} */ e) {
+      if (e.button === 3 || e.button === 4) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+    document.addEventListener("mousedown", onMouseNav, { capture: true });
+    document.addEventListener("auxclick", swallowAux, { capture: true });
+    document.addEventListener("mouseup", swallowAux, { capture: true });
+    return () => {
+      document.removeEventListener("mousedown", onMouseNav, { capture: true });
+      document.removeEventListener("auxclick", swallowAux, { capture: true });
+      document.removeEventListener("mouseup", swallowAux, { capture: true });
+    };
+  });
+
   function backToPick() {
     error = "";
     testOk = false;
@@ -757,20 +795,99 @@
     });
   }
 
+  /**
+   * Default port per engine. One table, read by both the engine picker and the
+   * save path - they used to carry separate copies that already disagreed about
+   * ClickHouse (8123 here, TLS-aware there), so which port a saved row ended up
+   * with depended on whether you had touched the picker.
+   * Engines with no port at all (SQLite, DuckDB, D1, libSQL) are absent on
+   * purpose: `undefined` is what clears the field.
+   */
+  const DEFAULT_PORTS = {
+    postgres: 5432,
+    mysql: 3306,
+    mariadb: 3306,
+    cockroachdb: 26257,
+    clickhouse: 8123,
+    mssql: 1433,
+    redis: 6379,
+  };
+  /** @param {string} id @param {boolean} [isSecure] */
+  function defaultPortFor(id, isSecure = secure) {
+    if (id === "clickhouse") return isSecure ? 8443 : 8123;
+    return DEFAULT_PORTS[id];
+  }
+
+  /**
+   * Default database and login per engine. The port already worked this way; the
+   * other two did not, so picking MySQL left "postgres" sitting in Database and
+   * Username - a Postgres default under a MySQL header, which is not a form you
+   * can trust. Absent = the engine has no sensible default and the field clears.
+   * @type {Record<string, { database?: string, user?: string }>}
+   */
+  const ENGINE_DEFAULTS = {
+    postgres:    { database: "postgres", user: "postgres" },
+    cockroachdb: { database: "defaultdb", user: "root" },
+    mysql:       { database: "", user: "root" },
+    mariadb:     { database: "", user: "root" },
+    clickhouse:  { database: "default", user: "default" },
+    mssql:       { database: "master", user: "sa" },
+    redis:       { database: "0", user: "" },
+  };
+
   function switchDriver(id) {
+    const prevPort = defaultPortFor(dbType);
+    const prev = ENGINE_DEFAULTS[dbType] ?? {};
+    const next = ENGINE_DEFAULTS[id] ?? {};
     dbType = id;
-    if (id === "postgres") port = "5432";
-    if (id === "mysql" || id === "mariadb") port = "3306";
-    if (id === "cockroachdb") port = "26257";
-    if (id === "clickhouse") port = secure ? "8443" : "8123";
-    if (id === "mssql") port = "1433";
-    if (id === "redis") port = "6379";
+    // Re-default a field only when it still holds the *previous* engine's
+    // default. Anything typed by hand is the user's and survives a trip through
+    // the engine picker and back; every switch used to overwrite the port, and
+    // never touched database or username at all - which is how a MySQL form
+    // ended up asking for the "postgres" database as user "postgres".
+    // An engine with no default clears the field rather than inheriting a stale
+    // value from the last one.
+    if (port === "" || String(prevPort ?? "") === String(port)) {
+      const p = defaultPortFor(id);
+      port = p != null ? String(p) : "";
+    }
+    if (database === "" || database === prev.database) database = next.database ?? "";
+    if (user === "" || user === prev.user) user = next.user ?? "";
     if (id === "sqlite-memory" || id === "duckdb-memory") filePath = ":memory:";
     if (id === "duckdb") filePath = "";
     error = "";
     testOk = false;
     connectionUri = "";
     uriHint = "";
+  }
+
+  /**
+   * Render the current fields as a connection string. Switching to string mode
+   * with an empty box would otherwise throw away a filled-in form and then fail
+   * Connect with "Enter a valid connection string" over a target that was
+   * perfectly valid a click earlier, so the switch seeds the box instead.
+   */
+  function fieldsToConnectionUri() {
+    const scheme =
+      dbType === "mysql" ? "mysql"
+      : dbType === "mariadb" ? "mariadb"
+      : dbType === "clickhouse" ? "clickhouse"
+      : "postgresql";
+    if (!host) return "";
+    const auth = user
+      ? `${encodeURIComponent(user)}${password ? `:${encodeURIComponent(password)}` : ""}@`
+      : "";
+    const p = port ? `:${port}` : "";
+    return `${scheme}://${auth}${host}${p}/${database ?? ""}`;
+  }
+
+  /** @param {'string'|'fields'} mode */
+  function setFieldMode(mode) {
+    if (mode === "string" && !connectionUri.trim()) {
+      connectionUri = fieldsToConnectionUri();
+      uriHint = "";
+    }
+    fieldMode = mode;
   }
 
   function applyConnectionUri() {
@@ -1451,19 +1568,9 @@
   }
 
   // Engines addressed by host + port, with the port a blank field saves as.
-  const DEFAULT_PORTS = {
-    postgres: 5432,
-    mysql: 3306,
-    mariadb: 3306,
-    cockroachdb: 26257,
-    clickhouse: 8123,
-    mssql: 1433,
-    redis: 6379,
-  };
-
   /** Shape a form payload into the persisted SavedConnection row (Save and Connect share it). */
   function buildSavedConn(payload, id, lastConnectedAt) {
-    const defaultPort = DEFAULT_PORTS[payload.type];
+    const defaultPort = defaultPortFor(payload.type);
     return {
       id,
       ...payload,
@@ -1509,6 +1616,12 @@
     ).sort(byLastConnected);
     // Keep editing the row we just saved, so a follow-up Connect updates it
     // instead of creating a duplicate.
+    if (lastPersistFailed()) {
+      failWith(
+        "Couldn't save this connection - local storage is full. Delete a few saved queries or connections and try again.",
+      );
+      return;
+    }
     editingId = id;
     baseline = snapshot();
     justSaved = true;
@@ -1540,10 +1653,22 @@
         return;
       }
       const payload = formPayload();
-      await openConnection(payload);
-      if (myOp !== opId) return; // cancelled by the user
       const existing = editingId ? saved.find((s) => s.id === editingId) : null;
       const id = existing?.id ?? newConnectionId();
+      // Persist BEFORE dialling. Everything the user typed is worth keeping the
+      // moment they commit to it, and a connect can fail for reasons that have
+      // nothing to do with what they entered - no network, VPN down, server
+      // asleep. Saving only on success meant a dropped connection threw the
+      // whole form away and they had to retype it, which is what made
+      // connections look like they were disappearing after being saved.
+      // lastConnectedAt stays at its previous value so a failed attempt does not
+      // jump the row to the top of the recents list or turn it into "Resume".
+      saved = upsertConnection(
+        buildSavedConn(payload, id, existing?.lastConnectedAt),
+      ).sort(byLastConnected);
+      editingId = id;
+      await openConnection(payload);
+      if (myOp !== opId) return; // cancelled by the user
       const saved_conn = buildSavedConn(payload, id, Date.now());
       saved = upsertConnection(saved_conn).sort(byLastConnected);
       setLastConnectionId(id);
@@ -1635,7 +1760,7 @@
   // the form lined up, which is most of what made it look thrown together.
   const row6 = "grid grid-cols-6 gap-x-4";
   const inp =
-    "h-8 w-full rounded-md border-2 border-foreground/15 bg-muted/20 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/35 placeholder:font-normal outline-none transition-[color,border-color,box-shadow] hover:border-foreground/40";
+    "field-surface h-9 w-full bg-transparent px-3 text-ui-xs text-foreground placeholder:text-muted-foreground placeholder:font-normal outline-none";
   const inpNum =
     inp +
     " [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
@@ -1702,6 +1827,29 @@
 <!-- Advanced options, SSL / SSH tunnel / encryption / read-only. Laid out to
      fill the available width (toggle row + horizontal SSH grid); wraps to a
      column on the narrow provider/D1 collapsible. -->
+<!-- Two ways to say the same thing, so they are modes rather than neighbours:
+     paste a string, or fill the boxes. Lives beside the engine name in the
+     header, not on a band of its own above the first field. -->
+{#snippet fieldModeSwitch()}
+  <div class="field-surface flex shrink-0 items-center gap-0.5 p-0.5">
+    {#each [["string", "Connection string"], ["fields", "Fields"]] as opt (opt[0])}
+      <button
+        type="button"
+        aria-pressed={fieldMode === opt[0]}
+        class={cn(
+          "rounded-[calc(var(--radius-field)-2px)] px-2.5 py-1 text-ui-2xs font-medium transition-colors",
+          fieldMode === opt[0]
+            ? "bg-accent text-foreground"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+        onclick={() =>
+          setFieldMode(/** @type {"string"|"fields"} */ (opt[0]))}
+        >{opt[1]}</button
+      >
+    {/each}
+  </div>
+{/snippet}
+
 {#snippet advancedFields()}
   {@const isPgMy =
     dbType === "postgres" ||
@@ -1722,7 +1870,7 @@
             checked={ssl}
             onCheckedChange={(v) => (ssl = v === true)}
           />
-          <span class="text-ui-xs text-muted-foreground/70">Use SSL / TLS</span>
+          <span class="text-ui-xs text-foreground/75">Use SSL / TLS</span>
         </label>
         <label
           class="col-span-3 flex cursor-pointer select-none items-center gap-2 sm:col-span-2"
@@ -1733,9 +1881,9 @@
             onCheckedChange={(v) => (sshEnabled = v === true)}
           />
           <span
-            class="flex items-center gap-1.5 text-ui-xs text-muted-foreground/70"
+            class="flex min-w-0 items-center gap-1.5 text-ui-xs text-foreground/75"
           >
-            <Icon name="terminal" class="size-3 shrink-0" />
+            <Icon name="terminal" class="size-3.5 shrink-0" />
             Connect via SSH tunnel
           </span>
         </label>
@@ -1752,9 +1900,7 @@
               else if (!secure && port === "8443") port = "8123";
             }}
           />
-          <span class="text-ui-xs text-muted-foreground/70"
-            >Use HTTPS (TLS)</span
-          >
+          <span class="text-ui-xs text-foreground/75">Use HTTPS (TLS)</span>
         </label>
       {/if}
       <label
@@ -1766,9 +1912,9 @@
           onCheckedChange={(v) => (readOnly = v === true)}
         />
         <span
-          class="flex items-center gap-1.5 text-ui-xs text-muted-foreground/70"
+          class="flex min-w-0 items-center gap-1.5 text-ui-xs text-foreground/75"
         >
-          <Icon name="lock" class="size-3 shrink-0" />
+          <Icon name="lock" class="size-3.5 shrink-0" />
           Open in read-only mode
         </span>
       </label>
@@ -1776,31 +1922,33 @@
 
     <!-- SSH tunnel fields, horizontal, fills the width -->
     {#if isPgMy && sshEnabled}
-      <div
-        class="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] items-start gap-x-4 gap-y-3 border-t border-border/15 pt-4"
-      >
-        <div class="grid grid-cols-[1fr_72px] gap-2">
-          <div>
-            <label for="cn-ssh-host" class={lbl}>SSH Host</label>
-            <Input
-              id="cn-ssh-host"
-              bind:value={sshHost}
-              placeholder="bastion.example.com"
-              class={inp}
-            />
-          </div>
-          <div>
-            <label for="cn-ssh-port" class={lbl}>Port</label>
-            <Input
-              id="cn-ssh-port"
-              bind:value={sshPort}
-              type="text"
-              inputmode="numeric"
-              class={inpNum}
-            />
-          </div>
+      <!-- The tunnel is a second address, so it is laid out as one: the same
+           six-column template and the same 2/1/3 split the database address
+           above uses, which puts SSH Host under Host, Port under Port and SSH
+           Username under Database. It used to run its own auto-fit track list
+           with a nested 1fr/72px pair, so not one of its four field edges met
+           an edge in the row above it. -->
+      <div class={cn(row6, "items-start gap-y-4 border-t border-border/15 pt-4")}>
+        <div class="col-span-3 sm:col-span-2">
+          <label for="cn-ssh-host" class={lbl}>SSH Host</label>
+          <Input
+            id="cn-ssh-host"
+            bind:value={sshHost}
+            placeholder="bastion.example.com"
+            class={inp}
+          />
         </div>
-        <div>
+        <div class="col-span-3 sm:col-span-1">
+          <label for="cn-ssh-port" class={lbl}>Port</label>
+          <Input
+            id="cn-ssh-port"
+            bind:value={sshPort}
+            type="text"
+            inputmode="numeric"
+            class={inpNum}
+          />
+        </div>
+        <div class="col-span-6 sm:col-span-3">
           <label for="cn-ssh-user" class={lbl}>SSH Username</label>
           <Input
             id="cn-ssh-user"
@@ -1810,7 +1958,7 @@
             class={inp}
           />
         </div>
-        <div>
+        <div class="col-span-6 sm:col-span-3">
           <label for="cn-ssh-key" class={lbl}>Identity file</label>
           <Input
             id="cn-ssh-key"
@@ -1818,7 +1966,7 @@
             placeholder="~/.ssh/id_rsa"
             class={cn(inp, "font-mono text-ui-2xs")}
           />
-          <p class="mt-1 text-ui-3xs leading-snug text-muted-foreground/40">
+          <p class="mt-1 text-ui-2xs leading-snug text-muted-foreground">
             Optional, leave blank to use your SSH agent.
           </p>
         </div>
@@ -1836,10 +1984,10 @@
             class="mt-px"
           />
           <span class="flex flex-col">
-            <span class="text-ui-xs text-muted-foreground/75"
+            <span class="text-ui-xs text-muted-foreground"
               >Encrypt connection (TLS)</span
             >
-            <span class="text-ui-2xs leading-snug text-muted-foreground/40"
+            <span class="text-ui-2xs leading-snug text-muted-foreground"
               >Encrypts traffic between Stroke and the server.</span
             >
           </span>
@@ -1858,10 +2006,10 @@
             class="mt-px"
           />
           <span class="flex flex-col">
-            <span class="text-ui-xs text-muted-foreground/75"
+            <span class="text-ui-xs text-muted-foreground"
               >Trust server certificate</span
             >
-            <span class="text-ui-2xs leading-snug text-muted-foreground/40"
+            <span class="text-ui-2xs leading-snug text-muted-foreground"
               >Accept self-signed or otherwise untrusted certificates. Needed
               for many local / dev servers.</span
             >
@@ -1879,7 +2027,7 @@
       type="button"
       onclick={() => (advancedOpen = !advancedOpen)}
       aria-expanded={advancedOpen}
-      class="flex w-full items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/50 transition-colors hover:text-foreground"
+      class="flex w-full items-center gap-1.5 text-ui-2xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
     >
       <Icon
         name="chevron-right"
@@ -1949,7 +2097,7 @@
               }}
               title="Show connections (⌘B)"
               aria-label="Show connections"
-              class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground/45 transition-colors hover:bg-muted/50 hover:text-foreground"
+              class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
             >
               <Icon name="chevrons-right" class="size-4" />
             </button>
@@ -1965,7 +2113,7 @@
               </h2>
               {#if saved.length > 0}
                 <span
-                  class="rounded-full bg-muted/60 px-1.5 py-px text-ui-3xs font-medium tabular-nums text-muted-foreground/70"
+                  class="rounded-full bg-muted/60 px-1.5 py-px text-ui-2xs font-medium tabular-nums text-muted-foreground"
                   >{savedQuery ? `${savedMatches.length}/${saved.length}` : saved.length}</span
                 >
               {/if}
@@ -1977,7 +2125,7 @@
                 }}
                 title="Hide connections (⌘B)"
                 aria-label="Hide connections"
-                class="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/45 transition-colors hover:bg-muted/50 hover:text-foreground"
+                class="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
               >
                 <Icon name="chevrons-left" class="size-4" />
               </button>
@@ -1992,7 +2140,7 @@
                   "flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left text-ui-xs transition-[color,background-color,border-color,transform] duration-150 ease-out active:scale-[0.98]",
                   !editingId
                     ? "border-border/40 bg-muted/40 font-medium text-foreground"
-                    : "border-transparent text-muted-foreground/60 hover:bg-muted/25 hover:text-foreground",
+                    : "border-transparent text-muted-foreground hover:bg-muted/25 hover:text-foreground",
                 )}
               >
                 <Icon name="plus" class="size-3.5 shrink-0" />
@@ -2014,7 +2162,7 @@
                 <div class="relative">
                   <Icon
                     name="search"
-                    class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40"
+                    class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
                   />
                   <!-- The shared Input, resized to the rail's compact scale, so
                        the focus ring and border states match the engine search
@@ -2059,7 +2207,7 @@
                         savedQuery = "";
                         savedSearchEl?.focus();
                       }}
-                      class="absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground after:absolute after:-inset-1 after:content-['']"
+                      class="absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground after:absolute after:-inset-1 after:content-['']"
                       ><Icon name="x" class="size-3.5" /></button
                     >
                   {/if}
@@ -2072,7 +2220,7 @@
                 <!-- A dead end needs a way out: the filter that emptied the list
                      is the only thing standing between here and the list. -->
                 <div class="flex flex-col items-start gap-1.5 px-4 py-3">
-                  <p class="text-ui-2xs text-muted-foreground/50">
+                  <p class="text-ui-2xs text-muted-foreground">
                     No connection matches “{savedQuery}”.
                   </p>
                   <button
@@ -2103,7 +2251,7 @@
                           savedStagger && "cn-stagger-in",
                           isSel
                             ? "bg-muted/50 text-foreground"
-                            : "text-muted-foreground/60 hover:bg-muted/30 hover:text-foreground",
+                            : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
                         )}
                         style={savedStagger
                           ? `animation-delay: ${Math.min(i, 12) * 40}ms`
@@ -2171,7 +2319,7 @@
                             {conn.name || "Unnamed"}
                           </p>
                           <p
-                            class="mt-0.5 truncate text-ui-2xs leading-tight text-muted-foreground/55"
+                            class="mt-0.5 truncate text-ui-2xs leading-tight text-muted-foreground"
                           >
                             {connSubtitle(conn, cid)}
                           </p>
@@ -2180,7 +2328,7 @@
                         <!-- Trash: hidden until hover -->
                         <button
                           type="button"
-                          class="shrink-0 rounded p-0.5 text-muted-foreground/25 opacity-0 transition-opacity duration-150 hover:text-destructive group-hover:opacity-100"
+                          class="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-150 hover:text-destructive group-hover:opacity-100"
                           onclick={(e) => {
                             e.stopPropagation();
                             handleDelete(conn.id);
@@ -2192,7 +2340,7 @@
                 </ScrollArea>
               {:else}
                 <div class="flex h-full items-center justify-center pb-8">
-                  <p class="text-ui-2xs text-muted-foreground/25">
+                  <p class="text-ui-2xs text-muted-foreground">
                     No saved connections
                   </p>
                 </div>
@@ -2222,23 +2370,80 @@
              the title becomes that choice in step 2, with the back arrow as the
              way to change it - so there is never a form on screen for a database
              nobody has picked yet. -->
-          <div class="shrink-0 px-8 pt-6">
+          <div class="shrink-0 px-8 pt-5">
             {#if step === "pick"}
-              <h2
-                class="text-ui-lg font-semibold tracking-tight text-foreground"
-              >
-                Connect a database
-              </h2>
-              <p class="mt-1 text-ui-xs text-muted-foreground">
-                Choose what you're connecting to.
-              </p>
+              <!-- pe-6 keeps the rescan button clear of the dialog's own close
+                 button, which floats at right-4 top-4 over this same corner. -->
+              <div class="flex items-center gap-3 pe-6">
+                <h2
+                  class="text-ui-lg font-semibold tracking-tight text-foreground"
+                >
+                  Connect a database
+                </h2>
+                <!-- Search is how you reach an engine without reading six groups,
+                   so it sits in the header rather than in the scroller, and on the
+                   title's line rather than on one of its own. -->
+                <div class="relative ml-auto w-full max-w-[18rem]">
+                  <Icon
+                    name="search"
+                    class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <Input
+                    bind:ref={engineSearchEl}
+                    bind:value={engineQuery}
+                    placeholder="Search databases"
+                    aria-label="Search databases"
+                    class="h-8 pl-8 pr-8"
+                    oninput={() => (engineStagger = false)}
+                    onkeydown={(e) => {
+                      if (e.key !== "Enter" || !firstEngineMatch) return;
+                      e.preventDefault();
+                      pickEngine(firstEngineMatch.id);
+                    }}
+                  />
+                  {#if engineQuery}
+                    <button
+                      type="button"
+                      onclick={() => {
+                        engineQuery = "";
+                        engineSearchEl?.focus();
+                      }}
+                      aria-label="Clear search"
+                      class="absolute right-1 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                      ><Icon name="x" class="size-3.5" /></button
+                    >
+                  {/if}
+                </div>
+                <!-- The rescan already existed as a size-3 glyph at 35% opacity
+                   beside a section heading, findable only if you knew it was
+                   there. Same action, where you would look for it. -->
+                <button
+                  type="button"
+                  title="Rescan local databases (⌘R)"
+                  aria-label="Rescan local databases"
+                  disabled={localPhase === "scanning"}
+                  onclick={() => {
+                    saved = loadSavedConnections().sort(byLastConnected);
+                    void refreshLocal();
+                  }}
+                  class="field-surface inline-flex size-8 shrink-0 items-center justify-center text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.96] disabled:opacity-50"
+                >
+                  <Icon
+                    name="refresh-cw"
+                    class={cn(
+                      "size-3.5 shrink-0",
+                      localPhase === "scanning" && "animate-spin",
+                    )}
+                  />
+                </button>
+              </div>
             {:else}
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-3 pe-6">
                 <button
                   type="button"
                   onclick={backToPick}
                   title="Choose a different database"
-                  class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted/50 hover:text-foreground"
+                  class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
                 >
                   <Icon name="chevron-left" class="size-4" />
                 </button>
@@ -2258,6 +2463,9 @@
                       : activeDriver.label}
                   </h2>
                 </div>
+                {#if entryMode === "manual" && hasFieldToggle}
+                  <div class="ml-auto">{@render fieldModeSwitch()}</div>
+                {/if}
               </div>
             {/if}
           </div>
@@ -2267,76 +2475,14 @@
              blurbs turned this into a wall of prose to read before the first
              decision, and the mark is what people actually recognise. -->
           {#if step === "pick"}
-            <!-- Search sits outside the scroller: it is how you get to an engine
-               without reading six groups, so it must never scroll away. -->
-            <div class="flex shrink-0 items-center gap-2 px-8 pt-4">
-              <div class="relative max-w-[720px] flex-1">
-                <Icon
-                  name="search"
-                  class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40"
-                />
-                <Input
-                  bind:ref={engineSearchEl}
-                  bind:value={engineQuery}
-                  placeholder="Search databases and local studios…"
-                  aria-label="Search databases"
-                  class="pl-9 pr-8"
-                  oninput={() => (engineStagger = false)}
-                  onkeydown={(e) => {
-                    if (e.key !== "Enter" || !firstEngineMatch) return;
-                    e.preventDefault();
-                    pickEngine(firstEngineMatch.id);
-                  }}
-                />
-                {#if engineQuery}
-                  <button
-                    type="button"
-                    onclick={() => {
-                      engineQuery = "";
-                      engineSearchEl?.focus();
-                    }}
-                    aria-label="Clear search"
-                    class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground/40 transition-colors hover:text-foreground"
-                    ><Icon name="x" class="size-3" /></button
-                  >
-                {/if}
-              </div>
-              <!-- The rescan already existed as a size-3 glyph at 35% opacity beside a
-                   section heading - findable only if you knew it was there. This is the
-                   same action, where you would look for it. -->
-              <button
-                type="button"
-                title="Rescan local databases (⌘R)"
-                aria-label="Rescan local databases"
-                disabled={localPhase === "scanning"}
-                onclick={() => { saved = loadSavedConnections().sort(byLastConnected); void refreshLocal(); }}
-                class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground disabled:opacity-50"
-              >
-                <Icon name="refresh-cw" class={cn("size-3.5 shrink-0", localPhase === "scanning" && "animate-spin")} />
-                Refresh
-              </button>
-            </div>
             <ScrollArea type="auto" class="min-h-0 flex-1 scroll-smooth">
-              <div class="flex flex-col gap-5 px-8 py-5">
+              <div class="flex flex-col gap-3.5 px-8 py-4">
                 <!-- ── Studios running on this machine ────────────────────────
                    A running `prisma studio` / `drizzle-kit studio` already knows
                    its database, so this offers it directly - one click, no
                    connection string, nothing saved afterwards. -->
                 {#if localPhase !== "idle" && (localMatches.length > 0 || !engineQuery)}
-                  <div class="flex flex-col gap-4">
-                    {#if localGroups.length === 0}
-                      <!-- <div>
-                      <p class="flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/40">
-                        {@render liveDot()}
-                        Running on this machine
-                      </p>
-                      <p class="mt-2 text-ui-2xs leading-relaxed text-muted-foreground/45">
-                        {localPhase === 'scanning'
-                          ? 'Looking for local studios, installed servers and database containers…'
-                          : 'Nothing running locally. Start a Prisma or Drizzle studio, and it shows up here ready to open.'}
-                      </p>
-                    </div> -->
-                    {/if}
+                  <div class="flex flex-col gap-3.5">
                     {#each localGroups as group, i (group.key)}
                       {@render localGroup(group.label, group.targets, i === 0)}
                     {/each}
@@ -2361,18 +2507,18 @@
                 )}
                   <div>
                     <p
-                      class="flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/40"
+                      class="flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground"
                     >
                       {#if lead}{@render liveDot()}{/if}
                       {label}
-                      <span class="font-mono text-muted-foreground/30"
+                      <span class="font-mono text-muted-foreground"
                         >{targets.length}</span
                       >
                       {#if lead}
                         {#if localPhase === "scanning"}
                           <Icon
                             name="loader-2"
-                            class="size-3 animate-spin text-muted-foreground/35"
+                            class="size-3 animate-spin text-muted-foreground"
                           />
                         {:else}
                           <button
@@ -2380,14 +2526,14 @@
                             title="Scan again (⌘R)"
                             aria-label="Scan again for local databases"
                             onclick={() => void refreshLocal()}
-                            class="-my-1 inline-flex size-6 items-center justify-center rounded text-muted-foreground/35 transition-colors hover:bg-muted/50 hover:text-foreground"
+                            class="-my-1 inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
                             ><Icon name="refresh-cw" class="size-3" /></button
                           >
                         {/if}
                       {/if}
                     </p>
                     <div
-                      class="mt-2 grid grid-cols-[repeat(auto-fill,minmax(380px,1fr))] gap-2"
+                      class="mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-1.5"
                     >
                       {#each targets as t, i (t.id)}
                         {@const busy = connecting === t.id}
@@ -2400,11 +2546,11 @@
                             ? `animation-delay: ${Math.min(i, 8) * 35}ms`
                             : ""}
                           class={cn(
-                            "group flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out",
+                            "cell-quiet group flex items-center gap-2 px-2.5 py-1.5 text-left transition-[color,background-color,border-color,scale] duration-150 ease-out",
                             engineStagger && "cn-stagger-in",
                             t.conn
-                              ? "border-border/50 text-foreground/90 hover:border-border hover:bg-muted/40 hover:text-foreground active:scale-[0.98] disabled:opacity-60"
-                              : "cursor-not-allowed border-border/30 text-muted-foreground/40",
+                              ? "text-foreground hover:bg-muted/40 active:scale-[0.98] disabled:opacity-60"
+                              : "cursor-not-allowed opacity-50",
                           )}
                         >
                           {#if busy}
@@ -2422,7 +2568,7 @@
                                  "needs attention", not a greyed-out database. -->
                             <Icon
                               name="alert-triangle"
-                              class="mt-0.5 size-4 shrink-0 self-start text-warning/70"
+                              class="mt-0.5 size-4 shrink-0 self-start text-warning"
                             />
                           {/if}
                           <span class="min-w-0 flex-1">
@@ -2436,8 +2582,8 @@
                               class={cn(
                                 "mt-0.5 block font-mono text-ui-2xs leading-tight",
                                 t.conn
-                                  ? "truncate text-muted-foreground/50"
-                                  : "line-clamp-2 text-muted-foreground/60",
+                                  ? "truncate text-muted-foreground"
+                                  : "line-clamp-2 text-muted-foreground",
                               )}
                               >{t.subtitle}</span
                             >
@@ -2461,17 +2607,17 @@
                 {#each engineMatches as cat (cat.label)}
                   <div>
                     <p
-                      class="text-ui-3xs font-semibold uppercase tracking-wider text-muted-foreground/45"
+                      class="text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground"
                     >
                       {cat.label}
                     </p>
-                    <!-- Columns come from the window, not a fixed count: a card
-                       never goes below 230px (which is what turned "PostgreSQL"
-                       into "PostgreS…"), and on a wide window each group
-                       collapses to one row instead of leaving half the dialog
-                       empty. -->
+                    <!-- Columns come from the window, not a fixed count. The floor
+                       is the longest label ("DuckDB In-Memory") plus its icon, not
+                       a round number: at 230px a ten-character name got a 230px
+                       tile, so five fitted across a 1,500px dialog and every group
+                       became its own stacked row. -->
                     <div
-                      class="mt-2 grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2"
+                      class="mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(11.5rem,1fr))] gap-1.5"
                     >
                       {#each cat.drivers as d (d.id)}
                         {@const off = DISABLED_TABS.has(d.id)}
@@ -2481,10 +2627,10 @@
                           title={off ? `${d.label} - coming soon` : d.desc}
                           onclick={() => pickEngine(d.id)}
                           class={cn(
-                            "group flex h-9 items-center gap-2 rounded-md border px-2.5 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out",
+                            "cell-quiet group flex h-8 items-center gap-2 px-2.5 text-left transition-[color,background-color,border-color,scale] duration-150 ease-out",
                             off
-                              ? "cursor-not-allowed border-border/30 text-muted-foreground/30"
-                              : "border-border/50 text-foreground/90 hover:border-border hover:bg-muted/40 hover:text-foreground active:scale-[0.98]",
+                              ? "cursor-not-allowed opacity-40"
+                              : "text-foreground hover:bg-muted/40 active:scale-[0.98]",
                           )}
                         >
                           <DbIcon
@@ -2495,12 +2641,12 @@
                             )}
                           />
                           <span
-                            class="min-w-0 flex-1 truncate text-ui-sm font-medium"
+                            class="min-w-0 flex-1 truncate text-ui-xs font-medium"
                             >{d.label}</span
                           >
                           {#if off}
                             <span
-                              class="shrink-0 rounded bg-muted/50 px-1 py-px text-ui-3xs font-medium text-muted-foreground/50"
+                              class="shrink-0 rounded bg-muted/50 px-1 py-px text-ui-3xs font-medium text-muted-foreground"
                               >soon</span
                             >
                           {/if}
@@ -2525,7 +2671,7 @@
                         engineQuery = "";
                         engineSearchEl?.focus();
                       }}
-                      class="mt-1 text-ui-xs text-muted-foreground/60 underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                      class="mt-1 text-ui-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
                       >Clear search</button
                     >
                   </div>
@@ -2536,14 +2682,14 @@
             <!-- ── Step 2 · details for the chosen database ── -->
           {:else}
             <ScrollArea type="auto" class="min-h-0 flex-1 scroll-smooth">
-              <div class="flex items-start gap-10 px-8 py-6">
+              <div class="flex items-start gap-10 px-8 py-5">
                 <!-- Enter connects, from any field - filling a form and having to go
                  find the button is the one interaction nobody expects here. The
                  paste bar's own Enter handler runs first and marks the event
                  handled, so pasting a URI still just fills the fields. -->
                 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <div
-                  class="min-w-0 flex-1 max-w-[880px]"
+                  class="@container min-w-0 w-full"
                   onkeydown={(e) => {
                     if (e.key !== "Enter" || e.defaultPrevented || isBusy)
                       return;
@@ -2556,103 +2702,121 @@
                   {#if entryMode === "manual"}
                     <!-- Manual form, core connection fields, then a full-width Advanced
                      section at the bottom. -->
-                    <div class="flex min-w-0 flex-col gap-5">
-                      <!-- The engine came from step 1, so there is no picker here -
-                     the header's back arrow is how you change it.
+                      <div class="flex min-w-0 flex-col gap-5">
+                        <!-- The form reads as three parts, in the order the work actually happens:
+                             say where the database is, adjust how you reach it, then name it. Name
+                             used to hold the most prominent slot on the page despite being the one
+                             optional field on it, and the connection string sat beside the six
+                             fields it fills, so the same address was on screen twice. -->
 
-                     Name and the connection string share the first row. Both
-                     labels are single-line so they sit on one baseline: the
-                     Fields/URI switch used to ride in the right-hand label and
-                     pushed that label down a few pixels, which is the kind of
-                     misalignment you feel without being able to name. -->
-                      <div class={cn(row6, "gap-y-4")}>
-                        <div class="col-span-6 lg:col-span-3">
-                          <label for="cn-name" class={lbl}>
-                            Name
-                            <span class="font-normal text-muted-foreground/45"
-                              >· optional</span
-                            >
-                          </label>
-                          <Input
-                            id="cn-name"
-                            bind:value={name}
-                            class={inp}
-                            placeholder={autoName}
-                          />
-                        </div>
-
-                        {#if hasFieldToggle}
-                          <!-- A URI-only mode was redundant once this field fills the
-                         ones below: paste here and everything downstream is
-                         populated, so there is nothing a separate view added. -->
-                          <div class="col-span-6 min-w-0 lg:col-span-3">
-                            <label for="cn-paste-uri" class={lbl}>
-                              Connection string
-                              <span class="font-normal text-muted-foreground/45"
-                                >· fills the fields below</span
-                              >
-                            </label>
-                            <div class="flex gap-2">
-                              <Input
-                                id="cn-paste-uri"
-                                bind:value={connectionUri}
-                                placeholder="postgresql://…"
-                                class={cn(
-                                  inp,
-                                  "min-w-0 flex-1 font-mono text-ui-2xs",
-                                )}
-                                onpaste={() =>
-                                  requestAnimationFrame(applyConnectionUri)}
-                                onblur={() =>
-                                  connectionUri.trim() && applyConnectionUri()}
-                                onkeydown={(e) =>
-                                  e.key === "Enter" &&
-                                  (e.preventDefault(), applyConnectionUri())}
-                              />
-                              <button
-                                type="button"
-                                onclick={pasteConnectionUri}
-                                title="Paste from clipboard"
-                                aria-label="Paste from clipboard"
-                                class="inline-flex size-8 shrink-0 items-center justify-center rounded-md border-2 border-foreground/15 bg-muted/20 text-muted-foreground/70 transition-[color,border-color] hover:border-foreground/40 hover:text-foreground"
-                              >
-                                <Icon name="clipboard-copy" class="size-3.5" />
-                              </button>
+                        <!-- ── 1 · Address: connection string, or the fields it fills ─────────── -->
+                        <section>
+                          <!-- No caption, and no switch row either: the field labels
+                               below say what this is, and the Connection string /
+                               Fields switch now sits on the header line beside the
+                               engine it applies to. -->
+                          {#if hasFieldToggle && fieldMode === "string"}
+                            <div class={cn(row6, "gap-y-4")}>
+                              <div class="col-span-6">
+                            <!-- A URI-only mode was redundant once this field fills the
+                           ones below: paste here and everything downstream is
+                           populated, so there is nothing a separate view added. -->
+                            <div class="col-span-6 min-w-0 lg:col-span-3">
+                              <label for="cn-paste-uri" class={lbl}>
+                                Connection string
+                                <span class="font-normal text-muted-foreground"
+                                  >· paste one, or switch to Fields</span
+                                >
+                              </label>
+                              <div class="relative">
+                                <Input
+                                  id="cn-paste-uri"
+                                  bind:value={connectionUri}
+                                  placeholder="postgresql://…"
+                                  class={cn(
+                                    inp,
+                                    "min-w-0 pr-9 font-mono text-ui-2xs",
+                                  )}
+                                  onpaste={() =>
+                                    requestAnimationFrame(applyConnectionUri)}
+                                  onblur={() =>
+                                    connectionUri.trim() && applyConnectionUri()}
+                                  onkeydown={(e) =>
+                                    e.key === "Enter" &&
+                                    (e.preventDefault(), applyConnectionUri())}
+                                />
+                                <button
+                                  type="button"
+                                  onclick={pasteConnectionUri}
+                                  title="Paste from clipboard"
+                                  aria-label="Paste from clipboard"
+                                  class="absolute inset-y-0 right-0 inline-flex w-9 items-center justify-center rounded-r-md text-muted-foreground transition-colors hover:text-foreground"
+                                >
+                                  <Icon name="clipboard-copy" class="size-3.5" />
+                                </button>
+                              </div>
+                              {#if uriHint}
+                                <p
+                                  class="mt-1.5 flex items-center gap-1 text-ui-2xs"
+                                >
+                                  {#if uriHint.includes("Could") || uriHint.includes("Expected") || uriHint.includes("doesn't") || uriHint.includes("empty")}
+                                    <Icon
+                                      name="alert-circle"
+                                      class="size-3 shrink-0 text-destructive"
+                                    />
+                                    <span class="text-destructive">{uriHint}</span
+                                    >
+                                  {:else}
+                                    <Icon
+                                      name="check-circle-2"
+                                      class="size-3 shrink-0 text-success"
+                                    />
+                                    <span class="text-success">{uriHint}</span>
+                                  {/if}
+                                </p>
+                              {/if}
                             </div>
-                            {#if uriHint}
-                              <p
-                                class="mt-1.5 flex items-center gap-1 text-ui-2xs"
-                              >
-                                {#if uriHint.includes("Could") || uriHint.includes("Expected") || uriHint.includes("doesn't") || uriHint.includes("empty")}
-                                  <Icon
-                                    name="alert-circle"
-                                    class="size-3 shrink-0 text-destructive"
-                                  />
-                                  <span class="text-destructive">{uriHint}</span
-                                  >
-                                {:else}
-                                  <Icon
-                                    name="check-circle-2"
-                                    class="size-3 shrink-0 text-success"
-                                  />
-                                  <span class="text-success">{uriHint}</span>
-                                {/if}
+                              </div>
+                            </div>
+                            <!-- What the string resolved to, as one read-only line. Enough to
+                                 confirm you pasted the right thing; the switch above is how you
+                                 correct it. -->
+                            {#if host}
+                              {@const parts = [
+                                { k: "Host", v: host },
+                                { k: "Port", v: port || "—" },
+                                { k: "Database", v: database || "—" },
+                                ...(user ? [{ k: "User", v: user }] : []),
+                                ...(password ? [{ k: "Password", v: "••••••" }] : []),
+                              ]}
+                              <!-- What the string resolved to. Labelled pairs, not a
+                                   run of monospace fragments behind an arrow glyph:
+                                   the point is to confirm you pasted the right thing,
+                                   which means saying which part is which. -->
+                              <dl class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5">
+                                {#each parts as part (part.k)}
+                                  <div class="flex min-w-0 flex-col gap-0.5">
+                                    <dt class="text-ui-3xs uppercase tracking-wider text-muted-foreground">{part.k}</dt>
+                                    <dd class="min-w-0 truncate font-mono text-ui-2xs text-foreground">{part.v}</dd>
+                                  </div>
+                                {/each}
+                              </dl>
+                            {:else}
+                              <p class="mt-3 text-ui-2xs text-muted-foreground">
+                                Paste a connection string and the target appears here.
                               </p>
                             {/if}
-                          </div>
-                        {/if}
-                      </div>
-
+                          {:else}
                       <!-- Driver-specific fields -->
                       {#key dbType}
                         <div class="flex flex-col gap-3.5">
                           <!-- ── PostgreSQL / CockroachDB / MySQL / MariaDB ── -->
                           {#if dbType === "postgres" || dbType === "cockroachdb" || dbType === "mysql" || dbType === "mariadb"}
-                            <!-- Host, port and database are one address, so they share a row -
-              and the Host+Port pair spans exactly the three columns Name spans
-              above it, so the two rows break on the same line. -->
-                            <div class={row6}>
-                              <div class="col-span-3 sm:col-span-2">
+                            <!-- Host, port, database, user and password are one
+              address, so they share one row where the panel is wide enough and
+              break 3+2 where it is not. -->
+                            <div class={cn(row6, "gap-y-4 @4xl:grid-cols-12")}>
+                              <div class="col-span-3 sm:col-span-2 @4xl:col-span-3">
                                 <label for="cn-host" class={lbl}>Host</label>
                                 <Input
                                   id="cn-host"
@@ -2663,7 +2827,7 @@
                                   )}
                                 />
                               </div>
-                              <div class="col-span-3 sm:col-span-1">
+                              <div class="col-span-3 sm:col-span-1 @4xl:col-span-1">
                                 <label for="cn-port" class={lbl}>Port</label>
                                 <Input
                                   id="cn-port"
@@ -2676,7 +2840,7 @@
                                   )}
                                 />
                               </div>
-                              <div class="col-span-6 sm:col-span-3">
+                              <div class="col-span-6 sm:col-span-3 @4xl:col-span-3">
                                 <label for="cn-db" class={lbl}>Database</label>
                                 <Input
                                   id="cn-db"
@@ -2687,10 +2851,7 @@
                                   )}
                                 />
                               </div>
-                            </div>
-
-                            <div class={row6}>
-                              <div class="col-span-6 sm:col-span-3">
+                              <div class="col-span-6 sm:col-span-3 @4xl:col-span-3">
                                 <label for="cn-user" class={lbl}>Username</label
                                 >
                                 <Input
@@ -2703,7 +2864,7 @@
                                   )}
                                 />
                               </div>
-                              <div class="col-span-6 sm:col-span-3">
+                              <div class="col-span-6 sm:col-span-3 @4xl:col-span-2">
                                 <label for="cn-pass" class={lbl}>Password</label
                                 >
                                 <PasswordInput
@@ -2733,7 +2894,7 @@
                               <button
                                 type="button"
                                 onclick={() => (dbType = "libsql")}
-                                class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground"
+                                class="flex-1 rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
                                 >Remote (Turso / libSQL)</button
                               >
                             </div>
@@ -2750,7 +2911,7 @@
                                 <button
                                   type="button"
                                   onclick={pickSqliteFile}
-                                  class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
+                                  class="field-surface inline-flex h-8 shrink-0 items-center gap-1 px-2.5 text-ui-2xs text-muted-foreground transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
                                 >
                                   <Icon name="folder-open" class="size-3" />
                                   Browse
@@ -2769,7 +2930,7 @@
                                 Ephemeral in-memory database
                               </p>
                               <p
-                                class="text-ui-2xs leading-relaxed text-muted-foreground/45"
+                                class="text-ui-2xs leading-relaxed text-muted-foreground"
                               >
                                 Data lives only for this session. Nothing is
                                 written to disk, closing the connection discards
@@ -2785,7 +2946,7 @@
                               <button
                                 type="button"
                                 onclick={() => (dbType = "sqlite")}
-                                class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground"
+                                class="flex-1 rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
                                 >Local file</button
                               >
                               <button
@@ -2804,7 +2965,7 @@
                                 class={cn(inp, "font-mono text-ui-2xs")}
                               />
                               <p
-                                class="mt-1 text-ui-3xs text-muted-foreground/30"
+                                class="mt-1 text-ui-3xs text-muted-foreground"
                               >
                                 libsql:// · https:// · http://localhost:PORT
                               </p>
@@ -2847,7 +3008,7 @@
                                   type="button"
                                   onclick={applyConnectionUri}
                                   disabled={!connectionUri.trim()}
-                                  class="h-8 shrink-0 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25"
+                                  class="field-surface h-8 shrink-0 px-2.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25"
                                 >
                                   Parse
                                 </button>
@@ -2865,12 +3026,12 @@
                                   {#if uriHint.includes("Could") || uriHint.includes("Expected")}
                                     <Icon
                                       name="alert-circle"
-                                      class="size-2.5"
+                                      class="size-3"
                                     />
                                   {:else}
                                     <Icon
                                       name="check-circle-2"
-                                      class="size-2.5"
+                                      class="size-3"
                                     />
                                   {/if}
                                   {uriHint}
@@ -2962,14 +3123,14 @@
                                 <button
                                   type="button"
                                   onclick={pickDuckdbFile}
-                                  class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+                                  class="field-surface inline-flex h-8 shrink-0 items-center gap-1 px-2.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
                                 >
                                   <Icon name="folder-open" class="size-3" />
                                   Browse
                                 </button>
                               </div>
                               <p
-                                class="mt-1 text-ui-3xs text-muted-foreground/30"
+                                class="mt-1 text-ui-3xs text-muted-foreground"
                               >
                                 A new file is created if it doesn't exist.
                               </p>
@@ -2986,7 +3147,7 @@
                                 Ephemeral in-memory DuckDB
                               </p>
                               <p
-                                class="text-ui-2xs leading-relaxed text-muted-foreground/45"
+                                class="text-ui-2xs leading-relaxed text-muted-foreground"
                               >
                                 A columnar analytical database that lives only
                                 for this session. Nothing is written to disk,
@@ -3016,7 +3177,7 @@
                                   type="button"
                                   onclick={applyConnectionUri}
                                   disabled={!connectionUri.trim()}
-                                  class="h-8 shrink-0 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25"
+                                  class="field-surface h-8 shrink-0 px-2.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25"
                                 >
                                   Parse
                                 </button>
@@ -3034,12 +3195,12 @@
                                   {#if uriHint.includes("Could") || uriHint.includes("Expected")}
                                     <Icon
                                       name="alert-circle"
-                                      class="size-2.5"
+                                      class="size-3"
                                     />
                                   {:else}
                                     <Icon
                                       name="check-circle-2"
-                                      class="size-2.5"
+                                      class="size-3"
                                     />
                                   {/if}
                                   {uriHint}
@@ -3188,7 +3349,7 @@
                                 class={inpNum}
                               />
                               <p
-                                class="mt-1 text-ui-3xs text-muted-foreground/30"
+                                class="mt-1 text-ui-3xs text-muted-foreground"
                               >
                                 Logical database number (0-15).
                               </p>
@@ -3202,7 +3363,7 @@
                                 checked={secure}
                                 onCheckedChange={(v) => (secure = v === true)}
                               />
-                              <span class="text-ui-xs text-muted-foreground/70"
+                              <span class="text-ui-xs text-muted-foreground"
                                 >Use TLS</span
                               >
                             </label>
@@ -3210,20 +3371,37 @@
                         </div>
                       {/key}
 
-                      <!-- Advanced, full-width section at the bottom -->
-                      <div class="border-t border-border/40 pt-5">
-                        <p
-                          class="mb-4 flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/45"
-                        >
-                          <Icon
-                            name="sliders-horizontal"
-                            class="size-3 shrink-0"
-                          />
-                          Advanced
-                        </p>
-                        {@render advancedFields()}
+                          {/if}
+                        </section>
+
+                        <!-- ── 2 · Transport and name ──────────────────────────────────────
+                             Three checkboxes and one optional text field, which is one
+                             band of form between them - they had a rule and a section
+                             each, for four controls. Name still comes last in reading
+                             order: it is the only optional field on the page, and it
+                             used to hold the first and most prominent slot. -->
+                        <section class="border-t border-border/40 pt-4">
+                          <div class={cn(row6, "gap-y-5 @4xl:grid-cols-12")}>
+                            <div class="col-span-6 min-w-0 @4xl:col-span-8">
+                              {@render advancedFields()}
+                            </div>
+                            <div class="col-span-6 min-w-0 sm:col-span-3 @4xl:col-span-4">
+                              <label for="cn-name" class={lbl}>
+                                Name
+                                <span class="font-normal text-muted-foreground"
+                                  >· optional</span
+                                >
+                              </label>
+                              <Input
+                                id="cn-name"
+                                bind:value={name}
+                                class={inp}
+                                placeholder={autoName}
+                              />
+                            </div>
+                          </div>
+                        </section>
                       </div>
-                    </div>
                     <!-- /manual column -->
                   {:else if isProvider}
                     <div class="mt-6 flex flex-col gap-4">
@@ -3280,7 +3458,7 @@
 
                       <details class="group">
                         <summary
-                          class="flex cursor-pointer list-none select-none items-center gap-1 text-ui-2xs text-muted-foreground/45 transition-colors hover:text-muted-foreground"
+                          class="flex cursor-pointer list-none select-none items-center gap-1 text-ui-2xs text-muted-foreground transition-colors hover:text-muted-foreground"
                         >
                           <Icon
                             name="chevron-right"
@@ -3345,9 +3523,13 @@
                 <!-- Status chip + subtle target preview. Step 1 has no target yet,
                    so it shows nothing rather than "Ready" for a database nobody
                    has chosen. -->
-                <div class="flex min-w-0 flex-1 items-center gap-2 text-ui-2xs">
+                <div
+                  class="flex min-w-0 flex-1 items-center gap-2 text-ui-2xs"
+                  role="status"
+                  aria-live="polite"
+                >
                   {#if step === "pick"}
-                    <span class="text-ui-2xs text-muted-foreground/40">
+                    <span class="text-ui-2xs text-muted-foreground">
                       {saved.length === 0
                         ? "Everything stays on this machine"
                         : railOpen
@@ -3356,7 +3538,7 @@
                     </span>
                   {:else if connecting}
                     <span
-                      class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"
+                      class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground"
                       ><Icon
                         name="loader-2"
                         class="size-3 animate-spin"
@@ -3364,7 +3546,7 @@
                     >
                   {:else if testing}
                     <span
-                      class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"
+                      class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground"
                       ><Icon
                         name="loader-2"
                         class="size-3 animate-spin"
@@ -3377,7 +3559,7 @@
                       ></span>Failed</span
                     >
                     <span
-                      class="min-w-0 flex-1 truncate font-mono text-ui-3xs text-muted-foreground/50 select-text"
+                      class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground select-text"
                       title={error}
                       data-studio-selectable="text">{error}</span
                     >
@@ -3395,7 +3577,7 @@
                     >
                   {:else}
                     <span
-                      class="flex shrink-0 items-center gap-1.5 text-muted-foreground/50"
+                      class="flex shrink-0 items-center gap-1.5 text-muted-foreground"
                       ><span
                         class="size-1.5 rounded-full bg-muted-foreground/30"
                       ></span>Ready</span
@@ -3403,7 +3585,7 @@
                   {/if}
                   {#if step !== "pick" && !error}
                     <span
-                      class="min-w-0 truncate font-mono text-ui-3xs text-muted-foreground/40"
+                      class="min-w-0 truncate font-mono text-ui-2xs text-muted-foreground"
                       title={statusTarget}>{statusTarget}</span
                     >
                   {/if}
@@ -3411,7 +3593,15 @@
 
                 <!-- Actions, shared Button variants (Resume ghost · Stop soft-destructive
                    · Test outline · Connect solid primary), one system app-wide. -->
-                <div class="ml-auto flex shrink-0 items-center gap-2">
+                <!-- Two groups, spaced apart rather than run together. Disconnect and
+                   Resume act on the live session; Test, Save and Connect act on the
+                   form in front of you. They read as one undifferentiated row of five
+                   buttons at a single gap, which is how "Resume" ends up looking like
+                   a peer of "Connect". 4px inside a group against 20px between them
+                   is the 1:5 ratio that makes the split legible without a divider. -->
+                <div class="ml-auto flex shrink-0 items-center gap-5">
+                  {#if activeConnectionName || (lastId && saved.find((c) => c.id === lastId))}
+                  <div class="flex min-w-0 items-center gap-1">
                   <!-- Ending the live session belongs next to resuming it: both act
                      on the current connection rather than on the form. -->
                   {#if activeConnectionName}
@@ -3448,6 +3638,9 @@
                       {/if}
                     </Button>
                   {/if}
+                  </div>
+                  {/if}
+                  <div class="flex shrink-0 items-center gap-2">
                   {#if isBusy}
                     <Button variant="destructive" onclick={stopOp}>
                       <Icon name="x" class="size-3.5" />Stop
@@ -3498,6 +3691,7 @@
                       {/if}
                     </Button>
                   {/if}
+                  </div>
                 </div>
               </div>
             </div>
@@ -3509,9 +3703,9 @@
       <button
         type="button"
         onclick={requestClose}
-        class="absolute right-4 top-4 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/40 transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.92] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        class="field-surface absolute right-4 top-5 inline-flex size-8 items-center justify-center text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.96]"
       >
-        <Icon name="x" class="size-4" />
+        <Icon name="x" class="size-3.5" />
         <span class="sr-only">Close</span>
       </button>
 
@@ -3534,7 +3728,7 @@
                   Discard unsaved changes?
                 </h3>
                 <p
-                  class="mt-1 text-ui-xs leading-relaxed text-muted-foreground/70"
+                  class="mt-1 text-ui-xs leading-relaxed text-muted-foreground"
                 >
                   You have unsaved edits in this connection. Closing now will
                   lose them.
@@ -3545,7 +3739,7 @@
               <button
                 type="button"
                 onclick={() => (confirmDiscardOpen = false)}
-                class="inline-flex h-8 items-center rounded-lg border border-border/40 px-3.5 text-ui-xs text-muted-foreground/80 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
+                class="field-surface inline-flex h-8 items-center px-3.5 text-ui-xs text-muted-foreground transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
               >
                 Keep editing
               </button>

@@ -127,7 +127,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
   <div
     role="presentation"
-    class="flex w-[640px] flex-col overflow-hidden rounded-2xl border border-border/60 bg-background elevate-3-rim"
+    class="flex w-[40rem] flex-col overflow-hidden rounded-2xl border border-border/60 bg-background elevate-3-rim"
     style="height: 420px"
     onclick={(e) => e.stopPropagation()}
   >
@@ -151,7 +151,7 @@
 
     <!-- Footer -->
     <div class="flex shrink-0 items-center justify-between border-t border-border/50 px-4 py-2.5">
-      <p class="font-mono text-ui-2xs text-muted-foreground/50">
+      <p class="font-mono text-ui-2xs text-muted-foreground">
         <kbd>⌘↵</kbd> to run
         &nbsp;·&nbsp;
         <kbd>Esc</kbd> to close
@@ -159,7 +159,7 @@
       <div class="flex items-center gap-2">
         <button
           type="button"
-          class="inline-flex h-7 items-center rounded-md border border-border/60 px-3 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-muted"
+          class= "field-surface inline-flex h-7 items-center px-3 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-muted"
           onclick={onclose}
           disabled={running}
         >Cancel</button>
