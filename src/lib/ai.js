@@ -983,6 +983,13 @@ async function* streamOnce(url, reqHeaders, body, signal, onRetry) {
   /** @type {Map<number | string, { id: string, name: string, args: string }>} */
   const tcAcc = new Map()
   let buf = ''
+  // Reasoning models stream their chain of thought in `reasoning_content` (or
+  // `reasoning`) and the answer in `content`. Usually both arrive. When a router
+  // sends only the former - which happens on aliases like `auto/best-coding` that
+  // resolve to a reasoning model - the turn would otherwise finish with nothing
+  // to show, so it is kept as the fallback rather than discarded.
+  let sawContent = false
+  let reasoning = ''
 
   try {
     while (true) {
@@ -993,14 +1000,35 @@ async function* streamOnce(url, reqHeaders, body, signal, onRetry) {
       buf = lines.pop() ?? ''
       for (const line of lines) {
         const t = line.trim()
-        if (!t || t === 'data: [DONE]') continue
-        if (!t.startsWith('data: ')) continue
+        if (!t.startsWith('data:')) continue
+        // The space after `data:` is optional in the SSE spec and some providers
+        // omit it, which made every frame from those endpoints unparseable.
+        const payload = t.slice(5).trimStart()
+        if (!payload || payload === '[DONE]') continue
         /** @type {any} */
         let chunk
-        try { chunk = JSON.parse(t.slice(6)) } catch { continue }
-        const delta = chunk.choices?.[0]?.delta
+        try { chunk = JSON.parse(payload) } catch { continue }
+        // A gateway can report a failure inside a 200 stream. Dropping the frame
+        // ends the turn with no text and no error, which reads as the model
+        // silently ignoring the question.
+        if (chunk.error) {
+          const e = chunk.error
+          throw new Error(`AI API ${e.code ?? res.status}: ${e.message ?? JSON.stringify(e)}`)
+        }
+        const choice = chunk.choices?.[0]
+        if (!choice) continue
+        // `delta` for a real stream, `message` for an endpoint that accepted
+        // `stream: true` and answered with one non-streamed frame anyway.
+        const delta = choice.delta ?? choice.message
         if (!delta) continue
-        if (delta.content) yield { textDelta: delta.content }
+        if (delta.content) {
+          sawContent = true
+          yield { textDelta: delta.content }
+        } else if (typeof delta.reasoning_content === 'string') {
+          reasoning += delta.reasoning_content
+        } else if (typeof delta.reasoning === 'string') {
+          reasoning += delta.reasoning
+        }
         if (Array.isArray(delta.tool_calls)) {
           for (const tc of delta.tool_calls) {
             // Prefer the provider's stream index; when omitted, key by id so
@@ -1017,6 +1045,12 @@ async function* streamOnce(url, reqHeaders, body, signal, onRetry) {
     }
   } finally {
     reader.releaseLock()
+  }
+
+  // Only text the model produced this turn: better than an empty bubble, and it
+  // tells you which model is misbehaving.
+  if (!sawContent && tcAcc.size === 0 && reasoning.trim()) {
+    yield { textDelta: reasoning }
   }
 
   if (tcAcc.size > 0) {

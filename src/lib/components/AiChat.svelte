@@ -1893,6 +1893,17 @@
         );
         await scrollBottom();
       }
+    } else {
+      // No text, no tool call, no transport error. This used to fall off the end
+      // of the function: the thinking indicator was cleared in `send`'s finally
+      // block and the turn vanished, which looks exactly like the app ignoring
+      // the question. Say what happened and name the model, because the fix is
+      // almost always to switch it.
+      throw new Error(
+        `${settings.model || "The model"} returned an empty response. ` +
+          "Nothing was streamed back - no text and no tool call. " +
+          "Try another model, or send the message again.",
+      );
     }
   }
 
