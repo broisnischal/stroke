@@ -110,7 +110,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import { isGeometryType, geometrySummary } from "$lib/geometry-cell.js";
   import FkSubviewPanel from "./FkSubviewPanel.svelte";
   // JsonCellLightbox (Monaco-based) is imported lazily at its render site below.
-  import CellQuickLook from "./CellQuickLook.svelte";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Check from "@lucide/svelte/icons/check";
   import Loader from "@lucide/svelte/icons/loader";
@@ -428,12 +427,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let editInput = $state(null);
 
   /**
-   * @typedef {{ rowIdx: number, colIdx: number, draft: string, original: string, columnName: string, dataType: string, nullable: boolean }} QuickLookCell
-   * @type {QuickLookCell | null}
-   */
-  let quickLookCell = $state(null);
-
-  /**
    * Currently open FK sub-view (forward or reverse), or null.
    * @type {{ rowIdx:number, kind:'forward'|'reverse', label:string, data:{ loading:boolean, columns:any[], rows:any[], error:string|null } } | null}
    */
@@ -451,11 +444,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     } catch {}
     return 260
   })())
+  /** rAF handle + pending height for the dock drag. */
+  let _fkDockRafId = 0
+  let _fkDockPendingH = 0
   // Active drag listeners (column resize / FK dock resize). Tracked so a mid-drag
   // unmount can remove them in onDestroy instead of leaking them on window.
   /** @type {{ move: (e: PointerEvent) => void, up: () => void } | null} */
   let _activeResizeListeners = null
   function clearActiveResizeListeners() {
+    if (_fkDockRafId) { cancelAnimationFrame(_fkDockRafId); _fkDockRafId = 0 }
     if (!_activeResizeListeners) return
     window.removeEventListener('pointermove', _activeResizeListeners.move)
     window.removeEventListener('pointerup', _activeResizeListeners.up)
@@ -467,13 +464,28 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     e.preventDefault()
     clearActiveResizeListeners()
     const startY = e.clientY, startH = fkDockHeight
+    // Coalesce to one height write per frame. The dock is a flex sibling of the
+    // scroll container, so every write reflows the grid, fires its ResizeObserver,
+    // resizes the canvas backing store (which clears it) and forces a full
+    // repaint. Writing that straight from pointermove ran the whole chain 120×/s
+    // on a ProMotion trackpad - several times per painted frame - which is why
+    // dragging the related-rows panel juddered and the grid flashed behind it.
     const move = (/** @type {PointerEvent} */ ev) => {
-      fkDockHeight = Math.min(FK_DOCK_MAX, Math.max(FK_DOCK_MIN, startH + (startY - ev.clientY)))
+      _fkDockPendingH = Math.min(FK_DOCK_MAX, Math.max(FK_DOCK_MIN, startH + (startY - ev.clientY)))
+      if (_fkDockRafId) return
+      _fkDockRafId = requestAnimationFrame(() => {
+        _fkDockRafId = 0
+        fkDockHeight = _fkDockPendingH
+      })
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       _activeResizeListeners = null
+      if (_fkDockRafId) { cancelAnimationFrame(_fkDockRafId); _fkDockRafId = 0 }
+      // Land on the last position the pointer actually reached, not on whichever
+      // frame happened to win the race with pointerup.
+      if (_fkDockPendingH) fkDockHeight = _fkDockPendingH
       try { localStorage.setItem('stroke:fk-dock-height', String(fkDockHeight)) } catch {}
     }
     window.addEventListener('pointermove', move)
@@ -1312,82 +1324,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!editingCell) return;
     editingCell = null;
     enumEditorOpen = false;
-    tick().then(() => tableContainer?.focus({ preventScroll: true }));
-  }
-
-  /** @param {number} rowIdx @param {number} colIdx */
-  function openQuickLook(rowIdx, colIdx) {
-    // Vectors and geometries have viewers that say something; the generic
-    // preview doesn't.
-    if (openVectorViewer(rowIdx, colIdx)) return;
-    if (openGeometryViewer(rowIdx, colIdx)) return;
-    const col = columns[colIdx];
-    if (!col) return;
-    const dataType = col.dataType ?? col.data_type ?? "";
-    if (!isEditableType(dataType)) return;
-    // close any inline edit first
-    if (editingCell) cancelEdit();
-    const startValue = effectiveCellValue(rowIdx, colIdx);
-    const oversize = oversizeCellInfo(startValue);
-    if (oversize) {
-      // Only a truncated preview was loaded - the quick-look editor would
-      // silently save it back. The JSON lightbox covers read-only viewing.
-      toast.error("Value too large to edit", {
-        description: `${col.name} holds ${formatByteSize(oversize.bytes)}; edit it with a SQL UPDATE instead.`,
-      });
-      return;
-    }
-    const original = valueToEditString(startValue);
-    quickLookCell = {
-      rowIdx,
-      colIdx,
-      draft: original,
-      original,
-      isNull: startValue === null || startValue === undefined,
-      originalIsNull: startValue === null || startValue === undefined,
-      columnName: col.name,
-      dataType,
-      nullable: col.nullable ?? true,
-    };
-  }
-
-  function cancelQuickLook() {
-    quickLookCell = null;
-    tick().then(() => tableContainer?.focus({ preventScroll: true }));
-  }
-
-  async function commitQuickLook() {
-    if (!quickLookCell || saving) return;
-    const { rowIdx, colIdx, draft, isNull } = quickLookCell;
-    const col = columns[colIdx];
-    if (!col) return;
-    // No-op only when BOTH the text and the null-state are unchanged - otherwise
-    // a NULL→"" (or ""→NULL) flip would be silently dropped as a "no change".
-    if (draft === quickLookCell.original && isNull === quickLookCell.originalIsNull) {
-      quickLookCell = null;
-      tick().then(() => tableContainer?.focus({ preventScroll: true }));
-      return;
-    }
-    // NULL is explicit ("Set NULL"); otherwise an empty draft is a genuine empty
-    // string, so bypass parseCellInput's ""→null collapse for that one case.
-    /** @type {import('$lib/cell-value.js').ParseResult} */
-    let parsed;
-    if (isNull) {
-      parsed = { ok: true, value: null };
-    } else if (draft === "") {
-      parsed = { ok: true, value: "" };
-    } else {
-      parsed = parseCellInput(draft, col.dataType ?? col.data_type ?? "text", getColumnEnumValues(col));
-    }
-    if (!parsed.ok) {
-      toast.error("Invalid value", { description: parsed.message });
-      return;
-    }
-    const prevValue = effectiveCellValue(rowIdx, colIdx);
-    stageEdit(rowIdx, colIdx, parsed.value);
-    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: parsed.value }];
-    futureEdits = [];
-    quickLookCell = null;
     tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
@@ -3654,25 +3590,42 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    *  computed type scale + the real loaded mono font (avoids fallback tofu). */
   let _fonts = /** @type {{ cell: string, type: string, header: string, family: string, cellPx: number, typePx: number } | null} */ (null)
 
-  /** Read the real computed mono fonts for cells / datatypes off the probe. */
+  /**
+   * Canvas text sizes, in logical px at 100% zoom.
+   *
+   * The grid sizes its own text instead of reading `--fs-xs` / `--fs-3xs` off
+   * the probe, because those two numbers are produced by different formulas and
+   * drift apart as you zoom: every `--fs-*` step is rounded on its own and then
+   * nudged by the type scale's separation walk, while ROW_HEIGHT and every other
+   * canvas constant is `round(N * canvasZoom)`. The result was text that changed
+   * size relative to its own row from one rung to the next - 12px in a 28px row
+   * at 100%, but proportionally 6% smaller at 110% - which is what made zooming
+   * the grid look like the font was drifting rather than scaling.
+   *
+   * Scaling both from `canvasZoom` locks the ratio. The values are the nominal
+   * `text-ui-xs` / `text-ui-3xs` sizes from DESIGN_SYSTEM.md, which is what the
+   * canvas constants (ROW_HEIGHT, CELL_PAD_X, HEADER_H) were tuned against.
+   */
+  const GRID_CELL_PX = 12
+  const GRID_TYPE_PX = 10
+
+  /** Read the real computed mono FAMILY off the probe; sizes come from the zoom. */
   function readFonts(/** @type {HTMLElement} */ probe) {
     const prevClass = probe.className
-    const measure = (/** @type {string} */ cls) => {
-      probe.className = cls
-      const cs = getComputedStyle(probe)
-      return { px: parseFloat(cs.fontSize) || 13, family: cs.fontFamily }
-    }
-    const cell = measure('font-mono text-ui-xs')
-    const type = measure('font-mono text-ui-3xs')
+    probe.className = 'font-mono text-ui-xs'
+    const family = getComputedStyle(probe).fontFamily
     probe.className = prevClass
+    // Floors keep the smallest rung legible rather than sub-pixel mush.
+    const cellPx = Math.max(9, Math.round(GRID_CELL_PX * canvasZoom))
+    const typePx = Math.max(7, Math.round(GRID_TYPE_PX * canvasZoom))
     return {
-      family: cell.family,
-      cellPx: cell.px,
-      typePx: type.px,
-      cell: `${cell.px}px ${cell.family}`,
-      type: `${type.px}px ${type.family}`,
+      family,
+      cellPx,
+      typePx,
+      cell: `${cellPx}px ${family}`,
+      type: `${typePx}px ${family}`,
       // Medium-weight header name (Linear/Drizzle style).
-      header: `530 ${cell.px}px ${cell.family}`,
+      header: `530 ${cellPx}px ${family}`,
     }
   }
 
@@ -3832,17 +3785,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
 
-    // Shift+Space: open Quick Look editor for the focused cell
-    if (e.key === " " && e.shiftKey && !e.ctrlKey && !e.metaKey && !editingCell) {
-      if (focusedRow !== null && focusedCol !== null) {
-        const ai = visToActualColIdx(focusedCol);
-        if (ai >= 0 && canEditColumn(ai)) {
-          e.preventDefault();
-          openQuickLook(focusedRow, ai);
-          return;
-        }
-      }
-    }
 
     if (editingCell) return;
     if (newRowDrafts) return;
@@ -4116,17 +4058,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * Must stay in step with the draw pass below - this is the click target for
    * what that paints.
    */
-  function cellButtonRects(cellX, w, ry, rh, { canExpand, alignRight = false }) {
+  function cellButtonRects(cellX, w, ry, rh, { alignRight = false }) {
     const cy = ry + rh / 2
     const rect = (/** @type {number} */ x) => ({ x, y: ry, w: ICON_HIT, h: rh, cx: x + ICON_HIT / 2, cy })
-    if (alignRight) {
-      // Left-to-right: copy first (nearest the edge), then quick-look.
-      const copy = rect(cellX + 4)
-      return { copy, quick: canExpand ? rect(copy.x + ICON_HIT) : null }
-    }
+    // The copy button sits on the side the value is not using.
+    if (alignRight) return { copy: rect(cellX + 4) }
     const right = cellX + w - 4  // 4px right margin
-    const copy = rect(right - ICON_HIT)
-    return { copy, quick: canExpand ? rect(copy.x - ICON_HIT) : null }
+    return { copy: rect(right - ICON_HIT) }
   }
 
   function draw() {
@@ -4913,7 +4851,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     const rowHover = c.hoveredRow === idx
     const isHover = rowHover && c.hoveredColName === col.name
-    const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !cached?.isBool
     const cy = ry + rh / 2
 
     // A per-column transform (chosen from the header menu) renders live and wins
@@ -4970,7 +4907,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // left-aligned text, left of right-aligned text - so they occupy empty
     // space in both cases. Only long values, the ones that would actually
     // collide, give up room, and only while the pointer is in the cell.
-    const hoverW = isHover ? c.iconHit + (canExpand ? c.iconHit : 0) : 0
+    const hoverW = isHover ? c.iconHit : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
     // The same gap on both sides. Left-aligned text used to reserve 4px on the
     // assumption that a value never reaches the right edge - but a *truncated*
@@ -5046,17 +4983,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     //    match cellButtonRects(), which is the click target for these.
     if (isHover) {
       if (alignRight) {
-        let lx = cellX + 4
-        drawIcon(ctx, 'copy', lx + 5, cy - 7, 14, c.cMuted, 1.8)
-        lx += c.iconHit
-        if (canExpand) drawIcon(ctx, 'maximize-2', lx + 5, cy - 7, 14, c.cMuted, 1.8)
+        drawIcon(ctx, 'copy', cellX + 9, cy - 7, 14, c.cMuted, 1.8)
       } else {
         drawIcon(ctx, 'copy', rx - c.iconHit + 5, cy - 7, 14, c.cMuted, 1.8)
         rx -= c.iconHit
-        if (canExpand) {
-          drawIcon(ctx, 'maximize-2', rx - c.iconHit + 5, cy - 7, 14, c.cMuted, 1.8)
-          rx -= c.iconHit
-        }
       }
     }
 
@@ -5892,19 +5822,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         const value = effectiveCellValue(idx, actualIdx)
         const isNull = value === null || value === undefined
         const isJson = !isNull && typeof value === 'object'
-        const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !isBooleanType(cached?.colType ?? '')
         // Same alignment test the draw pass uses, so the click target follows
-        // the buttons to whichever side they were painted on.
-        const { copy, quick } = cellButtonRects(
+        // the button to whichever side it was painted on.
+        const { copy } = cellButtonRects(
           /** @type {number} */ (t.drawnX), t.col.w, 0, ROW_HEIGHT,
-          { canExpand, alignRight: isRightAlignedColumn(actualIdx) },
+          { alignRight: isRightAlignedColumn(actualIdx) },
         )
         const relX = x - /** @type {number} */ (t.drawnX)
         if (relX >= copy.x - /** @type {number} */ (t.drawnX) && relX <= copy.x - /** @type {number} */ (t.drawnX) + copy.w) {
           void copyCellValue(idx, actualIdx); return
-        }
-        if (quick && relX >= quick.x - /** @type {number} */ (t.drawnX) && relX <= quick.x - /** @type {number} */ (t.drawnX) + quick.w) {
-          openQuickLook(idx, actualIdx); return
         }
         if (isJson) { openJsonLightbox(value, t.col.name, e); return }
 
@@ -6512,6 +6438,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 {@const eDateTime = !eIsArray && !eIsJson && shouldUseDateTimePicker(eType, ecol?.name ?? '')}
                 {@const eDateOnly = !eIsArray && !eIsJson && isDateOnlyType(eType)}
                 {@const eTimeOnly = !eIsArray && !eIsJson && isTimeOnlyType(eType)}
+                <!-- The editor has to land on the glyphs it replaces. The canvas
+                     draws cell text at CELL_PAD_X and flips to flush-right per the
+                     Appearance setting; an editor that is always left-aligned at
+                     px-3 made the value jump sides and shift 2px the moment you
+                     started typing. Same padding, same alignment, no jump. -->
+                {@const eAlignRight = isRightAlignedColumn(editingCell?.colIdx ?? -1)}
+                {@const eFieldStyle = `padding-left:${CELL_PAD_X}px;padding-right:${CELL_PAD_X}px;text-align:${eAlignRight ? 'right' : 'left'}`}
                 <div
                   in:fade={{ duration: 100, easing: cubicOut }}
                   data-cell-editor
@@ -6649,47 +6582,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       bind:value={editingCell.draft}
                       disabled={saving}
                       aria-label="Edit {ecol?.name ?? 'cell'}"
-                      class="box-border block h-full w-full min-w-0 max-w-full border-0 bg-transparent px-3 font-mono text-ui-xs text-foreground outline-none selection:bg-primary/20"
+                      class="box-border block h-full w-full min-w-0 max-w-full border-0 bg-transparent font-mono text-ui-xs text-foreground outline-none selection:bg-primary/20"
+                      style={eFieldStyle}
                       onclick={(e) => e.stopPropagation()}
                       onkeydown={handleEditKeydown}
                     />
-                  {:else if eIsJson}
-                    <!-- JSON/JSONB cell: inline typing (Enter/Esc commit) plus an
-                         expand affordance to the editable quick-look surface, whose
-                         commit routes through stageEdit like a plain edit. The
-                         read-only Monaco lightbox is a separate view. -->
-                    <div class="flex h-full w-full items-center">
-                      <input
-                        bind:this={editInput}
-                        bind:value={editingCell.draft}
-                        disabled={saving}
-                        aria-label="Edit {ecol?.name ?? 'cell'}"
-                        class="box-border block h-full min-w-0 flex-1 border-0 bg-transparent pl-3 pr-1 font-mono text-ui-xs text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
-                        onclick={(e) => e.stopPropagation()}
-                        onkeydown={handleEditKeydown}
-                      />
-                      <button
-                        type="button"
-                        disabled={saving}
-                        title="Open JSON editor"
-                        aria-label="Open JSON editor"
-                        class="mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground outline-none hover:bg-accent hover:text-foreground"
-                        onclick={(e) => {
-                          e.stopPropagation();
-                          if (!editingCell) return;
-                          openQuickLook(editingCell.rowIdx, editingCell.colIdx);
-                        }}
-                      >
-                        <Maximize2 class="size-3.5" />
-                      </button>
-                    </div>
                   {:else}
                     <input
                       bind:this={editInput}
                       bind:value={editingCell.draft}
                       disabled={saving}
                       aria-label="Edit {ecol?.name ?? 'cell'}"
-                      class="box-border block h-full w-full min-w-0 max-w-full overflow-x-auto border-0 bg-transparent px-3 font-mono text-ui-xs text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
+                      class="box-border block h-full w-full min-w-0 max-w-full overflow-x-auto border-0 bg-transparent font-mono text-ui-xs text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
+                      style={eFieldStyle}
                       onclick={(e) => e.stopPropagation()}
                       onkeydown={handleEditKeydown}
                     />
@@ -7325,13 +7230,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   elementType={arrayEditorType}
   value={arrayEditorValue}
   onsave={commitArrayEditor}
-/>
-
-<CellQuickLook
-  bind:cell={quickLookCell}
-  {saving}
-  oncancel={cancelQuickLook}
-  onsave={commitQuickLook}
 />
 
 <!-- DML preview / confirm: shown before any edit, insert, or delete is applied. -->

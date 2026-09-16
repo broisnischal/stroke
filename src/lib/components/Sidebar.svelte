@@ -1,5 +1,6 @@
 <script>
   import { untrack } from "svelte";
+  import { getAppScale } from '$lib/app-zoom.js';
   import { createHotkey } from "@tanstack/svelte-hotkeys";
   import Icon from "./Icon.svelte";
   import SearchableMenu from "./SearchableMenu.svelte";
@@ -22,7 +23,6 @@
   import { CRASH_WORD, isMagic, armCrash } from '$lib/games/easter-eggs.js'
   import { t } from "$lib/i18n.js";
   import { formatTableRowCount } from "$lib/table-list.js";
-  import { virtualWindow, offsetWithin, measureRowStride, VIRT_THRESHOLD, VIRT_BUFFER } from "$lib/virtual-window.js";
   import {
     clampNavSidebarWidth,
     loadLayout,
@@ -32,6 +32,8 @@
   const initialLayout = loadLayout();
   let width = $state(initialLayout.navSidebarWidth);
   let resizeStartWidth = initialLayout.navSidebarWidth;
+  /** App scale sampled at drag start - `dx` is screen px, `width` is px at 100%. */
+  let resizeScale = 1;
 
   let {
     connectionName = "",
@@ -432,9 +434,19 @@
     return /^(_|pg_|sql_|sqlite_)/i.test(name)
   }
 
+  // ── Shared context-menu target ────────────────────────────────────────────
+  // Each long list owns ONE ContextMenu.Root; the row that was right-clicked is
+  // recorded here from the event, the way DataTable does it for the grid. Keeps
+  // the per-row cost to a <button>, which is what makes an unwindowed list of a
+  // few thousand tables affordable.
+  let menuTable = $state('')
+  let menuView = $state('')
+  let menuMatView = $state('')
+
   // ── Selection state ───────────────────────────────────────────────────────
   /** @type {Set<string>} */
   let selectedItems = $state(new Set())
+  const menuTableSelected = $derived(selectedItems.has(menuTable))
   /** Anchor for shift range-select. @type {string | null} */
   let lastSelectedName = $state(null)
 
@@ -669,146 +681,23 @@
     sortBy = 'name';
     sortDir = 'asc';
   }
-  // ── Virtual lists (tables, views, materialized views, databases) ─────────
-  // The window maths lives in $lib/virtual-window.js; this block owns the two
-  // measurements only the DOM can answer - the row stride and where each list
-  // sits inside the scrolled content.
-  //
-  // Row stride is MEASURED, not assumed: row height scales with the app zoom /
-  // font-size (Linux even uses a 15px base), and any drift between an assumed
-  // constant and reality × hundreds of rows = phantom scroll space below the
-  // last row (the "keeps scrolling past the end" gutter). 27px is only the
-  // pre-measure fallback. Every list uses the same row chrome, so one stride
-  // covers all four.
-  let rowH = $state(27)
-  $effect(() => {
-    const el = tableListEl
-    void scrollContainerEl // re-attach the observer when the scroll host mounts
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const measure = () => {
-      // Spacer <li>s are aria-hidden - measure the stride between two real rows.
-      const stride = measureRowStride(el)
-      if (stride !== null) {
-        // Read rowH untracked: this effect must NOT depend on the value it writes,
-        // or setting rowH re-runs it, and a stride that doesn't settle in one pass
-        // spins until Svelte's infinite-loop guard trips. The ResizeObserver still
-        // re-measures on real layout changes.
-        const cur = untrack(() => rowH)
-        if (Math.abs(stride - cur) > 0.5) rowH = stride
-      }
-      // Same observer covers the other half of the window maths: a layout change
-      // in the list also means its offset in the scroll container may have moved.
-      untrack(() => measureListOffset())
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    // Also watch the scrolled content: a section above the list (databases,
-    // recent, pinned) opening or closing moves the list without resizing it.
-    const content = scrollContainerEl?.firstElementChild
-    if (content) ro.observe(content)
-    return () => ro.disconnect()
-  })
-  // The window shifts one row at a time: the start index is floored to the row
-  // stride, so the derived short-circuits (same value) for every scroll event
-  // within a row - no re-render, no spacer resize until a row boundary is
-  // actually crossed. Each update stays tiny (±1 row) instead of arriving as a
-  // batched chunk hitch.
-
+  // ── Lists (tables, views, materialized views, databases) ─────────────────
   /** @type {HTMLElement | null} */
   let scrollContainerEl = $state(null)
   /** @type {HTMLElement | null} */
   let tableListEl = $state(null)
-  let sidebarScrollTop = $state(0)
-  let sidebarHeight = $state(0)
-  // Update the virtual window synchronously on scroll. Reading scrollTop here is a
-  // cheap cached read (layout is already up to date inside a scroll handler) and
-  // Svelte coalesces the resulting re-renders into a single flush per frame. A RAF
-  // hop would only push the rendered window one frame *behind* the scrollbar thumb,
-  // which reads as lag while dragging.
-  function onSidebarScroll() {
-    if (!scrollContainerEl) return
-    sidebarScrollTop = scrollContainerEl.scrollTop
-  }
-  /** Offset of each windowed <ul> from the top of the scroll container.
-   *  Re-measured whenever anything above one of them opens, closes or filters. */
-  let tableListOffsetTop = $state(0)
-  let viewListOffsetTop = $state(0)
-  let matViewListOffsetTop = $state(0)
-  let dbListOffsetTop = $state(0)
 
-  /** @type {HTMLElement | null} */
-  let viewListEl = $state(null)
-  /** @type {HTMLElement | null} */
-  let matViewListEl = $state(null)
-  /** @type {HTMLElement | null} */
-  let dbListEl = $state(null)
-
-  /**
-   * Re-measure where every windowed list sits in the scrolled content.
-   *
-   * Read from live rects rather than walked through `offsetParent`: that walk
-   * only terminated when an ancestor happened to be the scroll container, and it
-   * ran off an enumerated list of "things above the list". Anything else that
-   * grew above it - expanding the databases section, a filter that changes the
-   * pinned block - left the offset stale and small, which pushed the window far
-   * past the real first visible row: the list rendered its tail behind a giant
-   * empty spacer (the black gap).
-   */
-  function measureListOffset() {
-    const container = scrollContainerEl
-    if (!container) return
-    const tables = offsetWithin(tableListEl, container)
-    if (tables !== null && Math.abs(tables - tableListOffsetTop) > 0.5) tableListOffsetTop = tables
-    const views = offsetWithin(viewListEl, container)
-    if (views !== null && Math.abs(views - viewListOffsetTop) > 0.5) viewListOffsetTop = views
-    const matViews = offsetWithin(matViewListEl, container)
-    if (matViews !== null && Math.abs(matViews - matViewListOffsetTop) > 0.5) matViewListOffsetTop = matViews
-    const dbs = offsetWithin(dbListEl, container)
-    if (dbs !== null && Math.abs(dbs - dbListOffsetTop) > 0.5) dbListOffsetTop = dbs
-  }
-
-  // Re-measure whenever anything that can move the list re-renders. Cheap: two
-  // rect reads, and only when one of these actually changes.
-  $effect(() => {
-    void recentOpen
-    void visiblePinnedTables.length
-    void showRecent
-    void filteredRegularTables.length
-    void filteredViews.length
-    void filteredMatViews.length
-    void filteredDbEntries.length
-    void tablesOpen
-    void viewsOpen
-    void matViewsOpen
-    void databasesOpen
-    void tableListEl
-    void viewListEl
-    void matViewListEl
-    void dbListEl
-    void scrollContainerEl
-    measureListOffset()
-  })
-
-  /** @param {number} count @param {number} offsetTop */
-  function windowFor(count, offsetTop) {
-    return virtualWindow({
-      count,
-      scrollTop: sidebarScrollTop,
-      viewportHeight: sidebarHeight,
-      offsetTop,
-      rowH,
-    })
-  }
-
-  const tableWin = $derived(windowFor(filteredRegularTables.length, tableListOffsetTop))
-  const viewWin = $derived(windowFor(filteredViews.length, viewListOffsetTop))
-  const matViewWin = $derived(windowFor(filteredMatViews.length, matViewListOffsetTop))
-  const dbWin = $derived(windowFor(filteredDbEntries.length, dbListOffsetTop))
-
-  const viewsToRender = $derived(filteredViews.slice(viewWin.start, viewWin.end))
-  const matViewsToRender = $derived(filteredMatViews.slice(matViewWin.start, matViewWin.end))
-  const dbEntriesToRender = $derived(filteredDbEntries.slice(dbWin.start, dbWin.end))
+  // No windowing. The sidebar renders every row.
+  //
+  // It used to virtualize all four lists, and the window maths was the source of
+  // a run of scroll bugs - a blank list behind a full-height spacer, and jitter
+  // from a fractional row stride that `offsetTop` could only report as an
+  // integer. Off-screen rows are instead skipped by the browser via
+  // `content-visibility` on the row itself (see the list styles below), which
+  // needs no stride, no spacers and no scroll handler to go wrong.
+  const viewsToRender = $derived(filteredViews)
+  const matViewsToRender = $derived(filteredMatViews)
+  const dbEntriesToRender = $derived(filteredDbEntries)
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
@@ -841,7 +730,7 @@
 
 <div
   class={cn("flex h-full shrink-0", side === "right" && "flex-row-reverse")}
-  style:width="{width}px"
+  style:width="calc({width}px * var(--app-scale, 1))"
   data-studio-region="sidebar"
 >
   <ContextMenu.Root>
@@ -1141,11 +1030,9 @@
       <div class="flex min-h-0 flex-1 flex-col">
         <div
           bind:this={scrollContainerEl}
-          bind:clientHeight={sidebarHeight}
           class="app-scroll min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain [will-change:scroll-position]"
           role="none"
           use:smoothScroll={{ enabled: !$appNativeScroll }}
-          onscroll={onSidebarScroll}
           onclick={(e) => {
             if (selectedItems.size > 0 && !/** @type {Element} */(e.target).closest?.('li')) {
               clearSelection()
@@ -1216,8 +1103,7 @@
                     {!dbEntriesLoaded ? 'Loading…' : lf ? 'No matching databases' : 'No other databases'}
                   </p>
                 {:else}
-                  <ul bind:this={dbListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
-                    {#if dbWin.topPad > 0}<li style="height:{dbWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
+                  <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]">
                     {#each dbEntriesToRender as db (db.key)}
                       {@const isCurrent = db.key === activeDbKey}
                       <li>
@@ -1288,7 +1174,6 @@
                         </ContextMenu.Root>
                       </li>
                     {/each}
-                    {#if dbWin.botPad > 0}<li style="height:{dbWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   </ul>
                 {/if}
               {/if}
@@ -1307,7 +1192,7 @@
                 >Clear</button>
               </div>
               {#if recentOpen}
-                <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]">
                   {#each filteredRecent.slice(0, 5) as item (item.schema + '.' + item.table)}
                     <li class="group/recent">
                       <div
@@ -1365,7 +1250,7 @@
                   >Clear all</button>
                 {/if}
               </div>
-              <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+              <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]">
                 {#each visiblePinnedTables as tableName, idx (tableName)}
                   {@const isSelected = selectedItems.has(tableName)}
                   <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
@@ -1520,10 +1405,29 @@
                   else btns[i - 1]?.focus()
                 }}
               >
-              <ul
-                bind:this={tableListEl}
-                class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1"
-              >
+              <!-- ONE context menu for the whole list, not one per row.
+                   A ContextMenu.Root + Trigger per <li> is two component instances
+                   per table, and this list is no longer windowed - a 5,000-table
+                   schema instantiated 10,000 menu components that exist only to be
+                   right-clicked. `content-visibility` skips a row's LAYOUT, not its
+                   construction, so that cost was paid in full on every schema switch
+                   and every filter keystroke. Which row was clicked is read off the
+                   event instead. -->
+              <ContextMenu.Root>
+                <ContextMenu.Trigger>
+                  {#snippet child({ props })}
+                    {@const openMenu = props.oncontextmenu}
+                    <ul
+                      bind:this={tableListEl}
+                      {...props}
+                      oncontextmenu={(e) => {
+                        const li = e.target instanceof Element ? e.target.closest("li[data-table]") : null
+                        if (!(li instanceof HTMLElement)) return
+                        menuTable = li.dataset.table ?? ""
+                        openMenu?.(e)
+                      }}
+                      class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]"
+                    >
                 {#if regularTables.length === 0 && tables.length > 0}
                   <li
                     class="flex w-full flex-col items-center gap-2 px-4 py-8 text-center"
@@ -1534,190 +1438,187 @@
                     </p>
                   </li>
                 {:else}
-                  {#if tableWin.topPad > 0}<li style="height:{tableWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
-                  {#each filteredRegularTables.slice(tableWin.start, tableWin.end) as table (table.name)}
+                  {#each filteredRegularTables as table (table.name)}
                     {@const isSelected = selectedItems.has(table.name)}
-                    <li>
-                      <ContextMenu.Root>
-                        <ContextMenu.Trigger class="w-full">
-                          <button
-                            type="button"
-                            class={cn(
-                              "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
-                              isSelected
-                                ? "bg-primary/10 text-foreground"
-                                : activeTable === table.name
-                                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                                  : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
-                            )}
-                            onclick={(e) => {
-                              if (e.shiftKey) { e.preventDefault(); selectItem(table.name, true) }
-                              else if (e.metaKey || e.ctrlKey) { e.preventDefault(); selectItem(table.name, false) }
-                              else ontableselect(table.name)
-                            }}
-                          >
-                            <span
-                              class="relative size-3.5 shrink-0"
-                              onclick={(e) => { e.stopPropagation(); selectItem(table.name, e.shiftKey) }}
-                              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); selectItem(table.name, e.shiftKey); } }}
-                              role="checkbox"
-                              aria-checked={isSelected}
-                              tabindex="-1"
-                            >
-                              {#if isSelected}
-                                <Icon name="square-check" class="size-3.5 text-primary" />
-                              {:else}
-                                <Icon name="table-2" class="size-3.5 opacity-70 group-hover:hidden" />
-                                <Icon name="square" class="size-3.5 hidden opacity-70 group-hover:block" />
-                              {/if}
-                            </span>
-                            <span class="flex min-w-0 items-center gap-1.5">
-                              <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{table.name}</span>
-                              {#if table.rlsEnabled}
-                                <Icon
-                                  name="lock"
-                                  class="size-3 shrink-0 text-muted-foreground"
-                                  role="img"
-                                  aria-label="Row-level security enabled"
-                                />
-                              {/if}
-                            </span>
-                            {#if showRowCount}
-                            <!-- Fixed min-width so the column doesn't shift every
-                                 row sideways as lazy counts land. A count that has
-                                 not arrived draws nothing at all: a placeholder mark
-                                 on every row made a long list read as a column of
-                                 dashes, which says "empty" far louder than "counting". -->
-                            <span
-                              class="flex min-w-[4ch] shrink-0 items-center justify-end font-mono text-ui-2xs leading-4 tabular-nums text-muted-foreground"
-                              title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : "Counting rows…"}
-                            >
-                              {#if table.rowCount != null}{formatTableRowCount(table.rowCount)}{/if}
-                            </span>
-                            {/if}
-                          </button>
-                        </ContextMenu.Trigger>
-                        <ContextMenu.Content class="min-w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-                          {#if isSelected && selectedItems.size > 1}
-                            <!-- Multi-select: actions apply to all selected tables -->
-                            <ContextMenu.Item onSelect={openSelected}>
-                              <Icon name="external-link" />
-                              Open {selectedItems.size} tables
-                            </ContextMenu.Item>
-                            {#if [...selectedItems].some((n) => openTableSet.has(n))}
-                              <ContextMenu.Item onSelect={closeSelectedTabs}>
-                                <Icon name="x" />
-                                Close open tabs
-                              </ContextMenu.Item>
-                            {/if}
-                            <ContextMenu.Separator />
-                            <ContextMenu.Item onSelect={copySelectedNames}>
-                              <Icon name="clipboard-copy" />
-                              Copy {selectedItems.size} names
-                            </ContextMenu.Item>
-                            <ContextMenu.Item onSelect={() => (allSelectedPinned ? unpinSelected() : pinSelected())}>
-                              {#if allSelectedPinned}
-                                <Icon name="pin-off" />
-                                Unpin {selectedItems.size} tables
-                              {:else}
-                                <Icon name="pin" />
-                                Pin {selectedItems.size} tables
-                              {/if}
-                            </ContextMenu.Item>
-                            <ContextMenu.Separator />
-                            <ContextMenu.Item onSelect={clearSelection}>
-                              <Icon name="square" />
-                              Deselect all
-                            </ContextMenu.Item>
-                          {:else}
-                          <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(table.name) }}>
-                            <Icon name="clipboard-copy" />
-                            Copy name
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => oncopycolumns(table.name)}>
-                            <Icon name="copy" />
-                            Copy columns
-                          </ContextMenu.Item>
-                          {#if openTableSet.has(table.name)}
-                            <ContextMenu.Item onSelect={() => onclosetable(table.name)}>
-                              <Icon name="x" />
-                              Close tab
-                            </ContextMenu.Item>
-                          {/if}
-                          <ContextMenu.Item onSelect={() => togglePin(table.name)}>
-                            {#if pinnedTables.includes(table.name)}
-                              <Icon name="pin-off" />
-                              Unpin table
-                            {:else}
-                              <Icon name="pin" />
-                              Pin table
-                            {/if}
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => toggleSelect(table.name)}>
-                            {#if isSelected}
-                              <Icon name="square" />
-                              Deselect
-                            {:else}
-                              <Icon name="square-check" />
-                              Select
-                            {/if}
-                          </ContextMenu.Item>
-                          <ContextMenu.Separator />
-                          <ContextMenu.Item onSelect={() => onopeninconsole(table.name)}>
-                            <Icon name="terminal" />
-                            Open in SQL console
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => ongeneratesql(table.name)}>
-                            <Icon name="zap" />
-                            Generate SQL…
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => oncountrows(table.name)}>
-                            <Icon name="hash" />
-                            Count rows
-                          </ContextMenu.Item>
-                          <ContextMenu.Separator />
-                          <ContextMenu.Item onSelect={() => onviewstructure(table.name)}>
-                            <Icon name="layout-list" />
-                            View structure
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => onviewddl(table.name)}>
-                            <Icon name="code-2" />
-                            View DDL
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => onexportsql(table.name)}>
-                            <Icon name="file-down" />
-                            Export as SQL
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => onexportdata(table.name)}>
-                            <Icon name="download" />
-                            Export data
-                          </ContextMenu.Item>
-                          <ContextMenu.Separator />
-                          <ContextMenu.Item
-                            disabled={$readOnlyMode}
-                            title={$readOnlyMode ? READ_ONLY_HINT : undefined}
-                            onSelect={() => openDangerDialog('truncate', table.name)}
-                          >
-                            <Icon name="eraser" />
-                            Truncate table
-                          </ContextMenu.Item>
-                          <ContextMenu.Item
-                            variant="destructive"
-                            disabled={$readOnlyMode}
-                            title={$readOnlyMode ? READ_ONLY_HINT : undefined}
-                            onSelect={() => openDangerDialog('drop', table.name)}
-                          >
-                            <Icon name="trash-2" />
-                            Drop table
-                          </ContextMenu.Item>
-                          {/if}
-                        </ContextMenu.Content>
-                      </ContextMenu.Root>
+                    <li data-table={table.name}>
+                    <button
+                      type="button"
+                      class={cn(
+                        "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                        isSelected
+                          ? "bg-primary/10 text-foreground"
+                          : activeTable === table.name
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                            : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
+                      )}
+                      onclick={(e) => {
+                        if (e.shiftKey) { e.preventDefault(); selectItem(table.name, true) }
+                        else if (e.metaKey || e.ctrlKey) { e.preventDefault(); selectItem(table.name, false) }
+                        else ontableselect(table.name)
+                      }}
+                    >
+                      <span
+                        class="relative size-3.5 shrink-0"
+                        onclick={(e) => { e.stopPropagation(); selectItem(table.name, e.shiftKey) }}
+                        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); selectItem(table.name, e.shiftKey); } }}
+                        role="checkbox"
+                        aria-checked={isSelected}
+                        tabindex="-1"
+                      >
+                        {#if isSelected}
+                          <Icon name="square-check" class="size-3.5 text-primary" />
+                        {:else}
+                          <Icon name="table-2" class="size-3.5 opacity-70 group-hover:hidden" />
+                          <Icon name="square" class="size-3.5 hidden opacity-70 group-hover:block" />
+                        {/if}
+                      </span>
+                      <span class="flex min-w-0 items-center gap-1.5">
+                        <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{table.name}</span>
+                        {#if table.rlsEnabled}
+                          <Icon
+                            name="lock"
+                            class="size-3 shrink-0 text-muted-foreground"
+                            role="img"
+                            aria-label="Row-level security enabled"
+                          />
+                        {/if}
+                      </span>
+                      {#if showRowCount}
+                      <!-- Fixed min-width so the column doesn't shift every
+                           row sideways as lazy counts land. A count that has
+                           not arrived draws nothing at all: a placeholder mark
+                           on every row made a long list read as a column of
+                           dashes, which says "empty" far louder than "counting". -->
+                      <span
+                        class="flex min-w-[4ch] shrink-0 items-center justify-end font-mono text-ui-2xs leading-4 tabular-nums text-muted-foreground"
+                        title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : "Counting rows…"}
+                      >
+                        {#if table.rowCount != null}{formatTableRowCount(table.rowCount)}{/if}
+                      </span>
+                      {/if}
+                    </button>
                     </li>
                   {/each}
-                  {#if tableWin.botPad > 0}<li style="height:{tableWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                 {/if}
-              </ul>
+                    </ul>
+                  {/snippet}
+                </ContextMenu.Trigger>
+            <ContextMenu.Content class="min-w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+              {#if menuTableSelected && selectedItems.size > 1}
+                <!-- Multi-select: actions apply to all selected tables -->
+                <ContextMenu.Item onSelect={openSelected}>
+                  <Icon name="external-link" />
+                  Open {selectedItems.size} tables
+                </ContextMenu.Item>
+                {#if [...selectedItems].some((n) => openTableSet.has(n))}
+                  <ContextMenu.Item onSelect={closeSelectedTabs}>
+                    <Icon name="x" />
+                    Close open tabs
+                  </ContextMenu.Item>
+                {/if}
+                <ContextMenu.Separator />
+                <ContextMenu.Item onSelect={copySelectedNames}>
+                  <Icon name="clipboard-copy" />
+                  Copy {selectedItems.size} names
+                </ContextMenu.Item>
+                <ContextMenu.Item onSelect={() => (allSelectedPinned ? unpinSelected() : pinSelected())}>
+                  {#if allSelectedPinned}
+                    <Icon name="pin-off" />
+                    Unpin {selectedItems.size} tables
+                  {:else}
+                    <Icon name="pin" />
+                    Pin {selectedItems.size} tables
+                  {/if}
+                </ContextMenu.Item>
+                <ContextMenu.Separator />
+                <ContextMenu.Item onSelect={clearSelection}>
+                  <Icon name="square" />
+                  Deselect all
+                </ContextMenu.Item>
+              {:else}
+              <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(menuTable) }}>
+                <Icon name="clipboard-copy" />
+                Copy name
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => oncopycolumns(menuTable)}>
+                <Icon name="copy" />
+                Copy columns
+              </ContextMenu.Item>
+              {#if openTableSet.has(menuTable)}
+                <ContextMenu.Item onSelect={() => onclosetable(menuTable)}>
+                  <Icon name="x" />
+                  Close tab
+                </ContextMenu.Item>
+              {/if}
+              <ContextMenu.Item onSelect={() => togglePin(menuTable)}>
+                {#if pinnedTables.includes(menuTable)}
+                  <Icon name="pin-off" />
+                  Unpin table
+                {:else}
+                  <Icon name="pin" />
+                  Pin table
+                {/if}
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => toggleSelect(menuTable)}>
+                {#if menuTableSelected}
+                  <Icon name="square" />
+                  Deselect
+                {:else}
+                  <Icon name="square-check" />
+                  Select
+                {/if}
+              </ContextMenu.Item>
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => onopeninconsole(menuTable)}>
+                <Icon name="terminal" />
+                Open in SQL console
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => ongeneratesql(menuTable)}>
+                <Icon name="zap" />
+                Generate SQL…
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => oncountrows(menuTable)}>
+                <Icon name="hash" />
+                Count rows
+              </ContextMenu.Item>
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => onviewstructure(menuTable)}>
+                <Icon name="layout-list" />
+                View structure
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => onviewddl(menuTable)}>
+                <Icon name="code-2" />
+                View DDL
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => onexportsql(menuTable)}>
+                <Icon name="file-down" />
+                Export as SQL
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => onexportdata(menuTable)}>
+                <Icon name="download" />
+                Export data
+              </ContextMenu.Item>
+              <ContextMenu.Separator />
+              <ContextMenu.Item
+                disabled={$readOnlyMode}
+                title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                onSelect={() => openDangerDialog('truncate', menuTable)}
+              >
+                <Icon name="eraser" />
+                Truncate table
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                variant="destructive"
+                disabled={$readOnlyMode}
+                title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                onSelect={() => openDangerDialog('drop', menuTable)}
+              >
+                <Icon name="trash-2" />
+                Drop table
+              </ContextMenu.Item>
+              {/if}
+            </ContextMenu.Content>
+              </ContextMenu.Root>
               </div>
             {/if}
             {/if}
@@ -1734,16 +1635,27 @@
                 {/if}
               </div>
               {#if viewsOpen}
-                <ul bind:this={viewListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                <!-- One menu for the list - see the tables list above for why. -->
+                <ContextMenu.Root>
+                <ContextMenu.Trigger>
+                {#snippet child({ props })}
+                {@const openMenu = props.oncontextmenu}
+                <ul
+                  {...props}
+                  oncontextmenu={(e) => {
+                    const li = e.target instanceof Element ? e.target.closest('li[data-view]') : null
+                    if (!(li instanceof HTMLElement)) return
+                    menuView = li.dataset.view ?? ''
+                    openMenu?.(e)
+                  }}
+                  class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]"
+                >
                   {#if filteredViews.length === 0}
                     <!-- The tab-level empty state covers this. -->
                   {:else}
-                    {#if viewWin.topPad > 0}<li style="height:{viewWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                     {#each viewsToRender as view (view.name)}
                       {@const isSelected = selectedItems.has(view.name)}
-                      <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
-                        <ContextMenu.Root>
-                          <ContextMenu.Trigger class="w-full">
+                      <li data-view={view.name}>
                             <button
                               type="button"
                               class={cn(
@@ -1776,29 +1688,29 @@
                                    source, so this only ever rendered a misleading 0. Materialized
                                    views are physical tables and keep theirs. -->
                             </button>
-                          </ContextMenu.Trigger>
-                          <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-                            <ContextMenu.Item onSelect={() => toggleSelect(view.name)}>
-                              {#if isSelected}
-                                <Icon name="square" />
-                                Deselect
-                              {:else}
-                                <Icon name="square-check" />
-                                Select
-                              {/if}
-                            </ContextMenu.Item>
-                            <ContextMenu.Separator />
-                            <ContextMenu.Item variant="destructive" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : undefined} onSelect={() => openDangerDialog('drop', view.name)}>
-                              <Icon name="trash-2" />
-                              Drop view
-                            </ContextMenu.Item>
-                          </ContextMenu.Content>
-                        </ContextMenu.Root>
                       </li>
                     {/each}
-                    {#if viewWin.botPad > 0}<li style="height:{viewWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   {/if}
                 </ul>
+                {/snippet}
+                </ContextMenu.Trigger>
+                <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                  <ContextMenu.Item onSelect={() => toggleSelect(menuView)}>
+                    {#if selectedItems.has(menuView)}
+                      <Icon name="square" />
+                      Deselect
+                    {:else}
+                      <Icon name="square-check" />
+                      Select
+                    {/if}
+                  </ContextMenu.Item>
+                  <ContextMenu.Separator />
+                  <ContextMenu.Item variant="destructive" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : undefined} onSelect={() => openDangerDialog('drop', menuView)}>
+                    <Icon name="trash-2" />
+                    Drop view
+                  </ContextMenu.Item>
+                </ContextMenu.Content>
+                </ContextMenu.Root>
               {/if}
             {/if}
 
@@ -1850,16 +1762,27 @@
                 {/if}
               </div>
               {#if matViewsOpen}
-                <ul bind:this={matViewListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                <!-- One menu for the list - see the tables list above for why. -->
+                <ContextMenu.Root>
+                <ContextMenu.Trigger>
+                {#snippet child({ props })}
+                {@const openMenu = props.oncontextmenu}
+                <ul
+                  {...props}
+                  oncontextmenu={(e) => {
+                    const li = e.target instanceof Element ? e.target.closest('li[data-matview]') : null
+                    if (!(li instanceof HTMLElement)) return
+                    menuMatView = li.dataset.matview ?? ''
+                    openMenu?.(e)
+                  }}
+                  class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]"
+                >
                   {#if filteredMatViews.length === 0}
                     <!-- The tab-level empty state covers this. -->
                   {:else}
-                    {#if matViewWin.topPad > 0}<li style="height:{matViewWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                     {#each matViewsToRender as mv (mv.name)}
                       {@const isSelected = selectedItems.has(mv.name)}
-                      <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
-                        <ContextMenu.Root>
-                          <ContextMenu.Trigger class="w-full">
+                      <li data-matview={mv.name}>
                             <button
                               type="button"
                               class={cn(
@@ -1894,29 +1817,29 @@
                               </span>
                               {/if}
                             </button>
-                          </ContextMenu.Trigger>
-                          <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-                            <ContextMenu.Item onSelect={() => toggleSelect(mv.name)}>
-                              {#if isSelected}
-                                <Icon name="square" />
-                                Deselect
-                              {:else}
-                                <Icon name="square-check" />
-                                Select
-                              {/if}
-                            </ContextMenu.Item>
-                            <ContextMenu.Separator />
-                            <ContextMenu.Item variant="destructive" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : undefined} onSelect={() => openDangerDialog('drop', mv.name)}>
-                              <Icon name="trash-2" />
-                              Drop view
-                            </ContextMenu.Item>
-                          </ContextMenu.Content>
-                        </ContextMenu.Root>
                       </li>
                     {/each}
-                    {#if matViewWin.botPad > 0}<li style="height:{matViewWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   {/if}
                 </ul>
+                {/snippet}
+                </ContextMenu.Trigger>
+                <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                  <ContextMenu.Item onSelect={() => toggleSelect(menuMatView)}>
+                    {#if selectedItems.has(menuMatView)}
+                      <Icon name="square" />
+                      Deselect
+                    {:else}
+                      <Icon name="square-check" />
+                      Select
+                    {/if}
+                  </ContextMenu.Item>
+                  <ContextMenu.Separator />
+                  <ContextMenu.Item variant="destructive" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : undefined} onSelect={() => openDangerDialog('drop', menuMatView)}>
+                    <Icon name="trash-2" />
+                    Drop view
+                  </ContextMenu.Item>
+                </ContextMenu.Content>
+                </ContextMenu.Root>
               {/if}
             {/if}
 
@@ -1956,9 +1879,10 @@
     edge={side === "right" ? "start" : "end"}
     onresizestart={() => {
       resizeStartWidth = width;
+      resizeScale = getAppScale();
     }}
     onresize={(dx) => {
-      width = clampNavSidebarWidth(resizeStartWidth + dx);
+      width = clampNavSidebarWidth(resizeStartWidth + dx / resizeScale);
     }}
     onresizeend={() => {
       resizeStartWidth = width;

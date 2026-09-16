@@ -6,6 +6,7 @@
   import { readOnlyMode, guardWrite, READ_ONLY_HINT } from '$lib/stores/read-only.js'
   import { tick, onDestroy } from 'svelte'
   import ResizeHandle from './ResizeHandle.svelte'
+  import { getAppScale } from '$lib/app-zoom.js'
   import Search from '@lucide/svelte/icons/search'
   import X from '@lucide/svelte/icons/x'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
@@ -116,6 +117,8 @@
   }
   let keysWidth = $state(loadKeysWidth())
   let resizeStartWidth = 0
+  /** App scale sampled at drag start - `dx` is screen px, `keysWidth` is px at 100%. */
+  let resizeScale = 1
 
   // ── Key list state ──────────────────────────────────────────────────────────
   let keys = $state(/** @type {string[]} */ ([]))
@@ -846,7 +849,7 @@
 
   <div class="flex min-h-0 flex-1 overflow-hidden">
     <!-- ── Key list ─────────────────────────────────────────────────────── -->
-    <div class="flex shrink-0 flex-col border-r border-border bg-panel" style:width="{keysWidth}px">
+    <div class="flex shrink-0 flex-col border-r border-border bg-panel" style:width="calc({keysWidth}px * var(--app-scale, 1))">
       <!-- Header -->
       <div class="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3">
         <KeyRound class="size-4 shrink-0 text-muted-foreground" />
@@ -1075,8 +1078,8 @@
     <ResizeHandle
       axis="x"
       edge="end"
-      onresizestart={() => (resizeStartWidth = keysWidth)}
-      onresize={(dx) => (keysWidth = clampKeysWidth(resizeStartWidth + dx))}
+      onresizestart={() => { resizeStartWidth = keysWidth; resizeScale = getAppScale() }}
+      onresize={(dx) => (keysWidth = clampKeysWidth(resizeStartWidth + dx / resizeScale))}
       onresizeend={() => {
         resizeStartWidth = keysWidth
         try {

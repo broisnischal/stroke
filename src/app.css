@@ -51,29 +51,36 @@
      look brighter along the top than along the bottom, which reads as a badly
      drawn border rather than as depth. */
   --app-zoom: 1;
-  --app-font-size: 14px;
+  /* The ratio the UI actually renders at - the rounded root over ROOT_BASE_PX.
+     Distinct from --app-zoom, which is the rung's nominal label. Panel widths are
+     stored as px at 100% and multiplied by this, so declare the 100% value here
+     too: without it the first paint (before applySettings runs) resolves every
+     `calc(Npx * var(--app-scale))` through the fallback instead. */
+  --app-scale: 1;
+  --app-font-size: 16px;
   /* UI type scale, in whole pixels. applySettings() recomputes these for the
-     active OS base size and zoom level and writes them back to the root; these
-     are the 14px-base fallbacks that hold for the first paint before JS runs.
+     active zoom rung and writes them back to the root; these are the 100%
+     fallbacks (16px base) that hold for the first paint before JS runs, and they
+     must stay in step with `buildTypeScale()` in src/lib/type-scale.js.
      Whole pixels are the point: a fractional font-size makes WebKit rasterise
      glyphs off the pixel grid, which is what made UI text look soft at 100%. */
-  --fs-3xl: 24px;
-  --lh-3xl: 30px;
-  --fs-2xl: 20px;
-  --lh-2xl: 28px;
-  --fs-xl: 18px;
-  --lh-xl: 26px;
-  --fs-lg: 16px;
-  --lh-lg: 24px;
-  --fs-base: 14px;
-  --fs-15: 15px;
-  --fs-sm: 13px;
-  --fs-xs: 12px;
-  --fs-2xs: 11px;
-  --fs-3xs: 10px;
-  --editor-font-size: 14px;
+  --fs-3xl: 27px;
+  --lh-3xl: 34px;
+  --fs-2xl: 23px;
+  --lh-2xl: 32px;
+  --fs-xl: 21px;
+  --lh-xl: 30px;
+  --fs-lg: 18px;
+  --lh-lg: 27px;
+  --fs-base: 16px;
+  --fs-15: 17px;
+  --fs-sm: 15px;
+  --fs-xs: 14px;
+  --fs-2xs: 13px;
+  --fs-3xs: 11px;
+  --editor-font-size: 16px;
   /* 1.5 ratio - matches VS Code / Cursor's default editor line height. */
-  --editor-line-height: 21px;
+  --editor-line-height: 24px;
   /* Dedicated code font for Monaco editors, kept independent of the app's UI /
      data-grid mono (`--font-mono`) - same separation VS Code makes between its
      "editor font" and everything else. JetBrains Mono is a true code typeface:
@@ -247,11 +254,13 @@ textarea.no-focus-ring:focus-visible {
   outline: none;
 }
 
-/* OS-native border-radius conventions */
-html[data-os="macos"]   { --radius: 10px; --window-radius: 10px; } /* macOS Big Sur+ system radius */
-html[data-os="windows"] { --radius: 9px; --window-radius: 8px; } /* Windows 11 */
+/* Control radius is the same on every OS - a button that reads as "ours" on macOS
+   has to read the same on Windows and Linux. Only the WINDOW radius still follows
+   the platform, because that corner is drawn against the OS compositor and a
+   mismatch there shows as a seam against the desktop, not as a style choice. */
+:root { --radius: 10px; --window-radius: 10px; } /* macOS Big Sur+ system radius */
+html[data-os="windows"] { --window-radius: 8px; } /* Windows 11 */
 html[data-os="linux"]   { --window-radius: 8px; }
-:root { --window-radius: 10px; }
 
 /* Ceiling for every floating menu panel (context menu, dropdown, submenus).
    Panels size to their longest label, so this is the only thing standing

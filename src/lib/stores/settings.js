@@ -9,9 +9,47 @@ import {
 } from '$lib/themes/registry.js'
 import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js'
 import { detectOs } from '$lib/platform.js'
+import {
+  UI_TYPE_SCALE,
+  TYPE_SCALE_REF,
+  rootPxFor,
+  ROOT_BASE_PX,
+  ZOOM_STEPS,
+  buildTypeScale,
+} from '$lib/type-scale.js'
 import { SQL_FORMAT_DEFAULTS, normalizeSqlFormat, setSqlFormatOptions } from '$lib/sql-format-options.js'
 
 const STORAGE_KEY = 'stroke:settings'
+
+/**
+ * Whether the OS should own scrolling, when the user has expressed no preference.
+ *
+ * Eased scrolling is ours: wheel deltas are accumulated and `scrollTop` is walked
+ * toward the target one frame at a time. That is a real improvement over a
+ * discrete mouse wheel, which otherwise jumps a fixed notch with no motion at all.
+ *
+ * It is the wrong thing on macOS. The OS has ALREADY applied momentum and rubber
+ * banding to a trackpad's deltas by the time they reach us, so easing them again
+ * is a second filter on top of a filter: every gesture trails its fingers by the
+ * length of our ease, which is exactly what "the scrolling feels laggy" describes.
+ * It also costs a non-passive wheel listener, which puts the main thread in front
+ * of every tick on the one platform whose compositor did not need it.
+ *
+ * So: OS-owned on macOS, eased elsewhere. Either way Settings → Appearance →
+ * Native scrolling is the override, and an explicit choice always wins over this.
+ */
+export function defaultNativeScroll() {
+  return detectOs() === 'macos'
+}
+
+/** One-shot marker for the migration in `loadSettings` (see there for why). */
+const SCROLL_DEFAULT_KEY = 'stroke:scroll-default-v2'
+const scrollDefaultApplied = () => {
+  try { return localStorage.getItem(SCROLL_DEFAULT_KEY) === '1' } catch { return true }
+}
+const markScrollDefaultApplied = () => {
+  try { localStorage.setItem(SCROLL_DEFAULT_KEY, '1') } catch {}
+}
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
@@ -27,24 +65,9 @@ const STORAGE_KEY = 'stroke:settings'
  * than in a CSS calc so a non-14px base can never push a step off the pixel grid.
  * The `15` step exists only to back the legacy `text-[15px]` compatibility class.
  */
-const UI_TYPE_SCALE = [
-  ['3xl', 24, 30],
-  ['2xl', 20, 28],
-  ['xl', 18, 26],
-  ['lg', 16, 24],
-  ['base', 14],
-  ['15', 15],
-  ['sm', 13],
-  ['xs', 12],
-  ['2xs', 11],
-  ['3xs', 10],
-]
 
-/** UI zoom scale (font + layout). 1 = 100%. */
-export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
+export { ZOOM_STEPS }
 const DEFAULT_ZOOM = 1
-/** Index of the 100% rung - the root size steps out from here, one px per rung. */
-export const ZOOM_DEFAULT_INDEX = ZOOM_STEPS.indexOf(DEFAULT_ZOOM)
 
 /**
  * Selectable font stacks. Each sets the UI (`--font-sans`) and data/SQL/grid
@@ -351,12 +374,8 @@ export const DEFAULT_SETTINGS = {
   // structure scannable down the left edge, and one embedding value can run to
   // tens of thousands of characters - wrapped, it buries every row around it.
   jsonWordWrap: false,
-  // Off by default, i.e. the grid and the sidebar scroll with the app's own eased
-  // scrolling. Turning it on hands both back to the OS - which is what you want
-  // if your system already does momentum/inertia scrolling well, or if you drive
-  // the app through a trackpad or a screen reader whose behaviour we shouldn't
-  // second-guess.
-  nativeScroll: false,
+  // Platform default, not a fixed one - see `defaultNativeScroll()`.
+  nativeScroll: defaultNativeScroll(),
   rowSpacing: DEFAULT_ROW_SPACING,
   motion: DEFAULT_MOTION,
   // SQL formatter preferences. Defaults live with the formatter (format-sql.js)
@@ -527,11 +546,12 @@ export function loadSettings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
+      markScrollDefaultApplied()
       _settingsCache = {
         ...DEFAULT_SETTINGS,
         theme: systemPreferredTheme(),
-        // Every platform's 100% rung is already its comfortable size (see
-        // `basePx` in applySettings), so nobody starts off-rung.
+        // 100% is already the comfortable size on every platform (see
+        // ROOT_BASE_PX in type-scale.js), so nobody starts off-rung.
         zoom: DEFAULT_ZOOM,
       }
       return { ..._settingsCache }
@@ -574,7 +594,17 @@ export function loadSettings() {
     const telemetry = parsed.telemetry !== false
     const cmdkAiEnabled = parsed.cmdkAiEnabled === true
     const jsonWordWrap = parsed.jsonWordWrap === true
-    const nativeScroll = parsed.nativeScroll === true
+    // `saveSettings` writes the whole object, so an existing install has the OLD
+    // default (`false`) stored as if it were a choice - there is no way to tell
+    // "the user picked eased" from "eased is what shipped". The marker below is
+    // what distinguishes them: it is stamped the first time this build resolves
+    // the setting, so the platform default is applied exactly once, and anything
+    // the user picks after that is a real choice and is left alone.
+    let nativeScroll = typeof parsed.nativeScroll === 'boolean' ? parsed.nativeScroll : defaultNativeScroll()
+    if (!scrollDefaultApplied()) {
+      nativeScroll = defaultNativeScroll()
+      markScrollDefaultApplied()
+    }
     const rowSpacing = normalizeRowSpacing(parsed.rowSpacing)
     const motion = normalizeMotion(parsed.motion)
     const sqlFormat = normalizeSqlFormat(parsed.sqlFormat)
@@ -647,43 +677,28 @@ export function applySettings(settings) {
   setMode(dark ? 'dark' : 'light')
   setStore(appThemeId, theme)
   setStore(isCurrentThemeDark, dark)
-  // Each platform's 100% rung is its own comfortable reading size, so "zoom 0"
-  // means the same thing everywhere: the size you should not have to change.
-  //
-  //   linux / windows  18px - 1x-DPI desktops where a 14px stroke is too thin to
-  //                          read reliably. Windows used to reach ~17.5px by
-  //                          shipping a 1.25 DEFAULT zoom instead, which made its
-  //                          100% rung a lie and left no headroom below it.
-  //   macos            14px - Retina plus SF's own hinting; 18 there is oversized.
-  const basePx =
-    root.dataset.os === 'macos' ? 14 : 18
-
-  // The root size steps by ONE WHOLE PIXEL per rung, taken from the rung's index
-  // rather than from `basePx * zoom`.
-  //
-  // Multiplying and rounding collapses rungs into each other: at a 16px base,
-  // 110% and 115% both round to 18px, so the window was pixel-identical between
-  // them while the `--fs-*` steps (rounded independently, from different
-  // numerators) still moved - zoom that changed the text and not the layout.
-  // Base 14 collides the same way at 90/95% and 105/110%. Indexing guarantees a
-  // strictly increasing root on every base, so a zoom step always moves both.
-  const stepIdx = ZOOM_STEPS.indexOf(zoom)
-  const rootPx =
-    stepIdx === -1
-      ? Math.max(1, Math.round(basePx * zoom))
-      : basePx + (stepIdx - ZOOM_DEFAULT_INDEX)
+  const rootPx = rootPxFor(zoom)
 
   // Every type step is rounded to a whole pixel against that root. Resolving the
   // scale in CSS as `calc(N / 14 * 1rem)` only landed on whole pixels when the
   // root happened to be 14px; anywhere else a 13px caption came out fractional
   // and WebKit rasterised it off the pixel grid, which is what made UI text look
   // soft. The canvas table reads --app-font-size, so it follows automatically.
-  const stepPx = (n) => `${Math.max(1, Math.round((n * rootPx) / 14))}px`
+  const scale = buildTypeScale(rootPx)
   setStyleVar(root, '--app-zoom', String(zoom))
   setStyleVar(root, '--app-font-size', `${rootPx}px`)
-  for (const [step, size, leading] of UI_TYPE_SCALE) {
-    setStyleVar(root, `--fs-${step}`, stepPx(size))
-    if (leading) setStyleVar(root, `--lh-${step}`, stepPx(leading))
+  // The ratio the UI actually renders at, which is the rounded root over the
+  // base - not `zoom`, which is the rung's nominal label and can sit a few
+  // tenths of a pixel away from it. Draggable panel widths are stored as px at
+  // 100% and multiplied by this, so a sidebar grows with the text inside it
+  // instead of clipping its own labels at the high rungs.
+  const appScale = rootPx / ROOT_BASE_PX
+  setStyleVar(root, '--app-scale', String(appScale))
+  for (const [step, size] of scale) setStyleVar(root, `--fs-${step}`, `${size}px`)
+  for (const [step, , leading] of UI_TYPE_SCALE) {
+    if (!leading) continue
+    const lh = Math.max(1, Math.round((leading * rootPx) / TYPE_SCALE_REF))
+    setStyleVar(root, `--lh-${step}`, `${lh}px`)
   }
 
   // Monaco editors read --editor-font-size / --editor-line-height directly (Monaco
@@ -757,7 +772,15 @@ export function applySettings(settings) {
   // Drop the legacy per-table key - it drifted from settings.zoom and made only
   // the grid look huge/blurry while the sidebar stayed at normal scale.
   try { localStorage.removeItem('stroke:canvas-zoom') } catch {}
-  const canvasZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom))
+  // `appScale`, NOT `zoom`. The canvas takes its FONTS from a DOM probe, which
+  // resolves against --app-font-size, i.e. the rounded root over the base. Its
+  // GEOMETRY (row height, padding, icons) scales by this number. Feeding it the
+  // rung's nominal label instead made the two disagree wherever rounding moved
+  // the root off the label: at the 90% rung the root is 14px, so text rendered
+  // at 87.5% inside rows that shrank to 90%, and at 110% text grew 12.5% inside
+  // rows that grew 10% - text gaining on its row in BOTH directions, which is
+  // what made zooming look asymmetric.
+  const canvasZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, appScale))
   if (zoomState.value !== canvasZoom) zoomState.value = canvasZoom
   // Webview page-zoom reset is an IPC round-trip - only needed when zoom changed
   // (or on the first apply, to undo any stale native zoom from a prior session).
@@ -887,6 +910,12 @@ export function decreaseZoom() {
 }
 
 export function resetZoom() {
+  // Also clear any webview zoom. That is a second, independent scale (WKWebView
+  // pinch magnification, or Tauri's page-zoom polyfill) which the app never sets
+  // on purpose but can drift into. Resetting only the app zoom left the window
+  // still magnified with no way back, and Cmd+0 is the one gesture that has to
+  // always mean "put it back".
+  resetWebviewZoom()
   return updateSettings({ zoom: DEFAULT_ZOOM })
 }
 

@@ -1,5 +1,6 @@
 <script>
   import { tick, onMount, onDestroy } from "svelte";
+  import { getAppScale } from '$lib/app-zoom.js';
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import Loader2 from "@lucide/svelte/icons/loader-2";
   import Send from "@lucide/svelte/icons/send";
@@ -366,6 +367,8 @@
   const initialLayout = loadLayout()
   let width = $state(initialLayout.aiSidebarWidth)
   let resizeStartWidth = initialLayout.aiSidebarWidth
+  /** App scale sampled at drag start - `dx` is screen px, `width` is px at 100%. */
+  let resizeScale = 1
 
   // ── Streaming ─────────────────────────────────────────────────────────────
   let streamingContent = $state('')
@@ -769,11 +772,11 @@
 
 <div
   class="relative flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border/50 bg-background"
-  style="width: {width}px; min-width: {width}px; max-width: {width}px"
+  style="width: calc({width}px * var(--app-scale, 1)); min-width: calc({width}px * var(--app-scale, 1)); max-width: calc({width}px * var(--app-scale, 1))"
   data-studio-region="ai-sidebar"
 >
   <div class="absolute inset-y-0 left-0 z-20">
-    <ResizeHandle edge="start" onresizestart={() => { resizeStartWidth = width }} onresize={(dx) => { width = clampAiSidebarWidth(resizeStartWidth + dx) }} onresizeend={() => saveLayout({ aiSidebarWidth: width })} />
+    <ResizeHandle edge="start" onresizestart={() => { resizeStartWidth = width; resizeScale = getAppScale() }} onresize={(dx) => { width = clampAiSidebarWidth(resizeStartWidth + dx / resizeScale) }} onresizeend={() => saveLayout({ aiSidebarWidth: width })} />
   </div>
 
   <!-- Header -->

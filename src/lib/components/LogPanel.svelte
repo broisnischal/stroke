@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { getAppScale } from '$lib/app-zoom.js'
   import X from '@lucide/svelte/icons/x'
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
@@ -21,6 +22,8 @@
   const initialLayout = loadLayout()
   let width = $state(initialLayout.logPanelWidth)
   let resizeStartWidth = initialLayout.logPanelWidth
+  /** App scale sampled at drag start - `dx` is screen px, `width` is px at 100%. */
+  let resizeScale = 1
 
   /** @type {import('$lib/stores/activity-log.js').ActivityEntry[]} */
   let entries = $state([])
@@ -92,12 +95,12 @@
 
 <div
   class="flex h-full min-w-0 shrink-0 flex-col border-l border-border bg-panel"
-  style="width: {width}px; min-width: {width}px; max-width: {width}px"
+  style="width: calc({width}px * var(--app-scale, 1)); min-width: calc({width}px * var(--app-scale, 1)); max-width: calc({width}px * var(--app-scale, 1))"
 >
   <ResizeHandle
     edge="start"
-    onresizestart={() => { resizeStartWidth = width }}
-    onresize={(dx) => { width = clampLogPanelWidth(resizeStartWidth - dx) }}
+    onresizestart={() => { resizeStartWidth = width; resizeScale = getAppScale() }}
+    onresize={(dx) => { width = clampLogPanelWidth(resizeStartWidth - dx / resizeScale) }}
     onresizeend={() => saveLayout({ logPanelWidth: width })}
   />
 

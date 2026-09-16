@@ -2,6 +2,7 @@
   import { virtualColumnsStore } from '$lib/stores/virtual-columns.js'
   import { templateRefs, bindExpr, FN_SNIPPETS } from '$lib/virtual-column.js'
   import ResizeHandle from './ResizeHandle.svelte'
+  import { getAppScale } from '$lib/app-zoom.js'
   import Plus from '@lucide/svelte/icons/plus'
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import Pencil from '@lucide/svelte/icons/pencil'
@@ -36,6 +37,8 @@
   }
   let panelWidth = $state(loadWidth())
   let resizeStartWidth = 0
+  /** App scale sampled at drag start - `dx` is screen px, `panelWidth` is px at 100%. */
+  let resizeScale = 1
 
   function saveWidth(w) {
     try { localStorage.setItem('stroke:vcol-panel-w', String(w)) } catch {}
@@ -108,14 +111,14 @@
 <ResizeHandle
   axis="x"
   edge="start"
-  onresizestart={() => { resizeStartWidth = panelWidth }}
-  onresize={(dx) => { panelWidth = Math.min(MAX_W, Math.max(MIN_W, resizeStartWidth + dx)) }}
+  onresizestart={() => { resizeStartWidth = panelWidth; resizeScale = getAppScale() }}
+  onresize={(dx) => { panelWidth = Math.min(MAX_W, Math.max(MIN_W, resizeStartWidth + dx / resizeScale)) }}
   onresizeend={() => saveWidth(panelWidth)}
 />
 
 <div
   class="flex h-full shrink-0 flex-col border-l border-border/40 bg-panel text-ui-sm"
-  style="width: {panelWidth}px"
+  style="width: calc({panelWidth}px * var(--app-scale, 1))"
   role="none"
   onkeydown={(e) => {
     if (e.key !== 'Escape') return

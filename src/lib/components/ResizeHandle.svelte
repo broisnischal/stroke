@@ -25,10 +25,36 @@
     const startX = e.clientX
     const startY = e.clientY
 
+    // Coalesce to one `onresize` per animation frame.
+    //
+    // A pointermove stream runs at the pointer's rate, not the display's - 120Hz+
+    // on a trackpad or a high-polling mouse - and every call here writes a panel
+    // width, which reflows the whole shell. Where the panel sits next to the data
+    // grid that also means the grid's ResizeObserver fires, its canvas backing
+    // store is reallocated (which clears it) and the frame is repainted from
+    // scratch. Running that several times per PAINTED frame is pure waste, and it
+    // is what made dragging a panel next to the grid - the inspector, the related-
+    // rows dock, the log panel - judder and flash.
+    //
+    // rAF also puts the write in the same frame the browser is about to paint, so
+    // the handle tracks the pointer exactly as closely as before.
+    let rafId = 0
+    let pending = 0
+    let hasPending = false
+
+    const flush = () => {
+      rafId = 0
+      if (!hasPending) return
+      hasPending = false
+      onresize(pending)
+    }
+
     /** @param {PointerEvent} ev */
     function onMove(ev) {
       const delta = axis === 'x' ? ev.clientX - startX : ev.clientY - startY
-      onresize(edge === 'end' ? delta : -delta)
+      pending = edge === 'end' ? delta : -delta
+      hasPending = true
+      if (!rafId) rafId = requestAnimationFrame(flush)
     }
 
     /** @param {PointerEvent} ev */
@@ -38,6 +64,10 @@
       el.removeEventListener('pointermove', onMove)
       el.removeEventListener('pointerup', onUp)
       el.removeEventListener('pointercancel', onUp)
+      // Land on the last position the pointer actually reached, rather than on
+      // whichever frame happened to win the race with pointerup.
+      if (rafId) cancelAnimationFrame(rafId)
+      flush()
       onresizeend()
     }
 

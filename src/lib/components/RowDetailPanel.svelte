@@ -1,5 +1,6 @@
 <script>
   import FieldSelect from './FieldSelect.svelte';
+  import { getAppScale } from '$lib/app-zoom.js'
   import X from '@lucide/svelte/icons/x'
   import Copy from '@lucide/svelte/icons/copy'
   import Search from '@lucide/svelte/icons/search'
@@ -57,6 +58,8 @@
   const initialLayout = loadLayout()
   let width = $state(initialLayout.inspectorWidth)
   let resizeStartWidth = initialLayout.inspectorWidth
+  /** App scale sampled at drag start - `dx` is screen px, `width` is px at 100%. */
+  let resizeScale = 1
   /** @type {'details' | 'normal' | 'json' | 'preview'} */
   let viewMode = $state(initialLayout.inspectorView)
   let fieldSearch = $state('')
@@ -355,14 +358,15 @@
 </script>
 
 {#if target && meta}
-  <div class="flex h-full shrink-0" style:width="{width}px">
+  <div class="flex h-full shrink-0" style:width="calc({width}px * var(--app-scale, 1))">
     <ResizeHandle
       edge="start"
       onresizestart={() => {
+        resizeScale = getAppScale()
         resizeStartWidth = width
       }}
       onresize={(dx) => {
-        width = clampInspectorWidth(resizeStartWidth + dx)
+        width = clampInspectorWidth(resizeStartWidth + dx / resizeScale)
       }}
       onresizeend={() => {
         resizeStartWidth = width
