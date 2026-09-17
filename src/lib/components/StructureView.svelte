@@ -476,7 +476,7 @@
   const TD_DROP = 'border-b border-r border-border/25 p-0 align-middle overflow-visible'
   const INP = 'box-border block h-full w-full min-w-0 overflow-x-auto border-0 bg-transparent px-3 py-0 font-mono text-ui-xs text-foreground outline-none selection:bg-primary/20'
   const DROP_PANEL = 'absolute left-0 top-full z-50 mt-0.5 max-h-64 min-w-48 overflow-y-auto rounded-[10px] border border-border/60 bg-popover p-1 elevate-2-rim'
-  const DROP_ITEM = 'relative flex w-full cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 font-mono text-ui-sm text-foreground outline-none hover:bg-accent hover:text-foreground'
+  const DROP_ITEM = 'relative flex w-full min-w-0 cursor-default select-none items-center gap-1.5 truncate rounded-md px-2 py-1 font-mono text-ui-xs text-foreground outline-none hover:bg-accent hover:text-foreground'
 
   // ── Tab state ─────────────────────────────────────────────────────────────
   /** @type {'columns' | 'indexes' | 'relations' | 'triggers'} */
@@ -552,7 +552,7 @@
 
     <!-- ── Columns tab ── -->
     {#if activeTab === 'columns'}
-      <table class="border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
+      <table class="cell-fields border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
         <colgroup>
           {#each colWidths as w}<col style="width:{w}px;min-width:{w}px;max-width:{w}px" />{/each}
         </colgroup>
@@ -607,7 +607,7 @@
               <!-- data_type: plain drop panel, avoids DropdownMenu.Root/Trigger hybrid
                    that causes TypeError in Svelte 5 when the object literal is followed
                    by a cast `(expr)` on the next line (ASI footgun). -->
-              <td class="{TD_DROP} {typeDropOpen[col.name] ? 'ring-2 ring-inset ring-primary' : stagedValues['type:' + col.name] ? 'ring-1 ring-inset ring-warning/50' : ''}">
+              <td class="{TD_DROP} {stagedValues['type:' + col.name] ? 'ring-1 ring-inset ring-warning/50' : ''}">
                 <div class="relative h-full">
                   <input
                     type="text"
@@ -647,7 +647,7 @@
                   />
                   <svg class="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
                   {#if typeDropOpen[col.name]}
-                    <div class="{DROP_PANEL} w-52">
+                    <div class="{DROP_PANEL} min-w-52">
                       {#each filteredTypesFor(col.name) as t (t)}
                         <button type="button"
                           class="{DROP_ITEM} {t === displayType ? 'bg-accent/60' : ''}"
@@ -659,7 +659,7 @@
                           }}
                         >{t}</button>
                       {:else}
-                        <p class="px-2 py-1.5 font-mono text-ui-xs text-muted-foreground">No match</p>
+                        <p class="px-2 py-1 font-mono text-ui-xs text-muted-foreground">No match</p>
                       {/each}
                     </div>
                   {/if}
@@ -671,7 +671,7 @@
                 <div class="relative flex h-full items-center px-3">
                   <FieldSelect
                     size="sm"
-                    class="w-full border-0 bg-transparent px-0 text-ui-sm {displayNullable ? 'text-foreground' : 'text-muted-foreground'} {stagedValues['nullable:' + col.name] !== undefined ? 'text-warning' : ''}"
+                    class="w-full px-0 font-mono text-ui-xs {displayNullable ? 'text-foreground' : 'text-muted-foreground'} {stagedValues['nullable:' + col.name] !== undefined ? 'text-warning' : ''}"
                     value={displayNullable ? 'YES' : 'NO'}
                     disabled={isPk || !canEdit}
                     onchange={(v) => stageNullable(col.name, v === 'YES')}
@@ -681,7 +681,7 @@
               </td>
 
               <!-- column_default -->
-              <td class="{TD_DROP} {defDropOpen[col.name] ? 'ring-2 ring-inset ring-primary' : stagedValues['default:' + col.name] !== undefined ? 'ring-1 ring-inset ring-warning/50' : ''}">
+              <td class="{TD_DROP} {stagedValues['default:' + col.name] !== undefined ? 'ring-1 ring-inset ring-warning/50' : ''}">
                 <div class="relative h-full">
                   <input
                     type="text"
@@ -719,20 +719,20 @@
                   />
                   <svg class="pointer-events-none absolute right-2 top-1/2 size-3 -translate-y-1/2 text-muted-foreground" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
                   {#if defDropOpen[col.name]}
-                    <div class="{DROP_PANEL} w-52">
+                    <div class="{DROP_PANEL} min-w-52">
                       <button type="button" class={DROP_ITEM} onmousedown={(e) => { e.preventDefault(); defDropOpen = {...defDropOpen,[col.name]:false}; stageDefault(col.name, null) }}>EMPTY, drop default</button>
                       <button type="button" class={DROP_ITEM} onmousedown={(e) => { e.preventDefault(); defDropOpen = {...defDropOpen,[col.name]:false}; stageDefault(col.name, 'NULL') }}>NULL</button>
                       {#if isTimestamp(col.dataType)}
-                        <div class="my-0.5 border-t border-border/40"></div>
+                        <div class="-mx-1 my-0.5 h-px bg-border/50"></div>
                         <button type="button" class={DROP_ITEM} onmousedown={(e) => { e.preventDefault(); defDropOpen = {...defDropOpen,[col.name]:false}; stageDefault(col.name, 'NOW()') }}>NOW()</button>
                         <button type="button" class={DROP_ITEM} onmousedown={(e) => { e.preventDefault(); defDropOpen = {...defDropOpen,[col.name]:false}; stageDefault(col.name, 'CURRENT_TIMESTAMP') }}>CURRENT_TIMESTAMP</button>
                       {/if}
                       {#if /^bool/i.test(col.dataType)}
-                        <div class="my-0.5 border-t border-border/40"></div>
+                        <div class="-mx-1 my-0.5 h-px bg-border/50"></div>
                         <button type="button" class={DROP_ITEM} onmousedown={(e) => { e.preventDefault(); defDropOpen = {...defDropOpen,[col.name]:false}; stageDefault(col.name, 'TRUE') }}>TRUE</button>
                         <button type="button" class={DROP_ITEM} onmousedown={(e) => { e.preventDefault(); defDropOpen = {...defDropOpen,[col.name]:false}; stageDefault(col.name, 'FALSE') }}>FALSE</button>
                       {/if}
-                      <div class="my-0.5 border-t border-border/40"></div>
+                      <div class="-mx-1 my-0.5 h-px bg-border/50"></div>
                       <button type="button" class="{DROP_ITEM} text-muted-foreground" onmousedown={(e) => { e.preventDefault(); defDropOpen = {...defDropOpen,[col.name]:false} }}>Close</button>
                     </div>
                   {/if}
@@ -821,7 +821,7 @@
                 <div class="relative flex h-full items-center px-3">
                   <FieldSelect
                     size="sm"
-                    class="w-full border-0 bg-transparent px-0 text-ui-sm {newColumn.isNullable ? 'text-foreground' : 'text-muted-foreground'}"
+                    class="w-full px-0 font-mono text-ui-xs {newColumn.isNullable ? 'text-foreground' : 'text-muted-foreground'}"
                     value={newColumn.isNullable ? 'YES' : 'NO'}
                     onchange={(v) => (newColumn.isNullable = v === 'YES')}
                     options={[{ value: 'YES', label: 'YES' }, { value: 'NO', label: 'NO' }]}
@@ -897,7 +897,7 @@
         {/if}
       </div>
 
-      <table class="border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
+      <table class="cell-fields border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
         <colgroup>
           <col style="min-width:180px;width:220px" />
           <col style="min-width:110px;width:130px" />
@@ -919,16 +919,16 @@
             <tr class="group/idx" style="height:32px">
 
               <!-- index_name -->
-              <td class="border-b border-r border-border/40 px-3 font-mono text-ui-sm text-foreground overflow-hidden">{idx.name}</td>
+              <td class="border-b border-r border-border/25 px-3 font-mono text-ui-xs text-foreground overflow-hidden">{idx.name}</td>
 
               <!-- algorithm -->
-              <td class="border-b border-r border-border/40 p-0 align-middle overflow-hidden">
+              <td class="border-b border-r border-border/25 p-0 align-middle overflow-hidden">
                 <DropdownMenu.Root>
-                  <DropdownMenu.Trigger class="group/alg flex h-full w-full cursor-pointer items-center gap-1 px-3 font-mono text-ui-sm uppercase text-foreground hover:bg-accent/20">
+                  <DropdownMenu.Trigger class="group/alg flex h-full w-full cursor-pointer items-center gap-1 px-3 font-mono text-ui-xs uppercase text-foreground hover:bg-accent/20">
                     <span class="flex-1">{idx.indexType}</span>
                     <svg class="size-3 shrink-0 text-muted-foreground opacity-0 group-hover/alg:opacity-100" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
                   </DropdownMenu.Trigger>
-                  <DropdownMenu.Content class="min-w-44 [&_[data-slot=dropdown-menu-item]]:font-mono [&_[data-slot=dropdown-menu-item]]:text-ui-sm [&_[data-slot=dropdown-menu-item]]:px-3 [&_[data-slot=dropdown-menu-item]]:py-1.5" align="start" sideOffset={1}>
+                  <DropdownMenu.Content class="min-w-44 [&_[data-slot=dropdown-menu-item]]:font-mono" align="start" sideOffset={1}>
                     {#each INDEX_ALGORITHMS as alg (alg)}
                       <DropdownMenu.Item class={alg.toLowerCase() === idx.indexType.toLowerCase() ? 'bg-accent/60' : ''}
                         onSelect={() => { if (alg.toLowerCase() !== idx.indexType.toLowerCase()) requestIndexRecreate(idx, alg, idx.isUnique, idx.columns) }}
@@ -941,7 +941,7 @@
               </td>
 
               <!-- is_unique -->
-              <td class="border-b border-r border-border/40 p-0 align-middle overflow-hidden">
+              <td class="border-b border-r border-border/25 p-0 align-middle overflow-hidden">
                 <div class="flex h-full items-center px-3">
                   <button
                     type="button"
@@ -955,7 +955,7 @@
               </td>
 
               <!-- columns -->
-              <td class="border-b border-r border-border/40 p-0 align-middle overflow-hidden">
+              <td class="border-b border-r border-border/25 p-0 align-middle overflow-hidden">
                 <input type="text"
                   value={idx.columns}
                   class="{INP} text-muted-foreground"
@@ -965,12 +965,12 @@
               </td>
 
               <!-- condition -->
-              <td class="border-b border-r border-border/40 px-3 font-mono text-ui-sm text-muted-foreground overflow-hidden">
+              <td class="border-b border-r border-border/25 px-3 font-mono text-ui-xs text-muted-foreground overflow-hidden">
                 <span class="truncate block">{idx.condition ?? '—'}</span>
               </td>
 
               <!-- comment -->
-              <td class="border-b border-r border-border/40 p-0 align-middle overflow-hidden">
+              <td class="border-b border-r border-border/25 p-0 align-middle overflow-hidden">
                 <input type="text" value={idx.comment ?? ''} placeholder="—"
                   class="{INP} italic text-muted-foreground placeholder:not-italic placeholder:text-muted-foreground focus:not-italic focus:text-foreground"
                   onblur={(e) => { const v = /** @type {HTMLInputElement} */ (e.target).value; if (v !== (idx.comment ?? '')) void updateIndexComment(idx.name, v) }}
@@ -979,7 +979,7 @@
               </td>
 
               <!-- delete -->
-              <td class="border-b border-border/40 p-0 align-middle">
+              <td class="border-b border-border/25 p-0 align-middle">
                 <button type="button" disabled={confirmLoading || $readOnlyMode}
                   class="flex h-full w-full items-center justify-center text-muted-foreground transition-colors hover:text-destructive disabled:opacity-40 disabled:hover:text-muted-foreground group-hover/idx:text-muted-foreground"
                   title={$readOnlyMode ? READ_ONLY_HINT : 'Drop index'} onclick={() => requestDropIndex(idx.name)}
@@ -1004,11 +1004,11 @@
               </td>
               <td class="border-b border-r border-success/20 p-0">
                 <DropdownMenu.Root>
-                  <DropdownMenu.Trigger class="group/na flex h-full w-full cursor-pointer items-center gap-1 px-3 font-mono text-ui-sm uppercase text-foreground hover:bg-accent/20">
+                  <DropdownMenu.Trigger class="group/na flex h-full w-full cursor-pointer items-center gap-1 px-3 font-mono text-ui-xs uppercase text-foreground hover:bg-accent/20">
                     <span class="flex-1">{newIndex.algorithm || 'BTREE'}</span>
                     <svg class="size-3 text-muted-foreground opacity-0 group-hover/na:opacity-100" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
                   </DropdownMenu.Trigger>
-                  <DropdownMenu.Content class="min-w-44 [&_[data-slot=dropdown-menu-item]]:font-mono [&_[data-slot=dropdown-menu-item]]:text-ui-sm [&_[data-slot=dropdown-menu-item]]:px-3 [&_[data-slot=dropdown-menu-item]]:py-1.5" align="start" sideOffset={1}>
+                  <DropdownMenu.Content class="min-w-44 [&_[data-slot=dropdown-menu-item]]:font-mono" align="start" sideOffset={1}>
                     {#each INDEX_ALGORITHMS as alg (alg)}
                       <DropdownMenu.Item class={newIndex.algorithm === alg ? 'bg-accent' : ''} onSelect={() => { if (newIndex) newIndex.algorithm = alg }}>{alg}</DropdownMenu.Item>
                     {/each}
@@ -1060,7 +1060,7 @@
       <div class="flex items-center gap-2 border-b border-border/30 bg-muted/[0.08] px-3 py-2">
         <span class="text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground">Foreign Key Relations</span>
       </div>
-      <table class="border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
+      <table class="cell-fields border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
         <colgroup>
           <col style="min-width:160px;width:200px" />
           <col style="min-width:220px;width:280px" />
@@ -1076,18 +1076,18 @@
         <tbody>
           {#each relationsColumns as col (col.name)}
             <tr class="group/rel" style="height:32px">
-              <td class="border-b border-r border-border/40 px-3 font-mono text-ui-sm text-foreground overflow-hidden">
+              <td class="border-b border-r border-border/25 px-3 font-mono text-ui-xs text-foreground overflow-hidden">
                 <div class="flex items-center gap-1.5 truncate">
                   {#if pkSet.has(col.name)}<KeyRound class="size-3 shrink-0 text-warning" />{/if}
                   <span class="truncate">{col.name}</span>
                 </div>
               </td>
-              <td class="border-b border-r border-border/40 p-0 overflow-hidden">
-                <button type="button" class="flex h-full w-full items-center gap-1.5 px-3 font-mono text-ui-xs text-info transition-colors hover:bg-muted/40 hover:text-info" onclick={() => openFkDialog(col)}>
+              <td class="border-b border-r border-border/25 p-0 overflow-hidden">
+                <button type="button" class="flex h-full w-full items-center gap-1.5 px-2.5 font-mono text-ui-xs text-info transition-colors hover:bg-muted/40 hover:text-info" onclick={() => openFkDialog(col)}>
                   <ArrowRight class="size-3 shrink-0" /><span class="truncate">{col.foreignKey}</span>
                 </button>
               </td>
-              <td class="border-b border-border/40 p-0 align-middle">
+              <td class="border-b border-border/25 p-0 align-middle">
                 <button type="button" disabled={confirmLoading}
                   class="flex h-full w-full items-center justify-center text-muted-foreground transition-colors hover:text-destructive disabled:opacity-40 group-hover/rel:text-muted-foreground"
                   title="Remove foreign key"
@@ -1122,7 +1122,7 @@
         </button>
       </div>
 
-      <table class="border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
+      <table class="cell-fields border-collapse" style="table-layout: fixed; width: max-content; min-width: 100%">
         <colgroup>
           <col style="min-width:180px;width:220px" />
           <col style="min-width:90px;width:100px" />
@@ -1141,23 +1141,23 @@
         <tbody>
           {#each visibleTriggers as trig (trig.name)}
             <tr class="group/trig" style="height:32px">
-              <td class="border-b border-r border-border/40 px-3 font-mono text-ui-sm text-foreground overflow-hidden">
+              <td class="border-b border-r border-border/25 px-3 font-mono text-ui-xs text-foreground overflow-hidden">
                 <span class="block truncate">{trig.name}</span>
               </td>
-              <td class="border-b border-r border-border/40 px-3">
+              <td class="border-b border-r border-border/25 px-3">
                 <span class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground">{trig.timing}</span>
               </td>
-              <td class="border-b border-r border-border/40 px-3 overflow-hidden">
+              <td class="border-b border-r border-border/25 px-3 overflow-hidden">
                 <div class="flex gap-1 overflow-hidden">
                   {#each trig.events.split(', ').filter(Boolean) as ev (ev)}
                     <span class="shrink-0 rounded bg-primary/8 px-1.5 py-0.5 font-mono text-ui-3xs text-primary">{ev}</span>
                   {/each}
                 </div>
               </td>
-              <td class="border-b border-r border-border/40 px-3 font-mono text-ui-xs text-muted-foreground overflow-hidden">
+              <td class="border-b border-r border-border/25 px-3 font-mono text-ui-xs text-muted-foreground overflow-hidden">
                 <span class="block truncate">{trig.functionName}()</span>
               </td>
-              <td class="border-b border-r border-border/40 px-3">
+              <td class="border-b border-r border-border/25 px-3">
                 {#if trig.enabled}
                   <span class="flex items-center gap-1 font-mono text-ui-3xs text-success">
                     <span class="size-1.5 rounded-full bg-success"></span>on
@@ -1168,7 +1168,7 @@
                   </span>
                 {/if}
               </td>
-              <td class="border-b border-border/40 p-0 align-middle">
+              <td class="border-b border-border/25 p-0 align-middle">
                 <button type="button" disabled={confirmLoading || $readOnlyMode}
                   class="flex h-full w-full items-center justify-center text-muted-foreground transition-colors hover:text-destructive disabled:opacity-40 disabled:hover:text-muted-foreground group-hover/trig:text-muted-foreground"
                   title={$readOnlyMode ? READ_ONLY_HINT : 'Drop trigger'}

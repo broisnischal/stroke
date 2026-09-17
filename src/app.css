@@ -224,6 +224,48 @@ textarea:not(.no-focus-ring):not(.no-field-frame) {
   border-radius: 0;
 }
 
+/* ── Fields that ARE the cell ────────────────────────────────────────────────
+   A grid cell whose whole job is to hold one editable value does not also want
+   a field drawn inside it. The structure editor is sixteen rows of type,
+   nullable, default and comment, and every one of those controls was painting
+   its own 2px border at the 12px field radius inside a 28px row - sixty-odd
+   pills stacked in a grid, each one announcing itself as a separate control
+   when the grid's own rules already say where one value stops and the next
+   starts. The cell border is the field border.
+
+   Unlayered, like the data-table rule above it, because `.field-surface` and
+   the bare-input rule are unlayered too: a Tailwind `border-0` at the call site
+   loses to both, which is why passing one there had no effect.
+
+   Select triggers are `<button data-slot="select-trigger">`, so they need
+   naming explicitly - the bare-input rule never reached them, which is how the
+   nullable column ended up the only one still wearing a full pill. */
+.cell-fields :is(input, textarea, [data-slot="select-trigger"]) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* One edit highlight, the same one the data grid uses for the cell being edited
+   (`ring-2 ring-inset ring-primary` on its editor overlay). Here it is driven by
+   `:focus-within` on the cell rather than by each control, so a text field, a
+   combobox and a select all mark themselves identically - the type and default
+   columns used to be the only two that lit up, because they were the only two
+   with the open/closed state to hang it on.
+
+   `inset` so it never shifts the row, and on the cell so it traces the cell's
+   edge rather than a rounded box floating inside it. */
+.cell-fields td:focus-within {
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+/* The controls inside have already given up their own frame; they must not draw
+   a focus outline on top of the cell's highlight either. Two indicators for one
+   focus is what the field frame was doing before. */
+.cell-fields td:focus-within :is(input, textarea, [data-slot="select-trigger"]) {
+  outline: none;
+  box-shadow: none;
+}
+
 /* An editing cell keeps its field frame - the rounded, bordered input inside the
    cell is the look, and it is the same frame every other field in the app wears.
    What it must NOT have is a focus ring: the overlay around the cell is already
