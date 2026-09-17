@@ -13,6 +13,11 @@ const lists = (over = {}) => ({
 })
 
 describe('visibleRowCount', () => {
+  it('counts pinned rows as Tables rows - they render in that tab', () => {
+    const l = lists({ tables: [{ name: 'a' }], tablesTotal: 14, pins: ['orders'], pinsTotal: 3 })
+    expect(visibleRowCount('tables', l)).toEqual({ shown: 2, total: 17 })
+  })
+
   it('counts the open tab only', () => {
     const l = lists({
       tables: [{ name: 'a' }], tablesTotal: 14,
@@ -64,9 +69,14 @@ describe('soleMatch', () => {
     expect(soleMatch('recent', l)).toEqual({ kind: 'recent', name: 'events', schema: 'analytics' })
   })
 
-  it('picks a pinned table', () => {
-    expect(soleMatch('pins', lists({ pins: ['orders'], pinsTotal: 3 })))
+  it('picks a pinned table, which the Tables tab draws above its own list', () => {
+    expect(soleMatch('tables', lists({ pins: ['orders'], pinsTotal: 3, tablesTotal: 14 })))
       .toEqual({ kind: 'table', name: 'orders' })
+  })
+
+  it('refuses when one pin and one table both match - two rows, not one', () => {
+    const l = lists({ pins: ['orders'], pinsTotal: 3, tables: [{ name: 'order_items' }], tablesTotal: 14 })
+    expect(soleMatch('tables', l)).toBeNull()
   })
 
   it('picks a database and hands back the entry the switch needs', () => {

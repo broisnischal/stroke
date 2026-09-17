@@ -6,20 +6,21 @@
  * open the one match" is exactly the sort of thing that is easy to get right in
  * the markup and wrong in the list it counts.
  *
- * @typedef {'tables' | 'views' | 'recent' | 'pins' | 'databases'} SidebarTab
+ * @typedef {'tables' | 'views' | 'recent' | 'databases'} SidebarTab
  *
  * Every list here is already filtered by the search term - this module counts
  * and picks, it never filters.
  * @typedef {object} FilterLists
  * @property {{ name: string }[]} tables        filtered, un-pinned regular tables
  * @property {number} tablesTotal               un-pinned regular tables before the search
+ * @property {string[]} pins                    filtered pinned tables - they render at the
+ *                                              TOP of the Tables tab, so they are Tables rows
+ * @property {number} pinsTotal                 pinned tables before the search
  * @property {{ name: string }[]} views
  * @property {{ name: string }[]} matViews
  * @property {number} viewsTotal                views + materialized views before the search
  * @property {{ schema: string, table: string }[]} recent
  * @property {number} recentTotal
- * @property {string[]} pins
- * @property {number} pinsTotal
  * @property {{ key: string, label: string }[]} databases
  * @property {number} databasesTotal
  * @property {string} activeDbKey               the database already open
@@ -41,7 +42,13 @@ const RECENT_CAP = 5
 export function visibleRowCount(tab, lists) {
   switch (tab) {
     case 'tables':
-      return { shown: lists.tables.length, total: lists.tablesTotal }
+      // Pinned rows are drawn by this tab, above the table list, so the tab's
+      // count is both lists. Counting only the un-pinned half made the header
+      // say 0 on a schema whose every table was pinned.
+      return {
+        shown: lists.pins.length + lists.tables.length,
+        total: lists.pinsTotal + lists.tablesTotal,
+      }
     case 'views':
       // Materialized views ride in the Views tab, so both lists count as one.
       return { shown: lists.views.length + lists.matViews.length, total: lists.viewsTotal }
@@ -50,8 +57,6 @@ export function visibleRowCount(tab, lists) {
         shown: Math.min(lists.recent.length, RECENT_CAP),
         total: Math.min(lists.recentTotal, RECENT_CAP),
       }
-    case 'pins':
-      return { shown: lists.pins.length, total: lists.pinsTotal }
     case 'databases':
       return { shown: lists.databases.length, total: lists.databasesTotal }
     default:
@@ -75,8 +80,9 @@ export function soleMatch(tab, lists) {
   if (visibleRowCount(tab, lists).shown !== 1) return null
   switch (tab) {
     case 'tables': {
-      const t = lists.tables[0]
-      return t ? { kind: 'table', name: t.name } : null
+      // Exactly one row across both lists, so whichever holds it is the match.
+      const name = lists.pins[0] ?? lists.tables[0]?.name
+      return name ? { kind: 'table', name } : null
     }
     case 'views': {
       // Either list can hold the single match; views render first.
@@ -86,10 +92,6 @@ export function soleMatch(tab, lists) {
     case 'recent': {
       const r = lists.recent[0]
       return r ? { kind: 'recent', name: r.table, schema: r.schema } : null
-    }
-    case 'pins': {
-      const name = lists.pins[0]
-      return name ? { kind: 'table', name } : null
     }
     case 'databases': {
       const db = lists.databases[0]

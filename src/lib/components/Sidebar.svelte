@@ -245,13 +245,91 @@
   const _rowCountByName = $derived(new Map(tables.map((t) => [t.name, t.rowCount])))
   const visiblePinnedTables = $derived(pinnedTables.filter((n) => _tableNameSet.has(n)))
 
+  /**
+   * The reduced-motion rule from app.css, in JS.
+   *
+   * Needed because `scrollTo({ behavior: 'smooth' })` states the behaviour
+   * explicitly, and an explicit behaviour is NOT overridden by the
+   * `scroll-behavior: auto !important` that the stylesheet applies under the
+   * media query - that one only decides what `behavior: 'auto'` means. A
+   * scripted smooth scroll has to ask the question itself.
+   */
+  function prefersReducedMotion() {
+    const mode = document.documentElement.getAttribute('data-motion')
+    if (mode === 'full') return false      // Settings → Appearance overrides the OS
+    if (mode === 'reduced') return true
+    return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  }
+
+  /**
+   * Pin or unpin, and put the scroll offset where the row went.
+   *
+   * The two directions want opposite things, because the row moves in opposite
+   * directions:
+   *
+   *   PINNING moves the row UP, out of the table list and into the Pinned
+   *   section at the top. Scroll there and follow it - the point of pinning is
+   *   to put a table somewhere you can find it, and a pin that silently files
+   *   the row off-screen never shows you where that somewhere is. The scroll is
+   *   also the only confirmation the action worked, since the row vanishes from
+   *   where you clicked it.
+   *
+   *   UNPINNING moves the row DOWN, back into the table list at its sorted
+   *   position - which is somewhere you did not ask to go. So hold the list
+   *   still instead. Without that, the Pinned section shrinking by one row drags
+   *   everything below it up and the list appears to scroll on its own.
+   *
+   * Holding it still is scroll anchoring, which browsers do natively with
+   * `overflow-anchor` and WebKit - the engine this app ships on - does not
+   * implement. Doing it by hand is the whole of it: keep one element where it
+   * was and move the offset by however far it travelled.
+   */
   function togglePin(tableName) {
+    const root = scrollContainerEl
     const current = _allPinned[_connKey] ?? []
-    const next = current.includes(tableName)
-      ? current.filter((n) => n !== tableName)
-      : [...current, tableName]
+    const pinning = !current.includes(tableName)
+
+    // Only unpinning needs an anchor; pinning is going to the top regardless.
+    // The toggled row is the one that moves, so it can never BE the anchor -
+    // take the first other row at or below the viewport's top edge, since rows
+    // above it may sit in the section that is about to change size.
+    /** @type {HTMLElement | null} */
+    let anchor = null
+    let beforeY = 0
+    if (!pinning && root) {
+      const rootTop = root.getBoundingClientRect().top
+      for (const el of root.querySelectorAll('li[data-table], li[data-pin]')) {
+        const li = /** @type {HTMLElement} */ (el)
+        if (li.dataset.table === tableName || li.dataset.pin === tableName) continue
+        const y = li.getBoundingClientRect().top - rootTop
+        if (y >= 0) { anchor = li; beforeY = y; break }
+      }
+    }
+
+    const next = pinning
+      ? [...current, tableName]
+      : current.filter((n) => n !== tableName)
     _allPinned = { ..._allPinned, [_connKey]: next }
     savePinnedAll(_allPinned)
+
+    if (!root) return
+    // `flushSync` rather than `tick()`: both paths measure or move the scroll
+    // offset against the NEW list, and a frame later is not a fix - it is the
+    // jump, followed by a correction you can see.
+    flushSync()
+
+    if (pinning) {
+      // Safe against the wheel-ease controller on this container: it adopts any
+      // offset it did not set (`onScroll` → `sync`), and the pointerdown that
+      // delivered this click already stopped it.
+      root.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+      return
+    }
+    // Both lists are keyed by table name, so the anchor's node survives the
+    // re-render. Checked anyway - a filter settling in the same flush could drop it.
+    if (!anchor || !anchor.isConnected) return
+    const afterY = anchor.getBoundingClientRect().top - root.getBoundingClientRect().top
+    root.scrollTop += afterY - beforeY
   }
 
   function clearAllPins() {
@@ -287,7 +365,7 @@
    *
    * Materialized views ride in the Views tab - they are views, and splitting
    * them out is what produced six sections in the first place.
-   * @typedef {'tables' | 'views' | 'recent' | 'pins' | 'databases'} SidebarTab
+   * @typedef {'tables' | 'views' | 'recent' | 'databases'} SidebarTab
    */
   const SIDEBAR_TAB_KEY = 'stroke:sidebar-tab'
   /** @type {{ id: SidebarTab, label: string, icon: string }[]} */
@@ -299,7 +377,6 @@
     { id: 'databases', label: 'Databases', icon: 'database' },
     { id: 'views',     label: 'Views',     icon: 'table-view' },
     { id: 'recent',    label: 'Recent',    icon: 'clock' },
-    { id: 'pins',      label: 'Pins',      icon: 'pin' },
   ]
   function loadSidebarTab() {
     try {
@@ -371,7 +448,6 @@
     tables:    { icon: 'table-2',    title: 'No tables',    hint: 'Nothing in this schema yet.' },
     views:     { icon: 'table-view', title: 'No views',     hint: 'Views and materialized views show up here.' },
     recent:    { icon: 'clock',      title: 'No recents',   hint: 'Tables you open appear here.' },
-    pins:      { icon: 'pin',        title: 'No pins',      hint: 'Right-click a table to pin it here.' },
     databases: { icon: 'database',   title: 'No databases', hint: 'Nothing else on this server.' },
   }
   const tabIsEmpty = $derived(!loadingTables && !!connectionName && tabCounts[sidebarTab] === 0)
@@ -380,32 +456,30 @@
     tabIsEmpty &&
       !!debouncedFilter &&
       (sidebarTab === 'tables'
-        ? regularTablesUnpinned.length > 0
+        ? regularTablesUnpinned.length + visiblePinnedTables.length > 0
         : sidebarTab === 'views'
           ? views.length + matViews.length > 0
           : sidebarTab === 'databases'
             ? dbEntries.length > 0
-            : sidebarTab === 'pins'
-              ? pinnedTables.length > 0
-              : recentTables.length > 0),
+            : recentTables.length > 0),
   )
 
   /** How many rows each tab holds BEFORE the filter. @type {Record<SidebarTab, number>} */
   const tabTotals = $derived({
-    tables: regularTablesUnpinned.length,
+    // Pinned rows render at the top of this tab, so they count towards it. Only
+    // pins whose table still exists are counted, because only those draw a row.
+    tables: regularTablesUnpinned.length + visiblePinnedTables.length,
     views: views.length + matViews.length,
     // The recents list is capped at 5 rows, so that is the denominator too.
     recent: Math.min(recentTabs.length, 5),
-    pins: pinnedTables.length,
     databases: dbEntries.length,
   })
 
   /** How many rows each tab holds, after the filter. @type {Record<SidebarTab, number>} */
   const tabCounts = $derived({
-    tables: filteredRegularTables.length,
+    tables: filteredRegularTables.length + filteredPinnedTables.length,
     views: filteredViews.length + filteredMatViews.length,
     recent: Math.min(filteredRecent.length, 5),
-    pins: visiblePinnedTables.length,
     databases: filteredDbEntries.length,
   })
   $effect(() => { try { localStorage.setItem(SIDEBAR_TAB_KEY, sidebarTab) } catch {} })
@@ -438,7 +512,12 @@
   const showViews     = $derived(sidebarTab === 'views')
   const showMatViews  = $derived(sidebarTab === 'views')
   const showRecent    = $derived(sidebarTab === 'recent')
-  const showPins      = $derived(sidebarTab === 'pins')
+  // Pinned is a section of Tables, not a tab of its own. It was a fifth icon in
+  // the strip that held, for most connections, nothing at all - and it split
+  // "the tables in this schema" across two places you had to switch between to
+  // see. It renders above the Tables header, which is where the pins already
+  // sorted in `selectableOrder`.
+  const showPins      = $derived(sidebarTab === 'tables')
   const showDatabases = $derived(sidebarTab === 'databases')
   // Nothing collapses any more, so every list in the open tab is open.
   const recentOpen = true, tablesOpen = true, viewsOpen = true, matViewsOpen = true
@@ -626,9 +705,17 @@
     lf ? sortedRegularBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedRegularBase,
   );
 
+  // Pinned rows were never filtered: in their own tab the filter box was the
+  // only thing on screen that could act on them, and it did not. Sharing a tab
+  // with the table list makes that a visible bug - type a name and the pins
+  // would sit above the results untouched - so they take the same predicate.
+  const filteredPinnedTables = $derived(
+    lf ? visiblePinnedTables.filter((n) => n.toLowerCase().includes(lf)) : visiblePinnedTables,
+  );
+
   // Selectable rows in display order (pinned first, then regular) - drives shift range-select.
   const selectableOrder = $derived([
-    ...visiblePinnedTables,
+    ...filteredPinnedTables,
     ...filteredRegularTables.map((t) => t.name),
   ]);
 
@@ -702,7 +789,7 @@
     tables: filteredRegularTables, tablesTotal: regularTablesUnpinned.length,
     views: filteredViews, matViews: filteredMatViews, viewsTotal: views.length + matViews.length,
     recent: filteredRecent, recentTotal: recentTabs.length,
-    pins: visiblePinnedTables, pinsTotal: pinnedTables.length,
+    pins: filteredPinnedTables, pinsTotal: visiblePinnedTables.length,
     databases: filteredDbEntries, databasesTotal: dbEntries.length,
     activeDbKey,
   })
@@ -763,7 +850,7 @@
     void filteredViews.length
     void filteredMatViews.length
     void filteredRecent.length
-    void visiblePinnedTables.length
+    void filteredPinnedTables.length
     void filteredDbEntries.length
     renderedRowCount = listRowButtons().length
   })
@@ -816,14 +903,22 @@
   /** @type {HTMLElement | null} */
   let tableListEl = $state(null)
 
-  // No windowing. The sidebar renders every row.
+  // No windowing, and no `content-visibility` either. The sidebar renders every
+  // row, plainly.
   //
   // It used to virtualize all four lists, and the window maths was the source of
   // a run of scroll bugs - a blank list behind a full-height spacer, and jitter
-  // from a fractional row stride that `offsetTop` could only report as an
-  // integer. Off-screen rows are instead skipped by the browser via
-  // `content-visibility` on the row itself (see the list styles below), which
-  // needs no stride, no spacers and no scroll handler to go wrong.
+  // from a fractional row stride that `offsetTop` could only report as an integer.
+  // `content-visibility: auto` on each row replaced it, and traded those bugs for
+  // a worse one: WebKit - which is the engine this app actually ships on, via
+  // WKWebView - renders skipped subtrees lazily enough that a fast scroll outruns
+  // it, and rows arrive as blank dark gaps that fill in a frame or two later. A
+  // list that disappears while you scroll it is worse than a list that costs more
+  // to build.
+  //
+  // What makes rendering every row affordable is that a row is now just a <button>:
+  // the per-row ContextMenu.Root + Trigger (two component instances each) were
+  // hoisted to one shared menu per list. See the tables list markup below.
   const viewsToRender = $derived(filteredViews)
   const matViewsToRender = $derived(filteredMatViews)
   const dbEntriesToRender = $derived(filteredDbEntries)
@@ -913,7 +1008,7 @@
                   // 7px below it, so the rail floated in the gap between the pill and
                   // the border, attached to neither.
                   "group/tab relative inline-flex h-9 w-8 shrink-0 items-center justify-center transition-colors disabled:pointer-events-none disabled:opacity-40",
-                  // Two cues, not one. Colour alone does not separate five line icons
+                  // Two cues, not one. Colour alone does not separate four line icons
                   // at this size, so the selected tab also carries a filled surface and
                   // an accent rail - the same "which panel am I in" signal the VS Code
                   // activity bar uses.
@@ -1282,7 +1377,7 @@
                     {!dbEntriesLoaded ? 'Loading…' : lf ? 'No matching databases' : 'No other databases'}
                   </p>
                 {:else}
-                  <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]">
+                  <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5">
                     {#each dbEntriesToRender as db (db.key)}
                       {@const isCurrent = db.key === activeDbKey}
                       <li>
@@ -1371,7 +1466,7 @@
                 >Clear</button>
               </div>
               {#if recentOpen}
-                <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]">
+                <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5">
                   {#each filteredRecent.slice(0, 5) as item (item.schema + '.' + item.table)}
                     <li class="group/recent">
                       <div
@@ -1415,11 +1510,11 @@
             {/if}
 
             <!-- ── Pinned ─────────────────────────────────────────── -->
-            {#if showPins && visiblePinnedTables.length > 0 && connectionName}
+            {#if showPins && filteredPinnedTables.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <Icon name="pin" class="size-3 shrink-0 text-muted-foreground" />
                 <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Pinned</span>
-                {@render countBadge(visiblePinnedTables.length, pinnedTables.length)}
+                {@render countBadge(filteredPinnedTables.length, visiblePinnedTables.length)}
                 {#if pinnedTables.length > 5}
                   <button
                     type="button"
@@ -1429,10 +1524,10 @@
                   >Clear all</button>
                 {/if}
               </div>
-              <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]">
-                {#each visiblePinnedTables as tableName, idx (tableName)}
+              <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5">
+                {#each filteredPinnedTables as tableName, idx (tableName)}
                   {@const isSelected = selectedItems.has(tableName)}
-                  <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
+                  <li data-pin={tableName}>
                     <ContextMenu.Root>
                       <ContextMenu.Trigger class="w-full">
                         <button
@@ -1462,8 +1557,8 @@
                             {#if isSelected}
                               <Icon name="square-check" class="size-3 text-primary" />
                             {:else}
-                              <Icon name="pin" class="size-3 text-muted-foreground group-hover:hidden" />
-                              <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
+                              <Icon name="pin" class="absolute inset-0 size-3 text-muted-foreground group-hover:opacity-0" />
+                              <Icon name="square" class="absolute inset-0 size-3 opacity-0 group-hover:opacity-40" />
                             {/if}
                           </span>
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{tableName}</span>
@@ -1600,10 +1695,9 @@
                    A ContextMenu.Root + Trigger per <li> is two component instances
                    per table, and this list is no longer windowed - a 5,000-table
                    schema instantiated 10,000 menu components that exist only to be
-                   right-clicked. `content-visibility` skips a row's LAYOUT, not its
-                   construction, so that cost was paid in full on every schema switch
-                   and every filter keystroke. Which row was clicked is read off the
-                   event instead. -->
+                   right-clicked, and that cost is paid in full on every schema
+                   switch and every filter keystroke. Which row was clicked is read
+                   off the event instead. -->
               <ContextMenu.Root>
                 <ContextMenu.Trigger>
                   {#snippet child({ props })}
@@ -1617,7 +1711,7 @@
                         menuTable = li.dataset.table ?? ""
                         openMenu?.(e)
                       }}
-                      class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]"
+                      class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5"
                     >
                 {#if regularTables.length === 0 && tables.length > 0}
                   <li
@@ -1659,8 +1753,8 @@
                         {#if isSelected}
                           <Icon name="square-check" class="size-3.5 text-primary" />
                         {:else}
-                          <Icon name="table-2" class="size-3.5 opacity-70 group-hover:hidden" />
-                          <Icon name="square" class="size-3.5 hidden opacity-70 group-hover:block" />
+                          <Icon name="table-2" class="absolute inset-0 size-3.5 opacity-70 group-hover:opacity-0" />
+                          <Icon name="square" class="absolute inset-0 size-3.5 opacity-0 group-hover:opacity-70" />
                         {/if}
                       </span>
                       <span class="flex min-w-0 items-center gap-1.5">
@@ -1839,7 +1933,7 @@
                     menuView = li.dataset.view ?? ''
                     openMenu?.(e)
                   }}
-                  class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]"
+                  class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5"
                 >
                   {#if filteredViews.length === 0}
                     <!-- The tab-level empty state covers this. -->
@@ -1870,8 +1964,8 @@
                                 {#if isSelected}
                                   <Icon name="square-check" class="size-3 text-primary" />
                                 {:else}
-                                  <Icon name="table-view" class="size-3 opacity-50 group-hover:hidden" />
-                                  <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
+                                  <Icon name="table-view" class="absolute inset-0 size-3 opacity-50 group-hover:opacity-0" />
+                                  <Icon name="square" class="absolute inset-0 size-3 opacity-0 group-hover:opacity-40" />
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{view.name}</span>
@@ -1966,7 +2060,7 @@
                     menuMatView = li.dataset.matview ?? ''
                     openMenu?.(e)
                   }}
-                  class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5 [&>li]:[content-visibility:auto] [&>li]:[contain-intrinsic-size:auto_1.875rem]"
+                  class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5"
                 >
                   {#if filteredMatViews.length === 0}
                     <!-- The tab-level empty state covers this. -->
@@ -1997,8 +2091,8 @@
                                 {#if isSelected}
                                   <Icon name="square-check" class="size-3 text-primary" />
                                 {:else}
-                                  <Icon name="layers" class="size-3 opacity-50 group-hover:hidden" />
-                                  <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
+                                  <Icon name="layers" class="absolute inset-0 size-3 opacity-50 group-hover:opacity-0" />
+                                  <Icon name="square" class="absolute inset-0 size-3 opacity-0 group-hover:opacity-40" />
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{mv.name}</span>
