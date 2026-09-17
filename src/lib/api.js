@@ -906,7 +906,12 @@ export async function instanceReplication() { return await inv('instance_replica
  */
 export async function instanceSetConfig(name, value) {
   assertWritable('change server configuration')
-  return await inv('instance_set_config', { name, value })
+  // The command takes an Option<String>, and Tauri rejects the call outright on a
+  // type mismatch rather than coercing. A caller holding a number is an easy
+  // mistake to make - `bind:value` on a number input produces one - so the
+  // contract is enforced here rather than trusted at each call site. `null` has
+  // to survive: it is what resets the setting to its default.
+  return await inv('instance_set_config', { name, value: value == null ? null : String(value) })
 }
 
 /**

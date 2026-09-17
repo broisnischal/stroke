@@ -899,11 +899,20 @@
                     {@const open = openSetting === row.name}
                     {@const editable = row.editable !== false && !$readOnlyMode}
                     {@const modified = isModified(row)}
+                    <!-- pg setting names are [a-z0-9_], so they make valid ids as-is. -->
+                    {@const panelId = `cfg-panel-${row.name}`}
+                    {@const fieldId = `cfg-value-${row.name}`}
+                    {@const labelId = `cfg-label-${row.name}`}
                     <div class={cn('cfg-row border-b border-border/25 last:border-b-0', open && 'bg-muted/20')}>
+                      <!-- The focus style was `focus-visible:bg-accent/40` with the
+                           outline removed - the exact same treatment as `hover`, so a
+                           keyboard user could not tell which of 364 rows they were on.
+                           Project ring, inset so the rounded card does not clip it. -->
                       <button
                         type="button"
                         aria-expanded={open}
-                        class="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
+                        aria-controls={panelId}
+                        class="flex w-full items-center gap-3 px-3 py-2 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                         onclick={() => toggleSetting(row)}
                       >
                         <div class="min-w-0 flex-1">
@@ -918,7 +927,7 @@
                               </span>
                             {/if}
                             {#if row.editable === false}
-                              <Lock class="size-3 shrink-0 text-muted-foreground" aria-label="Read-only setting" />
+                              <Lock class="size-3 shrink-0 text-muted-foreground" role="img" aria-label="Read-only setting" />
                             {/if}
                           </div>
                           {#if row.description}
@@ -934,21 +943,26 @@
                       </button>
 
                       {#if open}
-                        <div class="border-t border-border/30 px-3 pb-3 pt-3">
+                        <div id={panelId} class="border-t border-border/30 px-3 pb-3 pt-3">
                           <div class="flex flex-wrap items-end gap-2">
                             <div class="min-w-[13rem] flex-1">
                               <div class="mb-1 flex items-baseline justify-between gap-2">
-                                <span class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">New value</span>
+                                <label
+                                  id={labelId}
+                                  for={row.vartype === 'bool' ? undefined : fieldId}
+                                  class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground"
+                                >New value</label>
                                 <span class="truncate font-mono text-ui-3xs text-muted-foreground">
                                   current: {shownValue(row)}{row.unit ? ` ${row.unit}` : ''}
                                 </span>
                               </div>
                               {#if row.vartype === 'bool'}
-                              <div class= "field-surface inline-flex h-9 items-center gap-0.5 bg-muted/30 p-0.5">
+                              <div role="group" aria-labelledby={labelId} class="field-surface inline-flex h-9 items-center gap-0.5 bg-muted/30 p-0.5">
                                   {#each ['on', 'off'] as v (v)}
                                     <button
                                       type="button"
                                       disabled={!editable}
+                                      aria-pressed={draft === v}
                                       onclick={() => (draft = v)}
                                       class={cn('h-full rounded-md px-4 font-mono text-ui-xs transition-colors disabled:opacity-40', draft === v ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
                                     >{v}</button>
@@ -956,6 +970,7 @@
                                 </div>
                               {:else if row.vartype === 'enum' && row.enumVals?.length}
                                 <select
+                                  id={fieldId}
                                   bind:value={draft}
                                   disabled={!editable}
                                   class= "field-surface h-9 w-full bg-muted/30 px-2.5 font-mono text-ui-sm text-foreground transition-[border-color,box-shadow] outline-none disabled:opacity-40"
@@ -963,10 +978,23 @@
                                   {#each row.enumVals as v (v)}<option value={v}>{v}</option>{/each}
                                 </select>
                               {:else}
+                                <!-- Deliberately `type="text"`, never `type="number"`.
+                                     Svelte coerces `bind:value` on a number input to a
+                                     JS number, and `instance_set_config` takes an
+                                     Option<String> - so every integer and real setting
+                                     failed at the IPC boundary with "invalid type:
+                                     floating point `0.2`, expected a string", which is
+                                     most of the 364. `inputmode` still brings up the
+                                     numeric keypad, and the spinner was wrong here
+                                     anyway: half of pg's "integer" settings are written
+                                     with a unit (`8MB`, `1min`), which a number input
+                                     will not accept at all. -->
                                 <input
+                                  id={fieldId}
                                   bind:value={draft}
                                   disabled={!editable}
-                                  type={row.vartype === 'integer' || row.vartype === 'real' ? 'number' : 'text'}
+                                  type="text"
+                                  inputmode={row.vartype === 'integer' ? 'numeric' : row.vartype === 'real' ? 'decimal' : 'text'}
                                   placeholder={row.bootVal || 'value'}
                                   onkeydown={(e) => {
                                     if (e.key === 'Enter' && editable && draft !== row.value) { e.preventDefault(); void applySetting(row) }
