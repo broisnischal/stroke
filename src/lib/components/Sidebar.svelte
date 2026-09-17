@@ -408,6 +408,27 @@
   })
   $effect(() => { try { localStorage.setItem(SIDEBAR_TAB_KEY, sidebarTab) } catch {} })
 
+  /** The database the sidebar has settled on. Held outside `$state` on purpose:
+      it is a bookmark for the effect below, not something the UI reads. */
+  let settledDbKey = activeDbKey
+  // Switching database lands on Tables. The Databases tab is a switcher, not a
+  // destination - once it has done its job, the list still under the cursor
+  // belongs to a database you are no longer looking at. Driven off the key
+  // rather than off the click so it fires when the switch actually lands: a
+  // click that opens the confirm dialog and gets cancelled must not move the tab,
+  // and a switch made from the command palette or the context menu must.
+  $effect(() => {
+    const key = activeDbKey
+    // Disconnected. Keep the bookmark - a reconnect puts the same key back, and
+    // that is not a switch.
+    if (!key) return
+    // First connection of the session, so the tab restored from localStorage stands.
+    if (!settledDbKey) { settledDbKey = key; return }
+    if (key === settledDbKey) return
+    settledDbKey = key
+    sidebarTab = 'tables'
+  })
+
   // The old per-section visibility flags are now just "is this the open tab".
   // Keeping the names means the ~900 lines of list markup below did not have to
   // be rewritten to ask a different question.
