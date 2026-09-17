@@ -735,8 +735,14 @@
 >
   <ContextMenu.Root>
   <ContextMenu.Trigger class="flex h-full min-w-0 flex-1">
+  <!-- Deliberately NOT a size container (`@container/sb`). Declaring one made the
+       whole sidebar subtree re-resolve its container queries on every pixel of a
+       resize drag, which measured 31ms of layout per frame against 5.8ms without
+       it in the same A/B - the drag ran at ~20fps. The one query it fed is gone:
+       the section headers below name their own list and carry their own count,
+       which needs no query at all. -->
   <aside
-    class="@container/sb studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
+    class="studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
     data-studio-chrome
   >
     {#if navSidebarPanel === "tables"}
@@ -1008,22 +1014,6 @@
             data-sidebar-filter
           />
           </div>
-          {#if connectionName && tabTotals[sidebarTab] > 0}
-            <!-- shown/total for the open tab. The tab strip is icon-only, so its dot
-                 can only say "something is in here"; the number belongs next to the
-                 filter that changes it. Hidden on a narrow sidebar, where the filter
-                 needs the width more than the count does. -->
-            <span
-              class="shrink-0 pl-0.5 font-mono text-ui-2xs tabular-nums text-muted-foreground @max-[13rem]/sb:hidden"
-              title="{tabCounts[sidebarTab]} shown of {tabTotals[sidebarTab]}"
-            >
-              {#if tabCounts[sidebarTab] !== tabTotals[sidebarTab]}
-                <span class="text-foreground">{tabCounts[sidebarTab]}</span>/{tabTotals[sidebarTab]}
-              {:else}
-                {tabTotals[sidebarTab]}
-              {/if}
-            </span>
-          {/if}
         </div>
       </div>
 
@@ -1070,11 +1060,18 @@
                  cannot switch in place (SQLite, Redis) never render it. -->
             {#if showDatabases && canSwitchDb && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
-                {#if true}
+                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Databases</span>
+                {#if dbEntries.length > 0}
+                  {@render countBadge(filteredDbEntries.length, dbEntries.length)}
+                {/if}
+                <!-- `countBadge` carries the `ml-auto` that pushes this group right;
+                     the buttons must not carry one too, or the free space splits
+                     between them and the count drifts into the middle of the row. -->
+                <div class={cn("flex shrink-0 items-center gap-1", dbEntries.length === 0 && "ml-auto")}>
                   {#if dbAdmin}
                     <button
                       type="button"
-                      class="hit-area ml-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                      class="hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                       onclick={onnewdatabase}
                       title={$readOnlyMode ? READ_ONLY_HINT : "New database"}
                       disabled={$readOnlyMode}
@@ -1084,14 +1081,14 @@
                   {/if}
                   <button
                     type="button"
-                    class={cn("hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground", !dbAdmin && "ml-auto")}
+                    class="hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
                     onclick={() => void loadDatabases()}
                     title="Refresh databases"
                     disabled={dbEntriesLoading}
                   >
                     <Icon name="refresh-cw" class={cn("size-3", dbEntriesLoading && "animate-spin")} />
                   </button>
-                {/if}
+                </div>
               </div>
               {#if databasesOpen}
                 {#if dbEntriesLoading && dbEntries.length === 0}
@@ -1181,12 +1178,12 @@
 
             <!-- ── Recent ─────────────────────────────────────────── -->
             {#if showRecent && filteredRecent.length > 0 && connectionName}
-              <!-- The tab carries the count, so this row keeps only the one
-                   action that belongs to this list. -->
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
+                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Recent</span>
+                {@render countBadge(Math.min(filteredRecent.length, 5), Math.min(recentTabs.length, 5))}
                 <button
                   type="button"
-                  class="ml-auto font-mono text-ui-2xs text-muted-foreground transition-colors hover:text-destructive"
+                  class="shrink-0 font-mono text-ui-2xs text-muted-foreground transition-colors hover:text-destructive"
                   onclick={onrecentclear}
                   title="Clear recent"
                 >Clear</button>
@@ -1240,11 +1237,11 @@
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <Icon name="pin" class="size-3 shrink-0 text-muted-foreground" />
                 <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Pinned</span>
-                <span class="ml-1 font-mono text-ui-2xs text-muted-foreground">{visiblePinnedTables.length}</span>
+                {@render countBadge(visiblePinnedTables.length, pinnedTables.length)}
                 {#if pinnedTables.length > 5}
                   <button
                     type="button"
-                    class="ml-auto font-mono text-ui-2xs text-muted-foreground hover:text-destructive transition-colors"
+                    class="shrink-0 font-mono text-ui-2xs text-muted-foreground hover:text-destructive transition-colors"
                     onclick={clearAllPins}
                     title="Clear all pinned tables"
                   >Clear all</button>
@@ -1390,6 +1387,18 @@
 
             <!-- ── Tables ─────────────────────────────────────────── -->
             {#if showTables}
+              <!-- Outside `tablesOpen`, like every other section header: a
+                   collapsed list still has to say what it is and how much it is
+                   hiding. `regularTablesUnpinned` is the denominator because
+                   pinning relocates a row into the Pinned list rather than
+                   filtering it out - counting against `regularTables` would read
+                   as "one table went missing" every time one is pinned. -->
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
+                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">{$t('sidebar.tables')}</span>
+                {#if regularTablesUnpinned.length > 0}
+                  {@render countBadge(filteredRegularTables.length, regularTablesUnpinned.length)}
+                {/if}
+              </div>
 
             {#if tablesOpen}
               <div
