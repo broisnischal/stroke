@@ -5,7 +5,7 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight, appNumberGrouping, appHighlightActiveRow, appGridFontSize, appImagePreview, appOpenUrlsOnClick } from '$lib/stores/settings.js'
   import { createSmoothScroll, wheelPixels } from '$lib/smooth-scroll.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
@@ -464,6 +464,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     e.preventDefault()
     clearActiveResizeListeners()
     const startY = e.clientY, startH = fkDockHeight
+    // Cleared per drag: a bare click with no movement would otherwise flush the
+    // PREVIOUS drag's height on pointerup and make the dock jump.
+    _fkDockPendingH = 0
     // Coalesce to one height write per frame. The dock is a flex sibling of the
     // scroll container, so every write reflows the grid, fires its ResizeObserver,
     // resizes the canvas backing store (which clears it) and forces a full
@@ -854,8 +857,33 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // (focus/selection/scroll all re-evaluate visible cells).
   /** @type {WeakMap<object, string>} */
   const _formatCache = new WeakMap();
+  // Grouped-number formatter, rebuilt only when the setting flips. Intl is slow
+  // enough to matter when a screen of cells each formats on every frame.
+  let _groupFmt = /** @type {Intl.NumberFormat | null} */ (null)
+  function groupNumber(/** @type {number} */ n) {
+    // Integers only. A float would be rounded to Intl's default 3 decimals, and
+    // silently changing a value the user is reading off the database is worse
+    // than leaving it ungrouped. Beyond 2^53 the digits are already unreliable,
+    // and bigints arrive as strings anyway.
+    if (!Number.isSafeInteger(n)) return String(n)
+    _groupFmt ??= new Intl.NumberFormat()
+    return _groupFmt.format(n)
+  }
+  $effect(() => { void $appNumberGrouping; _groupFmt = null; scheduleDraw() })
+  $effect(() => { void $appHighlightActiveRow; scheduleDraw() })
+  // Turning previews off must also drop what was already decoded - otherwise the
+  // thumbnails stay resident (up to 300 bitmaps) for a feature now switched off.
+  $effect(() => {
+    const on = $appImagePreview
+    untrack(() => { if (!on) releaseCellImages(); _redrawToken++; scheduleDraw() })
+  })
+
   function formatCell(value) {
+    // NULL stays the literal "NULL" here. drawCell swaps it for ∅ when the
+    // "Empty & NULL Markers" extension is on - that extension is the NULL
+    // display control, and a setting competing with it would be a second switch.
     if (value === null || value === undefined) return "NULL";
+    if (typeof value === "number" && $appNumberGrouping) return groupNumber(value);
     if (typeof value === "object") {
       const cached = _formatCache.get(value);
       if (cached !== undefined) return cached;
@@ -925,7 +953,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {number} cellW
    */
   function vectorHeads(cellW) {
-    const glyph = _glyphW > 0 ? _glyphW : Math.max(6, (_fonts?.cellPx ?? 12) * 0.6);
+    const glyph = _glyphW > 0 ? _glyphW : Math.max(6, (_fonts?.cellPx ?? 13) * 0.6);
     const fits = Math.floor((cellW - CELL_PAD_X * 2) / glyph);
     // "384d · " is ~7 glyphs and each value with its separator is ~7 more.
     if (fits < 14) return 0;
@@ -1086,6 +1114,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => { void $appTableStyle; scheduleDraw(); });
   $effect(() => { void $appTableAlign; scheduleDraw(); });
   $effect(() => { void $appZebraRows; scheduleDraw(); });
+  // Row spacing had no redraw of its own, so changing it moved the GEOMETRY
+  // without repainting: `contentHeight` and `spacerHeight` are $derived, so the
+  // scrollbar resized immediately while the canvas kept the pixels it had drawn
+  // at the old row height. The rows only took the new size once something else
+  // happened to trigger a paint - a scroll, a hover, a click - which reads as
+  // "row spacing half works". Every other grid-appearance store has this line;
+  // this one was missed when the setting was added.
+  // `_redrawToken++` READS and WRITES `_redrawToken`, which is `$state`. Done in
+  // a tracked effect that is an infinite loop - the write re-triggers the read -
+  // and Svelte kills the view with effect_update_depth_exceeded. `untrack` is how
+  // every other writer here does it (see the zoom watcher below); the row-spacing
+  // dependency stays tracked because `$appRowSpacing` is read outside it.
+  $effect(() => {
+    void $appRowSpacing
+    untrack(() => { _redrawToken++; scheduleDraw() })
+  });
 
   // ── Search-match highlighting ──────────────────────────────────────────────
   // The toolbar search filters rows server-side (ILIKE, case-insensitive);
@@ -1150,6 +1194,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     } else if (bottom > vst + ch) {
       setVirtualScroll(bottom - ch)
     }
+  }
+
+  /**
+   * Bring a row into view AFTER the related-rows dock has taken its space.
+   *
+   * Scrolling in the same tick reads the pre-dock `clientHeight`, so a row near
+   * the bottom is judged "already visible" and left alone - then the dock opens
+   * over it, and the row you clicked to inspect is the one row you can no longer
+   * see. `tick()` lets the dock lay out first; `clientHeight` is then the real,
+   * shortened viewport.
+   * @param {number} rowIdx
+   */
+  function scrollRowIntoViewBesideDock(rowIdx) {
+    tick().then(() => scrollRowIntoView(rowIdx))
   }
 
   /**
@@ -3606,12 +3664,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * `text-ui-xs` / `text-ui-3xs` sizes from DESIGN_SYSTEM.md, which is what the
    * canvas constants (ROW_HEIGHT, CELL_PAD_X, HEADER_H) were tuned against.
    */
-  const GRID_CELL_PX = 12
-  const GRID_TYPE_PX = 10
+  // The grid's two type sizes, at 100% zoom, in px.
+  //
+  // These are `text-ui-2xs` and `text-ui-3xs` resolved at the 16px root - the
+  // cell size was 12 and 10, a step below the scale, which is what made the grid
+  // read small against a sidebar rendering its rows at 15px.
+  //
+  // Quoted as plain numbers and multiplied by `canvasZoom` ON PURPOSE, rather
+  // than read off a `.text-ui-*` probe. Both the CSS scale and `canvasZoom` are
+  // pure functions of the same zoom rung, so the probe would only restate what
+  // `canvasZoom` already knows - but it would restate it from a second source,
+  // read at a different moment. That is exactly how the font and the geometry
+  // came apart: `_fonts` is a cache, the zoom watcher clears it, and whichever
+  // draw ran before `applySettings()` had written the new `--fs-*` vars to the
+  // root cached the OUTGOING rung's size. Reset from 200% and you got 25px text
+  // in a 30px row, permanently, because nothing invalidated the cache again.
+  //
+  // One source cannot disagree with itself. `13 * zoom` also tracks the real
+  // scale to within a pixel at every rung (see type-scale.js), so the fidelity
+  // the probe would have bought is a rounding step at 150% and above. */
+  // Cell size is the user's (Settings → Appearance → Grid text size); the type
+  // annotation rides 2px below it so the pair keeps its relationship at any size.
+  const GRID_CELL_PX = $derived($appGridFontSize)
+  const GRID_TYPE_PX = $derived(Math.max(7, $appGridFontSize - 2))
 
   /** Read the real computed mono FAMILY off the probe; sizes come from the zoom. */
   function readFonts(/** @type {HTMLElement} */ probe) {
     const prevClass = probe.className
+    // The probe supplies the FAMILY only - that one really does have to come off
+    // the DOM, because `--font-mono` is a user setting with no numeric form.
     probe.className = 'font-mono text-ui-xs'
     const family = getComputedStyle(probe).fontFamily
     probe.className = prevClass
@@ -3667,6 +3748,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       _fonts = null            // discard cached font metrics - zoom may change them
       _redrawToken++
     })
+  })
+
+  // Same for the grid text size: `_fonts` holds the measured px, so changing the
+  // setting without dropping the cache would move nothing until the next theme
+  // flip or webfont load.
+  $effect(() => {
+    void $appGridFontSize
+    untrack(() => { _fonts = null; _redrawToken++ })
   })
 
   // The focused-cell highlight is painted directly on the canvas by draw(),
@@ -4118,11 +4207,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // accumulate and is rebuilt by the next full frame, which the loop guarantees
     // arrives as soon as scrolling stops.
     if (!canBlit) _imgWanted.clear()
-    // Fonts are measured off the live DOM probe, so they already reflect the
-    // app zoom (.text-ui-* sizes resolve against --app-font-size). The layout
-    // constants (ROW_HEIGHT, HEADER_H, …) scale by the same canvasZoom factor,
-    // so text and geometry stay proportional with the rest of the UI. Do NOT
-    // multiply the probe fonts by canvasZoom again - that double-scales them.
+    // Font sizes and the layout constants (ROW_HEIGHT, HEADER_H, …) are both
+    // `<base px> * canvasZoom`, so text and geometry cannot land on different
+    // zoom rungs however this cache is invalidated. Do NOT re-source either one
+    // from a `.text-ui-*` probe: the CSS scale says the same thing a moment
+    // later, and the gap between the two is a bug, not a refinement.
     if (!_fonts) _fonts = readFonts(colorProbe)
     syncDisplayCaches()
     // Shimmer phase for skeleton rows, advanced from the clock so it moves at the
@@ -4321,6 +4410,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // change mid-frame. Read once here, then drawCell only touches this object.
       cols: geom.cols, pinnedCols, scrollLeft: _scrollLeft, viewportWidth: W,
       padX: CELL_PAD_X, iconHit: ICON_HIT, zoom: canvasZoom, fonts: _fonts,
+      highlightActiveRow: $appHighlightActiveRow,
       nameToActualIdx: _nameToActualIdx, colCache: _colCache,
       editingCell, focusedRow, hoveredRow, hoveredColName, focusColName, selectedCols,
       hasPendingEdits, pendingEdits, editedRowSet: _editedRowSet,
@@ -4565,7 +4655,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Red diff tint for rows staged for deletion.
     if (hasPendingDeletes && pendingDeletes.has(idx)) return withAlpha(c.RED, hoveredRow === idx ? 0.2 : 0.14)
     if (selected.has(idx)) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.18 : 0.13)
-    if (focusedRow === idx) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.09 : 0.07)
+    // The focused row's tint is what tells you where the keyboard is. Off by
+    // choice for people who navigate by cell and find the full-width band noisy -
+    // the focused CELL keeps its own ring either way, so nothing becomes invisible.
+    if (focusedRow === idx && c.highlightActiveRow) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.09 : 0.07)
     if (hoveredRow === idx) return withAlpha(c.cMutedBg, 0.18)
     // Zebra striping - a tint on odd rows. Below every interactive state above so
     // selection/hover/focus always win; O(1), no per-row allocation.
@@ -4761,11 +4854,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (ts.dash) ctx.setLineDash(ts.dash)
       ctx.beginPath()
       if (ts.cols) {
-        for (let k = 0; k < seps.length; k++) { ctx.moveTo(seps[k], ry); ctx.lineTo(seps[k], ry + rh) }
+        // "Ticks" clips each column rule to a short mark at the row's foot - a
+        // ruler rather than a cage. The column edge is still stated exactly where
+        // it matters (against the row rule) without a full-height line per column.
+        const colTop = ts.ticks ? ry + rh - Math.min(7, rh / 3) : ry
+        for (let k = 0; k < seps.length; k++) { ctx.moveTo(seps[k], colTop); ctx.lineTo(seps[k], ry + rh) }
       }
       if (ts.rows) { ctx.moveTo(0, ry + rh - 0.5); ctx.lineTo(vw, ry + rh - 0.5) }
+      // "Double" adds a second rule 3px inside the first. Batched into the SAME
+      // path as the primary rules, so twin lines cost one stroke per row, not two.
+      if (ts.double) {
+        if (ts.cols) {
+          for (let k = 0; k < seps.length; k++) { ctx.moveTo(seps[k] - 3, ry); ctx.lineTo(seps[k] - 3, ry + rh) }
+        }
+        if (ts.rows) { ctx.moveTo(0, ry + rh - 3.5); ctx.lineTo(vw, ry + rh - 3.5) }
+      }
       ctx.stroke()
       if (ts.dash) ctx.setLineDash([]) // reset so other strokes stay solid
+
+      // Group rule: a stronger line every Nth row, so you can count down a long
+      // page without tracking a cursor across it - ledger paper's one good idea.
+      // A second stroke, but only on 1 row in N, and only for the presets that
+      // ask for it; the dash was reset above so this line is always solid.
+      if (ts.groupEvery && (idx + 1) % ts.groupEvery === 0) {
+        ctx.strokeStyle = c.cBorder
+        ctx.beginPath()
+        ctx.moveTo(0, ry + rh - 0.5)
+        ctx.lineTo(vw, ry + rh - 0.5)
+        ctx.stroke()
+      }
     }
   }
 
@@ -4857,7 +4974,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // over formatter directives; skipped for staged/editing cells.
     const colTf = (!staged && c.rows[idx]) ? c.colTransformFns[col.name] : undefined
     // Avatar / image thumbnail transform - draw the image itself, not text.
-    if (colTf && _IMG_TF.has(colTf.id) && !isNull && isImageUrl(value)) {
+    if (colTf && _IMG_TF.has(colTf.id) && !isNull && $appImagePreview && isImageUrl(value)) {
       drawCellImage(ctx, String(value), cellX, ry, w, rh, cy, colTf.id === 'avatar', c)
       return
     }
@@ -5733,7 +5850,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           if (!row) return
           const fn = _vcolFns[vc.fnIdx]
           const val = fn ? fn(row) : ''
-          if (looksLikeUrl(val)) {
+          if (looksLikeUrl(val) && $appOpenUrlsOnClick) {
             void import('@tauri-apps/plugin-opener').then(m => m.openUrl(val)).catch(() => {})
           } else if (val) {
             void navigator.clipboard.writeText(val).catch(() => {})
@@ -5762,7 +5879,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           // Opening FK sub-view: close JSON expand for the same row (mutually exclusive)
           if (expandedRows.has(rowIdx)) { const s = new Set(expandedRows); s.delete(rowIdx); expandedRows = s }
           fkSubview = { rowIdx, kind: 'reverse', label: vc.label, relInfo: vc, data: { loading: true, columns: [], rows: [], error: null } }
-          scrollRowIntoView(rowIdx)
+          scrollRowIntoViewBesideDock(rowIdx)
           void onfetchrelatedrows({ kind: 'reverse', fromSchema: vc.fromSchema, fromTable: vc.fromTable, fromColumns: vc.fromColumns, toColumns: vc.toColumns, row }).then(res => {
             if (fkSubview?.rowIdx !== rowIdx || fkSubview?.label !== vc.label) return
             fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
@@ -5849,7 +5966,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           // Opening FK sub-view: close JSON expand for the same row (mutually exclusive)
           if (expandedRows.has(idx)) { const s = new Set(expandedRows); s.delete(idx); expandedRows = s }
           fkSubview = { rowIdx: idx, kind: 'forward', label: fkLbl, colIdx: actualIdx, data: { loading: true, columns: [], rows: [], error: null } }
-          scrollRowIntoView(idx)
+          scrollRowIntoViewBesideDock(idx)
           void onfetchrelatedrows({ kind: 'forward', fk, row: rows[idx] ?? [] }).then(res => {
             if (fkSubview?.rowIdx !== idx || fkSubview?.label !== fkLbl) return
             fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
@@ -5863,13 +5980,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           const href = cellLinkHref(formatCell(value))
           if (href) {
             const ut = cellUrlType(href, t.col.name)
-            if (e.ctrlKey || e.metaKey || e.shiftKey) void openExternal(href)
-            else if (ut === 'image' || ut === 'pdf') { lightboxUrl = href; lightboxType = /** @type {'image'|'pdf'} */ (ut) }
-            else void openExternal(href)
+            const isMedia = ut === 'image' || ut === 'pdf'
+            // The lightbox is gated by the PREVIEW setting, not the URL setting:
+            // it opens the file inside the app, so it is a preview, not "leaving
+            // to follow a link". That split is what lets someone keep previews
+            // while refusing to hand clicks to the browser, and vice versa.
+            if (isMedia && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+              if ($appImagePreview) { lightboxUrl = href; lightboxType = /** @type {'image'|'pdf'} */ (ut); return }
+              if ($appOpenUrlsOnClick) { void openExternal(href); return }
+              tableContainer?.focus({ preventScroll: true })
+              return
+            }
+            if ($appOpenUrlsOnClick) { void openExternal(href); return }
+            tableContainer?.focus({ preventScroll: true })
             return
           }
-          // Linkifier extension → deep-link an ID to an external system.
-          if (!isNull) {
+          // Linkifier extension → deep-link an ID to an external system. Same
+          // gate: it is still a click that leaves the app.
+          if (!isNull && $appOpenUrlsOnClick) {
             const linked = linkifyValue(value, cached?.colType ?? '', t.col.name)
             if (linked) { void openExternal(linked); return }
           }
@@ -6153,7 +6281,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <!-- Canvas: always mounted so the 2D context survives table navigation
                (each mount creates a new GPU-tracked context; keeping it alive
                across table switches eliminates the accumulation shown in DevTools). -->
-          <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible;will-change:transform">
+          <!-- 0x0 sticky anchor that pins the canvas to the top-left of the
+               scrollport. No `will-change: transform` here: the box never moves
+               under its own power, and promoting an empty sticky box to its own
+               compositor layer is what let WebKit keep painting it at a stale
+               offset while the scroll container was being RESIZED - the grid
+               appeared to slide up and down as the related-rows dock was dragged.
+               The canvas inside keeps its own will-change; that one is real. -->
+          <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible">
             <canvas
               bind:this={canvasEl}
               class="block"

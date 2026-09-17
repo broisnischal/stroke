@@ -28,6 +28,9 @@
     TABLE_STYLES,
     TABLE_ALIGN_OPTIONS,
     ROW_SPACINGS,
+    GRID_FONT_MIN,
+    GRID_FONT_MAX,
+    DEFAULT_GRID_FONT_SIZE,
     MOTION_MODES,
     DEFAULT_MAX_QUERY_HISTORY,
     DEFAULT_CONNECT_TIMEOUT_MS,
@@ -37,6 +40,7 @@
     AGENT_FONT_SIZES,
     THINKING_STYLES,
   } from "$lib/stores/settings.js";
+  import { PAGE_SIZE_OPTIONS, loadDefaultPageSize, saveDefaultPageSize } from '$lib/table-query.js';
   import {
     SQL_CASE_OPTIONS,
     SQL_FORMAT_FIELDS,
@@ -226,6 +230,13 @@
   }
 
   const rowSpacingEntries = Object.entries(ROW_SPACINGS);
+  // Rows-per-page is owned by table-query.js, not by this settings blob - the
+  // grid's own page-size dropdown writes it. Mirrored into local state so the
+  // row re-renders after a write, since there is no store to subscribe to.
+  let defaultPageSize = $state(loadDefaultPageSize());
+  const pageSizeItems = PAGE_SIZE_OPTIONS
+    .filter((n) => n > 0 && n <= 1_000)
+    .map((n) => ({ value: String(n), label: `${n} rows`, keywords: [String(n)] }));
   const motionEntries = Object.entries(MOTION_MODES);
   // NULL rendering is already an extension ("Empty & NULL Markers"), and a
   // second implementation in Settings would be two switches for one behaviour.
@@ -233,6 +244,11 @@
   // how NULL is drawn. Same extension, surfaced where people look for it.
   const NULLISH_ID = 'nullish-values';
   const nullishOn = $derived.by(() => { void $pluginState; return isPluginEnabled(NULLISH_ID); });
+  // Same story as NULL: "Boolean Glyphs" is a per-cell formatter, and formatters
+  // run after the grid's own value formatting and replace it. A boolean-display
+  // setting beside this toggle would be dead whenever the extension was on.
+  const BOOL_GLYPH_ID = 'boolean-glyph';
+  const boolGlyphOn = $derived.by(() => { void $pluginState; return isPluginEnabled(BOOL_GLYPH_ID); });
 
   const sidebarSideItems = [
     { value: 'left', label: 'Left' },
@@ -253,6 +269,37 @@
 
   function toggleZebraRows() {
     settings = updateSettings({ zebraRows: !settings.zebraRows });
+  }
+
+  function toggleNumberGrouping() {
+    settings = updateSettings({ numberGrouping: !settings.numberGrouping });
+  }
+
+  function toggleImagePreview() {
+    settings = updateSettings({ imagePreview: !settings.imagePreview });
+  }
+
+  function toggleOpenUrls() {
+    settings = updateSettings({ openUrlsOnClick: !settings.openUrlsOnClick });
+  }
+
+  function toggleHighlightActiveRow() {
+    settings = updateSettings({ highlightActiveRow: !settings.highlightActiveRow });
+  }
+
+  /** @param {number} px */
+  function setGridFontSize(px) {
+    const next = Math.min(GRID_FONT_MAX, Math.max(GRID_FONT_MIN, Math.round(px)));
+    if (next === settings.gridFontSize) return;
+    settings = updateSettings({ gridFontSize: next });
+  }
+
+  /** @param {string | undefined} v */
+  function setDefaultPageSize(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n === defaultPageSize) return;
+    saveDefaultPageSize(n);
+    defaultPageSize = loadDefaultPageSize();
   }
 
   function toggleAutoSaveQueries() {
@@ -1101,6 +1148,92 @@
         value={settings.rowSpacing}
         onValueChange={setRowSpacing}
         items={rowSpacingEntries.map(([id, s]) => ({ value: id, label: s.label, keywords: [s.label] }))}
+      />
+    </div>
+  {/if}
+  {#if show('Grid text size', 'Font size of the data grid, independent of the app zoom')}
+    <div class="flex items-center justify-between gap-4 py-2">
+      <div class="min-w-0 flex-1">
+        <p class="text-ui-sm font-medium text-foreground">Grid text size</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Size of the values in the data grid at 100% zoom. Separate from the app zoom, so the grid can run denser or larger than the rest of the interface without changing it.
+        </p>
+      </div>
+      <div class="flex shrink-0 items-center gap-1">
+        <Button variant="outline" size="icon" class="size-7" aria-label="Smaller grid text"
+          disabled={settings.gridFontSize <= GRID_FONT_MIN}
+          onclick={() => setGridFontSize(settings.gridFontSize - 1)}>−</Button>
+        <!-- The reading doubles as the reset. A separate "Reset" control for one
+             number is more chrome than the number itself; clicking the value you
+             are trying to change back is where the pointer already is. Title and
+             aria-label carry what it does, since the glyph cannot. -->
+        <button
+          type="button"
+          class="hit-area w-12 rounded text-center font-mono text-ui-xs tabular-nums text-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-100 disabled:hover:bg-transparent"
+          disabled={settings.gridFontSize === DEFAULT_GRID_FONT_SIZE}
+          title={settings.gridFontSize === DEFAULT_GRID_FONT_SIZE ? 'Default size' : `Reset to ${DEFAULT_GRID_FONT_SIZE}px`}
+          aria-label={settings.gridFontSize === DEFAULT_GRID_FONT_SIZE ? 'Grid text size, default' : `Reset grid text size to ${DEFAULT_GRID_FONT_SIZE} pixels`}
+          onclick={() => setGridFontSize(DEFAULT_GRID_FONT_SIZE)}
+        >{settings.gridFontSize}px</button>
+        <Button variant="outline" size="icon" class="size-7" aria-label="Larger grid text"
+          disabled={settings.gridFontSize >= GRID_FONT_MAX}
+          onclick={() => setGridFontSize(settings.gridFontSize + 1)}>+</Button>
+      </div>
+    </div>
+  {/if}
+  {#if show('Boolean glyphs', 'Show a coloured dot or check for boolean columns')}
+    {@render switchRow(
+      'Boolean glyphs',
+      'Draw boolean columns as a coloured dot or ✓ / ✗ instead of the raw true / false text, so a column of them reads at a glance. This is the Boolean Glyphs extension - the same switch, and its dot-or-check choice, live in Extensions.',
+      boolGlyphOn,
+      () => setPluginEnabled(BOOL_GLYPH_ID, !boolGlyphOn),
+    )}
+  {/if}
+  {#if show('Group large numbers', 'Thousands separators on integers in the grid')}
+    {@render switchRow(
+      'Group large numbers',
+      'Show integers with thousands separators, so 162957 reads as 162,957. Applies to whole numbers only - decimals are left exactly as the database returned them rather than being rounded to fit a format.',
+      settings.numberGrouping,
+      toggleNumberGrouping,
+    )}
+  {/if}
+  {#if show('Image previews', 'Show thumbnails for image URLs in the grid')}
+    {@render switchRow(
+      'Image previews',
+      'Draw a thumbnail for cells holding an image URL, and open the full image in a lightbox when one is clicked. Turning this off stops the images being downloaded at all, not just drawn - useful on a metered connection, or when a table of URLs should stay text.',
+      settings.imagePreview,
+      toggleImagePreview,
+    )}
+  {/if}
+  {#if show('Open links on click', 'Clicking a URL cell opens it in your browser')}
+    {@render switchRow(
+      'Open links on click',
+      'Click a cell holding a URL to open it in your browser. With this off a click just selects the cell, so a table full of links can be read and copied without one stray click leaving the app.',
+      settings.openUrlsOnClick,
+      toggleOpenUrls,
+    )}
+  {/if}
+  {#if show('Highlight the active row', 'Tint the row the keyboard is on')}
+    {@render switchRow(
+      'Highlight the active row',
+      'Tint the full width of the row holding the focused cell. Turn it off if you navigate cell by cell and find the band distracting - the focused cell keeps its own outline either way.',
+      settings.highlightActiveRow,
+      toggleHighlightActiveRow,
+    )}
+  {/if}
+  {#if show('Rows per page', 'How many rows a newly opened table fetches')}
+    <div class="flex items-center justify-between gap-4 py-2">
+      <div class="min-w-0 flex-1">
+        <p class="text-ui-sm font-medium text-foreground">Rows per page</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          How many rows a newly opened table fetches. The page-size control in the grid toolbar changes the same value, and applies to the table already open.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="Rows per page"
+        value={String(defaultPageSize)}
+        onValueChange={setDefaultPageSize}
+        items={pageSizeItems}
       />
     </div>
   {/if}

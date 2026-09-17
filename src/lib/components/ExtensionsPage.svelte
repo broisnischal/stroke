@@ -11,6 +11,7 @@
   } from "$lib/stores/plugins.js";
   import { TIMEZONE_OPTIONS } from "$lib/plugins/extensions/better-time.js";
   import { CURRENCIES } from "$lib/plugins/extensions/money-format.js";
+  import { BOOLEAN_STYLES } from "$lib/plugins/extensions/boolean-glyph.js";
   import { DEFAULT_RULES } from "$lib/plugins/extensions/linkify.js";
   import Clock from "@lucide/svelte/icons/clock";
   import Hash from "@lucide/svelte/icons/hash";
@@ -537,8 +538,17 @@
                 {@render settingRow("Source unit", "How the stored number is interpreted", ctl)}
               {:else if selected.id === "boolean-glyph"}
                 {@const c = cfg(selected.id, { style: "dot" })}
-                {#snippet ctl()}{@render toggle(c.style === "check", () => setPluginConfig(selected.id, { style: c.style === "check" ? "dot" : "check" }), "Toggle glyph style")}{/snippet}
-                {@render settingRow("Use ✓ / ✗", "Instead of a colored dot", ctl)}
+                {#snippet ctl()}
+                  <Select.Root type="single" value={c.style} onValueChange={(v) => v && setPluginConfig(selected.id, { style: v })}>
+                    <Select.Trigger size="sm" class={selTrigger} aria-label="Boolean style">
+                      <span class="truncate">{BOOLEAN_STYLES.find((s) => s.value === c.style)?.label ?? "Dot + text"}</span>
+                    </Select.Trigger>
+                    <Select.Content class="z-[120] max-h-[18rem] min-w-[10rem] p-1" sideOffset={6}>
+                      {#each BOOLEAN_STYLES as st (st.value)}<Select.Item value={st.value} label={st.label} class="py-1.5 pl-2 text-ui-xs">{st.label}</Select.Item>{/each}
+                    </Select.Content>
+                  </Select.Root>
+                {/snippet}
+                {@render settingRow("Style", "How true and false are drawn", ctl)}
               {:else if selected.id === "mask-sensitive"}
                 {@const c = cfg(selected.id, { revealOnHover: true })}
                 {#snippet ctl()}{@render toggle(c.revealOnHover !== false, () => setPluginConfig(selected.id, { revealOnHover: c.revealOnHover === false }), "Toggle reveal on hover")}{/snippet}

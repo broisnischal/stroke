@@ -55,7 +55,7 @@ const markScrollDefaultApplied = () => {
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, motion: MotionId, zebraRows: boolean, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, motion: MotionId, zebraRows: boolean, numberGrouping: boolean, imagePreview: boolean, openUrlsOnClick: boolean, highlightActiveRow: boolean, gridFontSize: number, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
 
 /**
  * UI type scale in design pixels: `[step, font-size, line-height?]`, matching
@@ -171,8 +171,17 @@ export const ICON_SETS = {
   hugeicons: { label: 'Hugeicons', description: 'Rounded, expressive premium set' },
   phosphor:  { label: 'Phosphor',  description: 'Friendly, geometric open set' },
 }
-/** @type {IconSetId} */
-export const DEFAULT_ICON_SET = 'lucide'
+/**
+ * Hugeicons is the app's look. Lucide remains the safety net rather than the
+ * default: `Icon.svelte` falls back to it per NAME, so the two glyphs this
+ * registry has not mapped yet still render - switching the default can add
+ * coverage gaps over time but never holes.
+ *
+ * Only new installs land here. `iconSet` is persisted, so anyone who has already
+ * run the app keeps whatever is in their settings until they change it.
+ * @type {IconSetId}
+ */
+export const DEFAULT_ICON_SET = 'hugeicons'
 /** @returns {IconSetId} */
 function normalizeIconSet(/** @type {unknown} */ id) {
   return ICON_SETS[/** @type {IconSetId} */ (id)] ? /** @type {IconSetId} */ (id) : DEFAULT_ICON_SET
@@ -195,6 +204,16 @@ function normalizeIconSet(/** @type {unknown} */ id) {
  */
 export const TABLE_STYLES = {
   lines:    { label: 'Lines',    description: 'Solid grid lines (classic)',        rows: true,  cols: true,  dash: null,   dots: false },
+  double:   { label: 'Double',   description: 'Twin rules - a ledger/print feel',  rows: true,  cols: true,  dash: null,   dots: false, double: true },
+  hairline: { label: 'Hairline', description: 'The finest dash - barely there',    rows: true,  cols: true,  dash: [1, 5], dots: false },
+  none:     { label: 'None',     description: 'No rules at all - text only',       rows: false, cols: false, dash: null,   dots: false },
+  // `groupEvery` draws a stronger rule every Nth row. Paired with rows:true it is
+  // ruled paper; with rows:false it is the only horizontal line on screen, which
+  // is the quietest way to keep a long page countable.
+  ledger:   { label: 'Ledger',   description: 'Row rules, heavier every 5th',     rows: true,  cols: false, dash: null,   dots: false, groupEvery: 5 },
+  graph:    { label: 'Graph',    description: 'Fine grid, heavier every 5th row', rows: true,  cols: true,  dash: null,   dots: false, groupEvery: 5 },
+  bands:    { label: 'Bands',    description: 'One rule every 5 rows, nothing else', rows: false, cols: false, dash: null, dots: false, groupEvery: 5 },
+  ticks:    { label: 'Ticks',    description: 'Row rules with short column ticks', rows: true,  cols: true,  dash: null,   dots: false, ticks: true },
   bordered: { label: 'Bordered', description: 'Bold high-contrast grid lines',     rows: true,  cols: true,  dash: null,   dots: false, strong: true },
   striped:  { label: 'Striped',  description: 'Alternating even/odd row shading',  rows: true,  cols: false, dash: null,   dots: false, zebra: true },
   dotted:   { label: 'Dotted',   description: 'Fine dotted grid, softer feel',     rows: true,  cols: true,  dash: [1, 3], dots: false },
@@ -215,9 +234,16 @@ export const DEFAULT_TABLE_STYLE = 'lines'
  * @type {Record<RowSpacingId, { label: string, height: number }>}
  */
 export const ROW_SPACINGS = {
+  // 19px is the floor that still clears a 13px glyph's descenders. Below it the
+  // text starts touching the rule beneath it, which reads as a rendering fault
+  // rather than as density.
+  dense: { label: 'Dense', height: 19 },
   compact: { label: 'Compact', height: 22 },
   standard: { label: 'Standard', height: 28 },
   relaxed: { label: 'Relaxed', height: 36 },
+  // Headroom for the top of the grid-text-size range: an 18px value needs a row
+  // taller than `relaxed` before it stops feeling cramped.
+  spacious: { label: 'Spacious', height: 44 },
 }
 /**
  * How much motion the interface is allowed.
@@ -241,6 +267,36 @@ export const MOTION_IDS = /** @type {MotionId[]} */ (Object.keys(MOTION_MODES))
 /** @param {unknown} id @returns {MotionId} */
 function normalizeMotion(id) {
   return MOTION_MODES[/** @type {MotionId} */ (id)] ? /** @type {MotionId} */ (id) : DEFAULT_MOTION
+}
+
+// NULL rendering deliberately does NOT live here. The "Empty & NULL Markers"
+// extension already owns it - DataTable draws ∅ instead of NULL when that
+// extension is on (see `c.nullishOn`) - and SettingsDialog already surfaces that
+// toggle for discoverability. A second control here would be two switches for
+// one behaviour, which is the trap that comment in SettingsDialog calls out.
+
+// Boolean rendering deliberately does NOT live here either. The "Boolean Glyphs"
+// extension owns it, and it wins by construction: per-cell formatters run AFTER
+// formatCell and replace its output, so a setting here would silently do nothing
+// whenever that extension was on. Surfaced in SettingsDialog as a toggle instead,
+// exactly like the NULL markers above.
+
+/**
+ * Grid text size in px at 100% zoom. The canvas multiplies by the zoom rung, so
+ * this is the base, not the rendered size.
+ *
+ * Bounded rather than free: below 10 the monospace glyphs stop resolving on the
+ * pixel grid, and above 18 the fixed row heights in ROW_SPACINGS clip the
+ * descenders. Anyone wanting more than this wants the app zoom.
+ */
+export const GRID_FONT_MIN = 10
+export const GRID_FONT_MAX = 18
+export const DEFAULT_GRID_FONT_SIZE = 13
+/** @param {unknown} n */
+function normalizeGridFontSize(n) {
+  const v = Math.round(Number(n))
+  if (!Number.isFinite(v)) return DEFAULT_GRID_FONT_SIZE
+  return Math.min(GRID_FONT_MAX, Math.max(GRID_FONT_MIN, v))
 }
 
 /** @type {RowSpacingId} */
@@ -385,6 +441,11 @@ export const DEFAULT_SETTINGS = {
   // shade alternate rows as part of their look, and this turns the same shading
   // on for any of the others without changing the separators you picked.
   zebraRows: false,
+  numberGrouping: false,
+  imagePreview: true,
+  openUrlsOnClick: true,
+  highlightActiveRow: true,
+  gridFontSize: DEFAULT_GRID_FONT_SIZE,
   // Off by default: every executed statement is already in Query History, and
   // saving each one would bury the handful you deliberately kept. On, a run that
   // succeeded is filed under Saved Queries too, deduplicated by its SQL.
@@ -447,6 +508,14 @@ export const appRowSpacing = writable(/** @type {RowSpacingId} */ (DEFAULT_ROW_S
 
 /** Reactive: shade alternate grid rows regardless of the style preset. */
 export const appZebraRows = writable(false)
+/** Grid value rendering - read by the canvas renderer on every paint. */
+export const appNumberGrouping = writable(false)
+/** Fetch and draw thumbnails for image-URL cells. Off also stops the FETCH. */
+export const appImagePreview = writable(true)
+/** Whether a click on a URL cell leaves the app to open it. */
+export const appOpenUrlsOnClick = writable(true)
+export const appHighlightActiveRow = writable(true)
+export const appGridFontSize = writable(DEFAULT_GRID_FONT_SIZE)
 
 /** Reactive: file every successful run under Saved Queries as well as History. */
 export const appAutoSaveQueries = writable(false)
@@ -609,6 +678,14 @@ export function loadSettings() {
     const motion = normalizeMotion(parsed.motion)
     const sqlFormat = normalizeSqlFormat(parsed.sqlFormat)
     const zebraRows = parsed.zebraRows === true
+    const numberGrouping = parsed.numberGrouping === true
+    // Both default ON - this is what the grid already did - so an absent key must
+    // read as true, not false.
+    const imagePreview = parsed.imagePreview !== false
+    const openUrlsOnClick = parsed.openUrlsOnClick !== false
+    // Defaults true, so an absent key must not read as false.
+    const highlightActiveRow = parsed.highlightActiveRow !== false
+    const gridFontSize = normalizeGridFontSize(parsed.gridFontSize)
     const autoSaveQueries = parsed.autoSaveQueries === true
     const liveModeEnabled = parsed.liveModeEnabled === true
     const nullSortOrder = NULL_SORT_IDS.includes(parsed.nullSortOrder) ? parsed.nullSortOrder : DEFAULT_NULL_SORT
@@ -618,7 +695,7 @@ export function loadSettings() {
     const agentShowQueryCards = parsed.agentShowQueryCards !== false
     const agentWebAccess = parsed.agentWebAccess === true
     const tableTextAlign = TABLE_ALIGN_IDS.includes(parsed.tableTextAlign) ? parsed.tableTextAlign : DEFAULT_TABLE_ALIGN
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, motion, zebraRows, autoSaveQueries, sqlFormat }
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, motion, zebraRows, numberGrouping, imagePreview, openUrlsOnClick, highlightActiveRow, gridFontSize, autoSaveQueries, sqlFormat }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -753,6 +830,11 @@ export function applySettings(settings) {
   // Push formatter prefs into the shared option holder that format-sql.js reads.
   setSqlFormatOptions(settings.sqlFormat)
   setStore(appZebraRows, settings.zebraRows === true)
+  setStore(appNumberGrouping, settings.numberGrouping === true)
+  setStore(appImagePreview, settings.imagePreview !== false)
+  setStore(appOpenUrlsOnClick, settings.openUrlsOnClick !== false)
+  setStore(appHighlightActiveRow, settings.highlightActiveRow !== false)
+  setStore(appGridFontSize, normalizeGridFontSize(settings.gridFontSize))
   setStore(appAutoSaveQueries, settings.autoSaveQueries === true)
   setStore(appLiveMode, settings.liveModeEnabled === true)
   setStore(appAgentQueryCards, settings.agentShowQueryCards !== false)
