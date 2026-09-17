@@ -84,6 +84,87 @@ fn set_macos_webview_backdrop(window: &tauri::WebviewWindow, color: tauri::windo
     });
 }
 
+/// Let the page render at the display's real refresh rate instead of 60fps.
+///
+/// WebKit ships a feature flag called `PreferPageRenderingUpdatesNear60FPSEnabled`,
+/// default ON, which clamps the whole rendering update - `requestAnimationFrame`,
+/// CSS animations, and the compositor commit that follows them - to ~60Hz no
+/// matter what the panel can do. On a ProMotion display that is half the frames
+/// the hardware is already refreshing at, and it shows up as judder anywhere the
+/// main thread is drawing while the scrolling thread moves at the full 120Hz:
+/// the canvas grid lags the container it is pinned inside by up to a frame.
+///
+/// There is no public API for this. It is reachable through WebKit's own feature
+/// registry - the same list Safari's Develop > Feature Flags menu drives - via
+/// `+[WKPreferences _features]` and `-[WKPreferences _setEnabled:forFeature:]`.
+/// Both are underscore SPI, so every selector is checked before it is sent and
+/// the whole thing degrades to "stay at 60" rather than trapping on a WebKit
+/// version that has renamed or removed the flag.
+#[cfg(target_os = "macos")]
+fn unlock_macos_webview_frame_rate(window: &tauri::WebviewWindow) {
+    /// WebKit's key for the 60fps clamp, as it appears in `_features`.
+    const FLAG: &str = "PreferPageRenderingUpdatesNear60FPSEnabled";
+
+    let _ = window.with_webview(|webview| unsafe {
+        use objc2::runtime::{AnyClass, AnyObject, Bool};
+        use objc2::{msg_send, sel};
+
+        let view: *mut AnyObject = webview.inner().cast();
+        if view.is_null() {
+            return;
+        }
+        let Some(prefs_cls) = AnyClass::get(c"WKPreferences") else {
+            return;
+        };
+        let has_features: bool = msg_send![prefs_cls, respondsToSelector: sel!(_features)];
+        if !has_features {
+            return;
+        }
+
+        let config: *mut AnyObject = msg_send![view, configuration];
+        if config.is_null() {
+            return;
+        }
+        let prefs: *mut AnyObject = msg_send![config, preferences];
+        if prefs.is_null() {
+            return;
+        }
+        let can_set: bool = msg_send![prefs, respondsToSelector: sel!(_setEnabled:forFeature:)];
+        if !can_set {
+            return;
+        }
+
+        // `_features` is every flag WebKit knows, ~600 of them, and the only way
+        // to reach one is to find the object whose `key` matches: the setter takes
+        // a WKFeature, not a name.
+        let features: *mut AnyObject = msg_send![prefs_cls, _features];
+        if features.is_null() {
+            return;
+        }
+        let count: usize = msg_send![features, count];
+        for i in 0..count {
+            let feature: *mut AnyObject = msg_send![features, objectAtIndex: i];
+            if feature.is_null() {
+                continue;
+            }
+            let key: *mut AnyObject = msg_send![feature, key];
+            if key.is_null() {
+                continue;
+            }
+            // Read the NSString as UTF-8 rather than building one to compare
+            // against - this is the only string work in the loop and it runs once.
+            let utf8: *const std::ffi::c_char = msg_send![key, UTF8String];
+            if utf8.is_null() {
+                continue;
+            }
+            if std::ffi::CStr::from_ptr(utf8).to_bytes() == FLAG.as_bytes() {
+                let _: () = msg_send![prefs, _setEnabled: Bool::NO, forFeature: feature];
+                return;
+            }
+        }
+    });
+}
+
 /// Resolve the tray icon that matches the current system appearance.
 /// A dark mark sits on the light menu bar; a light mark on the dark menu bar,
 /// so the logo stays visible regardless of the OS theme.
@@ -231,6 +312,11 @@ pub fn run() {
                     view.setMagnification(1.0);
                     view.setPageZoom(1.0);
                 });
+
+                // Unclamp the render loop from 60fps. Done here, before the page
+                // has finished loading, so the first frame the user sees is
+                // already running at the display's rate.
+                unlock_macos_webview_frame_rate(&window);
 
                 // Install the standard macOS application menu. WKWebView text
                 // fields rely on the app menu's Edit items for the standard editing
