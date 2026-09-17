@@ -75,9 +75,26 @@ export function track(event, n = 1) {
   }
 }
 
+/**
+ * Is this a `npm run tauri` dev run rather than a real build?
+ *
+ * `isTauri()` is true for both, so it cannot tell them apart - and a dev run
+ * serves the page from http://localhost:1420, an origin the endpoint does not
+ * allow. Every flush failed CORS and logged three console errors, which is noise
+ * in the one place a developer is reading. Counting a developer's own clicks as
+ * product usage would be wrong anyway, so this is the right place to stop.
+ */
+function isDevRun() {
+  try {
+    return import.meta.env.DEV === true
+  } catch {
+    return false
+  }
+}
+
 /** Send whatever has accumulated. Fire-and-forget by design. */
 export async function flush() {
-  if (!enabled() || !isTauri()) { pending.clear(); return }
+  if (!enabled() || !isTauri() || isDevRun()) { pending.clear(); return }
   if (pending.size === 0 && !launched) return
 
   const events = Object.fromEntries(pending)
@@ -115,12 +132,19 @@ export async function flush() {
  * (the flush guard handles the rest).
  */
 export function startTelemetry() {
-  if (started || !isTauri() || !enabled()) return
+  if (started || !isTauri() || !enabled() || isDevRun()) return
   started = true
   launched = true
   timer = setInterval(() => void flush(), FLUSH_MS)
   // A session shorter than the flush interval would otherwise report nothing.
-  window.addEventListener('beforeunload', () => void flush())
+  // Named, and removed by stopTelemetry: an anonymous listener added here could
+  // never be taken off again, so every hot update stacked another one.
+  window.addEventListener('beforeunload', flushOnUnload)
+  void flush()
+}
+
+/** @type {() => void} */
+function flushOnUnload() {
   void flush()
 }
 
@@ -128,5 +152,18 @@ export function stopTelemetry() {
   if (timer) clearInterval(timer)
   timer = null
   started = false
+  if (typeof window !== 'undefined') window.removeEventListener('beforeunload', flushOnUnload)
   pending.clear()
+}
+
+// Tear down on hot update.
+//
+// This module owns a `setInterval` and a window listener in module scope, and
+// neither is reachable from the new module instance after a hot swap. Without
+// this the OLD timer keeps firing the OLD `flush` - so a fix to `flush` appears
+// not to work until a full reload, which is exactly how the dev-run guard above
+// looked broken after it had already landed. The stale timer also stacks: one
+// more interval per hot update, all of them posting.
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => stopTelemetry())
 }
