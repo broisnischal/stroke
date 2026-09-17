@@ -739,8 +739,33 @@
     const list = activeTabLabel.toLowerCase()
     if (!lf) return `${total} ${list}`
     if (shown === 0) return `No ${list} match ${lf}`
-    if (soleResult) return `1 of ${total} ${list}. Press Enter to open ${soleResult.label}.`
+    if (renderedRowCount === 1) return `1 of ${total} ${list}. Press Enter to open ${soleResult?.label ?? 'it'}.`
     return `${shown} of ${total} ${list}`
+  })
+
+  /**
+   * How many rows the open list is drawing, kept in sync with the DOM.
+   *
+   * The model said one row and the chip did not appear, while the section
+   * header - reading the very same expression - said 1/14. Rather than keep
+   * hunting that, both the chip and Enter now read the rows themselves. There is
+   * one source of truth for "is there exactly one thing here", and it is the
+   * thing the user is looking at.
+   *
+   * The effect re-runs whenever any list or the open tab changes; `$effect` runs
+   * after the DOM is updated, so the count it takes is the list as rendered.
+   */
+  let renderedRowCount = $state(0)
+  $effect(() => {
+    // Touch every list so this re-runs when the rendering could have changed.
+    void sidebarTab
+    void filteredRegularTables.length
+    void filteredViews.length
+    void filteredMatViews.length
+    void filteredRecent.length
+    void visiblePinnedTables.length
+    void filteredDbEntries.length
+    renderedRowCount = listRowButtons().length
   })
 
   /**
@@ -1144,7 +1169,7 @@
             data-sidebar-filter
           />
           </div>
-          {#if soleResult}
+          {#if renderedRowCount === 1}
             <!-- A real target, not a legend. When the filter has left one row,
                  the fastest thing to do with it is open it, and a hint that only
                  tells you which key to press makes the pointer take the long way
@@ -1158,9 +1183,9 @@
               type="button"
               tabindex="-1"
               class="hit-area shrink-0 rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-ui-3xs text-muted-foreground transition-colors hover:border-primary/60 hover:bg-accent hover:text-foreground"
-              title="Open {soleResult.label} (Enter)"
-              aria-label="Open {soleResult.label}"
-              onclick={() => soleResult?.open()}
+              title={soleResult ? `Open ${soleResult.label} (Enter)` : 'Open the only match (Enter)'}
+              aria-label={soleResult ? `Open ${soleResult.label}` : 'Open the only match'}
+              onclick={() => { const rows = listRowButtons(); if (rows.length === 1) rows[0].click(); else soleResult?.open() }}
             >↵</button>
           {/if}
           <!-- Held apart: the description is static and read on focus, the status
