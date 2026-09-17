@@ -8,12 +8,45 @@
  *   [*]         all array items
  *   [0:3]       slice (start:end, step optional)
  *   ["key"]     quoted property (handles keys with spaces/dots)
+ *   ["a","b"]   union of properties -> one object per element with just those keys
+ *   [0,2,-1]    union of indices -> those elements, in the order listed
  *   ..key       recursive descent
  *   [?(@.k)]    filter - truthy check
  *   [?(@.k op v)] filter - ==, !=, >, >=, <, <=
  */
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Split a bracket body on its top-level commas, or null when it holds none.
+ *
+ * Quote-aware, so a key that contains a comma survives intact: `["a,b","c"]` is
+ * two members, not three. Returns null for an unterminated quote so the caller's
+ * existing branches report it in their own words rather than this one guessing.
+ *
+ * @param {string} inner
+ * @returns {string[] | null}
+ */
+function splitUnion(inner) {
+  /** @type {string[]} */
+  const out = []
+  let buf = ''
+  let quote = ''
+  for (const ch of inner) {
+    if (quote) {
+      if (ch === quote) quote = ''
+      buf += ch
+      continue
+    }
+    if (ch === '"' || ch === "'") { quote = ch; buf += ch; continue }
+    if (ch === ',') { out.push(buf.trim()); buf = ''; continue }
+    buf += ch
+  }
+  if (quote) return null
+  if (out.length === 0) return null
+  out.push(buf.trim())
+  return out
+}
 
 /** @param {unknown} v @returns {'object'|'array'|'string'|'number'|'boolean'|'null'|'undefined'} */
 function typeOf(v) {
@@ -304,6 +337,57 @@ export function evalJsonPath(root, path) {
             continue
           }
           cur = slice(cur)
+          continue
+        }
+
+        // ["a","b"] / [0,2] - union selector.
+        //
+        // BEFORE the quoted-property branch on purpose. That branch's regex is
+        // greedy - /^["'](.+)["']$/ against `"day","requests"` matches, capturing
+        // `day","requests` - so a union used to resolve to a key nobody has and
+        // return [null, null] with ok:true. A silent wrong answer, not an error.
+        //
+        // Filters are skipped: `[?(@.a > 0)]` may hold commas of its own, and
+        // they are not union separators.
+        const unionMembers = inner.startsWith('?(') ? null : splitUnion(inner)
+        if (unionMembers) {
+          if (unionMembers.some((m) => m === '')) {
+            return { ok: false, error: `Empty member in union [${inner}]` }
+          }
+          // All-integer members select elements; anything else selects names.
+          // Mixing the two has no sensible result shape, so it is not accepted.
+          if (unionMembers.every((m) => /^-?\d+$/.test(m))) {
+            const idxs = unionMembers.map(Number)
+            const pick = (/** @type {unknown} */ a) =>
+              Array.isArray(a) ? idxs.map((i) => (i < 0 ? a[a.length + i] : a[i])) : []
+            if (projected) {
+              // Flatten into the projection, like the slice branch above.
+              /** @type {unknown[]} */
+              const out = []
+              for (const item of /** @type {unknown[]} */ (cur)) if (Array.isArray(item)) out.push(...pick(item))
+              cur = out
+              continue
+            }
+            if (!Array.isArray(cur)) return { ok: false, error: `[${inner}] requires an array` }
+            cur = pick(cur)
+            continue
+          }
+          // Quotes optional: the dot accessor takes a bare key, so demanding them
+          // only here would be a trap for the one syntax people copy from docs.
+          const keys = unionMembers.map((m) => m.replace(/^["'](.*)["']$/, '$1'))
+          /** @param {unknown} o */
+          const pickKeys = (o) => {
+            if (!o || typeof o !== 'object') return undefined
+            /** @type {Record<string, unknown>} */
+            const picked = {}
+            for (const k of keys) picked[k] = /** @type {any} */ (o)[k]
+            return picked
+          }
+          // One object per element holding the chosen keys - NOT RFC 9535's flat
+          // list of values. Flattening two keys over 60 rows gives 120 loose
+          // values with nothing saying which is which; this view renders rows, so
+          // the result has to stay row-shaped to be readable at all.
+          cur = Array.isArray(cur) ? cur.map(pickKeys) : pickKeys(cur)
           continue
         }
 

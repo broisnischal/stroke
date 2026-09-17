@@ -219,7 +219,16 @@
     overviewRulerLanes: 0,
     hideCursorInOverviewRuler: true,
     overviewRulerBorder: false,
-    smoothScrolling: false,  // smoothScrolling has a small CPU cost on every scroll event
+    // On by default now: this view is read by scrolling, and the animated
+    // offset is what makes a wheel notch land somewhere you can follow. The CPU
+    // cost it was turned off for is per scroll EVENT, not per frame, and it buys
+    // back more than it costs on a 120Hz panel where an unsmoothed notch jumps
+    // several lines between frames.
+    smoothScrolling: true,
+    // A wheel notch moves a predictable number of lines, and holding Alt gives a
+    // 5x jump for crossing a large document - Monaco's own fast-scroll gesture.
+    mouseWheelScrollSensitivity: 1,
+    fastScrollSensitivity: 5,
     renderLineHighlight: /** @type {'none'} */ ('none'),
     contextmenu: true,
     selectionHighlight: false,
@@ -384,7 +393,7 @@
       type="text"
       bind:value={jsonPath}
       placeholder=".field  ·  [0]  ·  [*].name  ·  ..key  ·  [?(@.x > 0)]"
-      class="min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+      class="no-focus-ring min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
       spellcheck="false"
       autocomplete="off"
       onfocus={() => { pathFocused = true }}
