@@ -1888,6 +1888,13 @@ let rowSearch = $state('')
       hiddenColumns: new Set(hiddenColumns),
       filterBarOpen,
       dataViewMode,
+      // Structure vs data is per tab, like every other thing on this list. It
+      // used to be one module-level `$state` shared by every open table, so
+      // opening a second tab reset the first one back to the grid - and the
+      // structure you were reading belonged to whichever table was last active.
+      tableViewMode,
+      structureColumns,
+      structureSearch,
       ...(() => { const s = tableGetScroll(); return { scrollLeft: s.left, scrollTop: s.top } })(),
       expandedRows: tableGetExpanded(),
     }
@@ -1923,6 +1930,13 @@ let rowSearch = $state('')
     filterBarOpen = s.filterBarOpen ?? false
     // Fresh tabs have no stored view mode - honor Settings → Database → Default view.
     dataViewMode = s.dataViewMode ?? /** @type {any} */ (loadSettings().defaultDataView)
+    // Tabs opened before this was per-tab have no stored value; the grid is the
+    // right default for them. The structure rows travel with the mode so a tab
+    // restored into structure paints its OWN columns rather than flashing the
+    // previous tab's while the auto-load effect refetches.
+    tableViewMode = s.tableViewMode ?? 'data'
+    structureColumns = /** @type {any} */ (s.structureColumns ?? [])
+    structureSearch = s.structureSearch ?? ''
     // Restore the grid scroll position for this tab. Defer one tick so that
     // if DataTable just remounted (switching from a non-table tab), the new
     // applyScroll binding is in place before we call it - otherwise the old
@@ -3844,8 +3858,12 @@ let rowSearch = $state('')
     // ERD inspector), where re-activating the existing tab would be a no-op.
     const existing = duplicate ? null : findTableTab(tabs, schema, table)
     if (existing) {
-      tableViewMode = 'data'
-      structureColumns = []
+      // No view reset here. These two lines used to force the grid on, because
+      // `tableViewMode` was shared by every tab and re-activating one would
+      // otherwise inherit the last tab's mode. It is part of the tab's snapshot
+      // now, so clicking a table that is already open in the structure editor
+      // returns you to the structure editor - which is what "the tab kept my
+      // place" means everywhere else in this app.
       await activateTab(existing.id)
       if (filters || search !== null) {
         if (resetQuery) {

@@ -32,6 +32,9 @@ import { loadDefaultPageSize } from '$lib/table-query.js'
  * @property {Set<string>} hiddenColumns
  * @property {boolean} filterBarOpen
  * @property {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} [dataViewMode]
+ * @property {'data' | 'structure'} [tableViewMode] - data grid vs the structure editor
+ * @property {unknown[]} [structureColumns] - the structure editor's rows for THIS table
+ * @property {string} [structureSearch]
  * @property {number} [scrollLeft]
  * @property {number} [scrollTop]
  * @property {number[]} [expandedRows] - row indices with an open inline detail panel; restored in background/snapshot panes
@@ -86,6 +89,8 @@ export function cloneTableTabState(state) {
     hiddenColumns: new Set(state.hiddenColumns),
     editingCell: state.editingCell ? { ...state.editingCell } : null,
     expandedRows: [...(state.expandedRows ?? [])],
+    // Immutable value array, like `columns` - reassigned wholesale by loadStructure().
+    structureColumns: state.structureColumns,
   }
 }
 
@@ -123,6 +128,9 @@ export function createTableTabState(schema = 'public', table = null, tableKind =
     hiddenColumns: new Set(),
     filterBarOpen: false,
     dataViewMode: 'table',
+    tableViewMode: 'data',
+    structureColumns: [],
+    structureSearch: '',
     scrollLeft: 0,
     scrollTop: 0,
     expandedRows: [],
