@@ -188,9 +188,11 @@ function normalizeIconSet(/** @type {unknown} */ id) {
 }
 
 /**
- * @typedef {'lines'|'dotted'|'dots'|'minimal'|'bordered'|'striped'|'dashed'|'columns'} TableStyleId
+ * @typedef {'lines'|'double'|'hairline'|'none'|'ledger'|'graph'|'bands'|'ticks'
+ *   |'dotted'|'dots'|'minimal'|'bordered'|'striped'|'dashed'|'columns'} TableStyleId
  * @typedef {{ label: string, description: string,
- *   rows: boolean, cols: boolean, dash: number[]|null, dots: boolean, strong?: boolean, zebra?: boolean }} TableStyleDef
+ *   rows: boolean, cols: boolean, dash: number[]|null, dots: boolean, strong?: boolean, zebra?: boolean,
+ *   double?: boolean, ticks?: boolean, groupEvery?: number }} TableStyleDef
  */
 
 /**
