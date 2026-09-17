@@ -241,9 +241,20 @@ textarea:not(.no-focus-ring):not(.no-field-frame) {
    naming explicitly - the bare-input rule never reached them, which is how the
    nullable column ended up the only one still wearing a full pill. */
 .cell-fields :is(input, textarea, [data-slot="select-trigger"]) {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  /* `!important` because the frame rule above cannot be out-specified by a
+     container class. Its seven `:not([type=...])` guards each count as an
+     attribute selector, so it lands at (0,9,1) while `.cell-fields input` is
+     (0,1,1) - the first pass of this fix lost to it, and lost silently: the
+     select triggers went flush (their frame is `.field-surface`, which sits in
+     `@layer base` and loses to any unlayered rule) while every `<input>` in the
+     same row kept its pill. Half-fixed read as a different bug.
+
+     The alternative is threading `.no-field-frame` through every field in the
+     grid, which is the per-call-site opt-out this container class exists to
+     replace. */
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
 }
 
 /* One edit highlight, the same one the data grid uses for the cell being edited
@@ -262,8 +273,8 @@ textarea:not(.no-focus-ring):not(.no-field-frame) {
    a focus outline on top of the cell's highlight either. Two indicators for one
    focus is what the field frame was doing before. */
 .cell-fields td:focus-within :is(input, textarea, [data-slot="select-trigger"]) {
-  outline: none;
-  box-shadow: none;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 /* An editing cell keeps its field frame - the rounded, bordered input inside the
