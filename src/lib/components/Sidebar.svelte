@@ -21,6 +21,7 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { cn } from "$lib/utils.js";
   import { CRASH_WORD, isMagic, armCrash } from '$lib/games/easter-eggs.js'
+  import { flushSync } from "svelte";
   import { t } from "$lib/i18n.js";
   import { visibleRowCount, soleMatch } from "$lib/sidebar-filter.js";
   import { formatTableRowCount } from "$lib/table-list.js";
@@ -742,6 +743,29 @@
     return `${shown} of ${total} ${list}`
   })
 
+  /**
+   * One activation button per row the open list is actually drawing, in order.
+   *
+   * Counted off the DOM rather than off `soleResult`, because the model and the
+   * rendering can disagree and only one of them is what the user is looking at:
+   * a tab that draws two sections, an empty-state row, a list still holding the
+   * previous tab's rows. If there is exactly one row on screen, Enter opens that
+   * row - and it opens it by clicking the row's own button, so Enter and a click
+   * cannot drift apart no matter what a row grows into later.
+   *
+   * The first button in each `li` is the row itself; rows whose button sits
+   * inside a context-menu trigger are reached the same way, and an `li` with no
+   * button (the "no tables in this schema" placeholder) drops out.
+   * @returns {HTMLElement[]}
+   */
+  function listRowButtons() {
+    const root = tableListEl ?? scrollContainerEl
+    if (!root) return []
+    return [...root.querySelectorAll('li')]
+      .map((li) => li.querySelector('button'))
+      .filter((b) => b instanceof HTMLElement && !b.disabled)
+  }
+
   /** Commit a pending debounce now, so Enter acts on what is actually typed. */
   function flushFilter() {
     if (!filterDebounce) return
@@ -1087,7 +1111,19 @@
               // which of six rows was meant is worse than a key that does nothing.
               if (e.key === 'Enter') {
                 flushFilter()
-                const sole = soleResult
+                // Commit the render too: `flushFilter` only sets state, and the
+                // rows are counted off the DOM, which is a frame behind until
+                // this runs.
+                flushSync()
+                const rows = listRowButtons()
+                if (rows.length === 1) {
+                  e.preventDefault()
+                  rows[0].click()
+                  return
+                }
+                // Nothing on screen to act on, or several. Fall back to the model
+                // only where the list is not rendered at all (a collapsed section).
+                const sole = rows.length === 0 ? soleResult : null
                 if (!sole) return
                 e.preventDefault()
                 sole.open()
@@ -1109,12 +1145,23 @@
           />
           </div>
           {#if soleResult}
-            <!-- Decorative: the same offer is in the field's description and in
-                 the live region, so a screen reader hears it without this. -->
-            <kbd
-              class="pointer-events-none shrink-0 rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-ui-3xs text-muted-foreground"
-              aria-hidden="true"
-            >↵</kbd>
+            <!-- A real target, not a legend. When the filter has left one row,
+                 the fastest thing to do with it is open it, and a hint that only
+                 tells you which key to press makes the pointer take the long way
+                 round to a row it can already see.
+                 `tabindex="-1"` keeps it out of the tab order on purpose: Tab
+                 from the filter goes to the list, which with one match is this
+                 same row, so a stop here would be a second stop on one thing.
+                 The keyboard path is Enter in the field, which the field's own
+                 description offers. -->
+            <button
+              type="button"
+              tabindex="-1"
+              class="hit-area shrink-0 rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-ui-3xs text-muted-foreground transition-colors hover:border-primary/60 hover:bg-accent hover:text-foreground"
+              title="Open {soleResult.label} (Enter)"
+              aria-label="Open {soleResult.label}"
+              onclick={() => soleResult?.open()}
+            >↵</button>
           {/if}
           <!-- Held apart: the description is static and read on focus, the status
                is rewritten as the list narrows. Merging them would re-announce
