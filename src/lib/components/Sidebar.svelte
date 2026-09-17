@@ -22,6 +22,7 @@
   import { cn } from "$lib/utils.js";
   import { CRASH_WORD, isMagic, armCrash } from '$lib/games/easter-eggs.js'
   import { t } from "$lib/i18n.js";
+  import { visibleRowCount, soleMatch } from "$lib/sidebar-filter.js";
   import { formatTableRowCount } from "$lib/table-list.js";
   import {
     clampNavSidebarWidth,
@@ -695,55 +696,34 @@
   /** Name of the open list, for the filter's accessible name and its live region. */
   const activeTabLabel = $derived(SIDEBAR_TABS.find((t) => t.id === sidebarTab)?.label ?? 'items')
 
-  /** Rows the open tab is showing right now, and what each one is worth counting as. */
-  const visibleRows = $derived.by(() => {
-    switch (sidebarTab) {
-      case 'tables': return { shown: filteredRegularTables.length, total: regularTablesUnpinned.length }
-      case 'views': return {
-        shown: filteredViews.length + filteredMatViews.length,
-        total: views.length + matViews.length,
-      }
-      // The recents list is capped at 5 rows, so that is the denominator too.
-      case 'recent': return { shown: Math.min(filteredRecent.length, 5), total: Math.min(recentTabs.length, 5) }
-      case 'pins': return { shown: visiblePinnedTables.length, total: pinnedTables.length }
-      case 'databases': return { shown: filteredDbEntries.length, total: dbEntries.length }
-      default: return { shown: 0, total: 0 }
-    }
+  /** Everything the filter rule counts, in the shape `sidebar-filter.js` wants. */
+  const filterLists = $derived({
+    tables: filteredRegularTables, tablesTotal: regularTablesUnpinned.length,
+    views: filteredViews, matViews: filteredMatViews, viewsTotal: views.length + matViews.length,
+    recent: filteredRecent, recentTotal: recentTabs.length,
+    pins: visiblePinnedTables, pinsTotal: pinnedTables.length,
+    databases: filteredDbEntries, databasesTotal: dbEntries.length,
+    activeDbKey,
   })
+
+  /** Rows the open tab is showing right now, against what it would show unfiltered. */
+  const visibleRows = $derived(visibleRowCount(sidebarTab, filterLists))
 
   /**
    * The one row left when the filter has narrowed the open tab to exactly one -
-   * Enter in the filter box opens it. Null whenever there is nothing to open, so
-   * the key stays inert rather than guessing at a list of several.
+   * Enter in the filter box opens it. The picking rule lives in
+   * `sidebar-filter.js` under test; this only binds the result to the handler
+   * that acts on it.
    * @returns {{ label: string, open: () => void } | null}
    */
   const soleResult = $derived.by(() => {
-    if (!connectionName || visibleRows.shown !== 1) return null
-    switch (sidebarTab) {
-      case 'tables': {
-        const t = filteredRegularTables[0]
-        return t ? { label: t.name, open: () => ontableselect(t.name) } : null
-      }
-      case 'views': {
-        // Either list can hold the single match; views render first.
-        const v = filteredViews[0] ?? filteredMatViews[0]
-        return v ? { label: v.name, open: () => ontableselect(v.name) } : null
-      }
-      case 'recent': {
-        const r = filteredRecent[0]
-        return r ? { label: r.table, open: () => onrecentselect(r.schema, r.table) } : null
-      }
-      case 'pins': {
-        const name = visiblePinnedTables[0]
-        return name ? { label: name, open: () => ontableselect(name) } : null
-      }
-      case 'databases': {
-        const db = filteredDbEntries[0]
-        // The database already open is the one row here that does nothing when
-        // clicked, so Enter must not claim it does something either.
-        if (!db || db.key === activeDbKey) return null
-        return { label: db.label, open: () => onswitchdatabase(db) }
-      }
+    if (!connectionName) return null
+    const m = soleMatch(sidebarTab, filterLists)
+    if (!m) return null
+    switch (m.kind) {
+      case 'table': return { label: m.name, open: () => ontableselect(m.name) }
+      case 'recent': return { label: m.name, open: () => onrecentselect(m.schema, m.name) }
+      case 'database': return { label: m.name, open: () => onswitchdatabase(m.entry) }
       default: return null
     }
   })
@@ -801,7 +781,7 @@
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
-"field-surface h-7 w-full min-w-0 bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover: hover:bg-background/55";
+"field-surface h-7 w-full min-w-0 bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:bg-background/55";
 </script>
 
 <svelte:window onkeydown={(e) => {
@@ -1143,7 +1123,7 @@
                the moment its text appears is announced unreliably. -->
           <span id="sidebar-filter-hint" class="sr-only"
             >Filters the {activeTabLabel.toLowerCase()} list. When one row matches, press Enter to open it.</span>
-          <span class="sr-only" role="status" aria-live="polite">{filterStatus}</span>
+          <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">{filterStatus}</span>
         </div>
       </div>
 
