@@ -210,7 +210,7 @@
       type="text"
       bind:value={jsonPath}
       placeholder=".field  ·  [0]  ·  .items[*].name  ·  ..key"
-      class="min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+      class="no-focus-ring min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
       spellcheck="false"
       autocomplete="off"
       onfocus={() => { pathFocused = true }}

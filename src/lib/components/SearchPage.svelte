@@ -167,7 +167,7 @@
         bind:this={inputEl}
         type="text"
         placeholder={useRegex ? 'Regex pattern…' : `Search across all tables in ${schema}…`}
-        class="min-w-0 flex-1 bg-transparent text-ui-sm outline-none placeholder:text-muted-foreground"
+        class="no-focus-ring min-w-0 flex-1 bg-transparent text-ui-sm outline-none placeholder:text-muted-foreground"
         bind:value={query}
         onkeydown={handleKeydown}
         oninput={() => { regexError = '' }}

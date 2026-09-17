@@ -375,7 +375,7 @@
                 type="text"
                 placeholder="Search chart types…"
                 bind:value={pickerSearch}
-                class="flex-1 bg-transparent font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
+                class="no-focus-ring flex-1 bg-transparent font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
               />
               {#if pickerSearch}
                 <button type="button" onclick={() => (pickerSearch = '')} class="text-muted-foreground hover:text-muted-foreground">

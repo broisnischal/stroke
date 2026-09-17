@@ -1527,7 +1527,7 @@
           spellcheck="false"
           autocapitalize="off"
           autocomplete="off"
-          class="h-7 min-w-0 flex-1 bg-transparent font-mono text-ui-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+          class="no-focus-ring h-7 min-w-0 flex-1 bg-transparent font-mono text-ui-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
         />
         <button
           type="button"

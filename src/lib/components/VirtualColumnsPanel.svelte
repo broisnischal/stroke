@@ -196,7 +196,7 @@
                 type="text"
                 bind:value={colSearch}
                 placeholder="Search columns…"
-                class="min-w-0 flex-1 bg-transparent text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
+                class="no-focus-ring min-w-0 flex-1 bg-transparent text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
                 autocomplete="off"
                 spellcheck="false"
               />

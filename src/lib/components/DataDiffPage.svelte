@@ -504,7 +504,7 @@
         <div class="flex items-center gap-2 border-b border-border/25 px-3 py-2">
           <Search class="size-3 shrink-0 text-muted-foreground" />
           <input use:focusNode type="text" bind:value={dropdownSearch} placeholder="Search…"
-            class="flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground" />
+            class="no-focus-ring flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground" />
           {#if dropdownSearch}<button onclick={() => { dropdownSearch = '' }} class="text-muted-foreground hover:text-foreground"><X class="size-3" /></button>{/if}
         </div>
         <div class="max-h-52 overflow-y-auto py-1">
@@ -550,7 +550,7 @@
         <div class="flex items-center gap-2 border-b border-border/25 px-3 py-2">
           <Search class="size-3 shrink-0 text-muted-foreground" />
           <input use:focusNode type="text" bind:value={dropdownSearch} placeholder="Search connections…"
-            class="flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground" />
+            class="no-focus-ring flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground" />
         </div>
         <div class="max-h-52 overflow-y-auto py-1">
           {#if filtered.length === 0}
@@ -679,8 +679,11 @@
   {#if diffRows.length > 0}
 
     <!-- Filter + search bar (tab-style, Vercel/Resend inspired) ── -->
-    <!-- No divider here, the elevated header band below provides the separation. -->
-    <div class="flex shrink-0 items-end gap-0 px-5">
+    <!-- The strip carries one continuous baseline and the tabs sit ON it. Each
+         button used to draw its own `border-b-2` and nothing drew the line
+         between them, so the active tab's underline floated in a gap with no
+         rule to belong to - six stubs rather than a tab strip. -->
+    <div class="flex shrink-0 items-end gap-0 border-b border-border/40 px-5">
 
       {#each [
         { key: 'all',       label: 'All',       count: diffRows.length,                          badge: 'bg-muted/30 text-muted-foreground',           active: 'text-foreground' },
@@ -693,10 +696,17 @@
         <button
           onclick={() => { activeFilter = f.key }}
           class={cn(
-            'flex items-center gap-1.5 border-b-2 pb-2.5 pt-2 px-3 text-ui-xs transition-all',
+            // -mb-px pulls the 2px marker over the strip's own 1px baseline so
+            // the two do not stack into a 3px double rule.
+            'flex items-center gap-1.5 border-b-2 -mb-px px-3 pb-2.5 pt-2 text-ui-xs transition-colors',
             activeFilter === f.key
-              ? cn('border-current font-medium', f.active)
-              : 'border-transparent text-muted-foreground hover:text-muted-foreground'
+              // `border-foreground`, not `border-current`: the underline said
+              // "Added" in green under a label already saying it in green, which
+              // read as a status bar rather than a selection. The marker's job is
+              // to say WHICH TAB, and that answer is the same colour whichever
+              // tab it is. The label keeps the status colour.
+              ? cn('border-foreground font-medium', f.active)
+              : 'border-transparent text-muted-foreground hover:text-foreground'
           )}
         >
           {f.label}
@@ -709,19 +719,30 @@
         </button>
       {/each}
 
-      <div class="ml-auto flex items-center gap-2 pb-2.5 pl-4">
-        <Search class="size-3 shrink-0 text-muted-foreground" />
-        <input type="text" bind:value={searchQuery} placeholder="Search rows…"
-          class="w-36 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground focus:w-52 transition-all" />
-        {#if searchQuery}
-          <button onclick={() => { searchQuery = '' }} class="text-muted-foreground hover:text-foreground transition-colors">
-            <X class="size-3" />
-          </button>
-        {:else}
-          <span class="text-ui-2xs text-muted-foreground tabular-nums">
-            {displayRows.length}{displayRows.length !== diffRows.length ? `/${diffRows.length}` : ''}
-          </span>
-        {/if}
+      <!-- The icon, the field and the clear button are ONE control, so they sit
+           in one frame. They used to be three siblings in a bare flex row: the
+           app-wide field rule framed the <input> alone, leaving the magnifier
+           stranded outside a pill it clearly belonged to.
+           `ps-4`, not `pl-4` - this strip mirrors under RTL. -->
+      <div class="ms-auto flex items-center gap-2 pb-2.5 ps-4">
+        <div class="flex h-7 items-center gap-1.5 rounded-md border border-border/40 bg-muted/30 px-2 transition-colors focus-within:border-border">
+          <Search class="size-3 shrink-0 text-muted-foreground" />
+          <input type="text" bind:value={searchQuery} placeholder="Search rows…"
+            aria-label="Search diff rows"
+            class="no-focus-ring w-40 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground" />
+          {#if searchQuery}
+            <button onclick={() => { searchQuery = '' }} aria-label="Clear search"
+              class="shrink-0 text-muted-foreground transition-colors hover:text-foreground">
+              <X class="size-3" />
+            </button>
+          {/if}
+        </div>
+        <!-- Always on, never swapped out for the clear button. The count IS the
+             result of the search, so hiding it the moment you search is backwards -
+             and a control that changes width as you type moves everything after it. -->
+        <span class="shrink-0 text-ui-2xs tabular-nums text-muted-foreground">
+          {displayRows.length}{displayRows.length !== diffRows.length ? `/${diffRows.length}` : ''}
+        </span>
       </div>
     </div>
 
