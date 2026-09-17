@@ -692,6 +692,85 @@
     lf !== '' || hideEmpty || hideSystem || sortBy !== 'name' || sortDir !== 'asc',
   );
 
+  /** Name of the open list, for the filter's accessible name and its live region. */
+  const activeTabLabel = $derived(SIDEBAR_TABS.find((t) => t.id === sidebarTab)?.label ?? 'items')
+
+  /** Rows the open tab is showing right now, and what each one is worth counting as. */
+  const visibleRows = $derived.by(() => {
+    switch (sidebarTab) {
+      case 'tables': return { shown: filteredRegularTables.length, total: regularTablesUnpinned.length }
+      case 'views': return {
+        shown: filteredViews.length + filteredMatViews.length,
+        total: views.length + matViews.length,
+      }
+      // The recents list is capped at 5 rows, so that is the denominator too.
+      case 'recent': return { shown: Math.min(filteredRecent.length, 5), total: Math.min(recentTabs.length, 5) }
+      case 'pins': return { shown: visiblePinnedTables.length, total: pinnedTables.length }
+      case 'databases': return { shown: filteredDbEntries.length, total: dbEntries.length }
+      default: return { shown: 0, total: 0 }
+    }
+  })
+
+  /**
+   * The one row left when the filter has narrowed the open tab to exactly one -
+   * Enter in the filter box opens it. Null whenever there is nothing to open, so
+   * the key stays inert rather than guessing at a list of several.
+   * @returns {{ label: string, open: () => void } | null}
+   */
+  const soleResult = $derived.by(() => {
+    if (!connectionName || visibleRows.shown !== 1) return null
+    switch (sidebarTab) {
+      case 'tables': {
+        const t = filteredRegularTables[0]
+        return t ? { label: t.name, open: () => ontableselect(t.name) } : null
+      }
+      case 'views': {
+        // Either list can hold the single match; views render first.
+        const v = filteredViews[0] ?? filteredMatViews[0]
+        return v ? { label: v.name, open: () => ontableselect(v.name) } : null
+      }
+      case 'recent': {
+        const r = filteredRecent[0]
+        return r ? { label: r.table, open: () => onrecentselect(r.schema, r.table) } : null
+      }
+      case 'pins': {
+        const name = visiblePinnedTables[0]
+        return name ? { label: name, open: () => ontableselect(name) } : null
+      }
+      case 'databases': {
+        const db = filteredDbEntries[0]
+        // The database already open is the one row here that does nothing when
+        // clicked, so Enter must not claim it does something either.
+        if (!db || db.key === activeDbKey) return null
+        return { label: db.label, open: () => onswitchdatabase(db) }
+      }
+      default: return null
+    }
+  })
+
+  /**
+   * What the filter's live region says. Reads off `lf`, which is already
+   * debounced, so it announces once the typing settles rather than per keystroke.
+   */
+  const filterStatus = $derived.by(() => {
+    if (!connectionName) return ''
+    const { shown, total } = visibleRows
+    const list = activeTabLabel.toLowerCase()
+    if (!lf) return `${total} ${list}`
+    if (shown === 0) return `No ${list} match ${lf}`
+    if (soleResult) return `1 of ${total} ${list}. Press Enter to open ${soleResult.label}.`
+    return `${shown} of ${total} ${list}`
+  })
+
+  /** Commit a pending debounce now, so Enter acts on what is actually typed. */
+  function flushFilter() {
+    if (!filterDebounce) return
+    clearTimeout(filterDebounce)
+    filterDebounce = null
+    debouncedFilter = localFilter
+    ontablefilter(localFilter)
+  }
+
   function resetFilters() {
     localFilter = '';
     debouncedFilter = '';
@@ -1021,6 +1100,19 @@
             disabled={!connectionName}
             oninput={(e) => handleFilterInput(e.currentTarget.value)}
             onkeydown={(e) => {
+              // Enter opens the match when the filter has left exactly one. The
+              // debounce is committed first, or a fast typist who narrows to one
+              // row and hits Enter within 200ms is judged against the previous
+              // term. Inert with nothing or several to open: a key that guesses
+              // which of six rows was meant is worse than a key that does nothing.
+              if (e.key === 'Enter') {
+                flushFilter()
+                const sole = soleResult
+                if (!sole) return
+                e.preventDefault()
+                sole.open()
+                return
+              }
               // Tab / ArrowDown from the filter → jump focus into the result list
               // so the user can keyboard-navigate the matched tables directly.
               if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'ArrowDown') {
@@ -1031,10 +1123,27 @@
               }
             }}
             class={cn(sidebarFieldClass, "w-full pl-8 pr-2.5 outline-none disabled:opacity-40 disabled:cursor-not-allowed")}
-            aria-label="Filter sidebar"
+            aria-label="Filter {activeTabLabel.toLowerCase()}"
+            aria-describedby="sidebar-filter-hint"
             data-sidebar-filter
           />
           </div>
+          {#if soleResult}
+            <!-- Decorative: the same offer is in the field's description and in
+                 the live region, so a screen reader hears it without this. -->
+            <kbd
+              class="pointer-events-none shrink-0 rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-ui-3xs text-muted-foreground"
+              aria-hidden="true"
+            >↵</kbd>
+          {/if}
+          <!-- Held apart: the description is static and read on focus, the status
+               is rewritten as the list narrows. Merging them would re-announce
+               the instruction on every keystroke. Both are rendered whether or
+               not they have anything to say, because a polite region inserted at
+               the moment its text appears is announced unreliably. -->
+          <span id="sidebar-filter-hint" class="sr-only"
+            >Filters the {activeTabLabel.toLowerCase()} list. When one row matches, press Enter to open it.</span>
+          <span class="sr-only" role="status" aria-live="polite">{filterStatus}</span>
         </div>
       </div>
 
