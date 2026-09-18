@@ -100,6 +100,10 @@ fn set_macos_webview_backdrop(window: &tauri::WebviewWindow, color: tauri::windo
 /// Both are underscore SPI, so every selector is checked before it is sent and
 /// the whole thing degrades to "stay at 60" rather than trapping on a WebKit
 /// version that has renamed or removed the flag.
+///
+/// Every exit logs what it did. Without that the failure mode is a silent 60fps
+/// that looks exactly like a machine whose display is 60Hz, and there is nothing
+/// in the app to tell the two apart.
 #[cfg(target_os = "macos")]
 fn unlock_macos_webview_frame_rate(window: &tauri::WebviewWindow) {
     /// WebKit's key for the 60fps clamp, as it appears in `_features`.
@@ -111,26 +115,32 @@ fn unlock_macos_webview_frame_rate(window: &tauri::WebviewWindow) {
 
         let view: *mut AnyObject = webview.inner().cast();
         if view.is_null() {
+            log::warn!("fps unclamp: no WKWebView, staying at 60fps");
             return;
         }
         let Some(prefs_cls) = AnyClass::get(c"WKPreferences") else {
+            log::warn!("fps unclamp: WKPreferences class missing, staying at 60fps");
             return;
         };
         let has_features: bool = msg_send![prefs_cls, respondsToSelector: sel!(_features)];
         if !has_features {
+            log::warn!("fps unclamp: +[WKPreferences _features] gone, staying at 60fps");
             return;
         }
 
         let config: *mut AnyObject = msg_send![view, configuration];
         if config.is_null() {
+            log::warn!("fps unclamp: no WKWebViewConfiguration, staying at 60fps");
             return;
         }
         let prefs: *mut AnyObject = msg_send![config, preferences];
         if prefs.is_null() {
+            log::warn!("fps unclamp: no WKPreferences, staying at 60fps");
             return;
         }
         let can_set: bool = msg_send![prefs, respondsToSelector: sel!(_setEnabled:forFeature:)];
         if !can_set {
+            log::warn!("fps unclamp: -[WKPreferences _setEnabled:forFeature:] gone, staying at 60fps");
             return;
         }
 
@@ -139,6 +149,7 @@ fn unlock_macos_webview_frame_rate(window: &tauri::WebviewWindow) {
         // a WKFeature, not a name.
         let features: *mut AnyObject = msg_send![prefs_cls, _features];
         if features.is_null() {
+            log::warn!("fps unclamp: _features returned nil, staying at 60fps");
             return;
         }
         let count: usize = msg_send![features, count];
@@ -159,9 +170,14 @@ fn unlock_macos_webview_frame_rate(window: &tauri::WebviewWindow) {
             }
             if std::ffi::CStr::from_ptr(utf8).to_bytes() == FLAG.as_bytes() {
                 let _: () = msg_send![prefs, _setEnabled: Bool::NO, forFeature: feature];
+                log::info!("fps unclamp: {FLAG} off, rendering at the display's rate");
                 return;
             }
         }
+        // macOS 26 dropped the clamp and the flag with it, so this is the healthy
+        // path there - the webview is already at native rate. On 13-15 it means
+        // WebKit renamed the key and the clamp is still on.
+        log::info!("fps unclamp: {FLAG} not in _features ({count} flags); already unclamped, or renamed");
     });
 }
 
