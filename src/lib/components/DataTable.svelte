@@ -6577,21 +6577,42 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               {/snippet}
               {#each [...expandedRows] as exIdx (exIdx)}
                 {#if rows[exIdx] !== undefined}
+                  <!-- Keeping the panel out of the header band is geometry, not a
+                       clip. The panel has to sit above the canvas (the canvas paints
+                       an opaque background), so once its row scrolls up behind the
+                       header it covers the column headers, the select-all checkbox
+                       and the collapse-all chevron - all of which are canvas-painted
+                       and hit-tested by coordinate, so a DOM box on top of them
+                       swallows the click before the canvas handler ever runs.
+                       `clip-path` hid that box but did not stop it from taking the
+                       pointer, which is why the header stayed visible and went dead.
+
+                       So the box itself stops at the band: the top edge moves down by
+                       the overlap, `overflow:hidden` trims what is now outside, and a
+                       matching negative margin holds the content at its true position,
+                       so nothing appears to move.
+
+                       The trim is applied only while there is something to trim.
+                       The scroll container carries `contain:layout`, which makes it
+                       the containing block for the panel's `position:fixed` context
+                       menu, so leaving `overflow:hidden` on permanently would clip
+                       that menu.
+
+                       `trackExpandHeight` measures the inner element, whose
+                       offsetHeight is the real panel height. Measuring the trimmed
+                       box instead would feed a shrinking height into rowTops and
+                       make every row below jitter while scrolling. Only panels
+                       actually touching the band pay anything, and only while they
+                       do. -->
                   {#if _scrollScale === 1}
                     <!-- Normal table: content-space vertical (native scroll moves it,
-                         no per-frame re-render), sticky-left for the horizontal pin.
-                         clip-path keeps it out of the header band: the panel sits above
-                         the canvas (it has to - the canvas paints an opaque background),
-                         so without the clip it drew straight over the sticky column
-                         header as soon as its row scrolled up behind it. Only panels
-                         actually touching the band pay anything, and only while they do. -->
+                         no per-frame re-render), sticky-left for the horizontal pin. -->
                     {@const clipTop = Math.max(0, HEADER_H - (rowDocTop(exIdx) + ROW_HEIGHT - _scrollTop))}
-                    <div class="absolute z-10 left-0 right-0" style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px">
-                      <div
-                        style="position:sticky; left:0; width:{_viewportWidth}px{clipTop > 0 ? `; clip-path: inset(${clipTop}px 0 0 0)` : ''}"
-                        use:trackExpandHeight={exIdx}
-                      >
-                        {@render expandBody(exIdx)}
+                    <div class="absolute z-10 left-0 right-0" style="top:{rowDocTop(exIdx) + ROW_HEIGHT + clipTop}px">
+                      <div style="position:sticky; left:0; width:{_viewportWidth}px{clipTop > 0 ? '; overflow:hidden' : ''}">
+                        <div style={clipTop > 0 ? `margin-top:-${clipTop}px` : ''} use:trackExpandHeight={exIdx}>
+                          {@render expandBody(exIdx)}
+                        </div>
                       </div>
                     </div>
                   {:else if rowViewportY(exIdx) > -_viewportHeight * 2 && rowViewportY(exIdx) < _viewportHeight + ROW_HEIGHT}
@@ -6603,10 +6624,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     <div style="position:sticky;top:0;left:0;width:0;height:0;overflow:visible;z-index:10">
                       <div
                         class="absolute left-0"
-                        style="top:{rowViewportY(exIdx) + ROW_HEIGHT}px; width:{_viewportWidth}px{clipTopScaled > 0 ? `; clip-path: inset(${clipTopScaled}px 0 0 0)` : ''}"
-                        use:trackExpandHeight={exIdx}
+                        style="top:{rowViewportY(exIdx) + ROW_HEIGHT + clipTopScaled}px; width:{_viewportWidth}px{clipTopScaled > 0 ? '; overflow:hidden' : ''}"
                       >
-                        {@render expandBody(exIdx)}
+                        <div style={clipTopScaled > 0 ? `margin-top:-${clipTopScaled}px` : ''} use:trackExpandHeight={exIdx}>
+                          {@render expandBody(exIdx)}
+                        </div>
                       </div>
                     </div>
                   {/if}
