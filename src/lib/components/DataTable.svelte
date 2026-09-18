@@ -6510,34 +6510,33 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               {/snippet}
               {#each [...expandedRows] as exIdx (exIdx)}
                 {#if rows[exIdx] !== undefined}
-                  <!-- Positioned in VIEWPORT space, off the same `_scrollTop` the
-                       canvas draws its rows from - not in content space.
-                       -
-                       Content space let native scroll move the panel, which sounds
-                       cheaper and is: the compositor slides it for free. But the rows
-                       it is wedged between are canvas pixels repainted on the MAIN
-                       thread from `_scrollTop`, read once per rAF. Two clocks. On any
-                       frame where the compositor has scrolled and the repaint has not
-                       landed yet, the panel and the rows are offset from each other,
-                       and the gap the canvas reserved shows at one edge. That is the
-                       flicker - it is not a paint artifact, it is a desync.
-                       -
-                       `transform`, not `top`: the value changes every scrolled frame,
-                       and transform is the one property that moves a box without
-                       laying it out or re-rastering its contents. Rounded, because a
-                       fractional offset makes WebKit re-antialias the panel's text
-                       every frame, which reads as shimmer on its own.
-                       -
-                       The 0x0 sticky anchor pins the layer to the scrollport, so the
-                       transform is measured from the viewport's top-left. Same shape
-                       the canvas itself uses. -->
-                  {@const panelY = Math.round(rowViewportY(exIdx) + ROW_HEIGHT)}
-                  {@const clipTop = Math.max(0, HEADER_H - panelY)}
-                  {#if _scrollScale === 1 || (panelY > -_viewportHeight * 2 && panelY < _viewportHeight + ROW_HEIGHT)}
+                  {#if _scrollScale === 1}
+                    <!-- Normal table: content-space vertical (native scroll moves it,
+                         no per-frame re-render), sticky-left for the horizontal pin.
+                         clip-path keeps it out of the header band: the panel sits above
+                         the canvas (it has to - the canvas paints an opaque background),
+                         so without the clip it drew straight over the sticky column
+                         header as soon as its row scrolled up behind it. Only panels
+                         actually touching the band pay anything, and only while they do. -->
+                    {@const clipTop = Math.max(0, HEADER_H - (rowDocTop(exIdx) + ROW_HEIGHT - _scrollTop))}
+                    <div class="absolute z-10 left-0 right-0" style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px">
+                      <div
+                        style="position:sticky; left:0; width:{_viewportWidth}px{clipTop > 0 ? `; clip-path: inset(${clipTop}px 0 0 0)` : ''}"
+                        use:trackExpandHeight={exIdx}
+                      >
+                        {@render expandBody(exIdx)}
+                      </div>
+                    </div>
+                  {:else if rowViewportY(exIdx) > -_viewportHeight * 2 && rowViewportY(exIdx) < _viewportHeight + ROW_HEIGHT}
+                    <!-- Huge/scaled table: viewport-sticky layer + viewport y. Content y
+                         would be tens of millions of px (past WebKit's layout range), and
+                         a far-off-screen panel there would also blow out the scroll height,
+                         so only render when the expanded row is near the viewport. -->
+                    {@const clipTopScaled = Math.max(0, HEADER_H - (rowViewportY(exIdx) + ROW_HEIGHT))}
                     <div style="position:sticky;top:0;left:0;width:0;height:0;overflow:visible;z-index:10">
                       <div
-                        class="absolute left-0 top-0"
-                        style="transform:translate3d(0,{panelY}px,0); width:{_viewportWidth}px{clipTop > 0 ? `; clip-path: inset(${clipTop}px 0 0 0)` : ''}"
+                        class="absolute left-0"
+                        style="top:{rowViewportY(exIdx) + ROW_HEIGHT}px; width:{_viewportWidth}px{clipTopScaled > 0 ? `; clip-path: inset(${clipTopScaled}px 0 0 0)` : ''}"
                         use:trackExpandHeight={exIdx}
                       >
                         {@render expandBody(exIdx)}
