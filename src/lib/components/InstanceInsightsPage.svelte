@@ -493,6 +493,29 @@
   /** @param {any} v */
   function cell(v) { return v === null || v === undefined ? '–' : Array.isArray(v) ? (v.length ? v.join(', ') : '–') : String(v) }
 
+  /**
+   * Columns whose every present value is a number. Those get right-aligned
+   * tabular figures, so PIDs and counts line up on the decimal down the column
+   * instead of ragging against a left edge like prose.
+   * @param {any[]} rows @param {string[]} cols
+   */
+  function numericCols(rows, cols) {
+    /** @type {Set<string>} */
+    const out = new Set()
+    for (const k of cols) {
+      let seen = false
+      let allNumeric = true
+      for (const row of rows) {
+        const v = row[k]
+        if (v === null || v === undefined) continue
+        seen = true
+        if (typeof v !== 'number') { allNumeric = false; break }
+      }
+      if (seen && allNumeric) out.add(k)
+    }
+    return out
+  }
+
   const ACRONYMS = new Set(['id', 'ids', 'pid', 'pids', 'db', 'ip', 'addr', 'xid', 'lsn', 'wal', 'gid', 'sql', 'os', 'tcp', 'io'])
   /** `blocking_pids` → `Blocking PIDs`. Raw catalog column names are not labels. */
   const humanize = (/** @type {string} */ k) => String(k).replace(/[_-]+/g, ' ').trim().split(' ')
@@ -1229,13 +1252,27 @@
          row loop, so a 200-session table allocated 200 throwaway Object.keys()
          arrays on every render of this page. -->
     {@const cols = keysOf(rows)}
-    <div class="app-scroll max-h-96 overflow-auto rounded-lg border border-border/50">
-      <table class="w-full border-collapse text-ui-2xs">
+    {@const numeric = numericCols(rows, cols)}
+    <!-- `insight-grid` (see <style>) does two things the shared .app-scroll
+         cannot: it lets a wheel that runs out of table keep scrolling the page,
+         and it gives the horizontal bar enough height to read as an affordance.
+         The cap is viewport-relative so a tall screen shows more than 24rem of
+         a 200-session table instead of the same short window everywhere. -->
+    <div class="app-scroll insight-grid max-h-[min(32rem,60vh)] overflow-auto rounded-lg border border-border/50">
+      <!-- w-max lets every column take its natural width and the container do the
+           scrolling. Under w-full the browser squeezed columns to fit and then
+           overflowed anyway, so the widths were wrong AND the tail was cut. -->
+      <table class="w-max min-w-full border-collapse text-ui-2xs">
         <thead>
           <tr>
-            <th class="sticky top-0 z-10 w-8 whitespace-nowrap border-b border-border/50 bg-panel px-2 py-1.5 text-right font-medium text-muted-foreground">#</th>
+            <th class="sticky top-0 z-10 w-8 whitespace-nowrap border-b border-border/50 bg-panel px-2 py-1.5 text-right text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">#</th>
             {#each cols as k (k)}
-              <th class="sticky top-0 z-10 whitespace-nowrap border-b border-border/50 bg-panel px-2.5 py-1.5 text-left font-medium text-muted-foreground">{humanize(k)}</th>
+              <th
+                class={cn(
+                  'sticky top-0 z-10 whitespace-nowrap border-b border-border/50 bg-panel px-2.5 py-1.5 text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground',
+                  numeric.has(k) ? 'text-right' : 'text-left',
+                )}
+              >{humanize(k)}</th>
             {/each}
           </tr>
         </thead>
@@ -1246,13 +1283,24 @@
               {#each cols as k (k)}
                 {@const raw = row[k]}
                 {@const text = cell(raw)}
-                <td class="max-w-[280px] truncate border-b border-border/20 px-2.5 py-1 font-mono text-foreground/85" title={text}>
+                <td
+                  class={cn(
+                    'max-w-[280px] truncate border-b border-border/20 px-2.5 py-1 font-mono text-foreground/85',
+                    numeric.has(k) && 'text-right tabular-nums',
+                  )}
+                  title={text.length > 32 ? text : undefined}
+                >
                   {#if k === 'state' || k === 'command'}
                     {#if raw}
                       <span class={cn('inline-flex items-center rounded px-1.5 py-px font-sans text-ui-3xs', stateTone(raw))}>{raw}</span>
                     {:else}
                       <span class="text-muted-foreground">–</span>
                     {/if}
+                  {:else if typeof raw === 'boolean'}
+                    <!-- A column of identical-weight true/false is unreadable at a
+                         glance. Only the true half carries information here, so
+                         false recedes to the muted tone. -->
+                    <span class={raw ? 'text-foreground/85' : 'text-muted-foreground/70'}>{raw}</span>
                   {:else}
                     {text}
                   {/if}
@@ -1267,6 +1315,35 @@
 {/snippet}
 
 <style>
+  /* Inline data tables inside the page scroller.
+     app.css already carves out horizontal-only scrollers from the blanket
+     `overscroll-behavior: contain`, for the reason documented there: a contained
+     box swallows every wheel tick under the pointer. These grids scroll on both
+     axes, so they missed that carve-out and hit the bug anyway - a wheel over a
+     table stopped dead at its last row instead of carrying on down the page.
+     Same split as the horizontal case: the page never scrolls sideways, so x
+     stays contained, and y chains once the table is out of rows.
+
+     The shared bar is 4px, which on a table that scrolls sideways is not enough
+     to read as "there is more to the right". 8px with a visible resting thumb is
+     the affordance, since a column cut off at the right edge is otherwise the
+     only cue that anything is hidden. */
+  .insight-grid {
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+  }
+  .insight-grid::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .insight-grid::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--muted-foreground) 32%, transparent);
+    border-radius: 9999px;
+  }
+  .insight-grid::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--muted-foreground) 52%, transparent);
+  }
+
   /* Config list perf: content-visibility lets the engine skip layout/paint for
      off-screen rows, so scrolling the full ~350-row pg_settings list stays smooth.
      The intrinsic size is the collapsed row height - `auto` lets the engine
