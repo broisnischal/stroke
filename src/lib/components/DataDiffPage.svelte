@@ -783,17 +783,16 @@
         <button
           onclick={() => { activeFilter = f.key }}
           class={cn(
-            // -mb-px pulls the 2px marker over the strip's own 1px baseline so
-            // the two do not stack into a 3px double rule.
-            'flex items-center gap-1.5 border-b-2 -mb-px px-3 pb-2.5 pt-2 text-ui-xs transition-colors',
+            // No underline marker. The active tab is carried by weight plus
+            // colour, which is still two cues rather than colour alone: the
+            // label goes medium AND takes its status colour, while every other
+            // tab stays regular-weight muted. The count badge behind it picks up
+            // the status tint too, so the selection reads at a glance without a
+            // rule under it.
+            'flex items-center gap-1.5 px-3 pb-2.5 pt-2 text-ui-xs transition-colors',
             activeFilter === f.key
-              // `border-foreground`, not `border-current`: the underline said
-              // "Added" in green under a label already saying it in green, which
-              // read as a status bar rather than a selection. The marker's job is
-              // to say WHICH TAB, and that answer is the same colour whichever
-              // tab it is. The label keeps the status colour.
-              ? cn('border-foreground font-medium', f.active)
-              : 'border-transparent text-muted-foreground hover:text-foreground'
+              ? cn('font-medium', f.active)
+              : 'text-muted-foreground hover:text-foreground'
           )}
         >
           {f.label}
