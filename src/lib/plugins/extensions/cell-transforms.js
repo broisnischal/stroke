@@ -5,6 +5,11 @@
 // `appliesTo(value, type, name)` gates which transforms surface for a cell -
 // detection-specific ones are listed first so the most relevant option is on
 // top, with a few universal string ops last.
+//
+// Picking one from the cell menu writes the result back into the cell as a
+// pending edit. `informational: true` opts out of that: those produce a report
+// about the value ("45 chars · 8 words"), not a replacement for it, so they copy
+// and show the result instead of overwriting the column with prose.
 
 // ── epoch / time ──────────────────────────────────────────────────────────────
 /** @param {unknown} value */
@@ -159,6 +164,8 @@ export const cellTransforms = {
     {
       id: 'epoch-to-local',
       label: 'Epoch → local + relative',
+      // Reads as prose ('… (in 3 months)'), not a value to store.
+      informational: true,
       /** @param {unknown} v */
       appliesTo: (v) => isEpochLike(v),
       /** @param {unknown} v */
@@ -180,6 +187,8 @@ export const cellTransforms = {
     {
       id: 'decode-jwt',
       label: 'Decode JWT',
+      // The decoded claims describe the token; they do not replace it.
+      informational: true,
       /** @param {unknown} v */
       appliesTo: (v) => isJwtLike(v),
       /** @param {unknown} v */
@@ -198,6 +207,8 @@ export const cellTransforms = {
     {
       id: 'uuid-inspect',
       label: 'Inspect UUID',
+      // A report about the UUID, not a different UUID.
+      informational: true,
       /** @param {unknown} v */
       appliesTo: (v) => typeof v === 'string' && UUID_RE.test(v.trim()),
       /** @param {unknown} v */
@@ -282,6 +293,8 @@ export const cellTransforms = {
     {
       id: 'bytes-to-human',
       label: 'Bytes → human size',
+      // '1.5 MB' is a rendering of the number, not the number.
+      informational: true,
       /** @param {unknown} v */
       appliesTo: (v) => {
         const n = typeof v === 'number' ? v : typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v) : NaN
@@ -356,6 +369,8 @@ export const cellTransforms = {
     {
       id: 'count',
       label: 'Count chars / words / bytes',
+      // Pure measurement - there is nothing here to write back.
+      informational: true,
       /** @param {unknown} v */
       appliesTo: (v) => typeof v === 'string' && v.length > 0,
       /** @param {unknown} v */

@@ -2182,23 +2182,49 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     futureEdits = [];
   }
 
-  /** Run an extension transform on a cell, copy the result, and show it in a
-   *  readable result card (monospace, pretty-printed, with a Copy action). */
+  /** Run an extension transform on a cell.
+   *
+   *  Slugify, UPPERCASE, Trim and the rest produce a replacement for the value,
+   *  so they are staged as an edit - identical to typing the result in, and
+   *  undoable and savable on the same path. Two cases have nothing to write
+   *  back: `informational` transforms, which report on the value rather than
+   *  replace it, and any column the grid cannot edit. Those copy the result and
+   *  show it in a readable card (monospace, pretty-printed, with a Copy action).
+   */
   async function runCellTransform(rowIdx, colIdx, transform) {
     const value = effectiveCellValue(rowIdx, colIdx);
+    let out;
     try {
-      const out = transform.run(value);
+      out = transform.run(value);
+    } catch (e) {
+      toast.error("Could not apply transform", { description: String(e?.message ?? e) });
+      return;
+    }
+
+    const editable = canEditColumn(colIdx);
+    if (!transform.informational && editable) {
+      stageEdit(rowIdx, colIdx, out);
+      pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: value, newValue: out }];
+      futureEdits = [];
+      toast.success(`${transform.label} · applied`, { duration: 2500 });
+      return;
+    }
+
+    try {
       await navigator.clipboard.writeText(out);
       // Pretty-print JSON output; cap the preview so the toast stays compact.
       let preview = out;
       try { preview = JSON.stringify(JSON.parse(out), null, 2); } catch { /* not JSON */ }
       const capped = preview.length > 1200 ? preview.slice(0, 1200) + "\n…" : preview;
-      toast.success(`${transform.label} · copied`, {
-        description: capped,
-        code: true,
-        duration: 8000,
-        action: { label: "Copy again", onClick: () => navigator.clipboard.writeText(out) },
-      });
+      toast.success(
+        transform.informational ? `${transform.label} · copied` : `${transform.label} · copied, column is read-only`,
+        {
+          description: capped,
+          code: true,
+          duration: 8000,
+          action: { label: "Copy again", onClick: () => navigator.clipboard.writeText(out) },
+        },
+      );
     } catch (e) {
       toast.error("Could not apply transform", { description: String(e?.message ?? e) });
     }
