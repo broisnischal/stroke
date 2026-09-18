@@ -129,25 +129,17 @@ export function createSmoothScroll(el) {
     // Re-clamp as we go: content can shrink under us (a filter, a smaller page).
     curTop = clamp(curTop + dTop * ease, maxTop())
     curLeft = clamp(curLeft + dLeft * ease, maxLeft())
-    // Whole pixels on EVERY frame, not just the landing one.
+    // Written FRACTIONAL on purpose, and rounded only at the landing below.
     //
-    // The landing already rounded, for the reason given there: the grid draws its
-    // text at integer offsets and a fractional scroll makes WebKit re-antialias
-    // every glyph. That reason applies just as much to the 40 frames before the
-    // landing, which is where it was actually being paid.
-    //
-    // It also matters for anything the grid does NOT draw. The expanded-JSON panel
-    // is a DOM element in content space, so the browser positions it from this
-    // exact value while the canvas rows beside it are drawn at Math.round() of it.
-    // Leaving this fractional put the panel and its rows up to a pixel apart, by a
-    // different amount each frame - which is the flicker you see when scrolling
-    // with a row expanded.
-    //
-    // `curTop` stays fractional on purpose (see the comment where it is declared):
-    // rounding the ACCUMULATOR would let a sub-pixel step round away to nothing and
-    // the animation would stall without ever reaching its target.
-    el.scrollTop = Math.round(curTop)
-    el.scrollLeft = Math.round(curLeft)
+    // Rounding here instead looks like the obvious fix for the canvas drawing text
+    // at integer offsets, and it is not. The ease moves curTop by a shrinking
+    // fraction each frame, so the tail of every scroll advances by less than a
+    // pixel per frame - at 120Hz, where each frame carries about half the delta it
+    // did at 60. Rounding the write turns that tail into 0,0,1,0,1 and the whole
+    // gesture ends in visible steps. The sub-pixel offset this leaves against the
+    // canvas is under half a pixel; the stepping it would cost is not.
+    el.scrollTop = curTop
+    el.scrollLeft = curLeft
     raf = requestAnimationFrame(frame)
   }
 

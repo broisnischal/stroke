@@ -869,12 +869,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     _groupFmt ??= new Intl.NumberFormat()
     return _groupFmt.format(n)
   }
-  $effect(() => { void $appNumberGrouping; _groupFmt = null; scheduleDraw() })
+  // Hot-path mirrors. `$store` compiles to a store_get() call, and formatCell and
+  // drawCell each run once per visible CELL per frame - so a store read there is
+  // thousands of calls a frame, at 120Hz. Mirrored into plain locals so the hot
+  // path reads a variable, which is what the frame context above does for
+  // $appTableAlign and the table style.
+  let _numberGroupingOn = false
+  let _imagePreviewOn = true
+  $effect(() => { _numberGroupingOn = $appNumberGrouping; _groupFmt = null; scheduleDraw() })
   $effect(() => { void $appHighlightActiveRow; scheduleDraw() })
   // Turning previews off must also drop what was already decoded - otherwise the
   // thumbnails stay resident (up to 300 bitmaps) for a feature now switched off.
   $effect(() => {
     const on = $appImagePreview
+    _imagePreviewOn = on
     untrack(() => { if (!on) releaseCellImages(); _redrawToken++; scheduleDraw() })
   })
 
@@ -883,7 +891,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // "Empty & NULL Markers" extension is on - that extension is the NULL
     // display control, and a setting competing with it would be a second switch.
     if (value === null || value === undefined) return "NULL";
-    if (typeof value === "number" && $appNumberGrouping) return groupNumber(value);
+    if (typeof value === "number" && _numberGroupingOn) return groupNumber(value);
     if (typeof value === "object") {
       const cached = _formatCache.get(value);
       if (cached !== undefined) return cached;
@@ -4175,11 +4183,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // The scroll loop opens the gate (pure vertical move, no repaint pending);
     // everything below is the geometric half of the precondition - the body must
     // be a rigid translation, which it is not when skeleton rows are animating,
-    // when an insert draft adds a band above row 0, when an expanded row makes
-    // row heights non-uniform, or when dy is fractional (reachable only on a
-    // table large enough for the scroll range to be compressed), which would land
-    // text on half-pixels and smear it. `_sawSkeleton` is still the *previous*
-    // frame's value here; it is reset a few lines down.
+    // when an insert draft adds a band above row 0, or when dy is fractional
+    // (reachable only on a table large enough for the scroll range to be
+    // compressed), which would land text on half-pixels and smear it.
+    // `_sawSkeleton` is still the *previous* frame's value here; it is reset a few
+    // lines down.
+    //
+    // An EXPANDED ROW used to disqualify a blit too, on the grounds that it makes
+    // row heights non-uniform. It does, and it does not matter: a vertical scroll
+    // is still a pure translation, and the panel's gap - which the canvas leaves
+    // as bare background - translates with everything else. The strip loop places
+    // rows by rowViewportY(), which already accounts for the expansion, and the
+    // newly exposed strip is cleared to cPanel before anything is drawn into it,
+    // so a gap landing inside it stays background. The one event that is NOT a
+    // translation, the panel's measured height changing, is tracked by the
+    // geometry effect below and forces a full frame through scheduleDraw().
+    //
+    // Keeping the guard cost a FULL repaint of every visible row on every frame
+    // for as long as any row was expanded - doubled once the display was unclamped
+    // to 120Hz. That saturates the main thread, and a saturated main thread is
+    // what shows up as the grid banding dark and the toolbar and column header
+    // stuttering: not a canvas bug, starvation.
     const dy = _blitDy
     _blitDy = 0
     const blitBodyH = Math.max(0, _viewportHeight - HEADER_H)
@@ -4197,7 +4221,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       Number.isInteger(HEADER_H * blitScale) &&
       !_sawSkeleton &&
       !newRowDrafts &&
-      expandedRows.size === 0 &&
       visibleColumns.length > 0
 
     // Rebuilt as cells paint; pumpCellImages() below uses it to fetch only what
@@ -4974,7 +4997,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // over formatter directives; skipped for staged/editing cells.
     const colTf = (!staged && c.rows[idx]) ? c.colTransformFns[col.name] : undefined
     // Avatar / image thumbnail transform - draw the image itself, not text.
-    if (colTf && _IMG_TF.has(colTf.id) && !isNull && $appImagePreview && isImageUrl(value)) {
+    if (colTf && _IMG_TF.has(colTf.id) && !isNull && _imagePreviewOn && isImageUrl(value)) {
       drawCellImage(ctx, String(value), cellX, ry, w, rh, cy, colTf.id === 'avatar', c)
       return
     }
