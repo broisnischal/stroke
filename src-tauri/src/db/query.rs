@@ -328,7 +328,20 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
         "BOOL" => try_get!(bool),
         "INT2" => try_get!(i16),
         "INT4" => try_get!(i32),
-        "INT8" | "OID" => try_get!(i64),
+        "INT8" => try_get!(i64),
+        // `oid` is an unsigned 32-bit id, and sqlx decodes it only through its
+        // own `Oid` newtype - `try_get::<i64>` here always failed, so every oid
+        // cell fell through the whole chain to the raw-bytes path and printed as
+        // mojibake or a hex preview. Unwrapped to a plain number so it sorts and
+        // right-aligns like the id it is.
+        "OID" => {
+            if let Ok(v) = row.try_get::<Option<sqlx::postgres::types::Oid>, _>(idx) {
+                return match v {
+                    Some(oid) => json!(oid.0),
+                    None => Value::Null,
+                };
+            }
+        }
         "FLOAT4" => try_get!(f32),
         "FLOAT8" => try_get!(f64),
         "NUMERIC" => try_get_string!(Decimal),
@@ -340,10 +353,15 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
         _ => {}
     }
 
-    // Known text types skip the scalar chain entirely: every arm below would
-    // fail (allocating its error) before the raw-bytes branch decodes them.
-    let known_text = matches!(type_name, "TEXT" | "VARCHAR" | "BPCHAR" | "CHAR" | "NAME");
-    if !known_text {
+    // Types the scalar chain cannot decode skip it entirely: every arm below
+    // would fail (allocating its error) before something further down handles
+    // them. Text types are read from raw bytes; the xid/lsn family is decoded by
+    // pg_ext_types, which the chain would only delay.
+    let skips_scalar_chain = matches!(
+        type_name,
+        "TEXT" | "VARCHAR" | "BPCHAR" | "CHAR" | "NAME" | "XID" | "XID8" | "PG_LSN"
+    );
+    if !skips_scalar_chain {
         try_get!(bool);
         try_get!(i16);
         try_get!(i32);
