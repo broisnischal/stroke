@@ -116,6 +116,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
   import DateTimePicker from "./DateTimePicker.svelte";
+  import SearchableMenu from "./SearchableMenu.svelte";
+  import Icon from "./Icon.svelte";
   import ColumnStatsPanel from "./ColumnStatsPanel.svelte";
   import BarChart2 from "@lucide/svelte/icons/bar-chart-2";
   import VirtualColumnsPanel from "./VirtualColumnsPanel.svelte";
@@ -608,6 +610,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let selectOnEditFocus = $state(true);
   /** Whether the enum cell-editor dropdown is open (auto-opens on edit). */
   let enumEditorOpen = $state(false);
+  /** Set by the enum menu's own onValueChange so the close that FOLLOWS a pick is
+   *  not mistaken for a dismissal. commitEdit() is async, so editingCell is still
+   *  set at the moment the menu closes and the watcher below cannot tell the two
+   *  apart without this. */
+  let _enumPicked = false;
+  // Closing the enum menu without picking cancels the edit - the contract the
+  // bits-ui Select's onOpenChange used to carry. SelectMenu exposes `open` as a
+  // binding rather than a callback, so it is watched instead.
+  $effect(() => {
+    const open = enumEditorOpen;
+    untrack(() => {
+      if (open) { _enumPicked = false; return }
+      if (_enumPicked) { _enumPicked = false; return }
+      if (editingCell) cancelEdit();
+    });
+  });
   /** Raw cell value before the current edit started (for undo tracking). */
   let lastEditOriginalValue = $state(/** @type {unknown} */ (undefined));
   /**
@@ -6610,45 +6628,59 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   style="top:{editOverlay.top}px; left:{editOverlay.left}px; width:{editOverlay.width}px; height:{editOverlay.height}px"
                 >
                   {#if eEnum}
-                    <!-- Themed, portaled dropdown (bits-ui), replaces the native
-                         <select>, whose OS popup was unstyled and broke on Linux/
-                         WebKitGTK. Auto-opens on edit; picking a value commits. -->
-                    <Select.Root
-                      type="single"
-                      value={editingCell?.draft ?? ''}
-                      open={enumEditorOpen}
-                      onOpenChange={(o) => {
-                        enumEditorOpen = o;
-                        // Closed without a pick (Escape / click-away) → cancel edit.
-                        if (!o && editingCell) cancelEdit();
-                      }}
-                      onValueChange={(v) => {
-                        if (!editingCell) return;
-                        editingCell.draft = v ?? '';
-                        void commitEdit();
+                    <!-- SearchableMenu directly, configured exactly like the
+                         filter-condition menu in TableToolbar - same primitive,
+                         same fixed content width, same trigger/item snippets - so
+                         the two read as one control rather than two takes on it.
+                         -
+                         NOT anchored to the cell width: a narrow column would
+                         squash the search field down to its icon. NOT font-mono
+                         either; every other menu in the app is sans, and the
+                         values are short labels, not data being compared
+                         character by character.
+                         -
+                         Picking commits; closing without a pick cancels. -->
+                    {@const enumItems = [
+                      ...(eNullable ? [{ value: '', label: 'NULL' }] : []),
+                      ...(editingCell?.original && !eEnum.includes(editingCell.original)
+                        ? [{ value: editingCell.original, label: editingCell.original }]
+                        : []),
+                      ...eEnum.map((o) => ({ value: o, label: o })),
+                    ]}
+                    <SearchableMenu
+                      bind:open={enumEditorOpen}
+                      items={enumItems}
+                      placeholder="Search values…"
+                      contentClass="w-56"
+                      align="start"
+                      onselect={(it) => {
+                        if (!editingCell) return
+                        _enumPicked = true
+                        editingCell.draft = it.value ?? ''
+                        void commitEdit()
                       }}
                     >
-                      <Select.Trigger
-                        bind:ref={editInput}
-                        aria-label="Edit {ecol?.name ?? 'cell'}"
-                        class="box-border h-full w-full min-w-0 max-w-full rounded-none border-0 bg-transparent px-3 py-0 font-mono text-ui-sm text-foreground shadow-none focus-visible:ring-0"
-                      >
-                        <span data-slot="select-value" class="truncate">
-                          {editingCell?.draft || (eNullable ? 'NULL' : 'Select…')}
-                        </span>
-                      </Select.Trigger>
-                      <Select.Content align="start" sideOffset={2} class="max-h-64 min-w-[var(--bits-select-anchor-width)] p-1">
-                        {#if eNullable}
-                          <Select.Item value="" label="NULL" class="font-mono text-ui-xs text-muted-foreground">NULL</Select.Item>
+                      {#snippet trigger(props)}
+                        <button
+                          {...props}
+                          bind:this={editInput}
+                          type="button"
+                          aria-label="Edit {ecol?.name ?? 'cell'}"
+                          class="flex h-full w-full min-w-0 items-center gap-1 px-3 text-left font-mono text-ui-sm text-foreground outline-none"
+                        >
+                          <span class="min-w-0 flex-1 truncate">
+                            {editingCell?.draft || (eNullable ? 'NULL' : 'Select…')}
+                          </span>
+                          <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
+                        </button>
+                      {/snippet}
+                      {#snippet item(it)}
+                        <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                        {#if (editingCell?.draft ?? '') === it.value}
+                          <Icon name="check" class="size-3.5 shrink-0 text-primary" />
                         {/if}
-                        {#if editingCell?.original && !eEnum.includes(editingCell.original)}
-                          <Select.Item value={editingCell.original} label={editingCell.original} class="font-mono text-ui-xs">{editingCell.original}</Select.Item>
-                        {/if}
-                        {#each eEnum as option (option)}
-                          <Select.Item value={option} label={option} class="font-mono text-ui-xs">{option}</Select.Item>
-                        {/each}
-                      </Select.Content>
-                    </Select.Root>
+                      {/snippet}
+                    </SearchableMenu>
                   {:else if isBooleanType(eType)}
                     {@const isOn = editingCell?.draft === "true"}
                     {@const isNull = eNullable && editingCell?.draft !== "true" && editingCell?.draft !== "false"}
