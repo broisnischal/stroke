@@ -211,7 +211,20 @@ pub fn run() {
         // Disabling it falls back to a Cairo/FreeType software path that stays crisp.
         // This is the only verified safe WebKitGTK rendering env var - others like
         // WEBKIT_USE_LEGACY_TEXT_RENDERER are not real and can trigger SIGTRAP crashes.
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        //
+        // The cost is per-frame CPU. rAF still rides the GdkFrameClock, so the
+        // cadence the compositor offers is the cadence WebKit asks for - but
+        // rasterising in software is expensive enough that a busy frame can miss
+        // it, and the miss gets more likely the higher the panel's rate. Default
+        // to crisp, and let a high-refresh setup buy frames back with
+        // `WEBKIT_DISABLE_DMABUF_RENDERER=0`, which puts the webview on the GPU
+        // compositor. The "0" is unset rather than passed through, because WebKit
+        // tests some of these vars for presence and not for value.
+        match std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").as_deref() {
+            Ok("0") | Ok("") => std::env::remove_var("WEBKIT_DISABLE_DMABUF_RENDERER"),
+            Ok(_) => {}
+            Err(_) => std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
+        }
         // GDK_SCALE is intentionally NOT forced here - overriding it breaks HiDPI
         // setups (2× displays) and can cause rendering panics on Wayland compositors.
     }
