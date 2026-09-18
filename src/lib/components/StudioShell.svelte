@@ -2224,21 +2224,19 @@ let rowSearch = $state('')
     commandOpen = true
   })
 
-  createHotkey('Mod+Tab', (e) => {
-    if (!connection || tabs.length < 2) return
-    e.preventDefault()
-    cycleTab(1)
-  })
-
-  createHotkey('Mod+Shift+Tab', (e) => {
-    if (!connection || tabs.length < 2) return
-    e.preventDefault()
-    cycleTab(-1)
-  })
-
-  // Note: Mod+Tab / Mod+Shift+Tab above already map to Ctrl+Tab on Windows/Linux
-  // and Cmd+Tab on macOS. No additional Ctrl+Tab registration needed - duplicates
-  // cause the "[already registered]" warning from @tanstack/svelte-hotkeys.
+  // Tab cycling lives in onWindowKeydownCapture below, not here. Two reasons it
+  // cannot go through the hotkey layer:
+  //
+  //  - `Mod` is the wrong modifier for it. On macOS Mod is ⌘, and ⌘Tab is the
+  //    system app switcher: the keydown never reaches the webview, so the
+  //    binding was dead on that platform in both directions. Ctrl+Tab is what
+  //    every browser uses on all three platforms, and nothing above the app
+  //    claims it.
+  //  - Tab is a focus key. Anything between the focused element and `document`
+  //    that handles focus movement - the grid canvas, the Monaco editors, the
+  //    bits-ui overlays - can stop the chord before the document-level bubble
+  //    listener sees it. Capture on window is the only phase that is reliably
+  //    ahead of all of them.
 
   // ⌘B / Ctrl+B is bound in the CAPTURE phase on window, not through
   // createHotkey. The hotkey layer listens on `document` in the BUBBLE phase, so
@@ -2253,6 +2251,18 @@ let rowSearch = $state('')
   // on macOS: Ctrl+B is the emacs "move backward" binding that text fields there
   // still honour, and swallowing it would break caret movement in every input.
   function onWindowKeydownCapture(/** @type {KeyboardEvent} */ e) {
+    // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs on every platform - see the note
+    // above the ⌘B block for why this is Ctrl rather than Mod, and why it is
+    // captured on window rather than registered as a hotkey. Shift only picks
+    // the direction, so both directions are one binding and cannot drift apart.
+    if (e.key === 'Tab' && e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!connection || tabs.length < 2) return
+      e.preventDefault()
+      e.stopPropagation()
+      cycleTab(e.shiftKey ? -1 : 1)
+      return
+    }
+
     const modOnly = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
     if (!modOnly || e.altKey || e.shiftKey) return
     if (e.key.toLowerCase() !== 'b') return

@@ -77,8 +77,10 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Mod+T', desc: 'Search tables' },
       { combo: 'Mod+N', desc: 'New tab' },
       { combo: 'Mod+W', desc: 'Close tab' },
-      { combo: 'Mod+Tab', desc: 'Next tab' },
-      { combo: 'Mod+Shift+Tab', desc: 'Previous tab' },
+      // Ctrl, not Mod, on purpose: macOS reserves ⌘Tab for the app switcher, so
+      // this is Ctrl+Tab on all three platforms - the same chord browsers use.
+      { combo: 'Ctrl+Tab', desc: 'Next tab' },
+      { combo: 'Ctrl+Shift+Tab', desc: 'Previous tab' },
       { combo: 'Mod+Shift+T', desc: 'Reopen closed tab' },
       { combo: 'Mod+1-9', desc: 'Go to tab (9 = last)' },
       { combo: 'Alt+Shift+T', desc: 'Toggle tab bar' },
