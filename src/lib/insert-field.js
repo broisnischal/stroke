@@ -27,10 +27,37 @@ export function columnTimestampRole(columnName) {
   return null
 }
 
-/** @param {string} dataType @param {string} columnName */
+/**
+ * Types whose name says nothing about what they hold.
+ *
+ * SQLite and friends report a column with no usable type at all, and that is the
+ * only case where a column NAME is better evidence than its type.
+ */
+function isUntypedColumn(dataType) {
+  const t = normalizeColumnType(dataType)
+  return t === '' || t === 'any' || t === 'null' || t === 'blob'
+}
+
+/**
+ * Should this column be edited with a date picker?
+ *
+ * The type decides. The NAME only gets a say when the type has nothing to say -
+ * it used to override outright, so any column called `created_at` got a picker
+ * whatever it held. A `text` column storing epoch milliseconds (1783054294883)
+ * got one, and then could not be edited at all: the picker cannot parse the
+ * value it is given, so nothing typed into it would commit.
+ *
+ * Silently failing to save was the visible half. The dangerous half is that a
+ * commit which HAD worked would have written an ISO string into a column of
+ * integers.
+ *
+ * @param {string} dataType @param {string} columnName
+ */
 export function shouldUseDateTimePicker(dataType, columnName) {
   if (isDateTimeType(dataType)) return true
-  return columnTimestampRole(columnName) !== null && !isBooleanType(dataType)
+  if (isBooleanType(dataType)) return false
+  if (!isUntypedColumn(dataType)) return false
+  return columnTimestampRole(columnName) !== null
 }
 
 /** @param {string} dataType */

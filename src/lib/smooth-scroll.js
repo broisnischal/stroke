@@ -129,8 +129,25 @@ export function createSmoothScroll(el) {
     // Re-clamp as we go: content can shrink under us (a filter, a smaller page).
     curTop = clamp(curTop + dTop * ease, maxTop())
     curLeft = clamp(curLeft + dLeft * ease, maxLeft())
-    el.scrollTop = curTop
-    el.scrollLeft = curLeft
+    // Whole pixels on EVERY frame, not just the landing one.
+    //
+    // The landing already rounded, for the reason given there: the grid draws its
+    // text at integer offsets and a fractional scroll makes WebKit re-antialias
+    // every glyph. That reason applies just as much to the 40 frames before the
+    // landing, which is where it was actually being paid.
+    //
+    // It also matters for anything the grid does NOT draw. The expanded-JSON panel
+    // is a DOM element in content space, so the browser positions it from this
+    // exact value while the canvas rows beside it are drawn at Math.round() of it.
+    // Leaving this fractional put the panel and its rows up to a pixel apart, by a
+    // different amount each frame - which is the flicker you see when scrolling
+    // with a row expanded.
+    //
+    // `curTop` stays fractional on purpose (see the comment where it is declared):
+    // rounding the ACCUMULATOR would let a sub-pixel step round away to nothing and
+    // the animation would stall without ever reaching its target.
+    el.scrollTop = Math.round(curTop)
+    el.scrollLeft = Math.round(curLeft)
     raf = requestAnimationFrame(frame)
   }
 
