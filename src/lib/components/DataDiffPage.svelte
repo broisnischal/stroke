@@ -28,7 +28,7 @@
    *   connId: string, database: string, databases: string[], loadingDbs: boolean,
    *   schema: string, schemas: string[], loadingSchemas: boolean,
    *   table: string, tables: string[], loadingTables: boolean,
-   *   mode: 'table'|'sql', sql: string,
+   *   mode: 'table'|'sql', sql: string, error: string,
    * }} SourceState
    *
    * @type {{
@@ -57,7 +57,7 @@
 
   /** @param {string} connId @param {string} database @param {string} schema @returns {SourceState} */
   function makeSource(connId, database, schema) {
-    return { connId, database, databases: [], loadingDbs: false, schema, schemas: [], loadingSchemas: false, table: '', tables: [], loadingTables: false, mode: 'table', sql: '' }
+    return { connId, database, databases: [], loadingDbs: false, schema, schemas: [], loadingSchemas: false, table: '', tables: [], loadingTables: false, mode: 'table', sql: '', error: '' }
   }
 
   /** @type {SourceState} */
@@ -274,7 +274,7 @@
 
   async function loadDatabases(/** @type {SourceState} */ src, /** @type {SavedConnection} */ conn, /** @type {(s:SourceState)=>void} */ set) {
     set({ ...src, loadingDbs: true, databases: [], database: '', schemas: [], schema: '', tables: [], table: '' })
-    const dbs = await fetchDatabases(conn)
+    const dbs = await fetchDatabases(conn).catch(() => /** @type {string[]} */ ([]))
     const defaultDb = conn.database || dbs[0] || ''
     const next = { ...src, loadingDbs: false, databases: dbs, database: defaultDb, schemas: [], schema: '', tables: [], table: '' }
     set(next)
@@ -288,26 +288,38 @@
       const next = { ...src, schemas, schema, tables: [], table: '', loadingSchemas: false }
       set(next); await loadTables(next, cfg, set); return
     }
-    set({ ...src, loadingSchemas: true, schemas: [], schema: '', tables: [], table: '' })
+    set({ ...src, loadingSchemas: true, schemas: [], schema: '', tables: [], table: '', error: '' })
     try {
       const s = await listSchemasOnConnection(cfg)
       const schema = pickDefaultSchema(s)
-      const next = { ...src, loadingSchemas: false, schemas: s, schema, tables: [], table: '' }
+      const next = { ...src, loadingSchemas: false, schemas: s, schema, tables: [], table: '', error: '' }
       set(next)
       if (schema) await loadTables(next, cfg, set)
-    } catch { set({ ...src, loadingSchemas: false }) }
+    } catch (e) {
+      // Swallowing this left an empty list, and an empty list renders as a chip
+      // with `pointer-events-none` - indistinguishable from "this connection has
+      // no schemas" and unclickable either way. A dropped connection is the
+      // common cause and the one worth naming.
+      set({ ...src, loadingSchemas: false, error: `Could not list schemas: ${String(e)}` })
+    }
   }
 
   async function loadTables(/** @type {SourceState} */ src, /** @type {SavedConnection} */ cfg, /** @type {(s:SourceState)=>void} */ set) {
     if (!src.schema || !cfg) return
-    if (isCurrent(src.connId) && cfg.database === connById(src.connId)?.database) {
-      set({ ...src, loadingTables: false, tables: tables.map((t) => t.name) }); return
+    // The `tables` prop is the OPEN connection's list for the schema it is
+    // currently on, so reusing it also requires the schema to match - without
+    // that check, picking a different schema on the current connection listed
+    // the active schema's tables under it.
+    if (isCurrent(src.connId) && cfg.database === connById(src.connId)?.database && src.schema === activeSchema) {
+      set({ ...src, loadingTables: false, tables: tables.map((t) => t.name), error: '' }); return
     }
-    set({ ...src, loadingTables: true, tables: [], table: '' })
+    set({ ...src, loadingTables: true, tables: [], table: '', error: '' })
     try {
       const t = await listTablesOnConnection(cfg, src.schema)
-      set({ ...src, loadingTables: false, tables: t, table: '' })
-    } catch { set({ ...src, loadingTables: false }) }
+      set({ ...src, loadingTables: false, tables: t, table: '', error: '' })
+    } catch (e) {
+      set({ ...src, loadingTables: false, error: `Could not list tables in ${src.schema}: ${String(e)}` })
+    }
   }
 
   function onConnChange(/** @type {'L'|'R'} */ side) {
@@ -606,6 +618,12 @@
             <div bind:this={lSqlEl} class="min-h-[64px] flex-1 overflow-hidden rounded-md border border-border/40"></div>
           {/if}
         </div>
+        {#if L.error}
+          <!-- Named, not silent. An empty option list renders as an unclickable
+               chip, so without this a dropped connection and "no tables here"
+               looked identical - and neither said anything. -->
+          <p class="px-5 pb-1 ps-[104px] font-mono text-ui-2xs text-destructive">{L.error}</p>
+        {/if}
 
         <div class="relative flex items-center px-5">
           <div class="h-px flex-1 bg-border/10"></div>
@@ -635,6 +653,12 @@
             <div bind:this={rSqlEl} class="min-h-[64px] flex-1 overflow-hidden rounded-md border border-border/40"></div>
           {/if}
         </div>
+        {#if R.error}
+          <!-- Named, not silent. An empty option list renders as an unclickable
+               chip, so without this a dropped connection and "no tables here"
+               looked identical - and neither said anything. -->
+          <p class="px-5 pb-1 ps-[104px] font-mono text-ui-2xs text-destructive">{R.error}</p>
+        {/if}
 
       </div>
 
