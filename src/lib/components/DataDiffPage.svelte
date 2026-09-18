@@ -1,6 +1,7 @@
 <script>
   import * as monaco from '$lib/monaco.js'
   import GitCompare from '@lucide/svelte/icons/git-compare'
+  import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Loader2 from '@lucide/svelte/icons/loader-2'
   import ArrowUpDown from '@lucide/svelte/icons/arrow-up-down'
   import Plus from '@lucide/svelte/icons/plus'
@@ -336,6 +337,54 @@
     const src = side === 'L' ? L : R, set = side === 'L' ? (s) => { L = s } : (s) => { R = s }
     const conn = connById(src.connId)
     if (conn) void loadTables(src, /** @type {SavedConnection} */ ({ ...conn, database: src.database }), set)
+  }
+
+  /** True while either side is re-listing, so the button can show it. */
+  let refreshing = $state(false)
+  const modKey = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '\u2318' : 'Ctrl+'
+
+  /**
+   * Re-list databases, schemas and tables for both sides from scratch.
+   *
+   * Exported so the global Mod+R lands here like it does on every other page.
+   * Rebuilds from the connection down rather than retrying the one call that
+   * failed: a dropped connection usually takes the whole chain with it, and the
+   * chips below the failure are stale anyway. Selections are preserved where the
+   * new lists still contain them - see restore() below.
+   */
+  export async function refresh() {
+    if (refreshing) return
+    refreshing = true
+    try {
+      const keep = { L: { db: L.database, schema: L.schema, table: L.table }, R: { db: R.database, schema: R.schema, table: R.table } }
+      await Promise.all(/** @type {const} */ (['L', 'R']).map(async (side) => {
+        const src = side === 'L' ? L : R
+        const set = side === 'L' ? (/** @type {SourceState} */ s2) => { L = s2 } : (/** @type {SourceState} */ s2) => { R = s2 }
+        const conn = connById(src.connId)
+        if (!conn) return
+        await loadDatabases(src, conn, set)
+        // Put back what the user had chosen, if it still exists.
+        const now = side === 'L' ? L : R
+        const want = keep[side]
+        if (want.db && now.databases.includes(want.db) && now.database !== want.db) {
+          const next = { ...now, database: want.db }
+          set(next)
+          await loadSchemas(next, /** @type {SavedConnection} */ ({ ...conn, database: want.db }), set)
+        }
+        const afterDb = side === 'L' ? L : R
+        if (want.schema && afterDb.schemas.includes(want.schema) && afterDb.schema !== want.schema) {
+          const next = { ...afterDb, schema: want.schema }
+          set(next)
+          await loadTables(next, /** @type {SavedConnection} */ ({ ...conn, database: afterDb.database }), set)
+        }
+        const afterSchema = side === 'L' ? L : R
+        if (want.table && afterSchema.tables.includes(want.table)) {
+          set({ ...afterSchema, table: want.table })
+        }
+      }))
+    } finally {
+      refreshing = false
+    }
   }
 
   function swapSources() {
@@ -686,6 +735,20 @@
           <span class="text-ui-2xs italic text-muted-foreground">auto, uses first column</span>
         {/if}
       </div>
+      <!-- Beside Compare, not in the header: it re-lists what the pickers above
+           offer, and this is the row you are on when one of them turns out to be
+           empty. Same Mod+R the rest of the app uses. -->
+      <button
+        type="button"
+        onclick={() => void refresh()}
+        disabled={refreshing}
+        title="Reload databases, schemas and tables ({modKey}R)"
+        aria-label="Reload source and target lists"
+        class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/40 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+      >
+        <RefreshCw class={cn('size-3.5', refreshing && 'animate-spin')} />
+        Refresh
+      </button>
       <button onclick={compare} disabled={comparing}
         class="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-primary px-4 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-50"
       >

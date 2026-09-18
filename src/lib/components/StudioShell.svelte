@@ -1195,6 +1195,7 @@
   let tableFocusCell = $state(() => {})
   /** @type {{ refresh: () => void } | null} */
   let securityPageRef = $state(null)
+  let dataDiffPageRef = $state(null)
   /** @type {{ sendMessage: (text: string) => void } | null} */
   let aiSidebarRef = $state(null)
 
@@ -2726,6 +2727,12 @@ let rowSearch = $state('')
     }
     if (activeTab?.kind === 'security') {
       securityPageRef?.refresh()
+      return
+    }
+    if (activeTab?.kind === 'data-diff') {
+      // Re-lists the source/target pickers. Mod+R means "reload what this page is
+      // showing" everywhere else, and on this page what it shows IS those lists.
+      await dataDiffPageRef?.refresh()
       return
     }
     if (activeTab?.kind === 'dashboard') {
@@ -7622,6 +7629,7 @@ let rowSearch = $state('')
           <svelte:boundary failed={tabError}>
             {#await import('./DataDiffPage.svelte')}<TabLoading />{:then { default: DataDiffPage }}
               <DataDiffPage
+                bind:this={dataDiffPageRef}
                 {schemas}
                 {tables}
                 activeSchema={activeSchema}
