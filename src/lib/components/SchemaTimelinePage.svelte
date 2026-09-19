@@ -12,6 +12,11 @@
   import { onMount } from 'svelte'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { cn } from '$lib/utils.js'
+  import * as Dialog from '$lib/components/ui/dialog/index.js'
+  import { Button } from '$lib/components/ui/button/index.js'
+  import FileCode from '@lucide/svelte/icons/file-code'
+  import Copy from '@lucide/svelte/icons/copy'
+  import { buildMigration, formatMigrationScript } from '$lib/schema-migration.js'
   import { listSchemas, listSchemasOnConnection, executeSql, executeSqlOnConnection } from '$lib/api.js'
   import {
     captureSnapshot,
@@ -83,6 +88,37 @@
   const beforeSnap = $derived(snapshots.find((s) => s.id === beforeId) ?? null)
   const afterSnap = $derived(snapshots.find((s) => s.id === afterId)  ?? null)
   const diff = $derived(beforeSnap && afterSnap ? diffSnapshots(beforeSnap, afterSnap) : null)
+
+  // ── Migration ──────────────────────────────────────────────────────────────
+  // The diff already knows what changed; this renders it as SQL to review.
+  let migrationOpen = $state(false)
+
+  /** The dialect only decides syntax, so anything not MySQL/SQLite reads as Postgres. */
+  const migrationDialect = $derived(
+    dbType === 'mysql' ? 'mysql' : dbType === 'sqlite' ? 'sqlite' : 'postgres',
+  )
+
+  const migration = $derived(
+    diff ? buildMigration(diff, { dialect: migrationDialect }) : null,
+  )
+
+  const migrationScript = $derived(
+    migration
+      ? formatMigrationScript(migration, {
+          dialect: migrationDialect,
+          title: `${beforeSnap?.title || 'earlier snapshot'} → ${afterSnap?.title || 'later snapshot'}`,
+        })
+      : '',
+  )
+
+  async function copyMigration() {
+    try {
+      await navigator.clipboard.writeText(migrationScript)
+      toast.success('Migration copied')
+    } catch (e) {
+      toast.error('Could not copy', { description: String(e) })
+    }
+  }
   const totalChanges = $derived(
     diff ? diff.addedTables.length + diff.removedTables.length + diff.modifiedTables.length : 0,
   )
@@ -619,6 +655,17 @@
             {/if}
             {#if isDiffEmpty(diff)}
               <span class="text-muted-foreground">Identical</span>
+            {:else}
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-7 shrink-0"
+                onclick={() => (migrationOpen = true)}
+                title="Generate the SQL that turns the earlier snapshot into the later one"
+              >
+                <FileCode class="size-3.5 shrink-0" />
+                Migration
+              </Button>
             {/if}
           </div>
         {/if}
@@ -857,6 +904,41 @@
     </div>
   </div>
 {/if}
+
+<Dialog.Root bind:open={migrationOpen}>
+  <Dialog.Content class="flex max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+    <Dialog.Header class="border-b border-border/60 px-5 py-4">
+      <Dialog.Title class="text-ui-sm">Migration SQL</Dialog.Title>
+      <Dialog.Description class="text-ui-2xs">
+        {migration?.statementCount ?? 0} statement{(migration?.statementCount ?? 0) === 1 ? '' : 's'}
+        taking the earlier snapshot to the later one. Review it before running — the
+        rollback below is commented out.
+      </Dialog.Description>
+    </Dialog.Header>
+
+    <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      {#if migration && migration.warnings.length > 0}
+        <div class="mb-3 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2.5">
+          <p class="text-ui-2xs font-semibold text-foreground">Read before running</p>
+          <ul class="mt-1.5 flex flex-col gap-1">
+            {#each migration.warnings as warning (warning)}
+              <li class="text-ui-3xs text-muted-foreground">• {warning}</li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
+      <pre class="overflow-x-auto rounded-lg border border-border/60 bg-background p-3 font-mono text-ui-3xs leading-relaxed text-foreground"><code>{migrationScript}</code></pre>
+    </div>
+
+    <Dialog.Footer class="border-t border-border/60 px-5 py-3">
+      <Button variant="outline" size="sm" onclick={() => (migrationOpen = false)}>Close</Button>
+      <Button size="sm" onclick={copyMigration}>
+        <Copy class="size-3.5 shrink-0" />
+        Copy
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
 <!-- ── Snippets ──────────────────────────────────────────────────────────── -->
 
