@@ -62,6 +62,8 @@
   let exportResult = $state(null);
   let exportError = $state("");
   let exportCancelled = $state(false);
+  /** Cancel requested, waiting for the backend to stop and report back. */
+  let exportStopping = $state(false);
 
   // Export options
   let optIncludeSchema = $state(true);
@@ -181,6 +183,7 @@
     exportResult = null;
     exportError = "";
     exportCancelled = false;
+    exportStopping = false;
     exportLogs = [];
     await startExportLog();
     try {
@@ -198,7 +201,16 @@
         includeTriggers: optIncludeTriggers,
         includeViews: optIncludeViews,
       });
-      if (exportCancelled) return;
+      if (exportCancelled || result.cancelled) {
+        // A cancelled dump stops at whatever object it had reached, so it is a
+        // prefix of the database, not a backup of it. Never offer it for
+        // download - a truncated file that looks complete is the one outcome a
+        // backup tool must not produce.
+        exportPhase = "idle";
+        exportLogs = [];
+        toast.info("Export stopped, the partial dump was discarded");
+        return;
+      }
       exportResult = result;
       exportPhase = "done";
     } catch (e) {
@@ -212,12 +224,13 @@
   }
 
   function stopExport() {
+    // As with the restore: hold `running` until the in-flight export returns,
+    // so a new run can't start while the old loop is still going and reset the
+    // shared cancel flag out from under it.
     exportCancelled = true;
+    exportStopping = true;
     backupCancel().catch(() => {}); // signal the backend to stop mid-run
-    stopExportLog();
-    exportPhase = "idle";
-    exportLogs = [];
-    toast.info("Export stopped");
+    toast.info("Stopping the export…");
   }
 
   async function downloadSql() {
@@ -247,6 +260,7 @@
 
   function resetExport() {
     exportPhase = "idle";
+    exportStopping = false;
     exportResult = null;
     exportError = "";
     exportLogs = [];
@@ -255,7 +269,7 @@
   // ── Import ────────────────────────────────────────────────────────────────
   /** @type {'idle'|'running'|'done'|'error'} */
   let importPhase = $state("idle");
-  /** @type {{statementsOk:number,statementsErr:number,errors:string[]}|null} */
+  /** @type {{statementsOk:number,statementsErr:number,statementsSkipped:number,cancelled:boolean,errors:string[]}|null} */
   let importResult = $state(null);
   let importError = $state("");
   let importSql = $state("");
@@ -264,6 +278,8 @@
   let showImportErrors = $state(false);
   let importConfirmed = $state(false);
   let importCancelled = $state(false);
+  /** Cancel requested, waiting for the backend to stop and report back. */
+  let importStopping = $state(false);
 
   function onFileSelect(/** @type {Event} */ e) {
     const input = /** @type {HTMLInputElement} */ (e.target);
@@ -298,15 +314,24 @@
     importResult = null;
     importError = "";
     importCancelled = false;
+    importStopping = false;
     showImportErrors = false;
     restoreLogs = [];
     await startRestoreLog();
     try {
       const result = await backupImport(importSql);
-      if (importCancelled) return;
       importResult = result;
       importPhase = "done";
-      if (result.statementsErr === 0) {
+      if (result.cancelled) {
+        // The backend reports what it actually did. On Postgres the whole
+        // restore is one transaction and a cancel rolls it back; the other
+        // engines apply statement by statement, so some of it stands.
+        toast.info(
+          result.statementsOk === 0
+            ? "Restore cancelled, nothing was applied"
+            : `Restore cancelled after ${result.statementsOk} statement(s)`,
+        );
+      } else if (result.statementsErr === 0) {
         toast.success(`Restore complete, ${result.statementsOk} statements`);
       } else {
         toast.warning(`Restore finished with ${result.statementsErr} error(s)`);
@@ -322,11 +347,14 @@
   }
 
   function stopImport() {
+    // Stay in `running` until the backend's promise settles. Dropping straight
+    // to idle both hid what the restore had already applied and let a second
+    // run start while the first was still looping - and because the cancel flag
+    // is global, starting that second run cleared the first one's cancel.
     importCancelled = true;
+    importStopping = true;
     backupCancel().catch(() => {}); // signal the backend to stop mid-run
-    stopRestoreLog();
-    importPhase = "idle";
-    toast.info("Restore stopped");
+    toast.info("Stopping the restore…");
   }
 
   function resetImport() {
@@ -339,6 +367,7 @@
     showImportErrors = false;
     importConfirmed = false;
     importCancelled = false;
+    importStopping = false;
     restoreLogs = [];
   }
 
@@ -736,11 +765,14 @@
                 disabled
                 class="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary/60 px-4 py-2 text-ui-xs font-medium text-primary-foreground"
               >
-                <Loader class="size-3.5 animate-spin" />Exporting…
+                <Loader class="size-3.5 animate-spin" />{exportStopping
+                  ? "Stopping…"
+                  : "Exporting…"}
               </button>
               <button
                 type="button"
                 onclick={stopExport}
+                disabled={exportStopping}
                 title="Stop export"
                 class="flex items-center justify-center gap-1.5 rounded-md border border-border/60 px-3 py-2 text-ui-xs text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/8 hover:text-destructive"
               >
@@ -905,12 +937,29 @@
             </div>
           {:else if importPhase === "done" && importResult}
             <div
-              class="rounded-lg border {importResult.statementsErr === 0
+              class="rounded-lg border {importResult.statementsErr === 0 &&
+              !importResult.cancelled
                 ? 'border-success/30 bg-success/8'
                 : 'border-warning/30 bg-warning/8'} p-4"
             >
               <div class="mb-3 flex items-center gap-2.5">
-                {#if importResult.statementsErr === 0}
+                {#if importResult.cancelled}
+                  <div
+                    class="flex size-8 shrink-0 items-center justify-center rounded-full border border-warning/30 bg-warning/20"
+                  >
+                    <StopCircle class="size-3.5 text-warning" />
+                  </div>
+                  <div>
+                    <p class="text-ui-xs font-semibold text-foreground">
+                      Restore cancelled
+                    </p>
+                    <p class="text-ui-3xs text-muted-foreground">
+                      {importResult.statementsOk === 0
+                        ? "Nothing was applied"
+                        : `${importResult.statementsOk} statement${importResult.statementsOk === 1 ? "" : "s"} were applied before it stopped`}
+                    </p>
+                  </div>
+                {:else if importResult.statementsErr === 0}
                   <div
                     class="flex size-8 shrink-0 items-center justify-center rounded-full border border-success/30 bg-success/20"
                   >
@@ -963,6 +1012,18 @@
                     </p>
                     <p class="mt-0.5 font-semibold text-destructive">
                       {importResult.statementsErr}
+                    </p>
+                  </div>
+                {/if}
+                {#if importResult.statementsSkipped > 0}
+                  <div>
+                    <p
+                      class="text-ui-3xs uppercase tracking-wide text-muted-foreground"
+                    >
+                      Not run
+                    </p>
+                    <p class="mt-0.5 font-semibold text-muted-foreground">
+                      {importResult.statementsSkipped}
                     </p>
                   </div>
                 {/if}
@@ -1034,11 +1095,14 @@
                 disabled
                 class="flex flex-1 items-center justify-center gap-2 rounded-md bg-primary/60 px-4 py-2 text-ui-xs font-medium text-primary-foreground"
               >
-                <Loader class="size-3.5 animate-spin" />Running…
+                <Loader class="size-3.5 animate-spin" />{importStopping
+                  ? "Stopping…"
+                  : "Running…"}
               </button>
               <button
                 type="button"
                 onclick={stopImport}
+                disabled={importStopping}
                 title="Stop restore"
                 class="flex items-center justify-center gap-1.5 rounded-md border border-border/60 px-3 py-2 text-ui-xs text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/8 hover:text-destructive"
               >
