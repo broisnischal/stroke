@@ -10,6 +10,14 @@
  */
 
 /** @typedef {'auto' | 'text' | 'raw' | 'null'} SqlParamMode */
+/**
+ * How the target engine escapes a quote inside a string literal.
+ * - `standard` — only `''` escapes; a backslash is an ordinary character
+ *   (Postgres with `standard_conforming_strings = on`, SQLite, most others).
+ * - `backslash` — MySQL's default, where `\'` also escapes and `\\` is one
+ *   backslash.
+ * @typedef {'standard' | 'backslash'} SqlDialect
+ */
 /** @typedef {{ value: string, mode: SqlParamMode }} SqlParamValue */
 /** @typedef {{ name: string, positions: Array<{ start: number, end: number }> }} SqlParam */
 
@@ -93,9 +101,16 @@ export function extractSqlParams(sql) {
  * - raw   → inserted verbatim (expressions, column refs - user's responsibility)
  * - auto  → numbers / TRUE / FALSE / NULL pass through, everything else quoted
  * - text  → always a quoted string
- * @param {string} raw @param {SqlParamMode} mode
+ *
+ * `dialect` decides how the quoting is done, and it matters: under MySQL's
+ * rules a value ending in a backslash turns `'…\'` into an unterminated
+ * literal, so a value like `\' OR 1=1 -- ` would escape its own quoting and
+ * run as SQL. Doubling the backslash is required there - and wrong everywhere
+ * else, where it would store two backslashes instead of one.
+ *
+ * @param {string} raw @param {SqlParamMode} mode @param {SqlDialect} [dialect]
  */
-export function formatParamLiteral(raw, mode) {
+export function formatParamLiteral(raw, mode, dialect = 'standard') {
   if (mode === 'null') return 'NULL'
   const v = String(raw ?? '')
   if (mode === 'raw') return v
@@ -105,7 +120,18 @@ export function formatParamLiteral(raw, mode) {
     if (/^null$/i.test(t)) return 'NULL'
     if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t)) return t
   }
-  return "'" + v.replace(/'/g, "''") + "'"
+  const escaped =
+    dialect === 'backslash' ? v.replace(/\\/g, '\\\\').replace(/'/g, "''") : v.replace(/'/g, "''")
+  return "'" + escaped + "'"
+}
+
+/**
+ * The escaping rules for a connection type, as `engineFamily` reports it.
+ * @param {string | null | undefined} engine
+ * @returns {SqlDialect}
+ */
+export function dialectForEngine(engine) {
+  return engine === 'mysql' ? 'backslash' : 'standard'
 }
 
 /**
@@ -126,8 +152,9 @@ export function missingSqlParams(sql, values) {
  * Inline every `:name` occurrence with its formatted literal. Parameters
  * without a value entry are left untouched.
  * @param {string} sql @param {Record<string, SqlParamValue>} values
+ * @param {SqlDialect} [dialect]
  */
-export function substituteSqlParams(sql, values) {
+export function substituteSqlParams(sql, values, dialect = 'standard') {
   const repls = extractSqlParams(sql)
     .filter((p) => values[p.name])
     .flatMap((p) => p.positions.map((pos) => ({ ...pos, name: p.name })))
@@ -135,7 +162,7 @@ export function substituteSqlParams(sql, values) {
   let out = String(sql ?? '')
   for (const r of repls) {
     const v = values[r.name]
-    out = out.slice(0, r.start) + formatParamLiteral(v.value, v.mode) + out.slice(r.end)
+    out = out.slice(0, r.start) + formatParamLiteral(v.value, v.mode, dialect) + out.slice(r.end)
   }
   return out
 }
