@@ -99,20 +99,52 @@ function pad2(n) {
   return String(n).padStart(2, '0')
 }
 
-/** @param {string} raw */
+/**
+ * A trailing UTC offset, in any of the spellings a timestamp reaches us in:
+ * `Z`, `+05:45`, `-0700`, `+00`, or the word `UTC` that chrono's
+ * `DateTime<Utc>::to_string()` appends.
+ */
+const ZONE_SUFFIX_RE = /(?:\s*(?:UTC|GMT)|\s*[+-]\d{2}(?::?\d{2})?|Z)$/i
+
+/**
+ * Normalise a typed timestamp into text the database will read back as the
+ * same instant.
+ *
+ * The rule that matters: a value carrying an explicit zone is handed through
+ * with only its zone spelling normalised, and is never rebuilt out of a local
+ * `Date`. `Date.parse` accepts `2026-05-22 11:28:40.501 UTC`, so reformatting
+ * it with `getHours()` and friends re-rendered the instant in the machine's own
+ * zone and then dropped the zone, which moved the value by the local offset on
+ * every edit - and quietly, because the write succeeded. Fractional seconds are
+ * kept for the same reason: the grid must not spend a column's precision to
+ * save a value the user did not change.
+ *
+ * @param {string} raw
+ */
 export function formatTimestampForDb(raw) {
   const trimmed = raw.trim()
   if (!trimmed) return trimmed
 
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(trimmed)) {
-    return `${trimmed.replace('T', ' ')}:00`
+  // Date only - already unambiguous.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed
+
+  // ISO-ish, with or without a `T`, with or without a zone. Postgres parses
+  // this shape natively, so the only work is to make the separator a space and
+  // spell the zone in a way it accepts (`UTC`/`GMT` -> `+00`).
+  const isoish = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?(\.\d+)?\s*(Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)?$/i
+  const m = isoish.exec(trimmed)
+  if (m) {
+    const [, date, hhmm, seconds, fraction, zone] = m
+    let out = `${date} ${hhmm}${seconds ?? ':00'}${fraction ?? ''}`
+    if (zone) {
+      out += /^(Z|UTC|GMT)$/i.test(zone) ? '+00' : zone
+    }
+    return out
   }
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(trimmed)) {
-    return trimmed.replace('T', ' ').replace(/\.\d+Z?$/, '').replace(/Z$/, '')
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return trimmed
-  }
+
+  // Anything else (a locale string, `May 31, 2026 …`) has no zone we can trust,
+  // so fall back to interpreting it locally - which is what the user typing in
+  // their own zone means.
   const parsed = Date.parse(trimmed)
   if (!Number.isNaN(parsed)) {
     const d = new Date(parsed)
