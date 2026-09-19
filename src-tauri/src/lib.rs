@@ -252,6 +252,7 @@ pub fn run() {
         .manage(TunnelState::new())
         .manage(omniroute::OmniRouteState::new())
         .manage(db::live::LiveState::default())
+        .manage(db::tx::TxState::default())
         .setup(move |app| {
             // Load or generate a stable MCP token from the app data directory.
             app.state::<McpState>().init_token(app.handle());
@@ -569,6 +570,11 @@ pub fn run() {
             db::backup::backup_cancel,
             db::import::import_rows,
             db::import::import_cancel,
+            db::tx::tx_begin,
+            db::tx::tx_execute,
+            db::tx::tx_commit,
+            db::tx::tx_rollback,
+            db::tx::tx_status,
             commands::check_license_status,
             commands::activate_license,
             commands::deactivate_license,

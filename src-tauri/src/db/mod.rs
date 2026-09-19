@@ -20,6 +20,7 @@ pub mod local_scan;
 pub mod pg_ext_types;
 pub mod geo;
 pub mod import;
+pub mod tx;
 
 pub use connection::{
     connect, connect_clickhouse, connect_d1, connect_duckdb, connect_libsql, connect_mssql, connect_mysql, connect_redis, connect_sqlite, disconnect,
