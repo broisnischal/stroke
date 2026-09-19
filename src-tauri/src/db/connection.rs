@@ -566,7 +566,114 @@ async fn connect_racing_probe<T>(
 /// query and a full reconnect.
 const STALE_AFTER: Duration = Duration::from_secs(25);
 
+/// What we have measured about the network path to this database.
+///
+/// A connection killed by a laptop sleep, a VPN flip, a wifi change or a NAT
+/// idle-timeout is usually not *closed*: the peer simply stops answering, and as
+/// far as this side is concerned the socket is still open. `SELECT 1` on it then
+/// neither succeeds nor fails - the kernel retransmits into the void until the
+/// TCP stack gives up, which takes minutes. Keepalive probes would catch it
+/// sooner, but macOS does not start them for two hours by default and sqlx
+/// exposes no way to configure them.
+///
+/// So the ping has to bound itself, and a fixed bound cannot be right for both a
+/// database on localhost and one across an ocean: too tight throws away healthy
+/// connections on a slow host (each costing a fresh handshake), too loose leaves
+/// the fast host waiting on a corpse. This measures the host instead - see
+/// `deadline` - and remembers that the path was alive, so the other five queries
+/// in a table open do not each re-prove it (`recently_verified`).
+#[derive(Debug, Default)]
+struct PathHealth {
+    /// `(when a ping last succeeded, EWMA of its round trip in microseconds)`.
+    ///
+    /// One lock, never held across an await: the two values are only ever read
+    /// and written together, and every caller does so between awaits.
+    state: Mutex<(Option<std::time::Instant>, u64)>,
+}
+
+impl PathHealth {
+    /// How long one connection's successful ping vouches for the others.
+    ///
+    /// The failure this guards against is the whole network path disappearing,
+    /// which takes every connection with it at once - so if one answered a
+    /// moment ago, the rest are alive too. A single connection dying on its own
+    /// (a server-side idle timeout, an admin terminate) is closed properly by
+    /// the server, so it comes back as an immediate error rather than a hang,
+    /// and needs no ping to find. That makes this safe, and it removes five of
+    /// the six round trips a table open used to pay after any pause.
+    const FRESH_FOR: Duration = Duration::from_secs(2);
+
+    /// Before the first measurement, allow this much. Generous enough for a
+    /// cold remote host, far short of the pool's `acquire_timeout`.
+    const UNMEASURED: Duration = Duration::from_secs(2);
+
+    fn recently_verified(&self) -> bool {
+        let guard = self.state.lock().unwrap();
+        guard.0.is_some_and(|at| at.elapsed() < Self::FRESH_FOR)
+    }
+
+    /// How long to wait for a ping before calling the connection dead.
+    ///
+    /// Ten times this host's own measured round trip. A healthy server would
+    /// have to become an order of magnitude slower than its own normal to be
+    /// mistaken for a dead one, so the "we discarded a connection that was
+    /// merely busy" case effectively does not arise - while a fast host is
+    /// declared dead in well under a second instead of waiting out a timeout
+    /// picked for someone else's network.
+    fn deadline(&self) -> Duration {
+        let rtt_us = self.state.lock().unwrap().1;
+        if rtt_us == 0 {
+            return Self::UNMEASURED;
+        }
+        Duration::from_micros(rtt_us.saturating_mul(10))
+            .clamp(Duration::from_millis(500), Duration::from_secs(15))
+    }
+
+    fn record(&self, rtt: Duration) {
+        let mut guard = self.state.lock().unwrap();
+        guard.0 = Some(std::time::Instant::now());
+        let sample = rtt.as_micros().min(u128::from(u64::MAX)) as u64;
+        // Weighted to the recent past so a network that gets slower is followed
+        // quickly, without one stall moving the deadline far.
+        guard.1 = if guard.1 == 0 { sample } else { guard.1 / 2 + sample / 2 };
+    }
+}
+
+/// Ping a connection that has been idle long enough to have died, and say
+/// whether the pool should still hand it out.
+///
+/// Shared by the Postgres and MySQL pools - `SELECT 1` and the reasoning are
+/// the same for both.
+macro_rules! ping_if_stale {
+    ($health:expr, $conn:expr, $meta:expr) => {{
+        if $meta.idle_for < STALE_AFTER || $health.recently_verified() {
+            Ok(true)
+        } else {
+            let started = std::time::Instant::now();
+            match tokio::time::timeout(
+                $health.deadline(),
+                sqlx::query("SELECT 1").execute(&mut *$conn),
+            )
+            .await
+            {
+                Ok(Ok(_)) => {
+                    $health.record(started.elapsed());
+                    Ok(true)
+                }
+                Ok(Err(e)) => Err(e),
+                // Silence is the dead case. Report it as an error rather than
+                // `Ok(false)`: sqlx closes a rejected connection gracefully,
+                // which means writing a Terminate to the same socket that just
+                // failed to answer, and waiting on that too. An error makes it
+                // drop the connection outright and open a fresh one.
+                Err(_elapsed) => Err(sqlx::Error::PoolTimedOut),
+            }
+        }
+    }};
+}
+
 fn pg_pool_builder() -> PgPoolOptions {
+    let health = std::sync::Arc::new(PathHealth::default());
     PgPoolOptions::new()
         // Headroom for the first-open burst (6 concurrent: rows + count + four
         // catalog lookups) PLUS the background warm, which HOLDS its connections
@@ -614,14 +721,9 @@ fn pg_pool_builder() -> PgPoolOptions {
         // Ping only what might be dead - see STALE_AFTER. A failure here makes the
         // pool drop this connection and hand over another (or open one), so a
         // stale pool repairs itself during acquire rather than after a failed query.
-        .before_acquire(|conn, meta| {
-            Box::pin(async move {
-                if meta.idle_for < STALE_AFTER {
-                    return Ok(true);
-                }
-                sqlx::query("SELECT 1").execute(&mut *conn).await?;
-                Ok(true)
-            })
+        .before_acquire(move |conn, meta| {
+            let health = health.clone();
+            Box::pin(async move { ping_if_stale!(health, conn, meta) })
         })
 }
 
@@ -916,6 +1018,7 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
         .filter(|t| !t.is_empty() && !t.eq_ignore_ascii_case("SYSTEM"))
         .map(|t| format!("SET time_zone = '{}'", t.replace('\'', "''")));
 
+    let health = std::sync::Arc::new(PathHealth::default());
     let connect = MySqlPoolOptions::new()
         // Same rationale as PG: 4 is the real-world ceiling for a desktop app.
         .max_connections(4)
@@ -928,14 +1031,9 @@ pub(crate) async fn open_mysql(config: &MysqlConfig) -> Result<MySqlPool, String
         // See pg_pool_builder: the pre-acquire ping is a round trip per acquire,
         // so it is gated on idle time instead of run on every one.
         .test_before_acquire(false)
-        .before_acquire(|conn, meta| {
-            Box::pin(async move {
-                if meta.idle_for < STALE_AFTER {
-                    return Ok(true);
-                }
-                sqlx::query("SELECT 1").execute(&mut *conn).await?;
-                Ok(true)
-            })
+        .before_acquire(move |conn, meta| {
+            let health = health.clone();
+            Box::pin(async move { ping_if_stale!(health, conn, meta) })
         })
         // Enable ANSI_QUOTES on every connection so double-quoted identifiers
         // ("col") work the same as backtick identifiers (`col`). This makes
@@ -1131,6 +1229,76 @@ mod tests {
     use super::*;
 
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    // ── PathHealth ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn unmeasured_path_gets_a_starting_deadline() {
+        assert_eq!(PathHealth::default().deadline(), PathHealth::UNMEASURED);
+    }
+
+    #[test]
+    fn deadline_tracks_the_host_that_was_measured() {
+        // A nearby host is declared dead quickly; a distant one is given room.
+        // A fixed timeout can only be right for one of them.
+        let near = PathHealth::default();
+        near.record(Duration::from_millis(50));
+        assert_eq!(near.deadline(), Duration::from_millis(500));
+
+        let far = PathHealth::default();
+        far.record(Duration::from_millis(900));
+        assert_eq!(far.deadline(), Duration::from_secs(9));
+    }
+
+    #[test]
+    fn deadline_stays_inside_its_bounds() {
+        // Sub-millisecond localhost must not get a deadline it can trip over,
+        // and a pathologically slow sample must not park the pool for a minute.
+        let local = PathHealth::default();
+        local.record(Duration::from_micros(200));
+        assert_eq!(local.deadline(), Duration::from_millis(500));
+
+        let awful = PathHealth::default();
+        awful.record(Duration::from_secs(30));
+        assert_eq!(awful.deadline(), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn a_healthy_connection_has_an_order_of_magnitude_of_headroom() {
+        // The property that matters: a server would have to get ~10x slower
+        // than its own normal before a live connection is thrown away.
+        let health = PathHealth::default();
+        health.record(Duration::from_millis(46)); // the measured host
+        assert!(health.deadline() >= Duration::from_millis(460));
+    }
+
+    #[test]
+    fn measurement_follows_the_network_without_chasing_one_stall() {
+        let health = PathHealth::default();
+        health.record(Duration::from_millis(100));
+        health.record(Duration::from_millis(200));
+        // Halfway, not all the way: one slow sample moves the deadline, but
+        // does not hand the next connection a 10x budget on its own.
+        assert_eq!(health.state.lock().unwrap().1, 150_000);
+    }
+
+    #[test]
+    fn one_success_vouches_for_the_pool_briefly() {
+        // This is what removes five of the six round trips a table open paid.
+        let health = PathHealth::default();
+        assert!(!health.recently_verified(), "nothing proven yet");
+        health.record(Duration::from_millis(10));
+        assert!(health.recently_verified());
+    }
+
+    #[test]
+    fn a_failed_ping_never_vouches_for_anything() {
+        // `record` is only reachable on success, so a pool that has only ever
+        // timed out keeps pinging rather than waving connections through.
+        let health = PathHealth::default();
+        assert!(!health.recently_verified());
+        assert_eq!(health.deadline(), PathHealth::UNMEASURED);
+    }
 
     /// The whole point of the probe signal: once TCP is proven, a slow handshake
     /// must be waited out, not restarted. Restarting pays TLS and auth again, and
