@@ -45,6 +45,7 @@
     extractSqlParams,
     missingSqlParams,
     substituteSqlParams,
+    dialectForEngine,
     loadStoredParamValues,
     saveStoredParamValues,
   } from "$lib/sql-params.js";
@@ -61,6 +62,8 @@
   let {
     /** Whether the SQL tab is the active/visible tab - gates global hotkeys. */
     active = true,
+    /** Connection family, so parameter values are quoted the way this engine reads them. */
+    engine = "postgres",
     sql = $bindable("SELECT 1;"),
     columns = [],
     rows = [],
@@ -76,6 +79,12 @@
     schemaHints = /** @type {SqlSchemaHints} */ ({}),
     /** Run SQL - receives a single-statement override, or undefined to run the whole buffer. */
     onrun = (/** @type {string | undefined} */ statementSql) => {},
+    /** Open transaction for this tab, or null when running in autocommit. */
+    txStatus = null,
+    txBusy = false,
+    onbegintransaction = () => {},
+    oncommittransaction = () => {},
+    onrollbacktransaction = () => {},
     onmodk = undefined,
     onmods = undefined,
     onmodi = undefined,
@@ -150,7 +159,7 @@
         return
       }
       lastRanStatement = single ?? null
-      onrun(substituteSqlParams(target, paramValues))
+      onrun(substituteSqlParams(target, paramValues, dialectForEngine(engine)))
       return
     }
     lastRanStatement = single ?? null
@@ -516,6 +525,53 @@
         Stop
       </Button>
     {:else}
+      {#if txStatus?.open}
+        <!-- An open transaction changes what Run means, so say so next to it
+             and keep Commit/Rollback within reach of the same hand. -->
+        <div
+          class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 pl-2 pr-1"
+          title={`${txStatus.statements} statement(s) run, ${txStatus.rowsAffected} row(s) changed. Nothing is saved until you commit.`}
+        >
+          <span class="whitespace-nowrap text-ui-2xs font-medium text-warning">
+            In transaction
+          </span>
+          <span class="font-mono text-ui-3xs text-muted-foreground">
+            {txStatus.statements}
+          </span>
+          <button
+            type="button"
+            class="inline-flex h-5 items-center rounded px-1.5 text-ui-3xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+            disabled={txBusy}
+            onclick={() => oncommittransaction()}
+            title={tipText('Commit', 'Save everything this transaction has done.')}
+          >
+            Commit
+          </button>
+          <button
+            type="button"
+            class="inline-flex h-5 items-center rounded px-1.5 text-ui-3xs font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-50"
+            disabled={txBusy}
+            onclick={() => onrollbacktransaction()}
+            title={tipText('Roll back', 'Undo everything this transaction has done.')}
+          >
+            Roll back
+          </button>
+        </div>
+      {:else}
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-7 shrink-0"
+          disabled={txBusy}
+          onclick={() => onbegintransaction()}
+          title={tipText(
+            'Begin transaction',
+            'Run statements without saving them, then commit or roll back.',
+          )}
+        >
+          Begin
+        </Button>
+      {/if}
       <!-- Split button: one wrapper owns the radius + shadow; the halves are
            plain buttons (the Button component's transparent border,
            bg-clip-padding and elevate shadow would each paint a seam). -->

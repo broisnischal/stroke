@@ -42,6 +42,7 @@
   import * as PaneTree from '$lib/pane-layout.js'
   import TabLoading from './TabLoading.svelte'
   import TableToolbar from './TableToolbar.svelte'
+  import ImportDataDialog from './ImportDataDialog.svelte'
   import DataTable from './DataTable.svelte'
   import RowDetailPanel from './RowDetailPanel.svelte'
   // TableJsonView / TableTextView are NOT imported here: both reach monaco-editor
@@ -130,6 +131,11 @@
     getIncomingForeignKeys,
     executeSql,
     executeSqlMulti,
+    txBegin,
+    txExecute,
+    txStatus,
+    txCommit,
+    txRollback,
     executeDdl,
     updateTableCell,
     deleteTableRows,
@@ -1049,6 +1055,76 @@
   /** @type {Map<string, typeof columns>} */
   let tableColumnsCache = $state(new Map())
   let primaryKey = $state([])
+  /** Data-import dialog for the open table. */
+  let importDataOpen = $state(false)
+
+  // ── Explicit transactions ──────────────────────────────────────────────────
+  // One transaction per SQL tab: it holds a connection, so it belongs to the
+  // editor the user opened it from rather than to the app as a whole.
+  /** @type {Map<string, string>} tab id -> backend session id */
+  let sqlTxSessions = $state(new Map())
+  /** @type {Map<string, import('$lib/api.js').TxStatus>} tab id -> its status */
+  let sqlTxStatuses = $state(new Map())
+  let sqlTxBusy = $state(false)
+
+  const activeTxSession = $derived(activeTabId ? sqlTxSessions.get(activeTabId) ?? null : null)
+  const activeTxStatus = $derived(activeTabId ? sqlTxStatuses.get(activeTabId) ?? null : null)
+
+  /** @param {string} tabId @param {import('$lib/api.js').TxStatus|null} status */
+  function setTxStatus(tabId, status) {
+    const next = new Map(sqlTxStatuses)
+    if (status) next.set(tabId, status)
+    else next.delete(tabId)
+    sqlTxStatuses = next
+  }
+
+  async function beginSqlTransaction() {
+    if (!activeTabId || sqlTxBusy) return
+    const session = `tx-${activeTabId}`
+    sqlTxBusy = true
+    try {
+      const status = await txBegin(session)
+      sqlTxSessions = new Map(sqlTxSessions).set(activeTabId, session)
+      setTxStatus(activeTabId, status)
+      toast.info('Transaction open — nothing is saved until you commit')
+    } catch (e) {
+      toast.error('Could not start a transaction', { description: String(e) })
+    } finally {
+      sqlTxBusy = false
+    }
+  }
+
+  /** @param {'commit'|'rollback'} how */
+  async function endSqlTransaction(how) {
+    const tabId = activeTabId
+    if (!tabId || sqlTxBusy) return
+    const session = sqlTxSessions.get(tabId)
+    if (!session) return
+    sqlTxBusy = true
+    try {
+      const applied = sqlTxStatuses.get(tabId)?.rowsAffected ?? 0
+      if (how === 'commit') {
+        await txCommit(session)
+        toast.success(applied > 0 ? `Committed — ${formatCompactCount(applied)} row(s) written` : 'Committed')
+      } else {
+        await txRollback(session)
+        toast.info('Rolled back — the database is unchanged')
+      }
+      // Only forget the session once the backend has actually closed it;
+      // dropping it on failure would strand the held connection with no way
+      // left in the UI to reach it.
+      const next = new Map(sqlTxSessions)
+      next.delete(tabId)
+      sqlTxSessions = next
+      setTxStatus(tabId, null)
+    } catch (e) {
+      toast.error(how === 'commit' ? 'Could not commit' : 'Could not roll back', {
+        description: String(e),
+      })
+    } finally {
+      sqlTxBusy = false
+    }
+  }
   /** @type {ForeignKeyInfo[]} */
   let foreignKeys = $state([])
   /** Cache of incoming (reverse) FKs, keyed by "schema.table". Loaded once per table open. */
@@ -5709,7 +5785,17 @@ let rowSearch = $state('')
     let ranError = ''
     let ranRowCount = 0
     try {
-      const results = await executeSqlMulti(sqlRan, queryId)
+      // A tab with an open transaction runs on that transaction's connection,
+      // so its statements stay invisible until the user commits. Everything
+      // below is identical - only the executor differs.
+      const txSession = runTabId ? sqlTxSessions.get(runTabId) : null
+      let results
+      if (txSession) {
+        results = [await txExecute(txSession, sqlRan)]
+        if (runTabId) setTxStatus(runTabId, await txStatus(txSession))
+      } else {
+        results = await executeSqlMulti(sqlRan, queryId)
+      }
       const data = results.length > 0 ? results[results.length - 1] : {}
       const cols = data.columns ?? []
       const rws = data.rows ?? []
@@ -6852,6 +6938,15 @@ let rowSearch = $state('')
   onopenlicense={() => openLicenseTab()}
 />
 
+<ImportDataDialog
+  bind:open={importDataOpen}
+  schema={activeSchema}
+  table={activeTable ?? ''}
+  {columns}
+  {primaryKey}
+  onimported={() => reloadTableFromQuery(false)}
+/>
+
 <AiSettingsDialog bind:open={showAiModelSettings} />
 
 <KeyboardShortcutsDialog bind:open={showShortcutsModal} />
@@ -7694,6 +7789,12 @@ let rowSearch = $state('')
           <SqlConsole
             bind:this={sqlConsoleRef}
             active={activeTab?.kind === 'sql'}
+            engine={dbType}
+            txStatus={activeTxSession ? activeTxStatus : null}
+            txBusy={sqlTxBusy}
+            onbegintransaction={() => void beginSqlTransaction()}
+            oncommittransaction={() => void endSqlTransaction('commit')}
+            onrollbacktransaction={() => void endSqlTransaction('rollback')}
             bind:sql={sqlText}
             bind:queryHistoryVisible
             {queryHistory}
@@ -7893,6 +7994,7 @@ let rowSearch = $state('')
             onfindreplace={() => (findReplaceOpen = true)}
             ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
+            onimport={() => (importDataOpen = true)}
             onexportdiagram={(kind) => erdPane?.exportDiagram?.(kind)}
             onexportchart={(kind) => chartPane?.exportChart?.(kind)}
             onaddrow={() => {

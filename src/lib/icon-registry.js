@@ -109,6 +109,7 @@ import Columns3 from '@lucide/svelte/icons/columns-3'
 import Crosshair from '@lucide/svelte/icons/crosshair'
 import Eraser from '@lucide/svelte/icons/eraser'
 import FileDown from '@lucide/svelte/icons/file-down'
+import FileUp from '@lucide/svelte/icons/file-up'
 import FileText from '@lucide/svelte/icons/file-text'
 import FunctionSquare from '@lucide/svelte/icons/function-square'
 import Hash from '@lucide/svelte/icons/hash'
@@ -150,7 +151,7 @@ import {
   WifiConnected01Icon, WifiDisconnected01Icon, TestTubeIcon, WorkflowSquare02Icon,
   Share08Icon, GitCompareIcon, PuzzleIcon, PlugSocketIcon, NoteEditIcon, ChartBarLineIcon, GlobalIcon,
   InformationCircleIcon, ArrowUpDownIcon, ArrowLeftRightIcon, Bookmark01Icon, BugIcon,
-  UnavailableIcon, Target01Icon, EraserIcon, FileDownloadIcon, File01Icon, FunctionSquareIcon,
+  UnavailableIcon, Target01Icon, EraserIcon, FileDownloadIcon, FileUploadIcon, File01Icon, FunctionSquareIcon,
   HashIcon, InfinityIcon, KeyboardIcon, Layers01Icon, LeftToRightListBulletIcon, Link01Icon,
   WorkflowSquare01Icon, PackageIcon, PinLocation01Icon, PinOffIcon, FilterHorizontalIcon,
   SquareIcon, CheckmarkSquare01Icon, UnfoldMoreIcon, UnfoldLessIcon, SortingDownIcon,
@@ -258,6 +259,7 @@ export const ICON_MAP = {
   'crosshair':      { lucide: Crosshair,      huge: Target01Icon },
   'eraser':         { lucide: Eraser,         huge: EraserIcon },
   'file-down':      { lucide: FileDown,       huge: FileDownloadIcon },
+  'file-up':        { lucide: FileUp,         huge: FileUploadIcon },
   'file-text':      { lucide: FileText,       huge: File01Icon },
   'function-square':{ lucide: FunctionSquare, huge: FunctionSquareIcon },
   'hash':           { lucide: Hash,           huge: HashIcon },

@@ -567,6 +567,8 @@ pub fn run() {
             db::backup::backup_export,
             db::backup::backup_import,
             db::backup::backup_cancel,
+            db::import::import_rows,
+            db::import::import_cancel,
             commands::check_license_status,
             commands::activate_license,
             commands::deactivate_license,

@@ -70,6 +70,7 @@
     ondeleteselected = () => {},
     /** @type {(format: 'csv' | 'json' | 'sql' | 'tsv' | 'md' | 'jsonl') => void | Promise<void>} */
     onexport = () => {},
+    onimport = () => {},
     /** Diagram exports, offered alongside the row formats while the ERD view is open. */
     /** @type {(kind: 'png' | 'copy-png' | 'svg' | 'mermaid') => void | Promise<void>} */
     onexportdiagram = () => {},
@@ -1446,6 +1447,10 @@
               </DropdownMenu.Group>
             </DropdownMenu.SubContent>
           </DropdownMenu.Sub>
+          <DropdownMenu.Item disabled={readonly} onSelect={() => onimport()}>
+            <Icon name="file-up" class="size-3.5" />
+            Import data…
+          </DropdownMenu.Item>
           <DropdownMenu.Separator />
           <DropdownMenu.Item
             variant="destructive"

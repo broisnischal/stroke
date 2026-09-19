@@ -247,7 +247,7 @@ pub struct SqlResult {
     pub sql: String,
 }
 
-fn pg_type_label(type_name: &str) -> String {
+pub(crate) fn pg_type_label(type_name: &str) -> String {
     let name = type_name;
     match name {
         "VARCHAR" | "CHAR" | "BPCHAR" => {
@@ -658,7 +658,7 @@ fn pg_datetime_cast(data_type: &str) -> Option<&'static str> {
 }
 
 #[derive(Debug, Clone)]
-struct PgColumnMeta {
+pub(crate) struct PgColumnMeta {
     data_type: String,
     udt_schema: Option<String>,
     udt_name: Option<String>,
@@ -718,7 +718,7 @@ impl PgColumnMeta {
         Ok(format!(r#""{column}" = $1"#))
     }
 
-    fn insert_value_sql(&self, bind_idx: u32) -> Result<String, String> {
+    pub(crate) fn insert_value_sql(&self, bind_idx: u32) -> Result<String, String> {
         if self.data_type.eq_ignore_ascii_case("USER-DEFINED") {
             let udt_name = self
                 .udt_name
@@ -749,11 +749,11 @@ pub struct InsertRowResult {
     pub row: Vec<Value>,
 }
 
-struct PgInsertColumnMeta {
-    name: String,
-    data_type: String,
-    optional_when_omitted: bool,
-    pg: PgColumnMeta,
+pub(crate) struct PgInsertColumnMeta {
+    pub(crate) name: String,
+    pub(crate) data_type: String,
+    pub(crate) optional_when_omitted: bool,
+    pub(crate) pg: PgColumnMeta,
 }
 
 fn pg_column_optional_when_omitted(
@@ -775,11 +775,11 @@ fn pg_column_optional_when_omitted(
     nullable
 }
 
-fn is_bytea_type(data_type: &str) -> bool {
+pub(crate) fn is_bytea_type(data_type: &str) -> bool {
     normalize_pg_type(data_type).contains("bytea")
 }
 
-fn validate_typed_value(data_type: &str, value: &Value) -> Result<(), String> {
+pub(crate) fn validate_typed_value(data_type: &str, value: &Value) -> Result<(), String> {
     let t = normalize_pg_type(data_type);
 
     match value {
@@ -2095,6 +2095,84 @@ pub async fn update_table_cell(
     Ok(())
 }
 
+/// Load the per-column metadata an INSERT needs: declared type, whether the
+/// column can be omitted, and the cast a literal needs to reach that type.
+/// Returns the columns in ordinal order alongside the lookup table.
+///
+/// Shared by the single-row insert and the bulk importer so the two agree on
+/// what a column will accept.
+pub(crate) async fn pg_insert_meta(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    table: &str,
+) -> Result<(Vec<String>, HashMap<String, PgInsertColumnMeta>), String> {
+    validate_ident(schema)?;
+    validate_ident(table)?;
+
+    let meta_rows = sqlx::query(
+        r#"
+        SELECT
+            a.attname::text,
+            CASE WHEN t.typtype IN ('e','c','d') THEN 'USER-DEFINED' ELSE t.typname::text END,
+            NOT a.attnotnull,
+            pg_get_expr(ad.adbin, ad.adrelid),
+            a.attidentity IN ('a', 'd'),
+            tn.nspname::text,
+            t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
+        LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum
+        "#,
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to load column metadata: {e}"))?;
+
+    if meta_rows.is_empty() {
+        return Err(format!("Table not found: {schema}.{table}"));
+    }
+
+    let mut column_order: Vec<String> = Vec::new();
+    let mut insert_meta: HashMap<String, PgInsertColumnMeta> = HashMap::new();
+
+    for row in &meta_rows {
+        let name: String = row
+            .try_get(0)
+            .map_err(|e| format!("Invalid column name: {e}"))?;
+        let data_type: String = row.try_get(1).unwrap_or_else(|_| "text".into());
+        let is_nullable = row.try_get::<bool, _>(2).unwrap_or(true);
+        let column_default: Option<String> = row.try_get(3).ok();
+        let is_identity = row.try_get::<bool, _>(4).unwrap_or(false);
+        let optional =
+            pg_column_optional_when_omitted(is_nullable, column_default.as_deref(), is_identity, &data_type);
+
+        column_order.push(name.clone());
+        insert_meta.insert(
+            name.clone(),
+            PgInsertColumnMeta {
+                name,
+                data_type: data_type.clone(),
+                optional_when_omitted: optional,
+                pg: PgColumnMeta {
+                    data_type,
+                    udt_schema: row.try_get(5).ok(),
+                    udt_name: row.try_get(6).ok(),
+                },
+            },
+        );
+    }
+
+    Ok((column_order, insert_meta))
+}
+
 pub async fn insert_table_row(
     state: State<'_, DbState>,
     schema: String,
@@ -2140,69 +2218,7 @@ pub async fn insert_table_row(
     }
 
     let pool = require_pool(&state)?;
-    validate_ident(&schema)?;
-    validate_ident(&table)?;
-
-    let meta_rows = sqlx::query(
-        r#"
-        SELECT
-            a.attname::text,
-            CASE WHEN t.typtype IN ('e','c','d') THEN 'USER-DEFINED' ELSE t.typname::text END,
-            NOT a.attnotnull,
-            pg_get_expr(ad.adbin, ad.adrelid),
-            a.attidentity IN ('a', 'd'),
-            tn.nspname::text,
-            t.typname::text
-        FROM pg_catalog.pg_attribute a
-        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
-        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
-        JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
-        LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
-        WHERE n.nspname = $1 AND c.relname = $2
-          AND a.attnum > 0 AND NOT a.attisdropped
-        ORDER BY a.attnum
-        "#,
-    )
-    .bind(&schema)
-    .bind(&table)
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| format!("Failed to load column metadata: {e}"))?;
-
-    if meta_rows.is_empty() {
-        return Err(format!("Table not found: {schema}.{table}"));
-    }
-
-    let mut column_order: Vec<String> = Vec::new();
-    let mut insert_meta: HashMap<String, PgInsertColumnMeta> = HashMap::new();
-
-    for row in &meta_rows {
-        let name: String = row
-            .try_get(0)
-            .map_err(|e| format!("Invalid column name: {e}"))?;
-        let data_type: String = row.try_get(1).unwrap_or_else(|_| "text".into());
-        let is_nullable = row.try_get::<bool, _>(2).unwrap_or(true);
-        let column_default: Option<String> = row.try_get(3).ok();
-        let is_identity = row.try_get::<bool, _>(4).unwrap_or(false);
-        let optional =
-            pg_column_optional_when_omitted(is_nullable, column_default.as_deref(), is_identity, &data_type);
-
-        column_order.push(name.clone());
-        insert_meta.insert(
-            name.clone(),
-            PgInsertColumnMeta {
-                name,
-                data_type: data_type.clone(),
-                optional_when_omitted: optional,
-                pg: PgColumnMeta {
-                    data_type,
-                    udt_schema: row.try_get(5).ok(),
-                    udt_name: row.try_get(6).ok(),
-                },
-            },
-        );
-    }
+    let (column_order, insert_meta) = pg_insert_meta(&pool, &schema, &table).await?;
 
     let mut col_names: Vec<String> = values.keys().cloned().collect();
     col_names.sort();
@@ -2441,7 +2457,7 @@ WHERE {match_cols}"#,
     Ok(result.rows_affected())
 }
 
-fn bind_typed_value<'a>(
+pub(crate) fn bind_typed_value<'a>(
     q: sqlx::query::Query<'a, sqlx::Postgres, sqlx::postgres::PgArguments>,
     data_type: &str,
     value: &Value,
@@ -2510,7 +2526,7 @@ fn bind_typed_value<'a>(
     }
 }
 
-fn is_row_returning_sql(sql: &str) -> bool {
+pub(crate) fn is_row_returning_sql(sql: &str) -> bool {
     let head = super::sql_util::statement_head(sql);
     matches!(
         head.as_str(),
@@ -2652,7 +2668,7 @@ pub async fn execute_sql_on_conn(
 const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
 /// Statement timeout for ad-hoc queries (milliseconds). Generous enough for
 /// heavier scans (e.g. tables with large TOASTed JSON columns) to finish.
-const EXECUTE_SQL_TIMEOUT_MS: i64 = 60_000;
+pub(crate) const EXECUTE_SQL_TIMEOUT_MS: i64 = 60_000;
 
 async fn execute_sql_pg(
     pool: &sqlx::PgPool,
@@ -2854,7 +2870,7 @@ fn sql_fragment_is_meaningful(s: &str) -> bool {
 /// inside quoted strings (`'…'` with `''`/`\'` escapes, `"…"`, backticks),
 /// line/block comments, or Postgres dollar-quoted bodies (`$$…$$`, `$tag$…$tag$`).
 /// Comment-only fragments are dropped. Mirrors `src/lib/sql-statements.js`.
-fn split_sql_statements(sql: &str) -> Vec<String> {
+pub(crate) fn split_sql_statements(sql: &str) -> Vec<String> {
     let b = sql.as_bytes();
     let n = b.len();
     let mut out: Vec<String> = Vec::new();

@@ -1068,7 +1068,7 @@ export async function backupExport(schema = null, tables = null, options = null)
 /**
  * Execute a SQL restore script against the connected database.
  * @param {string} sql
- * @returns {Promise<{ statementsOk: number, statementsErr: number, errors: string[] }>}
+ * @returns {Promise<{ statementsOk: number, statementsErr: number, statementsSkipped: number, cancelled: boolean, errors: string[] }>}
  */
 export async function backupImport(sql) {
   assertWritable('restore a backup')
@@ -1082,6 +1082,106 @@ export async function backupImport(sql) {
  */
 export async function backupCancel() {
   return inv('backup_cancel')
+}
+
+// ── Explicit transactions ─────────────────────────────────────────────────────
+
+/**
+ * @typedef {object} TxStatus
+ * @property {boolean} open
+ * @property {number} statements statements run since BEGIN
+ * @property {number} rowsAffected
+ * @property {number} openMs how long the transaction has been held
+ * @property {string|null} engine
+ */
+
+/**
+ * Open a transaction and hold its connection until it is committed or rolled
+ * back. `sessionId` scopes it to one editor tab.
+ * @param {string} sessionId
+ * @returns {Promise<TxStatus>}
+ */
+export async function txBegin(sessionId) {
+  return inv('tx_begin', { sessionId })
+}
+
+/**
+ * Run SQL inside an open transaction. Nothing is visible elsewhere until commit.
+ * @param {string} sessionId
+ * @param {string} sql
+ */
+export async function txExecute(sessionId, sql) {
+  if (isWriteSql(sql)) assertWritable('run that statement')
+  const _t0 = performance.now()
+  try {
+    const r = await inv('tx_execute', { sessionId, sql })
+    recordQuery({ sql: r?.sql || sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), source: 'sql', success: true })
+    return r
+  } catch (err) {
+    recordQuery({ sql, durationMs: Math.round(performance.now() - _t0), source: 'sql', success: false, error: /** @type {Error} */ (err).message })
+    throw err
+  }
+}
+
+/** @param {string} sessionId @returns {Promise<TxStatus>} */
+export async function txCommit(sessionId) {
+  assertWritable('commit a transaction')
+  return inv('tx_commit', { sessionId })
+}
+
+/** @param {string} sessionId @returns {Promise<TxStatus>} */
+export async function txRollback(sessionId) {
+  return inv('tx_rollback', { sessionId })
+}
+
+/** @param {string} sessionId @returns {Promise<TxStatus>} */
+export async function txStatus(sessionId) {
+  return inv('tx_status', { sessionId })
+}
+
+// ── Data import ───────────────────────────────────────────────────────────────
+
+/**
+ * @typedef {object} ImportOptions
+ * @property {'error'|'skip'|'update'} [conflict] what to do when a row already exists
+ * @property {string[]} [conflictColumns] the columns that decide a conflict
+ * @property {boolean} [abortOnError] true (default) imports all-or-nothing
+ * @property {number} [batchSize] rows per INSERT statement
+ */
+
+/**
+ * @typedef {object} ImportRowsResult
+ * @property {number} inserted
+ * @property {number} failed
+ * @property {number} skipped rows never attempted
+ * @property {boolean} cancelled
+ * @property {boolean} rolledBack true when nothing was committed
+ * @property {{ row: number, message: string }[]} errors
+ */
+
+/**
+ * Bulk-insert parsed rows into an existing table.
+ *
+ * `rows` must be positional: one value per entry in `columns`, same order.
+ * @param {string|null} schema
+ * @param {string} table
+ * @param {string[]} columns
+ * @param {unknown[][]} rows
+ * @param {ImportOptions|null} [options]
+ * @returns {Promise<ImportRowsResult>}
+ */
+export async function importRows(schema, table, columns, rows, options = null) {
+  assertWritable('import rows')
+  return inv('import_rows', { schema, table, columns, rows, options })
+}
+
+/**
+ * Request cancellation of the running import. The backend stops at the next
+ * batch; an all-or-nothing import then rolls back what it had written.
+ * @returns {Promise<void>}
+ */
+export async function importCancel() {
+  return inv('import_cancel')
 }
 
 // ── Autostart ─────────────────────────────────────────────────────────────────
