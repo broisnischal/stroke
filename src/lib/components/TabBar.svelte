@@ -40,6 +40,8 @@
     /** Reset a table tab's view state - search, filters, sort, hidden columns, view mode. */
     onresettable = /** @param {string} _id */ (_id) => {},
     onreopenclosed = () => {},
+    /** Open a fresh query editor - the `+` at the end of the strip. */
+    onnewsql = () => {},
     /** Whether the closed-tab stack has anything to reopen. */
     canreopenclosed = false,
     onpintoggle = /** @param {string} _id */ (_id) => {},
@@ -269,4 +271,15 @@
       </ContextMenu.Root>
     {/each}
   </div>
+  <!-- Outside the scroller on purpose: a `+` that scrolls away with the tabs is
+       a `+` you cannot find once the strip is full. -->
+  <button
+    type="button"
+    class="hit-area inline-flex w-8 shrink-0 items-center justify-center self-stretch text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
+    title="New query editor"
+    aria-label="New query editor"
+    onclick={onnewsql}
+  >
+    <Icon name="plus" class="size-3.5" />
+  </button>
 </header>

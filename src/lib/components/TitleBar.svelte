@@ -11,6 +11,8 @@
   import { isTrialActive, licenseStatus } from '$lib/stores/license.js'
   import LicenseActivation from './LicenseActivation.svelte'
   import Logo from './Logo.svelte'
+  import AppMenuBar from './AppMenuBar.svelte'
+  import { appMenuBar } from '$lib/stores/settings.js'
   import WindowControls from './WindowControls.svelte'
   import * as Dialog from '$lib/components/ui/dialog/index.js'
 
@@ -47,6 +49,8 @@
     ongoforward = () => {},
     ontogglesidebar = () => {},
     ontoggleaisidebar = () => {},
+    /** Named actions for the menu bar - see AppMenuBar. */
+    menuActions = /** @type {Record<string, () => void>} */ ({}),
   } = $props()
 
   let showActivationDialog = $state(false)
@@ -83,6 +87,15 @@
 
   <!-- Stroke mark -->
   <Logo class="mr-2 size-4 shrink-0" />
+
+  <!-- Menu bar. First after the mark, which is where every desktop app puts it
+       and where people look before they look for a shortcut. Optional: everything
+       in it is also in ⌘K and on a shortcut, so hiding it costs nothing but the
+       menus themselves. -->
+  {#if $appMenuBar}
+    <AppMenuBar {connected} actions={menuActions} />
+    <span class="mx-1.5 h-4 w-px shrink-0 bg-border/50"></span>
+  {/if}
 
   <!-- Sidebar toggle, disabled when not connected -->
   <button

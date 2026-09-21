@@ -462,6 +462,7 @@ pub fn run() {
             commands::ai_web_search,
             commands::ai_fetch_page,
             commands::read_file,
+            commands::open_new_window,
             commands::restart_app,
             commands::toggle_devtools,
             commands::test_postgres_connection,

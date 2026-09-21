@@ -259,6 +259,54 @@ pub async fn read_file(path: String) -> Result<String, String> {
     tokio::fs::read_to_string(&path).await.map_err(|e| e.to_string())
 }
 
+/// Open another Stroke window.
+///
+/// Windows share this process, and with it the active connection: the backend
+/// holds one pool, not one per window. That is the point - the second window is
+/// another view of the same session (a table on one screen, the SQL editor on
+/// the other), not a second client - but it does mean switching connection in
+/// either window switches it for both.
+///
+/// The chrome is built to match the main window exactly: frameless everywhere,
+/// macOS keeping its native traffic lights, and the dark base colour painted
+/// before the first frame so no white flash escapes while the frontend boots.
+#[tauri::command]
+pub fn open_new_window(app: tauri::AppHandle) -> Result<(), String> {
+    // Labels must be unique and stable-ish; the counter restarts with the app,
+    // and a closed label is free to reuse, so probe for the first gap.
+    let label = (2..64)
+        .map(|n| format!("main-{n}"))
+        .find(|l| app.webview_windows().get(l.as_str()).is_none())
+        .ok_or_else(|| "Too many windows are already open".to_string())?;
+
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        &label,
+        tauri::WebviewUrl::App("/".into()),
+    )
+    .title("Stroke")
+    .inner_size(1280.0, 800.0)
+    .min_inner_size(960.0, 600.0)
+    .resizable(true)
+    .background_color(tauri::window::Color(8, 8, 8, 255));
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.decorations(false);
+    }
+
+    let window = builder.build().map_err(|e| e.to_string())?;
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
 /// Restart the application - called after an update is installed.
 #[tauri::command]
 pub fn restart_app(app: tauri::AppHandle) {
