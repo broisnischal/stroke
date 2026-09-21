@@ -1,0 +1,143 @@
+# One container per dialect Stroke can talk to, all carrying the same `shop`
+# schema so the sidebar, grid, DDL and object pages can be compared across
+# engines rather than one at a time.
+#
+#   scripts/dialects.sh up        # start everything and seed what needs seeding
+#   scripts/dialects.sh status    # what is up, and how many rows it has
+#   scripts/dialects.sh verify    # walk every engine through Stroke's own code
+#   scripts/dialects.sh down      # stop; add --volumes to throw the data away
+#
+# Ports are deliberately in the 5xxxx range, one per engine, so a stack that is
+# already running on the standard port is left alone.
+
+name: stroke-dialects
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: stroke-test-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stroke
+      POSTGRES_PASSWORD: stroke
+      # `shop` for the database as well as the schema, so one saved connection
+      # reaches it whichever engine it is pointed at - MySQL has no schemas
+      # below the database, so `shop` has to be the database there.
+      POSTGRES_DB: shop
+    ports: ["55432:5432"]
+    volumes:
+      - ./seed/postgres:/docker-entrypoint-initdb.d:ro
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stroke -d shop"]
+      interval: 3s
+      retries: 20
+
+  cockroach:
+    # Wire-compatible with Postgres, but its catalog answers differ enough to be
+    # worth its own row in the matrix.
+    image: cockroachdb/cockroach:latest-v24.1
+    container_name: stroke-test-cockroach
+    restart: unless-stopped
+    command: start-single-node --insecure --accept-sql-without-tls
+    ports: ["56257:26257", "58080:8080"]
+    volumes:
+      - cockroach-data:/cockroach/cockroach-data
+    healthcheck:
+      test: ["CMD-SHELL", "cockroach sql --insecure -e 'SELECT 1' >/dev/null"]
+      interval: 5s
+      retries: 20
+
+  mysql:
+    image: mysql:8
+    container_name: stroke-test-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: stroke
+      MYSQL_DATABASE: shop
+    ports: ["53306:3306"]
+    volumes:
+      - ./seed/mysql:/docker-entrypoint-initdb.d:ro
+      - mysql-data:/var/lib/mysql
+    # log_bin_trust_function_creators: the seed defines a stored function, which
+    # the binlog otherwise refuses without SUPER.
+    command: ["--log_bin_trust_function_creators=1"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pstroke --silent"]
+      interval: 3s
+      retries: 30
+
+  mariadb:
+    image: mariadb:11
+    container_name: stroke-test-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: stroke
+      MARIADB_DATABASE: shop
+    ports: ["53307:3306"]
+    volumes:
+      - ./seed/mariadb:/docker-entrypoint-initdb.d:ro
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -pstroke --silent"]
+      interval: 3s
+      retries: 30
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: stroke-test-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: stroke
+      CLICKHOUSE_PASSWORD: stroke
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports: ["58123:8123", "59000:9000"]
+    volumes:
+      - ./seed/clickhouse:/docker-entrypoint-initdb.d:ro
+      - clickhouse-data:/var/lib/clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- 'http://127.0.0.1:8123/ping' | grep -q Ok"]
+      interval: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: stroke-test-redis
+    restart: unless-stopped
+    ports: ["56379:6379"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 3s
+      retries: 20
+
+  mssql:
+    # 2022 publishes amd64 only; on Apple silicon this runs under emulation and
+    # takes about a minute to come up.
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: stroke-test-mssql
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Stroke!passw0rd"
+      MSSQL_PID: Developer
+    ports: ["51433:1433"]
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' >/dev/null"]
+      interval: 5s
+      retries: 40
+
+volumes:
+  pg-data:
+  cockroach-data:
+  mysql-data:
+  mariadb-data:
+  clickhouse-data:
+  redis-data:
+  mssql-data:
