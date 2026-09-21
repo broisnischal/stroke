@@ -25,10 +25,17 @@
 			(compact ? "size-6" : "size-7"),
 	);
 	const navIcon = $derived(compact ? "size-3.5" : "size-4");
+	// `flex-1`, not a fixed `w-7`/`w-9`: the popover around this calendar is
+	// sized by its widest child - in the datetime picker that is the time row,
+	// which is wider than 7 x 28px of day - so seven fixed columns packed
+	// against the leading edge and left a dead strip down the trailing side,
+	// while the month header's `justify-between` spanned the full width. The
+	// columns share the row now, so the grid lines up with the header above it
+	// and the footer below.
 	const headCell = $derived(
 		compact
-			? "w-7 rounded-md font-mono text-ui-3xs font-normal text-muted-foreground/70"
-			: "w-9 rounded-md text-ui-2xs font-normal text-muted-foreground",
+			? "flex-1 rounded-md font-mono text-ui-3xs font-normal text-muted-foreground/70"
+			: "flex-1 rounded-md text-ui-2xs font-normal text-muted-foreground",
 	);
 	const dayCell = $derived(compact ? "size-7 font-mono text-ui-2xs tabular-nums" : "size-9 text-ui-sm");
 </script>
@@ -42,7 +49,13 @@
 	{...restProps}
 >
 	{#snippet children({ months, weekdays })}
-		<CalendarPrimitive.Header class={cn("flex items-center justify-between px-1", compact ? "mb-1" : "mb-2")}>
+		<CalendarPrimitive.Header class={cn(
+			// No inset: the header and the day grid share the same leading and
+			// trailing edge, so the chevrons sit over the first and last columns
+			// rather than 4px inside them.
+			"flex items-center justify-between",
+			compact ? "mb-1" : "mb-2",
+		)}>
 			<CalendarPrimitive.PrevButton class={nav}>
 				<ChevronLeft class={navIcon} />
 			</CalendarPrimitive.PrevButton>
@@ -67,7 +80,7 @@
 					{#each month.weeks as weekDates}
 						<CalendarPrimitive.GridRow class={cn("flex", compact ? "mt-0.5" : "mt-1")}>
 							{#each weekDates as date}
-								<CalendarPrimitive.Cell {date} month={month.value} class="relative p-0 text-center">
+								<CalendarPrimitive.Cell {date} month={month.value} class="relative flex flex-1 justify-center p-0 text-center">
 									<CalendarPrimitive.Day
 										class={cn(
 											"inline-flex items-center justify-center rounded-md font-normal transition-colors",
