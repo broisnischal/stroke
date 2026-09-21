@@ -1314,6 +1314,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /**
+   * Did the cursor's last move come from the keyboard?
+   *
+   * Only a keyboard move should scroll. Tab and the arrow keys can walk the
+   * cursor past the edge of the viewport, so the grid has to follow it or it
+   * sits there claiming to be on a column that is off screen. A click cannot:
+   * the cell was under the pointer, so it was already visible - and scrolling
+   * it "into view" then yanked the grid sideways under the hand that had just
+   * aimed at something, which is the one case where the viewport must hold
+   * still.
+   *
+   * Deliberately not `$state`: it is read inside `untrack` and must not be a
+   * dependency of the effect it gates.
+   */
+  let _focusFromKey = false
+
+  /**
    * The cell cursor keeps itself visible horizontally.
    *
    * Tab and the arrow keys moved `focusedCol` and left the scroll where it was,
@@ -1332,6 +1348,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const ci = focusedCol
     if (ci === null) return
     untrack(() => {
+      if (!_focusFromKey) return
       const col = navigableColumns[ci]
       if (col) scrollColumnIntoView(col.name, "auto")
     })
@@ -2535,6 +2552,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** @param {number} rowIdx @param {number} colIdx @param {'down'|'right'|'left'} action @param {boolean} [autoEdit] */
   function navigateAfterEdit(rowIdx, colIdx, action, autoEdit = false) {
+    _focusFromKey = true;
     const visColIdx = actualToVisColIdx(colIdx);
     const visLen = navigableColumns.length;
     const rowLen = rows.length;
@@ -4121,6 +4139,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
+    // Every move from here is a keyboard move, so the cursor may scroll itself
+    // into view. Set before the branches rather than in each of them.
+    _focusFromKey = true
     // Ctrl/Cmd + / - / 0: zoom the whole app (canvas scales in lockstep).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
       if (e.key === '=' || e.key === '+') { e.preventDefault(); increaseZoom(); return }
@@ -6256,6 +6277,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   function onCanvasClick(/** @type {MouseEvent} */ e) {
     if (e.button !== 0) return
+    // The cell is under the pointer, so it is on screen already: nothing here
+    // may scroll the column it lands on.
+    _focusFromKey = false
     if (_suppressNextClick) { _suppressNextClick = false; return }
     const { x, y } = canvasXY(e)
 
@@ -6427,6 +6451,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   function onCanvasDblClick(/** @type {MouseEvent} */ e) {
+    _focusFromKey = false
     const { x, y } = canvasXY(e)
     const t = hitTest(x, y)
     if (t.kind !== 'cell') return
@@ -6438,6 +6463,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   function onCanvasAuxClick(/** @type {MouseEvent} */ e) {
     if (e.button !== 1) return
+    _focusFromKey = false
     const { x, y } = canvasXY(e)
     const t = hitTest(x, y)
     if (t.kind === 'cell') tryFollowForeignKey(/** @type {number} */ (t.idx), /** @type {number} */ (t.actualIdx), e)
