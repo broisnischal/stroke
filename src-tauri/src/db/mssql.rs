@@ -45,21 +45,29 @@ pub async fn connect(cfg: &MssqlConfig) -> Result<MssqlClient, String> {
 
 /// Turn a driver error into something that says what to do about it.
 ///
-/// One case earns its own sentence. SQL Server 2022 ships a self-signed
-/// certificate that is X.509 v1, and negotiates TLS 1.3 - and the rustls
-/// backend's "trust the certificate anyway" verifier does not override
-/// `verify_tls13_signature`, so rustls parses the certificate after all and
-/// rejects the version. What reaches the user is
-/// `invalid peer certificate: Other(UnsupportedCertVersion)`, which names
+/// One case earns its own sentence. Against a server with a self-signed
+/// certificate - SQL Server 2022's default, and every dev container - a
+/// connection with Encrypt on fails inside the TLS handshake even with
+/// "Trust server certificate" on, and the rustls backend reports
+/// `invalid peer certificate: Other(UnsupportedCertVersion)`. That names
 /// neither the cause nor the one setting that avoids it.
+///
+/// Verified: reproducible with `encrypt: true` against the
+/// `docker/dialects.yml` fixture, and gone with `encrypt: false`, which still
+/// encrypts the login packet - the driver logs a TLS handshake either way. The
+/// certificate is not reachable with `openssl s_client`, because TDS wraps TLS
+/// inside its own pre-login exchange, so the error's own wording is as far as
+/// this has been pinned down; treat the version as the driver's account of it
+/// rather than something confirmed against the certificate.
 fn explain_connect_error(cfg: &MssqlConfig, err: &str) -> String {
     if cfg.encrypt && err.contains("UnsupportedCertVersion") {
         return format!(
-            "MS SQL connection failed: the server's certificate is an older \
-             format (X.509 v1) that this client cannot negotiate TLS 1.3 \
-             against, even with \"Trust server certificate\" on. Turn \
-             Encrypt off for this connection, or install a v3 certificate on \
-             the server. ({err})"
+            "MS SQL connection failed: this client will not complete an \
+             encrypted handshake with the server's certificate, even with \
+             \"Trust server certificate\" on - it reports the certificate in a \
+             format it does not accept. Turn Encrypt off for this connection \
+             (the login is still encrypted), or install a CA-issued \
+             certificate on the server. ({err})"
         );
     }
     format!("MS SQL connection failed: {err}")

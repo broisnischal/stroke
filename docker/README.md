@@ -60,9 +60,11 @@ Postgres, MySQL, MariaDB and ClickHouse seed themselves from
 
 Two notes that are easy to trip over:
 
-- **SQL Server, leave Encrypt off.** Its self-signed certificate is X.509 v1,
-  and the rustls backend rejects that under TLS 1.3 even with "Trust server
-  certificate" on. `db/mssql.rs` says so in the error message now.
+- **SQL Server, leave Encrypt off.** With Encrypt on, the handshake against its
+  self-signed certificate fails even with "Trust server certificate" on -
+  `invalid peer certificate: Other(UnsupportedCertVersion)`. With it off the
+  login packet is still encrypted, which is what the driver's own TLS handshake
+  log line is. `db/mssql.rs` explains it in the error message.
 - **Redis has no table list.** `db::redis::list_tables` is a documented stub -
   keyspace browsing is not built yet. The fixture still seeds `shop:*` keys of
   every Redis type, so there is something to browse the day it lands.

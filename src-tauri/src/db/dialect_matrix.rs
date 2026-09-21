@@ -110,9 +110,10 @@ fn cases() -> Vec<Case> {
                             "port": 51433, "database": "shop", "user": "sa",
                             "password": sql_server_password, "encrypt": false,
                             // Not `encrypt: true`: see `explain_connect_error`
-                            // in db/mssql.rs - SQL Server 2022's self-signed
-                            // certificate is X.509 v1 and the rustls backend
-                            // rejects it under TLS 1.3 even with trust_cert.
+                            // in db/mssql.rs. An encrypted handshake against
+                            // this server's self-signed certificate is refused
+                            // even with trust_cert on; the login packet is
+                            // encrypted either way.
                             "trust_cert": true }),
             schema: "dbo",
             expect_table: "products",
