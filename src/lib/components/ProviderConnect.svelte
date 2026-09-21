@@ -13,7 +13,8 @@
   import DbIcon from './DbIcon.svelte'
   import ProviderAuthPanel from './ProviderAuthPanel.svelte'
   import { Button } from '$lib/components/ui/button/index.js'
-  import Search from '@lucide/svelte/icons/search'
+  import ChevronDown from '@lucide/svelte/icons/chevron-down'
+  import SearchableMenu from './SearchableMenu.svelte'
   import KeyRound from '@lucide/svelte/icons/key-round'
   import Eye from '@lucide/svelte/icons/eye'
   import EyeOff from '@lucide/svelte/icons/eye-off'
@@ -69,29 +70,24 @@
   /** @type {import('$lib/providers.js').ProviderDatabase[]} */
   let databases = $state([])
   let selectedRef = $state('')
-  let search = $state('')
 
-  const filtered = $derived(
-    search.trim()
-      ? databases.filter((d) => d.name.toLowerCase().includes(search.toLowerCase()))
-      : databases,
+  // `SearchableMenu` owns the query, the filtering and the keyboard: the input
+  // autofocuses on open, Arrow keys move the highlight, Enter selects, Esc closes.
+  // This file used to hand-roll all of that around an always-open list, which is
+  // why the same picker behaved differently here and in the D1 flow.
+  //
+  // `value` is the db_ref because that is what selection needs, and cmdk scores a
+  // row against its value and keywords rather than its rendered content — so the
+  // label goes in `keywords` too, or typing a database's name would filter it out.
+  const dbItems = $derived(
+    databases.map((d) => ({
+      value: d.db_ref,
+      label: d.name,
+      keywords: d.region ? [d.name, d.region] : [d.name],
+      region: d.region,
+    })),
   )
-
-  // Keyboard navigation for the database list, driven from the search box.
-  let hlIdx = $state(0)
-  $effect(() => {
-    filtered
-    hlIdx = 0
-  })
-  /** @param {KeyboardEvent} e */
-  function onSearchKeydown(e) {
-    if (e.key === 'Escape') { search = ''; return }
-    const n = filtered.length
-    if (!n) return
-    if (e.key === 'ArrowDown') { e.preventDefault(); hlIdx = (hlIdx + 1) % n }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); hlIdx = (hlIdx - 1 + n) % n }
-    else if (e.key === 'Enter') { e.preventDefault(); const d = filtered[hlIdx] ?? filtered[0]; if (d) pick(d.db_ref) }
-  }
+  const selectedDbName = $derived(databases.find((d) => d.db_ref === selectedRef)?.name ?? '')
 
   /** Turn a raw backend error into a calm title + one-line explanation. */
   function friendlyError(msg) {
@@ -444,47 +440,48 @@
         </div>
       </div>
 
-    <!-- Database list -->
+    <!-- Database picker: the same searchable dropdown the D1 flow uses. -->
     {:else if databases.length > 0}
-      <div class="flex flex-col overflow-hidden rounded-lg border border-border/60">
-        {#if databases.length > 6}
-          <div class="relative border-b border-border/50">
-            <Search class="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              aria-label="Search databases"
-              placeholder="Search databases…"
-              bind:value={search}
-              class="no-focus-ring h-8 w-full bg-transparent pl-9 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
-              onkeydown={onSearchKeydown}
-            />
-          </div>
-        {/if}
-        <div class="db-list-scroll flex max-h-[240px] flex-col gap-0.5 overflow-y-auto p-1.5">
-          {#each filtered as db, idx (db.db_ref)}
-            {@const active = db.db_ref === selectedRef}
+      <div class="flex flex-col gap-1.5">
+        <span class="text-ui-3xs font-semibold tracking-[0.06em] text-muted-foreground uppercase">
+          {meta?.name} database
+        </span>
+        <SearchableMenu
+          items={dbItems}
+          placeholder="Search databases…"
+          empty="No matching database"
+          contentClass="w-[var(--bits-popover-anchor-width)] min-w-[240px]"
+          align="start"
+          onselect={(it) => pick(it.value)}
+        >
+          {#snippet trigger(props)}
             <button
+              {...props}
               type="button"
-              class={cn(
-                'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
-                active
-                  ? 'bg-primary/10 text-foreground ring-1 ring-primary/25'
-                  : idx === hlIdx
-                    ? 'bg-accent/60 text-foreground'
-                    : 'text-foreground/80 hover:bg-accent/60',
-              )}
-              onclick={() => pick(db.db_ref)}
+              disabled={phase === 'building'}
+              class="field-surface flex h-9 w-full items-center gap-2 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:outline-none disabled:opacity-60 data-[state=open]:border-ring"
             >
-              <DbIcon id={provider} class={cn('size-4 shrink-0', active ? 'text-foreground' : 'text-muted-foreground')} />
-              <span class="min-w-0 flex-1 truncate font-mono text-ui-xs leading-snug {active ? 'font-medium text-foreground' : 'text-foreground/85'}">{db.name}</span>
-              {#if db.region}<span class="shrink-0 text-ui-3xs text-muted-foreground">{db.region}</span>{/if}
-              {#if active && phase === 'building'}<Loader2 class="size-3.5 shrink-0 animate-spin text-primary" />{:else if active}<Check class="size-3.5 shrink-0 text-primary" />{/if}
+              <DbIcon id={provider} class={cn('size-4 shrink-0', selectedDbName ? 'text-foreground' : 'text-muted-foreground')} />
+              <span class={cn('min-w-0 flex-1 truncate font-mono', !selectedDbName && 'font-sans text-muted-foreground')}>
+                {selectedDbName || '- select database -'}
+              </span>
+              <!-- The spinner belongs on the trigger now. It used to sit on the
+                   selected row, which the dropdown closes over on select, so
+                   connecting would have looked like nothing happening. -->
+              {#if phase === 'building'}
+                <Loader2 class="size-3.5 shrink-0 animate-spin text-primary" />
+              {:else}
+                <ChevronDown class="size-3.5 shrink-0 text-muted-foreground" />
+              {/if}
             </button>
-          {/each}
-          {#if filtered.length === 0}
-            <p class="px-2.5 py-3 text-center text-ui-2xs text-muted-foreground">No match for “{search}”</p>
-          {/if}
-        </div>
+          {/snippet}
+          {#snippet item(it)}
+            <DbIcon id={provider} class={cn('size-4 shrink-0', it.value === selectedRef ? 'text-foreground' : 'text-muted-foreground')} />
+            <span class="min-w-0 flex-1 truncate font-mono leading-snug">{it.label}</span>
+            {#if it.region}<span class="shrink-0 text-ui-3xs text-muted-foreground">{it.region}</span>{/if}
+            {#if it.value === selectedRef}<Check class="size-3.5 shrink-0 text-primary" />{/if}
+          {/snippet}
+        </SearchableMenu>
       </div>
     {:else}
       <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-5 text-center">
