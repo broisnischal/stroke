@@ -253,11 +253,20 @@ pub async fn table_row_counts(
 
 async fn list_schemas_pg(pool: &PgPool) -> Result<Vec<String>, String> {
     let rows = sqlx::query(
+        // `pg_catalog` and `information_schema` are returned: they are real,
+        // browsable schemas, and a client that hides the catalog cannot answer
+        // "what does pg think this table looks like" without dropping to SQL. The
+        // UI filters them out of the picker by default and offers a toggle -
+        // that is a display choice, not something to decide in the query.
+        //
+        // Toast and temp namespaces stay excluded. They are per-session,
+        // per-relation storage with generated names; there is nothing there to
+        // browse, and on a busy server they would outnumber the real schemas.
         r#"SELECT n.nspname::text FROM pg_catalog.pg_namespace n
-           WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')
+           WHERE n.nspname <> 'pg_toast'
              AND n.nspname NOT LIKE 'pg_temp_%'
              AND n.nspname NOT LIKE 'pg_toast_%'
-           ORDER BY n.nspname"#,
+           ORDER BY (n.nspname IN ('pg_catalog','information_schema')), n.nspname"#,
     )
     .fetch_all(pool)
     .await

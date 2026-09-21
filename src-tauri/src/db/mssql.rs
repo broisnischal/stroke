@@ -216,10 +216,15 @@ async fn fetch_rows(handle: &MssqlHandle, sql: &str) -> Result<Vec<Row>, String>
 pub async fn list_schemas(handle: &MssqlHandle) -> Result<Vec<String>, String> {
     let rows = fetch_rows(
         handle,
+        // `sys` and `INFORMATION_SCHEMA` are real schemas worth browsing, so they
+        // come back and the UI decides whether to show them (it hides system
+        // schemas behind a toggle). The fixed database roles stay out: those are
+        // permission principals that happen to own a schema, and there is never
+        // anything in them.
         "SELECT name FROM sys.schemas WHERE name NOT IN \
-         ('sys','INFORMATION_SCHEMA','guest','db_owner','db_accessadmin','db_securityadmin', \
+         ('guest','db_owner','db_accessadmin','db_securityadmin', \
           'db_ddladmin','db_backupoperator','db_datareader','db_datawriter','db_denydatareader','db_denydatawriter') \
-         ORDER BY name",
+         ORDER BY CASE WHEN name IN ('sys','INFORMATION_SCHEMA') THEN 1 ELSE 0 END, name",
     )
     .await?;
     Ok(rows.iter().filter_map(|r| r.try_get::<&str, _>(0).ok().flatten().map(String::from)).collect())

@@ -529,10 +529,30 @@ html[data-os="linux"]   { --window-radius: 8px; }
   }
 
   /* tabindex="-1" elements are programmatically focusable but never keyboard-navigable;
-     they should never show a focus ring regardless of input method */
-  [tabindex="-1"]:focus,
-  [tabindex="-1"]:focus-visible {
+     they should never show a focus ring regardless of input method.
+
+     `[data-roving]` is the exception, and it has to be: a roving-tabindex widget
+     (the sidebar's tab strip, its table/view/database rows) parks `-1` on every
+     member except the one holding the tab stop, and the arrow keys then focus
+     those `-1` members deliberately. Without the escape this rule blanked the
+     ring - with `!important`, so nothing at the call site could win - and
+     arrowing down the sidebar moved a focus you could not see. */
+  [tabindex="-1"]:not([data-roving]):focus,
+  [tabindex="-1"]:not([data-roving]):focus-visible {
     outline: none !important;
+  }
+
+  /* Roving rows take their ring from plain `:focus`, under a flag the component
+     sets while the keyboard is driving. Every move inside such a widget is a
+     scripted `.focus()` from its own key handler, and WebKit - the engine this
+     ships on - does not promise `:focus-visible` for scripted focus, so the
+     usual chrome rule above could leave the focused row completely unmarked.
+     The flag is cleared on pointerdown, so a click still leaves no ring.
+     Inset by 2px: the row sits flush against the scroller's edge, and an
+     outward ring would be clipped there. */
+  [data-kbd-nav] [data-roving]:focus {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
   }
 
   /* Portaled overlays - these render outside #app so must explicitly inherit

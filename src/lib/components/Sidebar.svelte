@@ -21,9 +21,10 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { cn } from "$lib/utils.js";
   import { CRASH_WORD, isMagic, armCrash } from '$lib/games/easter-eggs.js'
-  import { flushSync } from "svelte";
+  import { flushSync, tick } from "svelte";
   import { t } from "$lib/i18n.js";
   import { visibleRowCount, soleMatch } from "$lib/sidebar-filter.js";
+  import { splitSchemas, isSystemSchema } from "$lib/system-schemas.js";
   import { formatTableRowCount } from "$lib/table-list.js";
   import {
     clampNavSidebarWidth,
@@ -430,11 +431,12 @@
   /** @param {{ key: string, label: string }} db */
   function onDbClick(db) {
     if (dbClickTimer) clearTimeout(dbClickTimer)
-    dbClickTimer = setTimeout(() => { dbClickTimer = null; onswitchdatabase(db) }, 220)
+    dbClickTimer = setTimeout(() => { dbClickTimer = null; focusListAfterSwitch(); onswitchdatabase(db) }, 220)
   }
   /** @param {{ key: string, label: string }} db */
   function onDbDblClick(db) {
     if (dbClickTimer) { clearTimeout(dbClickTimer); dbClickTimer = null }
+    focusListAfterSwitch()
     onswitchdatabasenow(db)
   }
 
@@ -521,6 +523,26 @@
   const showDatabases = $derived(sidebarTab === 'databases')
   // Nothing collapses any more, so every list in the open tab is open.
   const recentOpen = true, tablesOpen = true, viewsOpen = true, matViewsOpen = true
+  // The engine's own schemas (`pg_catalog`, `information_schema`, `sys`…) are
+  // loaded like any other - they are browsable, and sometimes the thing you
+  // actually need - but they are not where anyone keeps data, so the picker
+  // holds them behind one entry rather than burying `public` among them.
+  let showSystemSchemas = $state(_dp.showSystemSchemas ?? false)
+  const splitSchemaList = $derived(splitSchemas(schemas))
+  const SYSTEM_TOGGLE = '\u0000system-schemas'
+  const schemaMenuItems = $derived([
+    ...splitSchemaList.user.map((sc) => ({ value: sc, label: sc })),
+    ...(showSystemSchemas ? splitSchemaList.system.map((sc) => ({ value: sc, label: sc })) : []),
+    ...(splitSchemaList.system.length
+      ? [{
+          value: SYSTEM_TOGGLE,
+          label: showSystemSchemas
+            ? 'Hide system schemas'
+            : `Show system schemas (${splitSchemaList.system.length})`,
+        }]
+      : []),
+  ])
+
   let showRowCount = $state(_dp.showRowCount ?? true)
   let hideEmpty = $state(_dp.hideEmpty ?? false)
   let hideSystem = $state(_dp.hideSystem ?? false)
@@ -529,7 +551,7 @@
   /** @type {'asc' | 'desc'} */
   let sortDir = $state(_dp.sortDir ?? 'asc')
 
-  $effect(() => { saveDisplayPrefs({ sortBy, showRowCount, sortDir, hideEmpty, hideSystem }) })
+  $effect(() => { saveDisplayPrefs({ sortBy, showRowCount, sortDir, hideEmpty, hideSystem, showSystemSchemas }) })
 
   /** System / migration tables that are usually noise: `_prisma_migrations`, `pg_*`, `sqlite_*`, leading-underscore. */
   function isSystemTable(/** @type {string} */ name) {
@@ -852,7 +874,18 @@
     void filteredRecent.length
     void filteredPinnedTables.length
     void filteredDbEntries.length
-    renderedRowCount = listRowButtons().length
+    // …and on the key too: the stop moves with focus, not just with the data.
+    void rovingRowKey
+    void activeTable
+    const rows = listRowButtons()
+    renderedRowCount = rows.length
+    const stop = rovingRow(rows)
+    for (const row of rows) {
+      // Compared before writing: this runs on every filter keystroke, and a
+      // schema can hold thousands of rows.
+      const want = row === stop ? 0 : -1
+      if (row.tabIndex !== want) row.tabIndex = want
+    }
   })
 
   /**
@@ -865,18 +898,122 @@
    * row - and it opens it by clicking the row's own button, so Enter and a click
    * cannot drift apart no matter what a row grows into later.
    *
-   * The first button in each `li` is the row itself; rows whose button sits
-   * inside a context-menu trigger are reached the same way, and an `li` with no
-   * button (the "no tables in this schema" placeholder) drops out.
+   * Rows are marked with `data-sidebar-row` rather than being found as "the
+   * first button in the `li`". That older rule read the wrong element on the
+   * Recent tab, where the row is a `role="button"` div and the first real
+   * `<button>` inside it is the remove-from-recent control - so a filter that
+   * left one recent row and an Enter in the box deleted it instead of opening
+   * it. The attribute also spans every section in the open tab, which is what
+   * both the row count and the arrow-key walk below need.
    * @returns {HTMLElement[]}
    */
   function listRowButtons() {
-    const root = tableListEl ?? scrollContainerEl
+    const root = scrollContainerEl
     if (!root) return []
-    return [...root.querySelectorAll('li')]
-      .map((li) => li.querySelector('button'))
-      .filter((b) => b instanceof HTMLElement && !b.disabled)
+    return /** @type {HTMLElement[]} */ ([...root.querySelectorAll('[data-sidebar-row]')])
+      .filter((el) => !(el instanceof HTMLButtonElement && el.disabled))
   }
+
+  // ── One tab stop for the list (ARIA APG roving tabindex) ──────────────────
+  // Every row was its own tab stop, so crossing the sidebar with Tab took one
+  // press per table - 23 of them on the schema in the screenshot - and the focus
+  // ring crawled the list a row at a time instead of moving between the controls
+  // around it. A list is one widget: Tab reaches it once, arrows move inside it,
+  // Tab leaves it. Every row renders `tabindex="-1"` and exactly one is promoted
+  // to 0 below.
+  /** The row holding the tab stop, as its `data-sidebar-row` key. */
+  let rovingRowKey = $state(/** @type {string | null} */ (null))
+
+  /**
+   * The row that should hold the stop: the one last focused, else the row for
+   * the open table, else the first. The fallbacks are what make Tab land
+   * somewhere useful after the list is replaced - a schema switch leaves
+   * `rovingRowKey` pointing at a row that no longer exists.
+   * @param {HTMLElement[]} [rows]
+   */
+  function rovingRow(rows = listRowButtons()) {
+    return (
+      rows.find((r) => r.dataset.sidebarRow === rovingRowKey) ??
+      rows.find((r) => r.dataset.sidebarCurrent !== undefined) ??
+      rows[0] ??
+      null
+    )
+  }
+
+  /**
+   * True while the keyboard is the thing moving focus around the sidebar.
+   *
+   * Every move this component makes is a scripted `.focus()` - the arrow walk,
+   * the handoff out of the filter, the landing after a schema switch - and
+   * WebKit, the engine this ships on, does not promise `:focus-visible` for
+   * scripted focus. The rows would take focus with nothing drawn on them, which
+   * is exactly what "I don't see the focus" looks like. The flag puts a plain
+   * `:focus` ring on roving rows (see `[data-kbd-nav]` in app.css) and a
+   * pointerdown takes it away again, so a click still leaves no ring.
+   */
+  let kbdNav = $state(false)
+
+  /** Focusable things, in the order the browser would tab through them. */
+  const TABBABLE =
+    'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+
+  /**
+   * Move focus out of the sidebar and into the content region.
+   *
+   * Tab off a row landed on the panel splitter, which sits between the two in
+   * the DOM: a 1px line most people do not know is a control, and the only sign
+   * anything had happened was that line changing colour. The grid is what comes
+   * next in reading order, so Tab goes there. The splitter keeps its keyboard
+   * resize and is still reachable with Shift+Tab from the content.
+   * @returns {boolean} whether focus actually moved
+   */
+  function focusMainRegion() {
+    const main = document.querySelector('[data-studio-region="main"]')
+    if (!main) return false
+    // The grid is `tabindex="-1"` - it is focused, never tabbed to - so it has
+    // to be named rather than found among the tabbables.
+    const grid = main.querySelector('[data-canvas-table]')
+    const target =
+      grid instanceof HTMLElement
+        ? grid
+        : /** @type {HTMLElement | undefined} */ (
+            [...main.querySelectorAll(TABBABLE)].find(
+              (el) => el instanceof HTMLElement && el.offsetParent !== null,
+            )
+          )
+    if (!target) return false
+    target.focus()
+    return true
+  }
+
+  /**
+   * Schema + database the list was showing when a switch was asked for, or null
+   * when none is pending. Picking a schema or another database leaves focus on
+   * the control that was picked from, which is the one thing on screen that has
+   * nothing left to say - what the user wants next is the new schema's tables.
+   *
+   * Armed rather than acted on immediately, for two reasons: the outgoing
+   * schema's rows are still mounted for a frame or two after the click, and a
+   * switch that opens a confirm dialog must not move focus behind it. It fires
+   * on the first render that actually shows a different schema or database, so a
+   * cancelled switch never fires at all.
+   */
+  let listFocusFrom = /** @type {string | null} */ (null)
+  const listIdentity = $derived(`${activeSchema}\u0000${activeDbKey}`)
+  function focusListAfterSwitch() { listFocusFrom = listIdentity }
+  $effect(() => {
+    if (listFocusFrom === null || loadingTables || listIdentity === listFocusFrom) return
+    listFocusFrom = null
+    // Only while focus is still where the switch left it. The load takes a
+    // moment, and someone who clicked into the editor meanwhile keeps it.
+    const from = document.activeElement
+    const sidebar = scrollContainerEl?.closest('[data-studio-region="sidebar"]')
+    if (from && from !== document.body && !sidebar?.contains(from)) return
+    // The filter box is the fallback: a schema with no tables has no row to
+    // land on, and leaving focus on the schema button would strand it there.
+    kbdNav = true
+    ;(rovingRow() ?? filterEl)?.focus()
+  })
 
   /** Commit a pending debounce now, so Enter acts on what is actually typed. */
   function flushFilter() {
@@ -900,8 +1037,6 @@
   // ── Lists (tables, views, materialized views, databases) ─────────────────
   /** @type {HTMLElement | null} */
   let scrollContainerEl = $state(null)
-  /** @type {HTMLElement | null} */
-  let tableListEl = $state(null)
 
   // No windowing, and no `content-visibility` either. The sidebar renders every
   // row, plainly.
@@ -942,6 +1077,19 @@
   if (isEscClear) clearSelection()
 }} />
 
+<!-- The sidebar's one loading state. The tables list had the dots; every other
+     list wrote its own bare "Loading…" line, so the Databases tab looked like it
+     had failed and printed a label rather than like it was working. -->
+{#snippet listLoading(/** @type {string} */ label)}
+  <div class="flex items-center justify-center py-6" role="status" aria-label={label}>
+    <span class="inline-flex gap-1.5" aria-hidden="true">
+      <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0ms"></span>
+      <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 150ms"></span>
+      <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 300ms"></span>
+    </span>
+  </div>
+{/snippet}
+
 <!-- Section count badge: shows "visible/total" when filters hide rows, else just the total. -->
 {#snippet countBadge(visible, total)}
   {#if visible !== total}
@@ -968,6 +1116,8 @@
   <aside
     class="studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
     data-studio-chrome
+    data-kbd-nav={kbdNav ? "" : undefined}
+    onpointerdown={() => (kbdNav = false)}
   >
     {#if navSidebarPanel === "tables"}
     <div class="flex min-h-0 flex-1 flex-col">
@@ -996,6 +1146,7 @@
               <button
                 type="button"
                 role="tab"
+                data-roving
                 aria-selected={active}
                 aria-label={count > 0 ? `${tab.label}, ${count}` : tab.label}
                 title={`${tab.label} · ${modLabel}⇧${SIDEBAR_TABS.indexOf(tab) + 1}`}
@@ -1020,6 +1171,7 @@
                   // tabindex above is what keeps the strip to one tab stop.
                   if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return
                   e.preventDefault()
+                  kbdNav = true
                   const i = SIDEBAR_TABS.findIndex((t) => t.id === sidebarTab)
                   const next = (i + (e.key === "ArrowRight" ? 1 : -1) + SIDEBAR_TABS.length) % SIDEBAR_TABS.length
                   sidebarTab = SIDEBAR_TABS[next].id
@@ -1189,8 +1341,17 @@
                       contentClass="w-[var(--bits-popover-anchor-width)] min-w-[180px]"
                       placeholder="Search schemas…"
                       empty="No schema"
-                      items={schemas.map((s) => ({ value: s, label: s }))}
-                      onselect={(it) => { if (it.value) onschemachange(it.value); }}
+                      items={schemaMenuItems}
+                      onselect={(it) => {
+                        if (!it.value) return
+                        // The last entry is the toggle, not a schema.
+                        if (it.value === SYSTEM_TOGGLE) { showSystemSchemas = !showSystemSchemas; return }
+                        // Armed BEFORE the switch: `activeSchema` is bound, so the
+                        // shell writes the new one back synchronously and arming
+                        // afterwards would record the schema we are moving TO.
+                        focusListAfterSwitch()
+                        onschemachange(it.value)
+                      }}
                     >
                       {#snippet trigger(props)}
                         <button
@@ -1205,9 +1366,17 @@
                         </button>
                       {/snippet}
                       {#snippet item(it)}
-                        <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground" />
-                        <span class="min-w-0 flex-1 truncate">{it.label}</span>
-                        {#if it.value === activeSchema}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
+                        {#if it.value === SYSTEM_TOGGLE}
+                          <Icon name={showSystemSchemas ? 'eye-off' : 'eye'} class="size-3.5 shrink-0 text-muted-foreground" />
+                          <span class="min-w-0 flex-1 truncate text-muted-foreground">{it.label}</span>
+                        {:else}
+                          <Icon name="box" class={cn('size-3.5 shrink-0', isSystemSchema(it.value) ? 'text-muted-foreground/60' : 'text-muted-foreground')} />
+                          <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                          {#if isSystemSchema(it.value)}
+                            <span class="shrink-0 text-ui-3xs text-muted-foreground">system</span>
+                          {/if}
+                          {#if it.value === activeSchema}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
+                        {/if}
                       {/snippet}
                     </SearchableMenu>
             </div>
@@ -1252,10 +1421,13 @@
               // Tab / ArrowDown from the filter → jump focus into the result list
               // so the user can keyboard-navigate the matched tables directly.
               if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'ArrowDown') {
-                const first = /** @type {HTMLElement | null} */ (
-                  (tableListEl ?? scrollContainerEl)?.querySelector('button')
-                )
-                if (first) { e.preventDefault(); first.focus() }
+                // The FIRST result, not the row holding the tab stop: this is a
+                // search box, and the answer to what was typed starts at the top
+                // of the list. (It was also not the first `<button>` under the
+                // scroller - that is whichever section-header action comes first,
+                // so Tab out of the filter landed on an icon in a heading.)
+                const row = listRowButtons()[0]
+                if (row) { e.preventDefault(); kbdNav = true; row.focus() }
               }
             }}
             class={cn(sidebarFieldClass, "w-full pl-8 pr-2.5 outline-none disabled:opacity-40 disabled:cursor-not-allowed")}
@@ -1289,7 +1461,7 @@
                not they have anything to say, because a polite region inserted at
                the moment its text appears is announced unreliably. -->
           <span id="sidebar-filter-hint" class="sr-only"
-            >Filters the {activeTabLabel.toLowerCase()} list. When one row matches, press Enter to open it.</span>
+            >Filters the {activeTabLabel.toLowerCase()} list. Tab or press the down arrow to move into the results, then the arrow keys to move through them. When one row matches, press Enter to open it.</span>
           <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">{filterStatus}</span>
         </div>
       </div>
@@ -1305,37 +1477,56 @@
               clearSelection()
             }
           }}
+          onfocusin={(e) => {
+            // The stop follows focus, so Tab comes back to the row it left.
+            const row = e.target instanceof Element ? e.target.closest('[data-sidebar-row]') : null
+            if (row instanceof HTMLElement) rovingRowKey = row.dataset.sidebarRow ?? null
+          }}
           onkeydown={(e) => {
-            if (e.key === 'Escape' && selectedItems.size > 0) clearSelection()
+            if (e.key === 'Escape' && selectedItems.size > 0) { clearSelection(); return }
+            // Tab off a row leaves the list - forward into the content, back to
+            // the filter it was narrowed from. Only from a row: the section
+            // headers' own buttons keep the plain tab order.
+            if (e.key === 'Tab') {
+              const onRow = e.target instanceof Element && e.target.closest('[data-sidebar-row]')
+              if (!onRow) return
+              if (e.shiftKey) {
+                if (!filterEl) return
+                e.preventDefault(); kbdNav = true; filterEl.focus(); filterEl.select()
+              } else if (focusMainRegion()) {
+                e.preventDefault()
+              }
+              return
+            }
+            // Arrows walk the rows of every section in the open tab, Home/End
+            // jump to its ends, and ArrowUp off the top row returns to the filter
+            // box - the field the list was narrowed from.
+            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return
+            const rows = listRowButtons()
+            const i = rows.indexOf(/** @type {HTMLElement} */ (document.activeElement))
+            if (i === -1) return
+            e.preventDefault()
+            kbdNav = true
+            if (e.key === 'Home') rows[0]?.focus()
+            else if (e.key === 'End') rows[rows.length - 1]?.focus()
+            else if (e.key === 'ArrowDown') rows[i + 1]?.focus()
+            else if (i === 0) filterEl?.focus()
+            else rows[i - 1]?.focus()
           }}
         >
           {#if loadingTables}
-            <div
-              class="flex items-center justify-center py-8"
-              role="status"
-              aria-label="Loading"
-            >
-              <span class="inline-flex gap-1.5" aria-hidden="true">
-                <span
-                  class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50"
-                  style="animation-delay: 0ms"
-                ></span>
-                <span
-                  class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50"
-                  style="animation-delay: 150ms"
-                ></span>
-                <span
-                  class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50"
-                  style="animation-delay: 300ms"
-                ></span>
-              </span>
-            </div>
+            {@render listLoading('Loading tables')}
           {:else}
             <!-- ── Databases ──────────────────────────────────────
                  Other databases on the same server. Collapsed by default and
                  only fetched once expanded - see loadDatabases(). Engines that
                  cannot switch in place (SQLite, Redis) never render it. -->
-            {#if showDatabases && canSwitchDb && connectionName}
+            <!-- `!tabIsEmpty`: with nothing to list, the tab-level empty state
+                 below already says so in the middle of the panel. Rendering the
+                 section as well put a second, quieter "No other databases" at the
+                 top-left of the same empty panel - two answers to one question,
+                 in two different places and two different type sizes. -->
+            {#if showDatabases && canSwitchDb && connectionName && !tabIsEmpty}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Databases</span>
                 {#if dbEntries.length > 0}
@@ -1369,12 +1560,17 @@
               </div>
               {#if databasesOpen}
                 {#if dbEntriesLoading && dbEntries.length === 0}
-                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground">Loading…</p>
+                  {@render listLoading('Loading databases')}
                 {:else if dbEntriesError && dbEntries.length === 0}
                   <p class="px-4 pb-1.5 text-ui-2xs text-destructive">{dbEntriesError}</p>
+                {:else if !dbEntriesLoaded}
+                  <!-- Opened but the first fetch has not started or landed yet.
+                       This branch used to print "Loading…" as body text, which is
+                       the state the list spends longest in on a remote server. -->
+                  {@render listLoading('Loading databases')}
                 {:else if filteredDbEntries.length === 0}
                   <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground">
-                    {!dbEntriesLoaded ? 'Loading…' : lf ? 'No matching databases' : 'No other databases'}
+                    {lf ? 'No matching databases' : 'No other databases'}
                   </p>
                 {:else}
                   <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5">
@@ -1386,6 +1582,9 @@
                             <button
                               type="button"
                               disabled={isCurrent}
+                              data-sidebar-row="db:{db.key}"
+                              data-roving
+                              tabindex="-1"
                               class={cn(
                                 "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                                 isCurrent
@@ -1395,6 +1594,7 @@
                               onclick={() => !isCurrent && onDbClick(db)}
                               ondblclick={() => !isCurrent && onDbDblClick(db)}
                               title={isCurrent ? `${db.label} (current)` : `Switch to ${db.label} · double-click to switch without confirming`}
+                              aria-label={isCurrent ? `${db.label}, current database` : `Switch to ${db.label}`}
                             >
                               <Icon name="database" class="size-3 shrink-0 opacity-50" />
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{db.label}</span>
@@ -1405,7 +1605,7 @@
                           </ContextMenu.Trigger>
                           <ContextMenu.Content class="min-w-52 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
                             {#if !isCurrent}
-                              <ContextMenu.Item onSelect={() => onswitchdatabase(db)}>
+                              <ContextMenu.Item onSelect={() => { focusListAfterSwitch(); onswitchdatabase(db) }}>
                                 <Icon name="arrow-right" />
                                 Switch to this database
                               </ContextMenu.Item>
@@ -1477,13 +1677,32 @@
                             : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
                         )}
                         role="button"
-                        tabindex="0"
+                        tabindex="-1"
+                        data-sidebar-row="recent:{item.schema}.{item.table}"
+                        data-roving
+                        data-sidebar-current={activeTable === item.table ? '' : undefined}
                         onclick={() => onrecentselect(item.schema, item.table)}
                         onkeydown={(e) => {
                           // role="button" has to answer Space as well as Enter (ARIA APG).
-                          if (e.key !== 'Enter' && e.key !== ' ') return
-                          e.preventDefault()
-                          onrecentselect(item.schema, item.table)
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            onrecentselect(item.schema, item.table)
+                            return
+                          }
+                          // The remove control is hover-revealed and out of the
+                          // tab order, so the keyboard reaches it here instead.
+                          if (e.key === 'Delete' || e.key === 'Backspace') {
+                            e.preventDefault()
+                            // The row being removed is the one holding focus, so
+                            // the next one has to take it or focus falls to the
+                            // body and the list has to be tabbed into again.
+                            const rows = listRowButtons()
+                            const i = rows.indexOf(/** @type {HTMLElement} */ (e.currentTarget))
+                            const next = rows[i + 1] ?? rows[i - 1] ?? null
+                            onrecentremove(item.schema, item.table)
+                            kbdNav = true
+                            void tick().then(() => (next ?? filterEl)?.focus())
+                          }
                         }}
                       >
                         {#if item.tableKind === 'view'}
@@ -1496,7 +1715,8 @@
                         <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{item.table}</span>
                         <button
                           type="button"
-                          aria-label="Remove {item.table} from recent"
+                          tabindex="-1"
+                          aria-label="Remove {item.table} from recent (Delete)"
                           class="hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/recent:opacity-100 hover:text-foreground focus-visible:opacity-100"
                           onclick={(e) => { e.stopPropagation(); onrecentremove(item.schema, item.table) }}
                         >
@@ -1532,6 +1752,10 @@
                       <ContextMenu.Trigger class="w-full">
                         <button
                           type="button"
+                          tabindex="-1"
+                          data-sidebar-row="pin:{tableName}"
+                          data-roving
+                          data-sidebar-current={activeTable === tableName ? '' : undefined}
                           class={cn(
                             "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                             isSelected
@@ -1678,19 +1902,9 @@
               </div>
 
             {#if tablesOpen}
-              <div
-                role="none"
-                onkeydown={(e) => {
-                  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
-                  const btns = /** @type {HTMLButtonElement[]} */ ([...(tableListEl?.querySelectorAll('button') ?? [])])
-                  const i = btns.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement))
-                  if (i === -1) return
-                  e.preventDefault()
-                  if (e.key === 'ArrowDown') btns[i + 1]?.focus()
-                  else if (i === 0) filterEl?.focus()
-                  else btns[i - 1]?.focus()
-                }}
-              >
+              <!-- The arrow walk lives on the scroll container, which reaches
+                   every section in the tab rather than this one list. -->
+              <div>
               <!-- ONE context menu for the whole list, not one per row.
                    A ContextMenu.Root + Trigger per <li> is two component instances
                    per table, and this list is no longer windowed - a 5,000-table
@@ -1703,7 +1917,6 @@
                   {#snippet child({ props })}
                     {@const openMenu = props.oncontextmenu}
                     <ul
-                      bind:this={tableListEl}
                       {...props}
                       oncontextmenu={(e) => {
                         const li = e.target instanceof Element ? e.target.closest("li[data-table]") : null
@@ -1728,6 +1941,10 @@
                     <li data-table={table.name}>
                     <button
                       type="button"
+                      tabindex="-1"
+                      data-sidebar-row="table:{table.name}"
+                      data-roving
+                      data-sidebar-current={activeTable === table.name ? '' : undefined}
                       class={cn(
                         "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                         isSelected
@@ -1943,6 +2160,10 @@
                       <li data-view={view.name}>
                             <button
                               type="button"
+                              tabindex="-1"
+                              data-sidebar-row="view:{view.name}"
+                              data-roving
+                              data-sidebar-current={activeTable === view.name ? '' : undefined}
                               class={cn(
                                 "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                                 isSelected
@@ -2026,7 +2247,28 @@
                     <Icon name="x" class="size-3.5" />
                     Clear filter
                   </Button>
-                {:else if sidebarTab === 'tables' || sidebarTab === 'databases'}
+                {:else if sidebarTab === 'databases'}
+                  <!-- The section header is not rendered in this state, so its
+                       two actions live here instead of being unreachable. -->
+                  <div class="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onclick={() => void loadDatabases()} disabled={dbEntriesLoading}>
+                      <Icon name="refresh-cw" class={cn('size-3.5', dbEntriesLoading && 'animate-spin')} />
+                      Refresh
+                    </Button>
+                    {#if dbAdmin}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onclick={onnewdatabase}
+                        disabled={$readOnlyMode}
+                        title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                      >
+                        <Icon name="plus" class="size-3.5" />
+                        New database
+                      </Button>
+                    {/if}
+                  </div>
+                {:else if sidebarTab === 'tables'}
                   <Button variant="outline" size="sm" onclick={onrefresh}>
                     <Icon name="refresh-cw" class="size-3.5" />
                     Refresh
@@ -2070,6 +2312,10 @@
                       <li data-matview={mv.name}>
                             <button
                               type="button"
+                              tabindex="-1"
+                              data-sidebar-row="mview:{mv.name}"
+                              data-roving
+                              data-sidebar-current={activeTable === mv.name ? '' : undefined}
                               class={cn(
                                 "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                                 isSelected
