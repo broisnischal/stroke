@@ -55,7 +55,7 @@ const markScrollDefaultApplied = () => {
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, motion: MotionId, zebraRows: boolean, numberGrouping: boolean, imagePreview: boolean, openUrlsOnClick: boolean, highlightActiveRow: boolean, gridFontSize: number, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, motion: MotionId, zebraRows: boolean, showRowNumbers: boolean, showMenuBar: boolean, numberGrouping: boolean, imagePreview: boolean, openUrlsOnClick: boolean, highlightActiveRow: boolean, gridFontSize: number, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
 
 /**
  * UI type scale in design pixels: `[step, font-size, line-height?]`, matching
@@ -443,6 +443,8 @@ export const DEFAULT_SETTINGS = {
   // shade alternate rows as part of their look, and this turns the same shading
   // on for any of the others without changing the separators you picked.
   zebraRows: false,
+  showRowNumbers: false,
+  showMenuBar: true,
   numberGrouping: false,
   imagePreview: true,
   openUrlsOnClick: true,
@@ -510,6 +512,12 @@ export const appRowSpacing = writable(/** @type {RowSpacingId} */ (DEFAULT_ROW_S
 
 /** Reactive: shade alternate grid rows regardless of the style preset. */
 export const appZebraRows = writable(false)
+/** Row-number gutter in the data grid. Off by default: it is a reading aid, not
+ *  data, and it costs horizontal space on every table. */
+export const appRowNumbers = writable(false)
+/** File/Edit/View/Tools/Help in the title bar. On by default; off gives the
+ *  window title bar back to the drag region and the tab strip. */
+export const appMenuBar = writable(true)
 /** Grid value rendering - read by the canvas renderer on every paint. */
 export const appNumberGrouping = writable(false)
 /** Fetch and draw thumbnails for image-URL cells. Off also stops the FETCH. */
@@ -680,6 +688,8 @@ export function loadSettings() {
     const motion = normalizeMotion(parsed.motion)
     const sqlFormat = normalizeSqlFormat(parsed.sqlFormat)
     const zebraRows = parsed.zebraRows === true
+    const showRowNumbers = parsed.showRowNumbers === true
+    const showMenuBar = parsed.showMenuBar !== false
     const numberGrouping = parsed.numberGrouping === true
     // Both default ON - this is what the grid already did - so an absent key must
     // read as true, not false.
@@ -697,7 +707,7 @@ export function loadSettings() {
     const agentShowQueryCards = parsed.agentShowQueryCards !== false
     const agentWebAccess = parsed.agentWebAccess === true
     const tableTextAlign = TABLE_ALIGN_IDS.includes(parsed.tableTextAlign) ? parsed.tableTextAlign : DEFAULT_TABLE_ALIGN
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, motion, zebraRows, numberGrouping, imagePreview, openUrlsOnClick, highlightActiveRow, gridFontSize, autoSaveQueries, sqlFormat }
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, motion, zebraRows, showRowNumbers, showMenuBar, numberGrouping, imagePreview, openUrlsOnClick, highlightActiveRow, gridFontSize, autoSaveQueries, sqlFormat }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -832,6 +842,8 @@ export function applySettings(settings) {
   // Push formatter prefs into the shared option holder that format-sql.js reads.
   setSqlFormatOptions(settings.sqlFormat)
   setStore(appZebraRows, settings.zebraRows === true)
+  setStore(appRowNumbers, settings.showRowNumbers === true)
+  setStore(appMenuBar, settings.showMenuBar !== false)
   setStore(appNumberGrouping, settings.numberGrouping === true)
   setStore(appImagePreview, settings.imagePreview !== false)
   setStore(appOpenUrlsOnClick, settings.openUrlsOnClick !== false)

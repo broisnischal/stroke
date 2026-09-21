@@ -271,6 +271,14 @@
     settings = updateSettings({ zebraRows: !settings.zebraRows });
   }
 
+  function toggleRowNumbers() {
+    settings = updateSettings({ showRowNumbers: !settings.showRowNumbers });
+  }
+
+  function toggleMenuBar() {
+    settings = updateSettings({ showMenuBar: !settings.showMenuBar });
+  }
+
   function toggleNumberGrouping() {
     settings = updateSettings({ numberGrouping: !settings.numberGrouping });
   }
@@ -1283,6 +1291,22 @@
       'Shade every other row so a long row stays readable across the full width. The Striped and Dots grid styles already do this as part of their look.',
       settings.zebraRows,
       toggleZebraRows,
+    )}
+  {/if}
+  {#if show('Menu bar', 'File, Edit, View, Tools and Help in the title bar')}
+    {@render switchRow(
+      'Menu bar',
+      'Show File, Edit, View, Tools and Help in the title bar. Everything in it is also in the command palette (⌘K) and on a shortcut; turning it off gives the space back to the window drag region.',
+      settings.showMenuBar,
+      toggleMenuBar,
+    )}
+  {/if}
+  {#if show('Row numbers', 'Number every grid row in the gutter')}
+    {@render switchRow(
+      'Row numbers',
+      'Number each row in the gutter, counting from the first row of the page rather than from the first row on screen - so row 201 reads 201 on page 3, not 1. Off by default: it is a reading aid, not data, and it takes width from every table.',
+      settings.showRowNumbers,
+      toggleRowNumbers,
     )}
   {/if}
   {#if show('Cell alignment', 'Which side grid cell text sits on')}
