@@ -1,4 +1,5 @@
 <script>
+  import Kbd from './Kbd.svelte'
   import { startTelemetry, stopTelemetry } from "$lib/telemetry.js";
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
@@ -1394,17 +1395,22 @@
     <p class="mt-8 mb-1 text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">{$t('settings.sec.keyboard')}</p>
     <div class="mb-3 border-b border-border/40"></div>
     <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-      {@render shortcut('⌘M', $t('settings.kbd.cycleTheme'))}
-      {@render shortcut('⌘⇧M', $t('settings.kbd.prevTheme'))}
-      {@render shortcut('⌘+ / ⌘−', $t('settings.kbd.zoom'))}
-      {@render shortcut('⌘0', $t('settings.kbd.resetZoom'))}
+      {@render shortcut('Mod+M', $t('settings.kbd.cycleTheme'))}
+      {@render shortcut('Mod+Shift+M', $t('settings.kbd.prevTheme'))}
+      {@render shortcut('Mod+Plus', $t('settings.kbd.zoom'))}
+      {@render shortcut('Mod+Minus', $t('settings.kbd.zoom'))}
+      {@render shortcut('Mod+0', $t('settings.kbd.resetZoom'))}
     </div>
   {/if}
 {/snippet}
 
-{#snippet shortcut(/** @type {string} */ keys, /** @type {string} */ action)}
+<!-- One combo in `createHotkey` grammar, printed as keycaps by <Kbd> - the same
+     caps the menus and the shortcuts dialog draw. It used to take a glyph string
+     and set it in a single bordered box, so `⌘⇧M` was one cap reading "⌘⇧M" and
+     the ⌘ was hardcoded for every platform. -->
+{#snippet shortcut(/** @type {string} */ combo, /** @type {string} */ action)}
   <span class="flex items-center gap-1.5 text-ui-2xs text-muted-foreground">
-    <kbd class="rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-ui-3xs leading-4 text-foreground/70">{keys}</kbd>
+    <Kbd {combo} />
     {action}
   </span>
 {/snippet}

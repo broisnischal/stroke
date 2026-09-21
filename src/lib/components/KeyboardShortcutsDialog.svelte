@@ -14,6 +14,7 @@
   import X from "@lucide/svelte/icons/x";
 
   import { SHORTCUT_GROUPS, keycaps, comboText, IS_MAC } from "$lib/shortcuts.js";
+  import Kbd from "./Kbd.svelte";
 
   let { open = $bindable(false) } = $props();
 
@@ -233,14 +234,10 @@
                         {shortcut.desc}
                       </span>
 
-                      <span class="flex shrink-0 items-center gap-1">
-                        {#each caps as key, ki (ki)}
-                          <kbd>{key}</kbd>
-                          {#if ki < caps.length - 1}
-                            <span class="text-ui-3xs text-muted-foreground select-none">+</span>
-                          {/if}
-                        {/each}
-                      </span>
+                      <!-- No `+` between the caps: the separator was as wide as
+                           the caps at this size, and three chips in a row already
+                           read as one chord. -->
+                      <Kbd keys={caps} size="md" class="gap-1" />
                     </li>
                   {/each}
                 </ul>

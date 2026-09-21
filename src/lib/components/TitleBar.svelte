@@ -1,8 +1,5 @@
 <script>
   import { onMount } from 'svelte'
-  import ChevronLeft   from '@lucide/svelte/icons/chevron-left'
-  import ChevronRight  from '@lucide/svelte/icons/chevron-right'
-  import PanelLeft     from '@lucide/svelte/icons/panel-left'
   import MessageSquare from '@lucide/svelte/icons/message-square'
   import X             from '@lucide/svelte/icons/x'
   import KeyRound      from '@lucide/svelte/icons/key-round'
@@ -40,14 +37,8 @@
 
   let {
     title = 'Stroke',
-    canGoBack = false,
-    canGoForward = false,
-    sidebarOpen = true,
     connected = false,
     aiSidebarOpen = false,
-    ongoback = () => {},
-    ongoforward = () => {},
-    ontogglesidebar = () => {},
     ontoggleaisidebar = () => {},
     /** Named actions for the menu bar - see AppMenuBar. */
     menuActions = /** @type {Record<string, () => void>} */ ({}),
@@ -94,43 +85,7 @@
        menus themselves. -->
   {#if $appMenuBar}
     <AppMenuBar {connected} actions={menuActions} />
-    <span class="mx-1.5 h-4 w-px shrink-0 bg-border/50"></span>
   {/if}
-
-  <!-- Sidebar toggle, disabled when not connected -->
-  <button
-    type="button"
-    class={cn(
-      'shrink-0',
-      iconBtn,
-      !connected ? 'opacity-25 !pointer-events-none' : !sidebarOpen && 'bg-foreground/[0.05] text-foreground/60',
-    )}
-    onclick={ontogglesidebar}
-    disabled={!connected}
-    title={connected ? (sidebarOpen ? `Hide sidebar (${mod}B)` : `Show sidebar (${mod}B)`) : 'No active connection'}
-  >
-    <PanelLeft class="size-[13px]" />
-  </button>
-
-  <!-- Back / Forward -->
-  <button
-    type="button"
-    class={cn('ml-0.5 shrink-0', iconBtn, !canGoBack && 'opacity-20 !pointer-events-none')}
-    onclick={ongoback}
-    disabled={!canGoBack}
-    title="Go back (Alt+←)"
-  >
-    <ChevronLeft class="size-[13px]" />
-  </button>
-  <button
-    type="button"
-    class={cn('shrink-0', iconBtn, !canGoForward && 'opacity-20 !pointer-events-none')}
-    onclick={ongoforward}
-    disabled={!canGoForward}
-    title="Go forward (Alt+→)"
-  >
-    <ChevronRight class="size-[13px]" />
-  </button>
 
   <!-- Center title. Capped and centered so an unexpectedly long label (a file
        path, a verbose connection name) truncates instead of running under the

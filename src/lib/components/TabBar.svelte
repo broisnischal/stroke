@@ -237,6 +237,7 @@
           <ContextMenu.Item onSelect={() => onclose(tab.id)}>
             <Icon name="x" class="size-3.5" />
             Close Tab
+            <ContextMenu.Shortcut combo="Mod+W" />
           </ContextMenu.Item>
           <ContextMenu.Item disabled={!hasOtherClosable} onSelect={() => oncloseothers(tab.id)}>
             <Icon name="circle-slash" class="size-3.5" />
@@ -260,12 +261,15 @@
           <ContextMenu.Item disabled={!canreopenclosed} onSelect={onreopenclosed}>
             <Icon name="history" class="size-3.5" />
             Reopen last tab
-            <ContextMenu.Shortcut>⌘⇧T</ContextMenu.Shortcut>
+            <ContextMenu.Shortcut combo="Mod+Shift+T" />
           </ContextMenu.Item>
           <ContextMenu.Separator />
           <ContextMenu.Item variant="destructive" onSelect={oncloseall}>
             <Icon name="trash-2" class="size-3.5" />
             Close All Tabs
+            <!-- A space is a sequence: ⌘K, then W. <Kbd> prints it as two cap
+                 groups, because `⌘KW` would read as one three-key press. -->
+            <ContextMenu.Shortcut combo="Mod+K W" />
           </ContextMenu.Item>
         </ContextMenu.Content>
       </ContextMenu.Root>

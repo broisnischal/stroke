@@ -22,13 +22,9 @@
    */
   import { Menubar } from "bits-ui";
   import Icon from "./Icon.svelte";
-  import { IS_MAC } from "$lib/shortcuts.js";
+  import Kbd from "./Kbd.svelte";
 
   let { connected = false, actions = /** @type {Record<string, () => void>} */ ({}) } = $props();
-
-  const mod = IS_MAC ? "⌘" : "Ctrl";
-  const alt = IS_MAC ? "⌥" : "Alt";
-  const shift = IS_MAC ? "⇧" : "Shift+";
   /** @param {string} name */
   function run(name) {
     actions[name]?.();
@@ -48,69 +44,86 @@
     "data-disabled:pointer-events-none data-disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5";
 
   const sepCls = "-mx-1 my-1 h-px bg-border/60";
-  const keyCls = "ml-auto pl-4 font-mono text-ui-3xs tracking-tight text-muted-foreground";
 </script>
 
-{#snippet item(/** @type {string} */ icon, /** @type {string} */ label, /** @type {string} */ action, /** @type {string} */ keys = "", /** @type {boolean} */ disabled = false)}
+<!-- `combo` is a chord in the grammar `createHotkey` parses (`Mod+Shift+T`),
+     rendered by <Kbd> as one cap per key. The rows used to print the glyphs
+     butted together as a single string - "Mod+Shift+T" gave `⌘⇧T`, three
+     symbols with no shape at all, at 10px. -->
+{#snippet item(/** @type {string} */ icon, /** @type {string} */ label, /** @type {string} */ action, /** @type {string} */ combo = "", /** @type {boolean} */ disabled = false)}
   <Menubar.Item class={itemCls} {disabled} onSelect={() => run(action)}>
     <Icon name={icon} class="size-3.5 text-muted-foreground" />
     <span data-slot="menu-label" class="min-w-0 truncate">{label}</span>
-    {#if keys}<span class={keyCls}>{keys}</span>{/if}
+    {#if combo}<Kbd {combo} class="ml-auto pl-4" />{/if}
   </Menubar.Item>
 {/snippet}
 
-<Menubar.Root class="flex shrink-0 items-center gap-0.5" aria-label="Main menu">
+<!-- A hairline between each menu. `gap-0` because the rule now does the
+     separating, and the triggers keep their own `px-2`, so the spacing either
+     side of a divider is the padding rather than a gap plus padding. -->
+{#snippet divider()}
+  <span class="h-3 w-px shrink-0 bg-border/40" aria-hidden="true"></span>
+{/snippet}
+
+<Menubar.Root class="flex shrink-0 items-center" aria-label="Main menu">
   <!-- File -->
   <Menubar.Menu>
     <Menubar.Trigger class={triggerCls}>File</Menubar.Trigger>
     <Menubar.Portal>
       <Menubar.Content class={contentCls} align="start" sideOffset={6}>
-        {@render item("file-text", "New tab", "newTab", `${mod}${shift}T`)}
+        {@render item("file-text", "New tab", "newTab", "Mod+Shift+T")}
         {@render item("terminal", "New query editor", "newSql", "", !connected)}
-        {@render item("copy", "New window", "newWindow", `${mod}${shift}N`)}
+        {@render item("copy", "New window", "newWindow", "Mod+Shift+N")}
         <Menubar.Separator class={sepCls} />
         {@render item("database", "Connect…", "openConnection")}
-        {@render item("plug", "Disconnect", "disconnect", `${mod}${shift}D`, !connected)}
+        {@render item("plug", "Disconnect", "disconnect", "Mod+Shift+D", !connected)}
         <Menubar.Separator class={sepCls} />
-        {@render item("settings", "Settings…", "openSettings", `${mod},`)}
-        {@render item("x", "Close tab", "closeTab", `${mod}W`)}
+        {@render item("settings", "Settings…", "openSettings", "Mod+,")}
+        {@render item("x", "Close tab", "closeTab", "Mod+W")}
+        {@render item("trash-2", "Close all tabs", "closeAllTabs", "Mod+K W")}
       </Menubar.Content>
     </Menubar.Portal>
   </Menubar.Menu>
+
+  {@render divider()}
 
   <!-- Edit -->
   <Menubar.Menu>
     <Menubar.Trigger class={triggerCls}>Edit</Menubar.Trigger>
     <Menubar.Portal>
       <Menubar.Content class={contentCls} align="start" sideOffset={6}>
-        {@render item("search", "Search rows", "search", `${mod}F`, !connected)}
-        {@render item("replace", "Find & replace…", "findReplace", `${mod}${alt}F`, !connected)}
+        {@render item("search", "Search rows", "search", "Mod+F", !connected)}
+        {@render item("replace", "Find & replace…", "findReplace", "Mod+Alt+F", !connected)}
         {@render item("list-filter", "Find in database…", "findInDatabase", "", !connected)}
         <Menubar.Separator class={sepCls} />
-        {@render item("check", "Apply staged changes", "applyEdits", `${mod}S`, !connected)}
-        {@render item("clipboard-copy", "Copy staged changes as SQL", "copyEditsSql", `${mod}${alt}S`, !connected)}
+        {@render item("check", "Apply staged changes", "applyEdits", "Mod+S", !connected)}
+        {@render item("clipboard-copy", "Copy staged changes as SQL", "copyEditsSql", "Mod+Alt+S", !connected)}
         {@render item("undo-2", "Discard staged changes", "resetEdits", "", !connected)}
       </Menubar.Content>
     </Menubar.Portal>
   </Menubar.Menu>
+
+  {@render divider()}
 
   <!-- View -->
   <Menubar.Menu>
     <Menubar.Trigger class={triggerCls}>View</Menubar.Trigger>
     <Menubar.Portal>
       <Menubar.Content class={contentCls} align="start" sideOffset={6}>
-        {@render item("layout-list", "Toggle sidebar", "toggleSidebar", `${mod}B`)}
-        {@render item("bot", "Toggle chat", "toggleChat", `${mod}I`)}
+        {@render item("layout-list", "Toggle sidebar", "toggleSidebar", "Mod+B")}
+        {@render item("bot", "Toggle chat", "toggleChat", "Mod+I")}
         <Menubar.Separator class={sepCls} />
-        {@render item("plus", "Zoom in", "zoomIn", `${mod}+`)}
-        {@render item("minus", "Zoom out", "zoomOut", `${mod}-`)}
-        {@render item("rotate-ccw", "Reset zoom", "zoomReset", `${mod}0`)}
+        {@render item("plus", "Zoom in", "zoomIn", "Mod+Plus")}
+        {@render item("minus", "Zoom out", "zoomOut", "Mod+Minus")}
+        {@render item("rotate-ccw", "Reset zoom", "zoomReset", "Mod+0")}
         <Menubar.Separator class={sepCls} />
         {@render item("maximize-2", "Toggle full screen", "fullscreen", "F11")}
-        {@render item("command", "Command palette…", "commandPalette", `${mod}K`)}
+        {@render item("command", "Command palette…", "commandPalette", "Mod+K")}
       </Menubar.Content>
     </Menubar.Portal>
   </Menubar.Menu>
+
+  {@render divider()}
 
   <!-- Tools -->
   <Menubar.Menu>
@@ -124,19 +137,21 @@
         <Menubar.Separator class={sepCls} />
         {@render item("git-compare", "Data diff", "dataDiff", "", !connected)}
         {@render item("layout-dashboard", "Dashboard", "dashboard", "", !connected)}
-        {@render item("history", "Activity log", "logs", `${mod}${shift}L`, !connected)}
+        {@render item("history", "Activity log", "logs", "Mod+Shift+L", !connected)}
         <Menubar.Separator class={sepCls} />
-        {@render item("blocks", "Extensions", "extensions", `${mod}${shift}X`)}
+        {@render item("blocks", "Extensions", "extensions", "Mod+Shift+X")}
       </Menubar.Content>
     </Menubar.Portal>
   </Menubar.Menu>
+
+  {@render divider()}
 
   <!-- Help -->
   <Menubar.Menu>
     <Menubar.Trigger class={triggerCls}>Help</Menubar.Trigger>
     <Menubar.Portal>
       <Menubar.Content class={contentCls} align="start" sideOffset={6}>
-        {@render item("command", "Keyboard shortcuts", "shortcuts", `${mod}/`)}
+        {@render item("command", "Keyboard shortcuts", "shortcuts", "Mod+/")}
         {@render item("external-link", "What's new", "changelog")}
         <Menubar.Separator class={sepCls} />
         {@render item("alert-triangle", "Report an issue…", "reportIssue")}

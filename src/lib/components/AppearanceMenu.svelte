@@ -1,4 +1,5 @@
 <script>
+  import Kbd from './Kbd.svelte'
   import PanelLeft      from '@lucide/svelte/icons/panel-left'
   import PanelTop       from '@lucide/svelte/icons/panel-top'
   import PanelBottom    from '@lucide/svelte/icons/panel-bottom'
@@ -6,10 +7,7 @@
   import Check          from '@lucide/svelte/icons/check'
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js'
-  import { detectOs } from '$lib/platform.js'
 
-  const isMac = typeof navigator !== 'undefined' && detectOs() === 'macos'
-  const mod = isMac ? '⌘' : 'Ctrl'
 
   let {
     sidebarVisible = true,
@@ -41,7 +39,7 @@
       <span class="min-w-0 flex-1 truncate whitespace-nowrap">Sidebar</span>
       <span class="ml-auto flex shrink-0 items-center gap-2">
         {#if sidebarVisible}<Check class="size-3 shrink-0 text-muted-foreground" />{:else}<span class="size-3 shrink-0"></span>{/if}
-        <span class="flex items-center gap-[3px]"><kbd>{mod}</kbd><kbd>B</kbd></span>
+        <Kbd combo="Mod+B" />
       </span>
     </DropdownMenu.Item>
 
@@ -50,7 +48,7 @@
       <span class="min-w-0 flex-1 truncate whitespace-nowrap">Tab Bar</span>
       <span class="ml-auto flex shrink-0 items-center gap-2">
         {#if tabBarVisible}<Check class="size-3 shrink-0 text-muted-foreground" />{:else}<span class="size-3 shrink-0"></span>{/if}
-        <span class="flex items-center gap-[3px]"><kbd>{mod}</kbd><kbd>⇧</kbd><kbd>T</kbd></span>
+        <Kbd combo="Mod+Shift+T" />
       </span>
     </DropdownMenu.Item>
 
@@ -69,7 +67,7 @@
       <span class="min-w-0 flex-1 truncate whitespace-nowrap">Status Bar</span>
       <span class="ml-auto flex shrink-0 items-center gap-2">
         {#if statusBarVisible}<Check class="size-3 shrink-0 text-muted-foreground" />{:else}<span class="size-3 shrink-0"></span>{/if}
-        <span class="flex items-center gap-[3px]"><kbd>{mod}</kbd><kbd>⇧</kbd><kbd>B</kbd></span>
+        <Kbd combo="Mod+Shift+B" />
       </span>
     </DropdownMenu.Item>
   </DropdownMenu.Content>

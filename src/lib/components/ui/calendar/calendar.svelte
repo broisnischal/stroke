@@ -10,8 +10,27 @@
 		placeholder = $bindable(),
 		class: className,
 		weekdayFormat = "short",
+		/**
+		 * Dense variant: 28px days at the app's own data size, for a calendar in
+		 * a popover over a grid whose rows are 28px tall. The default 36px/15px
+		 * calendar is a page-sized control - in the cell editor it came out
+		 * wider than the column it was editing.
+		 */
+		compact = false,
 		...restProps
 	} = $props();
+
+	const nav = $derived(
+		"inline-flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40 " +
+			(compact ? "size-6" : "size-7"),
+	);
+	const navIcon = $derived(compact ? "size-3.5" : "size-4");
+	const headCell = $derived(
+		compact
+			? "w-7 rounded-md font-mono text-ui-3xs font-normal text-muted-foreground/70"
+			: "w-9 rounded-md text-ui-2xs font-normal text-muted-foreground",
+	);
+	const dayCell = $derived(compact ? "size-7 font-mono text-ui-2xs tabular-nums" : "size-9 text-ui-sm");
 </script>
 
 <CalendarPrimitive.Root
@@ -19,21 +38,17 @@
 	bind:value
 	bind:placeholder
 	{weekdayFormat}
-	class={cn("p-3", className)}
+	class={cn(compact ? "p-2" : "p-3", className)}
 	{...restProps}
 >
 	{#snippet children({ months, weekdays })}
-		<CalendarPrimitive.Header class="mb-2 flex items-center justify-between px-1">
-			<CalendarPrimitive.PrevButton
-				class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-			>
-				<ChevronLeft class="size-4" />
+		<CalendarPrimitive.Header class={cn("flex items-center justify-between px-1", compact ? "mb-1" : "mb-2")}>
+			<CalendarPrimitive.PrevButton class={nav}>
+				<ChevronLeft class={navIcon} />
 			</CalendarPrimitive.PrevButton>
-			<CalendarPrimitive.Heading class="text-ui-sm font-medium text-foreground" />
-			<CalendarPrimitive.NextButton
-				class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-			>
-				<ChevronRight class="size-4" />
+			<CalendarPrimitive.Heading class={cn("font-medium text-foreground", compact ? "text-ui-2xs" : "text-ui-sm")} />
+			<CalendarPrimitive.NextButton class={nav}>
+				<ChevronRight class={navIcon} />
 			</CalendarPrimitive.NextButton>
 		</CalendarPrimitive.Header>
 
@@ -42,9 +57,7 @@
 				<CalendarPrimitive.GridHead>
 					<CalendarPrimitive.GridRow class="flex">
 						{#each weekdays as day}
-							<CalendarPrimitive.HeadCell
-								class="w-9 rounded-md text-ui-2xs font-normal text-muted-foreground"
-							>
+							<CalendarPrimitive.HeadCell class={headCell}>
 								{day.slice(0, 2)}
 							</CalendarPrimitive.HeadCell>
 						{/each}
@@ -52,12 +65,13 @@
 				</CalendarPrimitive.GridHead>
 				<CalendarPrimitive.GridBody>
 					{#each month.weeks as weekDates}
-						<CalendarPrimitive.GridRow class="mt-1 flex">
+						<CalendarPrimitive.GridRow class={cn("flex", compact ? "mt-0.5" : "mt-1")}>
 							{#each weekDates as date}
-								<CalendarPrimitive.Cell {date} month={month.value} class="relative p-0 text-center text-ui-sm">
+								<CalendarPrimitive.Cell {date} month={month.value} class="relative p-0 text-center">
 									<CalendarPrimitive.Day
 										class={cn(
-											"inline-flex size-9 items-center justify-center rounded-md text-ui-sm font-normal transition-colors",
+											"inline-flex items-center justify-center rounded-md font-normal transition-colors",
+											dayCell,
 											"hover:bg-muted hover:text-foreground",
 											"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
 											"data-selected:bg-primary data-selected:text-primary-foreground data-selected:hover:bg-primary/90",

@@ -672,11 +672,23 @@ html[data-os="linux"]   { --window-radius: 8px; }
     background: color-mix(in oklch, var(--muted) 45%, transparent);
     border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
     border-radius: 6px;
-    /* One clean keycap shadow instead of a chunky 2px bottom border. */
-    box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 55%, transparent);
     white-space: nowrap;
     user-select: none;
     vertical-align: middle;
+  }
+
+  /* The in-line size: menu rows, field hints, tile chords - anywhere the cap
+     sits beside 13px text rather than in a list of its own. A 20px bordered cap
+     with a keycap shadow is a control next to a label that size; this is a
+     filled square that reads as a key and nothing else. */
+  kbd[data-size="sm"] {
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    font-size: var(--fs-3xs);
+    border-radius: 4px;
+    border-color: transparent;
+    background: color-mix(in oklch, var(--muted) 65%, transparent);
   }
 
   /* kbd inside a primary-coloured surface (e.g. Save button) */
