@@ -1,5 +1,6 @@
 <script>
   import Icon         from './Icon.svelte'
+  import { IS_MAC }   from '$lib/shortcuts.js'
   import { tick, onMount } from 'svelte'
   import { cn }       from '$lib/utils.js'
   import { toast }    from '$lib/components/ui/sonner/toast.svelte.js'
@@ -57,6 +58,8 @@
     applying = false,
     onapplyedits = /** @type {() => void} */ (() => {}),
     onresetedits = /** @type {() => void} */ (() => {}),
+    /** Put the staged changes on the clipboard as SQL, leaving them staged. */
+    oncopyeditssql = /** @type {() => void} */ (() => {}),
     showTableNav = false,
     onscrolltabletop = /** @type {() => void} */ (() => {}),
     onscrolltablebottom = /** @type {() => void} */ (() => {}),
@@ -708,33 +711,70 @@
       >v{appVersion}</button>
     {/if}
 
-    <!-- Pending edits -->
+    <!-- Pending edits.
+         Reset then Apply, in that order and tight against each other: they are
+         one decision about one set of changes, and as two loose buttons spaced
+         like unrelated status items they read as two. Apply carries the count
+         and the split caret, which is where the same action's other form (copy
+         the SQL instead of running it) belongs - not as a third button. -->
     {#if pendingEditCount > 0}
-      <button
-        type="button"
-        class="inline-flex h-6 items-center gap-1 rounded-md bg-primary px-2 text-ui-2xs font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-60"
-        onclick={onapplyedits}
-        disabled={applying}
-        title="Apply {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
-      >
-        {#if applying}
-          <span class="size-3 shrink-0 animate-spin rounded-full border border-current/40 border-t-current"></span>
-          Applying…
-        {:else}
-          <Icon name="check" class="size-3 shrink-0" />
-          Apply {pendingEditCount}
-        {/if}
-      </button>
-      <button
-        type="button"
-        class="inline-flex h-6 items-center gap-1 rounded-md px-2 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
-        onclick={onresetedits}
-        disabled={applying}
-        title="Discard unsaved changes"
-      >
-        <Icon name="undo-2" class="size-3 shrink-0" />
-        <span class="@max-[780px]/sb:hidden">Reset</span>
-      </button>
+      <div class="flex items-center gap-1">
+        <button
+          type="button"
+          class="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
+          onclick={onresetedits}
+          disabled={applying}
+          title="Discard {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
+        >
+          <Icon name="undo-2" class="size-3 shrink-0" />
+          <span class="@max-[780px]/sb:hidden">Reset</span>
+        </button>
+        <div class="inline-flex h-6 items-stretch overflow-hidden rounded-md bg-primary text-primary-foreground">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 pl-2 pr-1.5 text-ui-2xs font-medium transition-opacity hover:opacity-85 disabled:opacity-60"
+            onclick={onapplyedits}
+            disabled={applying}
+            title="Apply {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'} ({IS_MAC ? '⌘S' : 'Ctrl+S'})"
+          >
+            {#if applying}
+              <span class="size-3 shrink-0 animate-spin rounded-full border border-current/40 border-t-current"></span>
+              Applying…
+            {:else}
+              <Icon name="check" class="size-3 shrink-0" />
+              Apply
+              <span class="tabular-nums opacity-80">{pendingEditCount}</span>
+            {/if}
+          </button>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger
+              class="inline-flex w-5 items-center justify-center border-l border-primary-foreground/25 transition-opacity hover:opacity-85 disabled:opacity-60"
+              disabled={applying}
+              aria-label="More apply options"
+              title="More apply options"
+            >
+              <Icon name="chevron-down" class="size-3 shrink-0" />
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end" side="top" class="min-w-52">
+              <DropdownMenu.Item onSelect={onapplyedits}>
+                <Icon name="check" class="size-3.5" />
+                Apply changes
+                <DropdownMenu.Shortcut>{IS_MAC ? '⌘S' : 'Ctrl+S'}</DropdownMenu.Shortcut>
+              </DropdownMenu.Item>
+              <DropdownMenu.Item onSelect={oncopyeditssql}>
+                <Icon name="clipboard-copy" class="size-3.5" />
+                Copy to SQL
+                <DropdownMenu.Shortcut>{IS_MAC ? '⌘⌥S' : 'Ctrl+Alt+S'}</DropdownMenu.Shortcut>
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item onSelect={onresetedits}>
+                <Icon name="undo-2" class="size-3.5" />
+                Discard changes
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+        </div>
+      </div>
       {@render sep()}
     {/if}
 
