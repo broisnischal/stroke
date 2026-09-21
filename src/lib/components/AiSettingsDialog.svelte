@@ -551,7 +551,7 @@
                     </div>
                   </div>
                 </ContextMenu.Trigger>
-                <ContextMenu.Content class="min-w-40 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                <ContextMenu.Content class="min-w-40">
                   {#if !isActive}
                     <ContextMenu.Item onSelect={() => void setActiveProfile(profile.id)}>
                       <Check />

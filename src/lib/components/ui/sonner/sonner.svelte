@@ -14,14 +14,65 @@
     offset = '12px',
   } = $props()
 
+  /**
+   * How many cards the stack draws at once.
+   *
+   * It drew all of them. A batch operation that fails per row - 219 invalid
+   * values in one paste - put 219 absolutely-sized cards on screen, each with an
+   * enter transition and a flip animation, and the column ran off the bottom of
+   * the window. The rest are not lost: their timers are in the store and they
+   * come up as the ones above them expire, and the count says how many are
+   * waiting.
+   */
+  const VISIBLE_MAX = 4
+  /** Exit duration, and the gap between one card leaving and the next. */
+  const OUT_MS = 180
+  const STAGGER_MS = 40
+  const visible = $derived(toast.toasts.slice(0, VISIBLE_MAX))
+  const queued = $derived(Math.max(0, toast.toasts.length - VISIBLE_MAX))
   const showClearAll = $derived(toast.toasts.length > 1)
 
-  // Cascade the dismissal (newest first) instead of clearing everything in the
-  // same frame, so the stack sweeps out smoothly rather than all flying at once.
+  /**
+   * True while a Clear all is playing, which turns the flip animation off.
+   *
+   * Clear all used to dismiss one toast every 45ms. With four toasts that reads
+   * as a sweep; with two hundred it is a ten-second crawl in which every single
+   * removal re-triggers the 200ms flip of everything still on screen, so each
+   * card is animating a shift while already animating its own exit. That is the
+   * jitter: dozens of overlapping, restarting animations on the same elements.
+   *
+   * Now the store is emptied in one go and the cards leave together, staggered
+   * by their own exit delay - a fixed cost, whether the queue is 4 deep or 400.
+   */
+  let clearing = $state(false)
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let clearingTimer
+
   function clearAll() {
-    const ids = toast.getActiveToasts().map((t) => t.id)
-    ids.forEach((id, i) => setTimeout(() => toast.dismiss(id), i * 45))
+    clearing = true
+    clearTimeout(clearingTimer)
+    toast.dismiss()
+    // Held until the longest exit (duration + the last card's delay) has played,
+    // so a toast arriving mid-sweep does not get the flip it would have skipped.
+    clearingTimer = setTimeout(() => { clearing = false }, OUT_MS + VISIBLE_MAX * STAGGER_MS)
   }
+
+  /**
+   * Motion the user has asked not to see.
+   *
+   * The app-wide reduced-motion rules in app.css are CSS `!important`
+   * overrides, and a Svelte transition animates inline styles from JS - it does
+   * not read them. Both sources are checked here, in the same order the
+   * stylesheet resolves them: the in-app setting wins, and the OS preference
+   * decides when the setting is "System".
+   */
+  const reduced = $derived.by(() => {
+    if (typeof document === 'undefined') return false
+    const attr = document.documentElement.dataset.motion
+    if (attr === 'reduced') return true
+    if (attr === 'full') return false
+    return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  })
 
   const base =
     'group/toast pointer-events-auto relative flex w-full items-start gap-2 overflow-hidden rounded-xl border border-border/40 bg-popover px-2.5 py-2 text-popover-foreground shadow-[0_0_0_0.5px_rgba(0,0,0,0.03),0_10px_38px_-8px_rgba(0,0,0,0.14),0_2px_10px_-3px_rgba(0,0,0,0.06)] dark:border-white/[0.07] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.05),0_16px_48px_-10px_rgba(0,0,0,0.55),0_4px_14px_-4px_rgba(0,0,0,0.35)]'
@@ -82,24 +133,32 @@
   onmouseleave={toast.resumeAll}
 >
   {#if showClearAll}
-    <button
-      type="button"
-      transition:fly={{ y: -8, duration: 160 }}
-      class="studio-toast-clear-all pointer-events-auto ml-auto shrink-0 rounded-lg border border-border/50 bg-popover px-2.5 py-1 text-ui-2xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/60 hover:text-foreground dark:border-white/[0.08]"
-      onclick={clearAll}
-    >
-      Clear all
-    </button>
+    <div class="ml-auto flex shrink-0 items-center gap-1.5" transition:fly={{ y: -8, duration: reduced ? 0 : 160 }}>
+      {#if queued > 0}
+        <!-- Says the stack is capped, rather than leaving the other 215 to look
+             like they were dropped. -->
+        <span class="pointer-events-none rounded-lg border border-border/40 bg-popover/90 px-2 py-1 font-mono text-ui-3xs tabular-nums text-muted-foreground shadow-sm dark:border-white/[0.06]">
+          +{queued.toLocaleString('en-US')}
+        </span>
+      {/if}
+      <button
+        type="button"
+        class="studio-toast-clear-all pointer-events-auto shrink-0 rounded-lg border border-border/50 bg-popover px-2.5 py-1 text-ui-2xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted/60 hover:text-foreground dark:border-white/[0.08]"
+        onclick={clearAll}
+      >
+        Clear all
+      </button>
+    </div>
   {/if}
 
-  {#each toast.toasts as t (t.id)}
+  {#each visible as t, i (t.id)}
     <div
       class={base}
       style="font-family: var(--font-sans); font-size: var(--app-font-size);"
       role="status"
-      in:fly={{ y: flyY, duration: 200 }}
-      out:fly={{ x: 24, duration: 180 }}
-      animate:flip={{ duration: 200 }}
+      in:fly={{ y: flyY, duration: reduced ? 0 : 200 }}
+      out:fly={{ x: 24, duration: reduced ? 0 : OUT_MS, delay: clearing && !reduced ? i * STAGGER_MS : 0 }}
+      animate:flip={{ duration: clearing || reduced ? 0 : 200 }}
     >
       {#if t.type !== 'message'}
         <span class="{iconWrap} {iconClass[t.type]}" aria-hidden="true">

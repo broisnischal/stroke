@@ -51,6 +51,23 @@ const markScrollDefaultApplied = () => {
   try { localStorage.setItem(SCROLL_DEFAULT_KEY, '1') } catch {}
 }
 
+/**
+ * One-shot marker for the monospace-default migration in `loadSettings`.
+ *
+ * A stored blob from before this change carries `font: "geist"` - which is
+ * indistinguishable from someone having chosen Geist on purpose - so the switch
+ * cannot be inferred from the value. It runs once per install: the first load
+ * after the update rewrites a font nobody changed, sets this key, and never
+ * touches the setting again.
+ */
+const FONT_DEFAULT_KEY = 'stroke:font-default-mono'
+const fontDefaultApplied = () => {
+  try { return localStorage.getItem(FONT_DEFAULT_KEY) === '1' } catch { return true }
+}
+const markFontDefaultApplied = () => {
+  try { localStorage.setItem(FONT_DEFAULT_KEY, '1') } catch {}
+}
+
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
@@ -134,8 +151,20 @@ export const FONT_PRESETS = {
     mono: '"Source Code Pro Variable", ui-monospace, monospace',
   },
 }
-/** @type {FontId} */
-export const DEFAULT_FONT = 'geist'
+/**
+ * The app is monospace by default.
+ *
+ * Everything this tool shows is data - identifiers, values, SQL, types - and a
+ * proportional UI font next to a monospace grid meant two type systems on every
+ * screen. `mono` sets the same JetBrains Mono for `--font-sans` and
+ * `--font-mono`, so the chrome and the data finally agree.
+ *
+ * Existing installs move with it exactly once, through FONT_DEFAULT_KEY below:
+ * an update should land the new look, and someone who has since picked their
+ * own font should keep it.
+ * @type {FontId}
+ */
+export const DEFAULT_FONT = 'mono'
 /** @returns {FontId} */
 function normalizeFont(/** @type {unknown} */ id) {
   return FONT_PRESETS[/** @type {FontId} */ (id)] ? /** @type {FontId} */ (id) : DEFAULT_FONT
@@ -626,6 +655,7 @@ export function loadSettings() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
       markScrollDefaultApplied()
+      markFontDefaultApplied()
       _settingsCache = {
         ...DEFAULT_SETTINGS,
         theme: systemPreferredTheme(),
@@ -654,7 +684,14 @@ export function loadSettings() {
     const launchAtLogin = parsed.launchAtLogin === true
     const autoReconnectOnStartup = parsed.autoReconnectOnStartup !== false
     const previewDmlBeforeApply = parsed.previewDmlBeforeApply !== false
-    const font = normalizeFont(parsed.font)
+    let font = normalizeFont(parsed.font)
+    if (!fontDefaultApplied()) {
+      // Only the OLD default is rewritten. Any other value is a choice, and the
+      // whole point of the marker is that this cannot run twice - so someone who
+      // sets Geist after the update keeps it.
+      if (font === 'geist') font = DEFAULT_FONT
+      markFontDefaultApplied()
+    }
     const iconStyle = normalizeIconStyle(parsed.iconStyle)
     const iconSet = normalizeIconSet(parsed.iconSet)
     const tableStyle = normalizeTableStyle(parsed.tableStyle)
@@ -932,6 +969,24 @@ function handleZoomKeydown(e) {
 }
 
 /**
+ * Surfaces that do their own zooming.
+ *
+ * The blockers below run in the CAPTURE phase and call
+ * `stopImmediatePropagation()`, so anything inside the app that wants to zoom
+ * its own content never sees the event at all - it cannot opt out from its own
+ * handler, because its handler does not run. `.mermaid-canvas` was named here
+ * for exactly that reason; `[data-zoom-surface]` is the same escape hatch
+ * without a component's class name in a store (the media lightbox needs it for
+ * Ctrl+scroll and for trackpad pinch, which is what made zooming an image
+ * preview do nothing at all).
+ * @param {Event} e
+ */
+function ownsItsZoom(e) {
+  const t = /** @type {Element | null} */ (e.target)
+  return !!t?.closest?.('[data-zoom-surface], .mermaid-canvas')
+}
+
+/**
  * Block every Ctrl/Cmd + scroll zoom path. Zoom is keyboard-only (Cmd +/-/0).
  * macOS trackpad pinch arrives as ctrl+wheel near column resize handles and
  * page-zooms the webview (devicePixelRatio drift → canvas looks huge/blurry
@@ -941,8 +996,7 @@ function handleZoomKeydown(e) {
 function blockNativeScrollZoom(e) {
   const we = /** @type {WheelEvent} */ (e)
   if (!(we.ctrlKey || we.metaKey)) return
-  // Let mermaid diagrams handle their own Ctrl+scroll zoom.
-  if (/** @type {Element} */ (e.target)?.closest?.('.mermaid-canvas')) return
+  if (ownsItsZoom(e)) return
   e.preventDefault()
   e.stopImmediatePropagation()
   resetWebviewZoom()
@@ -953,7 +1007,7 @@ function blockNativeScrollZoom(e) {
  * @param {Event} e
  */
 function handleZoomGesture(e) {
-  if (/** @type {Element} */ (e.target)?.closest?.('.mermaid-canvas')) return
+  if (ownsItsZoom(e)) return
   e.preventDefault()
   e.stopImmediatePropagation()
   resetWebviewZoom()

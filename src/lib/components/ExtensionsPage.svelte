@@ -2,6 +2,9 @@
   import { untrack } from "svelte";
   import { cn } from "$lib/utils.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import SearchableMenu from "./SearchableMenu.svelte";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Check from "@lucide/svelte/icons/check";
   import { EXTENSIONS } from "$lib/plugins/registry.js";
   import {
     pluginState,
@@ -9,7 +12,7 @@
     setPluginEnabled,
     setPluginConfig,
   } from "$lib/stores/plugins.js";
-  import { TIMEZONE_OPTIONS } from "$lib/plugins/extensions/better-time.js";
+  import { TIMEZONE_OPTIONS, PRECISION_OPTIONS, timeZoneOffsetLabel } from "$lib/plugins/extensions/better-time.js";
   import { CURRENCIES } from "$lib/plugins/extensions/money-format.js";
   import { BOOLEAN_STYLES } from "$lib/plugins/extensions/boolean-glyph.js";
   import { DEFAULT_RULES } from "$lib/plugins/extensions/linkify.js";
@@ -135,6 +138,67 @@
     } catch (e) {
       toast.error(`Could not remove ${p.name}`, { description: String(e) });
     }
+  }
+
+  /**
+   * What each formatter is shown working on.
+   *
+   * The detail page described an extension and then asked you to go and open a
+   * table to find out what it does. These are the values the extension is for,
+   * run through the extension's own `format()` with the settings currently set,
+   * so the preview below answers "what will my data look like" without leaving
+   * the page - and moves the moment a setting is changed.
+   *
+   * `type` is what the formatter's `appliesTo()` is given, so each sample has to
+   * carry the column type it would really arrive with.
+   * @type {Record<string, { type: string, values: unknown[] }>}
+   */
+  const PREVIEW_SAMPLES = {
+    "better-time": {
+      type: "timestamptz",
+      values: [
+        new Date(Date.now() - 45 * 1000).toISOString().replace("T", " ").replace("Z", "+00"),
+        new Date(Date.now() - 3 * 3600 * 1000).toISOString().replace("T", " ").replace("Z", "+00"),
+        "2024-01-15 10:30:00.492+00",
+        "1999-12-31 23:59:59+00",
+      ],
+    },
+    "number-format": { type: "int8", values: [1234000, 987, -45600, 0.5] },
+    "money-format": { type: "numeric", values: [1999, 250000, -3450, 0] },
+    "duration-format": { type: "int4", values: [45, 3725, 86400, 950400] },
+    "boolean-glyph": { type: "bool", values: [true, false, null] },
+    "mask-sensitive": { type: "text", values: ["ada@example.com", "+1 415 555 0132", "4242 4242 4242 4242"] },
+    "linkify": { type: "text", values: ["https://stroke.sh/docs", "ada@example.com", "not a link"] },
+    "color-swatch": { type: "text", values: ["#3b82f6", "rgb(34 197 94)", "#f59e0b"] },
+    "status-badge": { type: "text", values: ["active", "pending", "failed", "archived"] },
+    "nullish-values": { type: "text", values: [null, "", "  "] },
+    "smart-text": { type: "text", values: ["  padded  ", "MIXED Case Text", "a-very-long-slug-that-keeps-going-and-going"] },
+    "freshness": { type: "timestamptz", values: [new Date(Date.now() - 120 * 1000).toISOString(), "2024-01-15 10:30:00+00"] },
+    "heatmap": { type: "int4", values: [12, 480, 1290] },
+    "validators": { type: "text", values: ["ada@example.com", "not-an-email", "550e8400-e29b-41d4-a716-446655440000"] },
+  };
+
+  /**
+   * Run one sample through an extension, exactly as the grid does.
+   * @param {any} ext @param {unknown} value @param {string} type
+   */
+  function previewOf(ext, value, type) {
+    if (typeof ext?.format !== "function") return null;
+    try {
+      if (typeof ext.appliesTo === "function" && !ext.appliesTo(type)) return null;
+      return ext.format(value, type, cfg(ext.id, ext.defaultConfig ?? {})) ?? null;
+    } catch {
+      // A formatter that throws on a sample is a bug in the formatter, not a
+      // reason to take the page down with it.
+      return null;
+    }
+  }
+
+  /** `NULL` and an empty string have to be distinguishable in the raw column. */
+  function rawText(/** @type {unknown} */ v) {
+    if (v === null || v === undefined) return "NULL";
+    if (v === "") return "''";
+    return String(v);
   }
 
   const CONFIGURABLE = new Set([
@@ -468,12 +532,13 @@
              the separating. -->
         <div class="border-b border-border/50 pb-4">
           <div class="flex items-start gap-3.5">
-            <span
-              class={cn(
-                "grid size-10 shrink-0 place-items-center rounded-lg border transition-colors",
-                on ? "border-primary/30 bg-primary/10 text-primary" : "border-border/60 bg-muted/40 text-muted-foreground",
-              )}
-            >
+            <!-- One surface, whatever the state. The tile used to turn into a
+                 blue-washed, blue-bordered, blue-iconed square when the
+                 extension was on - three carriers of one bit, in the accent
+                 colour that everywhere else in the app means "interactive",
+                 sitting next to the toggle that already says on or off. The
+                 icon is an identifier, not a status light. -->
+            <span class="grid size-10 shrink-0 place-items-center rounded-lg border border-border/60 bg-muted/30 text-foreground/70">
               {#if Icon}<Icon class="size-5" />{/if}
             </span>
             <div class="min-w-0 flex-1 pt-0.5">
@@ -497,6 +562,77 @@
                 </li>
               {/each}
             </ol>
+          </div>
+        {/if}
+
+        <!-- Before → after, as the grid would draw it -->
+        {#if PREVIEW_SAMPLES[selected.id] && typeof selected.format === "function"}
+          {@const sample = PREVIEW_SAMPLES[selected.id]}
+          <div class="mt-7">
+            {@render sectionLabel("Before & after")}
+            <!-- A real two-column table at the grid's own metrics - mono, 28px
+                 rows, hairline rules - because the question this answers is
+                 "what will my column look like", and a prose example in a
+                 different typeface cannot answer it. It re-renders from the
+                 settings below, so a zone or a precision change shows up here
+                 before you go and open a table. -->
+            <div class="overflow-hidden rounded-lg border border-border/50">
+              <table class="w-full table-fixed border-collapse font-mono text-ui-2xs">
+                <thead>
+                  <tr class="bg-muted/25 text-left">
+                    <th class="w-1/2 border-b border-border/50 px-3 py-1.5 font-[530] text-muted-foreground">Stored value</th>
+                    <th class="w-1/2 border-b border-border/50 px-3 py-1.5 font-[530] text-muted-foreground">Rendered</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each sample.values as v, i (i)}
+                    {@const out = previewOf(selected, v, sample.type)}
+                    <tr>
+                      <td
+                        class={cn(
+                          "h-7 overflow-hidden px-3 align-middle text-ellipsis whitespace-nowrap text-muted-foreground",
+                          i > 0 && "border-t border-border/25",
+                          (v === null || v === undefined) && "italic",
+                        )}
+                        title={rawText(v)}
+                      >{rawText(v)}</td>
+                      <td
+                        class={cn(
+                          "h-7 overflow-hidden px-3 align-middle text-ellipsis whitespace-nowrap text-foreground",
+                          i > 0 && "border-t border-border/25",
+                        )}
+                        title={out?.title ?? out?.display ?? ""}
+                      >
+                        {#if !out}
+                          <span class="text-muted-foreground/60">—</span>
+                        {:else}
+                          <span class="flex min-w-0 items-center gap-1.5">
+                            <!-- The three non-text shapes a formatter can return,
+                                 drawn the way the canvas draws them. -->
+                            {#if out.swatch}
+                              <span class="size-3 shrink-0 rounded-[3px] border border-border/60" style="background:{out.swatch}"></span>
+                            {:else if out.dot}
+                              <span class="size-2 shrink-0 rounded-full" style="background:{out.dot}"></span>
+                            {/if}
+                            {#if out.badge}
+                              <span
+                                class="shrink-0 rounded-full px-2 py-px text-ui-3xs"
+                                style="background:{out.badge.bg ?? 'transparent'};color:{out.badge.fg ?? 'inherit'}"
+                              >{out.display}</span>
+                            {:else if out.display}
+                              <span class="min-w-0 truncate">{out.display}</span>
+                            {/if}
+                          </span>
+                        {/if}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+            <p class="mt-1.5 px-0.5 text-ui-3xs text-muted-foreground">
+              Sample <span class="font-mono">{sample.type}</span> values · the stored value is never changed
+            </p>
           </div>
         {/if}
 
@@ -524,17 +660,54 @@
             <div class="rounded-lg border border-border/50 px-3.5 [&>*]:border-border/40 [&>*+*]:border-t">
               {#if selected.id === "better-time"}
                 {@const c = cfg(selected.id, { mode: "absolute", timeZone: "local" })}
+                <!-- Searchable, because the list is now every zone the platform
+                     knows - four hundred of them. A scroll-only dropdown is fine
+                     for nine cities and useless for four hundred, which is what
+                     made a zone that was there look like a zone that was not. -->
                 {#snippet tzControl()}
-                  <Select.Root type="single" value={c.timeZone} onValueChange={(v) => v && setPluginConfig(selected.id, { timeZone: v })}>
-                    <Select.Trigger size="sm" class={selTrigger} aria-label="Timezone"><span class="truncate">{tzLabel(selected.id)}</span></Select.Trigger>
-                    <Select.Content class="z-[120] max-h-[18rem] min-w-[12rem] p-1" sideOffset={6}>
-                      {#each TIMEZONE_OPTIONS as tz (tz.value)}<Select.Item value={tz.value} label={tz.label} class="py-1.5 pl-2 text-ui-xs">{tz.label}</Select.Item>{/each}
+                  <SearchableMenu
+                    items={TIMEZONE_OPTIONS}
+                    placeholder="Search city or country…"
+                    contentClass="z-[120] w-[20rem]"
+                    align="end"
+                    onselect={(it) => setPluginConfig(selected.id, { timeZone: it.value })}
+                  >
+                    {#snippet trigger(props)}
+                      <button {...props} type="button" class={cn(selTrigger, "inline-flex items-center gap-1.5 border")} aria-label="Timezone">
+                        <span class="min-w-0 flex-1 truncate text-left">{tzLabel(selected.id)}</span>
+                        <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">{timeZoneOffsetLabel(c.timeZone ?? "local")}</span>
+                        <ChevronDown class="size-3 shrink-0 text-muted-foreground" />
+                      </button>
+                    {/snippet}
+                    {#snippet item(it)}
+                      <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                      {#if it.country && it.country !== it.label}
+                        <span class="shrink-0 truncate text-ui-3xs text-muted-foreground">{it.country}</span>
+                      {/if}
+                      <span class="ml-1 shrink-0 font-mono text-ui-3xs text-muted-foreground/80">{timeZoneOffsetLabel(it.value)}</span>
+                      {#if it.value === (c.timeZone ?? "local")}<Check class="size-3.5 shrink-0 text-primary" />{/if}
+                    {/snippet}
+                  </SearchableMenu>
+                {/snippet}
+                {#snippet relControl()}{@render toggle(c.mode === "relative", () => setPluginConfig(selected.id, { mode: c.mode === "relative" ? "absolute" : "relative" }), "Toggle relative time")}{/snippet}
+                {#snippet precisionControl()}
+                  <Select.Root type="single" value={c.precision ?? "seconds"} onValueChange={(v) => v && setPluginConfig(selected.id, { precision: v })}>
+                    <Select.Trigger size="sm" class={selTrigger} aria-label="Time precision">
+                      <span class="truncate">{PRECISION_OPTIONS.find((o) => o.value === (c.precision ?? "seconds"))?.label ?? "Seconds"}</span>
+                    </Select.Trigger>
+                    <Select.Content class="z-[120] min-w-[10rem] p-1" sideOffset={6}>
+                      {#each PRECISION_OPTIONS as o (o.value)}<Select.Item value={o.value} label={o.label} class="py-1.5 pl-2 text-ui-xs">{o.label}</Select.Item>{/each}
                     </Select.Content>
                   </Select.Root>
                 {/snippet}
-                {#snippet relControl()}{@render toggle(c.mode === "relative", () => setPluginConfig(selected.id, { mode: c.mode === "relative" ? "absolute" : "relative" }), "Toggle relative time")}{/snippet}
-                {@render settingRow("Timezone", "Render timestamps in this zone", tzControl)}
+                <!-- The row reads "24-hour clock", so ON is `hour12: false`. -->
+                {#snippet hour12Control()}{@render toggle(c.hour12 !== true, () => setPluginConfig(selected.id, { hour12: c.hour12 !== true }), "Toggle 24-hour clock")}{/snippet}
+                {#snippet zoneNameControl()}{@render toggle(c.showZone === true, () => setPluginConfig(selected.id, { showZone: !(c.showZone === true) }), "Toggle timezone suffix")}{/snippet}
+                {@render settingRow("Timezone", `Render timestamps in this zone · ${timeZoneOffsetLabel(c.timeZone ?? "local")}`, tzControl)}
                 {@render settingRow("Relative time", 'Show "3 hours ago" instead of a date', relControl)}
+                {@render settingRow("Precision", "How much of the time to print - milliseconds matter when rows are ordered by it", precisionControl)}
+                {@render settingRow("24-hour clock", "14:30 rather than 2:30 PM", hour12Control)}
+                {@render settingRow("Show timezone", "Append the zone, so a value cannot be read in the wrong one", zoneNameControl)}
               {:else if selected.id === "number-format"}
                 {@const c = cfg(selected.id, { mode: "thousands" })}
                 {#snippet ctl()}{@render toggle(c.mode === "compact", () => setPluginConfig(selected.id, { mode: c.mode === "compact" ? "thousands" : "compact" }), "Toggle compact")}{/snippet}

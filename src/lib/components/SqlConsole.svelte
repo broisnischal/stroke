@@ -526,37 +526,46 @@
       </Button>
     {:else}
       {#if txStatus?.open}
-        <!-- An open transaction changes what Run means, so say so next to it
-             and keep Commit/Rollback within reach of the same hand. -->
-        <div
-          class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 pl-2 pr-1"
-          title={`${txStatus.statements} statement(s) run, ${txStatus.rowsAffected} row(s) changed. Nothing is saved until you commit.`}
-        >
-          <span class="whitespace-nowrap text-ui-2xs font-medium text-warning">
-            In transaction
+        <!-- An open transaction changes what Run means, so it is said next to
+             Run, and its two exits sit beside it.
+             -
+             The state and the actions are separate controls now. They were one
+             amber pill with a neutral Commit and a red Roll back inside it:
+             three semantic colours in a 28px box, with the destructive red
+             measuring 4.80:1 against the amber wash it sat on - technically
+             legible, and still two alarm hues arguing inside one chip. The chip
+             now carries one hue and says one thing; the actions are ordinary
+             `h-7` toolbar buttons with real hit areas, and red appears on the
+             one control that destroys work, on hover, where it means something.
+             (Measured on --panel in the dark theme: warning text on the wash
+             8.69:1, the count 6.68:1.) -->
+        <div class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-warning/25 bg-warning/10 px-2">
+          <span class="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true"></span>
+          <span class="whitespace-nowrap text-ui-2xs font-medium text-warning">In transaction</span>
+          <span class="whitespace-nowrap font-mono text-ui-2xs tabular-nums text-muted-foreground">
+            {txStatus.statements}<span class="ml-0.5">{txStatus.statements === 1 ? 'stmt' : 'stmts'}</span>
           </span>
-          <span class="font-mono text-ui-3xs text-muted-foreground">
-            {txStatus.statements}
-          </span>
-          <button
-            type="button"
-            class="inline-flex h-5 items-center rounded px-1.5 text-ui-3xs font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-            disabled={txBusy}
-            onclick={() => oncommittransaction()}
-            title={tipText('Commit', 'Save everything this transaction has done.')}
-          >
-            Commit
-          </button>
-          <button
-            type="button"
-            class="inline-flex h-5 items-center rounded px-1.5 text-ui-3xs font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-50"
-            disabled={txBusy}
-            onclick={() => onrollbacktransaction()}
-            title={tipText('Roll back', 'Undo everything this transaction has done.')}
-          >
-            Roll back
-          </button>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-7 shrink-0"
+          disabled={txBusy}
+          onclick={() => oncommittransaction()}
+          title={tipText('Commit', `Save everything this transaction has done: ${txStatus.statements} statement(s), ${txStatus.rowsAffected} row(s) changed.`)}
+        >
+          Commit
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
+          disabled={txBusy}
+          onclick={() => onrollbacktransaction()}
+          title={tipText('Roll back', 'Undo everything this transaction has done.')}
+        >
+          Roll back
+        </Button>
       {:else}
         <Button
           variant="outline"
@@ -602,7 +611,7 @@
             <DropdownMenu.Item onSelect={() => handleRun(undefined)}>
               <Play class="size-3.5 shrink-0 text-muted-foreground" />
               <span class="whitespace-nowrap">Run all statements</span>
-              <DropdownMenu.Shortcut>{mod}↵</DropdownMenu.Shortcut>
+              <DropdownMenu.Shortcut combo="Mod+Enter" />
             </DropdownMenu.Item>
             <DropdownMenu.Item
               class="items-start"
@@ -613,7 +622,7 @@
               <div class="flex w-full min-w-0 flex-col gap-0.5">
                 <span class="flex w-full items-center whitespace-nowrap">
                   Run statement at cursor
-                  <DropdownMenu.Shortcut>{mod}R</DropdownMenu.Shortcut>
+                  <DropdownMenu.Shortcut combo="Mod+R" />
                 </span>
                 {#if cursorStmtPreview}
                   <span class="truncate font-mono text-ui-2xs leading-4 text-muted-foreground">{clipSql(cursorStmtPreview)}</span>
