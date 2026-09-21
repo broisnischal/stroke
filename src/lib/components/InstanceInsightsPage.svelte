@@ -471,6 +471,22 @@
    * @param {any} row
    * @param {boolean} [toDefault]
    */
+  /**
+   * True once the server has told us it will not take `ALTER SYSTEM` at all.
+   *
+   * Managed Postgres (RDS, Cloud SQL, Azure, Neon…) blocks the statement
+   * outright: the parameters live in the provider's own parameter group, not in
+   * `postgresql.auto.conf`. Learned from the first rejection rather than guessed
+   * from the hostname, which would be wrong for a self-hosted server behind a
+   * proxy and for every provider not on the list.
+   */
+  let configWritesBlocked = $state(false)
+
+  /** @param {unknown} e */
+  function isAlterSystemBlocked(e) {
+    return /alter system .*not supported|permission denied .*alter system|must be superuser to execute alter system/i.test(String(e))
+  }
+
   async function applySetting(row, toDefault = false) {
     if (savingSetting) return
     savingSetting = row.name
@@ -479,9 +495,19 @@
       if (res.requiresRestart) toast.warning('Restart required', { description: res.message, duration: 7000 })
       else toast.success(res.message)
       openSetting = ''
+      configWritesBlocked = false
       await refreshConfig()
     } catch (e) {
-      toast.error('Could not change setting', { description: String(e), duration: 8000 })
+      if (isAlterSystemBlocked(e)) {
+        configWritesBlocked = true
+        toast.error('This server does not allow ALTER SYSTEM', {
+          description:
+            'Managed Postgres keeps its settings in the provider\'s parameter group - RDS parameter groups, Cloud SQL flags, Azure server parameters. Change it there and the value shows up here.',
+          duration: 10000,
+        })
+      } else {
+        toast.error('Could not change setting', { description: String(e), duration: 8000 })
+      }
     } finally {
       savingSetting = ''
     }
@@ -917,11 +943,24 @@
                 {/if}
                 <!-- One row per setting; content-visibility keeps the ~350-row list
                      smooth by skipping layout/paint for rows that are off-screen. -->
-                <div class="overflow-hidden rounded-lg border border-border/50 bg-muted/[0.04]">
+                <!-- Hairlines, not a card. Each section was a bordered, tinted
+                     panel holding rows that are themselves separated by borders,
+                     inside a page that is already a panel - three nested frames
+                     for one list. The heading above and the space between
+                     sections carry the grouping; a rule per row is all the
+                     structure the rows need. -->
+                <div class="border-t border-border/25">
                   {#each sec.rows as row (row.name)}
                     {@const open = openSetting === row.name}
-                    {@const editable = row.editable !== false && !$readOnlyMode}
+                    {@const editable = row.editable !== false && !$readOnlyMode && !configWritesBlocked}
                     {@const modified = isModified(row)}
+                    <!-- A write that needs a restart leaves `source` at `default`
+                         until the server comes back, so `isModified` reads false
+                         and the only way back out - ALTER SYSTEM RESET, which is
+                         what this button sends - was disabled exactly when it was
+                         needed. A queued change you cannot cancel is a trap. -->
+                    {@const canReset = modified || !!row.pendingRestart}
+                    {@const resetLabel = !modified && row.pendingRestart ? 'Discard' : 'Reset'}
                     <!-- pg setting names are [a-z0-9_], so they make valid ids as-is. -->
                     {@const panelId = `cfg-panel-${row.name}`}
                     {@const fieldId = `cfg-value-${row.name}`}
@@ -967,7 +1006,7 @@
 
                       {#if open}
                         <div id={panelId} class="border-t border-border/30 px-3 pb-3 pt-3">
-                          <div class="flex flex-wrap items-end gap-2">
+                          <div class="flex max-w-3xl flex-wrap items-end gap-2">
                             <div class="min-w-[13rem] flex-1">
                               <div class="mb-1 flex items-baseline justify-between gap-2">
                                 <label
@@ -1041,18 +1080,25 @@
                                 variant="ghost"
                                 size="lg"
                                 class="text-muted-foreground hover:text-foreground"
-                                disabled={!editable || savingSetting === row.name || !modified}
-                                title={modified ? `Reset to the server default${row.bootVal ? ` (${row.bootVal})` : ''}` : 'Already at the server default'}
+                                disabled={!editable || savingSetting === row.name || !canReset}
+                                title={!modified && row.pendingRestart
+                                  ? 'Drop the queued change - the server keeps running the value it has now'
+                                  : modified
+                                    ? `Reset to the server default${row.bootVal ? ` (${row.bootVal})` : ''}`
+                                    : 'Already at the server default'}
                                 onclick={() => void applySetting(row, true)}
                               >
-                                <RotateCcw /> Reset
+                                <RotateCcw /> {resetLabel}
                               </Button>
                             </div>
                           </div>
 
                           <!-- Everything the server knows about this setting, as a
                                readable grid rather than one run-on mono line. -->
-                          <dl class="mt-3 grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">
+                          <!-- Same column as the field above it: on a wide window
+                               these six pairs were strung across 1,900px, so the
+                               value sat half a screen from its own label. -->
+                          <dl class="mt-3 grid max-w-3xl grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
                             {#each [['Category', row.category], ['Type', row.vartype], ['Unit', row.unit], ['Default', row.bootVal], ['Range', (row.minVal || row.maxVal) ? `${row.minVal || '−∞'} … ${row.maxVal || '∞'}` : ''], ['Source', row.source]] as [k, v] (k)}
                               {#if v}
                                 <div class="flex min-w-0 items-baseline gap-2">
@@ -1063,18 +1109,32 @@
                             {/each}
                           </dl>
 
-                          {#if row.editable === false}
-                            <p class="mt-3 rounded-md bg-muted/40 px-2.5 py-1.5 text-ui-2xs text-muted-foreground">
+                          <!-- Notes read as notes: one line of text at the size of
+                               the metadata above it. They were full-width tinted
+                               bands, which gave a sentence of context the weight of
+                               an alert and stacked a fourth surface into the row. -->
+                          {#if configWritesBlocked}
+                            <p class="mt-3 flex max-w-3xl items-start gap-1.5 text-ui-2xs text-muted-foreground">
+                              <Lock class="mt-px size-3 shrink-0" />
+                              <span>
+                                This server refuses <span class="font-mono">ALTER SYSTEM</span>, which is how managed
+                                Postgres is set up - its settings live in the provider's parameter group (RDS parameter
+                                groups, Cloud SQL flags, Azure server parameters). Values changed there show up here.
+                              </span>
+                            </p>
+                          {:else if row.editable === false}
+                            <p class="mt-3 max-w-3xl text-ui-2xs text-muted-foreground">
                               Compiled into the server - it can only change by rebuilding or re-initialising the cluster.
                             </p>
                           {:else if $readOnlyMode}
-                            <p class="mt-3 rounded-md bg-muted/40 px-2.5 py-1.5 text-ui-2xs text-muted-foreground">{READ_ONLY_HINT}</p>
+                            <p class="mt-3 max-w-3xl text-ui-2xs text-muted-foreground">{READ_ONLY_HINT}</p>
                           {:else if row.requiresRestart}
-                            <p class="mt-3 rounded-md bg-warning/10 px-2.5 py-1.5 text-ui-2xs text-warning">
-                              Applying writes the value now, but the server has to restart before it takes effect.
+                            <p class="mt-3 flex max-w-3xl items-start gap-1.5 text-ui-2xs text-warning">
+                              <PowerOff class="mt-px size-3 shrink-0" />
+                              <span>Applying writes the value now, but the server has to restart before it takes effect.</span>
                             </p>
                           {:else if isPg}
-                            <p class="mt-3 text-ui-2xs text-muted-foreground">
+                            <p class="mt-3 max-w-3xl text-ui-2xs text-muted-foreground">
                               Written with <span class="font-mono">ALTER SYSTEM</span> and reloaded - persists across restarts. Needs a superuser role.{row.context && CONTEXT_HELP[row.context] ? ` ${CONTEXT_HELP[row.context]}.` : ''}
                             </p>
                           {/if}

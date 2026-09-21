@@ -29,6 +29,9 @@
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import Link2 from "@lucide/svelte/icons/link-2";
   import BarChart3 from "@lucide/svelte/icons/bar-chart-3";
+  import Thermometer from "@lucide/svelte/icons/thermometer";
+  import CircleSlash from "@lucide/svelte/icons/circle-slash";
+  import Dices from "@lucide/svelte/icons/dices";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
@@ -68,6 +71,12 @@
     "cell-transforms": Wand2,
     "saved-views": Bookmark,
     "find-replace": Replace,
+    // Without these three the grid drew the generic block icon for Freshness
+    // Heat, Empty & NULL Markers and Data Generator - three different tools
+    // wearing the "unknown extension" mark.
+    freshness: Thermometer,
+    "nullish-values": CircleSlash,
+    "data-gen": Dices,
   };
 
   const SECTIONS = [
@@ -238,16 +247,22 @@
       // Inset rim defines the pill edge on dark surfaces; inner shadow gives the
       // trough depth so the knob reads as sitting *in* the track, not on it.
       "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),inset_0_1px_2px_rgba(0,0,0,0.2)]",
-      // Emerald = the app's "extension enabled" signal (matches the card icon
-      // tint); bg-primary is near-white on Studio themes and swallowed the knob.
-      on ? "bg-success" : "bg-muted-foreground/25 hover:bg-muted-foreground/35",
+      // The theme's own accent, not `success`. Green is this app's word for "that
+      // operation worked"; twenty switches, twenty icons and a count badge all
+      // wearing it made the page read as a status board and left the theme's
+      // accent unused on the one page built entirely out of on/off. The knob
+      // swaps to `primary-foreground`, which is the token guaranteed to contrast
+      // with `primary` - that pairing is what the near-white Studio accent broke
+      // when the knob was hard-coded white.
+      on ? "bg-primary" : "bg-muted-foreground/25 hover:bg-muted-foreground/35",
     )}
   >
     <span
       class={cn(
         // iOS-style press feedback: the knob stretches along the travel axis
         // while staying anchored to its end of the track.
-        "pointer-events-none block h-3.5 w-3.5 rounded-full bg-white",
+        "pointer-events-none block h-3.5 w-3.5 rounded-full",
+        on ? "bg-primary-foreground" : "bg-white",
         "shadow-[0_1px_2px_rgba(0,0,0,0.28),0_0_1px_rgba(0,0,0,0.16)]",
         "transition-[translate,width] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)]",
         "group-active/toggle:w-4",
@@ -275,7 +290,11 @@
 <div class="app-scroll min-h-0 flex-1 overflow-y-auto bg-background">
   {#if !selected}
     <!-- ── Grid overview ─────────────────────────────────────────────────── -->
-    <div class="mx-auto w-full max-w-[52rem] px-8 py-8">
+    <!-- 72rem, not 52. At 52 a 1,600px window spent 380px of empty gutter on
+         each side to show three cards per row; the column now earns the space and
+         the grid resolves to four or five. `mx-auto` + equal `px` is what keeps
+         the two gutters identical at every width. -->
+    <div class="mx-auto w-full max-w-[72rem] px-8 py-8">
       <div class="flex items-center gap-2.5">
         <span class="grid size-6 shrink-0 place-items-center rounded-md border border-border/60 bg-muted/40 text-muted-foreground">
           <Blocks class="size-3.5" />
@@ -285,7 +304,7 @@
           class="ml-auto flex shrink-0 items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-ui-3xs font-medium tabular-nums text-muted-foreground"
           title="{enabledCount} of {EXTENSIONS.length} extensions enabled"
         >
-          {#if enabledCount > 0}<span class="size-1.5 rounded-full bg-success"></span>{/if}
+          {#if enabledCount > 0}<span class="size-1.5 rounded-full bg-primary"></span>{/if}
           {enabledCount} on
         </span>
       </div>
@@ -332,27 +351,24 @@
           </p>
         </div>
       {:else}
-        <div class="mt-2.5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div class="mt-2.5 grid grid-cols-[repeat(auto-fill,minmax(13.5rem,1fr))] gap-2">
           {#each $externalPlugins as p (p.id)}
             {@const on = pluginEnabledIn($pluginState, pluginKey(p.id))}
             {@const err = $externalPluginErrors[p.id] ?? ""}
-            <div class="group relative flex h-full flex-col gap-2.5 rounded-lg border border-border/60 bg-card p-3">
-              <span class="flex h-[18px] w-full items-center gap-2">
-                <Blocks class={cn("size-4 shrink-0", on && p.loadable ? "text-success" : "text-muted-foreground")} />
-                <!-- Reserves the toggle / "Broken" badge, both of which are
-                     layered over the card and invisible to normal flow. -->
-                <span class="ml-auto h-[18px] w-12 shrink-0" aria-hidden="true"></span>
-              </span>
-              <span class="flex min-w-0 flex-col">
-                <span class="truncate text-ui-xs font-medium leading-tight text-foreground" title={p.description || p.name}>{p.name}</span>
-                <span class="mt-0.5 truncate text-ui-2xs text-muted-foreground">
-                  {p.version ? `v${p.version}` : p.id}{p.author ? ` · ${p.author}` : ""}
+            <div class="group relative flex h-full flex-col gap-2 rounded-lg border border-border/60 bg-card py-2 pl-2.5 pr-12">
+              <div class="flex min-w-0 items-center gap-2.5">
+                <Blocks class={cn("size-4 shrink-0", on && p.loadable ? "text-foreground" : "text-muted-foreground")} />
+                <span class="flex min-w-0 flex-1 flex-col">
+                  <span class="truncate text-ui-xs font-medium leading-tight text-foreground" title={p.description || p.name}>{p.name}</span>
+                  <span class="truncate text-ui-2xs leading-tight text-muted-foreground">
+                    {p.version ? `v${p.version}` : p.id}{p.author ? ` · ${p.author}` : ""}
+                  </span>
                 </span>
-              </span>
+              </div>
               {#if p.error || err}
                 <p class="text-ui-2xs leading-snug text-destructive">{p.error || err}</p>
               {/if}
-              <div class="mt-auto flex items-center gap-1 pt-0.5">
+              <div class="mt-auto flex items-center gap-1">
                 <button
                   type="button"
                   class="hit-area inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
@@ -377,7 +393,7 @@
                   </span>
                 {/if}
               </div>
-              <div class="absolute right-3 top-3 flex h-[18px] items-center">
+              <div class="absolute right-3 top-2.5 flex h-[18px] items-center">
                 {#if p.loadable}
                   {@render toggle(on, () => void setExternalEnabled(p.id, !on), `Toggle ${p.name}`)}
                 {:else}
@@ -392,7 +408,13 @@
       {#each SECTIONS as section (section.title)}
         {@const items = EXTENSIONS.filter((e) => section.kinds.includes(e.kind))}
         <h3 class="mb-2.5 mt-7 px-0.5 text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">{section.title}</h3>
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <!-- Columns come from the width, not from three hand-picked breakpoints:
+             at 2/3/4 fixed columns the last row stretched its cards to twice the
+             width of the row above whenever the count did not divide evenly.
+             Cards are rows now - icon, name, kind, switch on one line - because
+             the tile had the icon on its own line and a 30px hole in the middle,
+             which is what made a 20-item grid read as unfinished. -->
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(13.5rem,1fr))] gap-2">
           {#each items as ext (ext.id)}
             {@const Icon = ICONS[ext.id] ?? Blocks}
             {@const on = isOn(ext.id)}
@@ -400,23 +422,21 @@
               <button
                 type="button"
                 onclick={() => (selectedId = ext.id)}
-                class="group relative flex h-full w-full flex-col gap-2.5 rounded-lg border border-border/60 bg-card p-3 text-left transition-[border-color,background-color] hover:border-border hover:bg-accent/40"
+                title="{ext.name} - {KIND_LABEL[ext.kind] ?? 'Extension'}"
+                class="group flex h-full w-full items-center gap-2.5 rounded-lg border border-border/60 bg-card py-2 pl-2.5 pr-12 text-left transition-[border-color,background-color] hover:border-border hover:bg-accent/40"
               >
-                <span class="flex h-[18px] w-full items-center gap-2">
-                  <Icon class={cn("size-4 shrink-0 transition-colors", on ? "text-success" : "text-muted-foreground group-hover:text-foreground")} />
-                  <!-- Holds the toggle's place. The toggle is layered over the
-                       card (so it is not a button inside a button), which means
-                       nothing in normal flow knows it is there. -->
-                  <span class="ml-auto h-[18px] w-8 shrink-0" aria-hidden="true"></span>
-                </span>
-                <span class="flex min-w-0 flex-col">
-                  <span class="truncate text-ui-xs font-medium leading-tight text-foreground transition-colors">{ext.name}</span>
-                  <span class="mt-0.5 truncate text-ui-2xs text-muted-foreground">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
+                <Icon class={cn("size-4 shrink-0 transition-colors", on ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")} />
+                <span class="flex min-w-0 flex-1 flex-col">
+                  <span class="truncate text-ui-xs font-medium leading-tight text-foreground">{ext.name}</span>
+                  <span class="truncate text-ui-2xs leading-tight text-muted-foreground">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
                 </span>
               </button>
-              <!-- Layered over the card so it is not a button inside a button. -->
-              <div class="absolute right-3 top-3 flex h-[18px] items-center">
-                {@render toggle(on, () => setPluginEnabled(ext.id, !on), `Toggle ${ext.name}`)}
+              <!-- Layered over the card so it is not a button inside a button.
+                   `pr-12` above is what keeps the label clear of it. -->
+              <div class="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+                <span class="pointer-events-auto">
+                  {@render toggle(on, () => setPluginEnabled(ext.id, !on), `Toggle ${ext.name}`)}
+                </span>
               </div>
             </div>
           {/each}
@@ -428,7 +448,12 @@
     {#key selected.id}
       {@const Icon = ICONS[selected.id]}
       {@const on = isOn(selected.id)}
-      <div class="mx-auto w-full max-w-[42rem] px-8 py-6">
+      <!-- Same outer column as the overview, with the content left-aligned
+           inside it rather than centred on its own: a 42rem block centred in a
+           wide window starts hundreds of pixels right of the grid you just came
+           from, so going into an extension moved the whole page sideways. -->
+      <div class="mx-auto w-full max-w-[72rem] px-8 py-6">
+      <div class="w-full max-w-[42rem]">
         <button
           type="button"
           class="-ml-1.5 mb-4 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-ui-xs text-muted-foreground transition-[background-color,color] hover:bg-muted/50 hover:text-foreground"
@@ -437,14 +462,16 @@
           <ArrowLeft class="size-3.5" />
           All extensions
         </button>
-        <!-- Header card, the icon tile carries the on/off state (emerald when
-             enabled), so the card and toggle stay quiet. One signal, not four. -->
-        <div class="rounded-lg border border-border/60 bg-card/40 p-4">
+        <!-- No card. The page is already a panel and this is its heading, so a
+             bordered, tinted box around the title drew a frame that says nothing;
+             the icon tile carries the on/off state and the rule underneath does
+             the separating. -->
+        <div class="border-b border-border/50 pb-4">
           <div class="flex items-start gap-3.5">
             <span
               class={cn(
                 "grid size-10 shrink-0 place-items-center rounded-lg border transition-colors",
-                on ? "border-success/30 bg-success/10 text-success" : "border-border/60 bg-muted/40 text-muted-foreground",
+                on ? "border-primary/30 bg-primary/10 text-primary" : "border-border/60 bg-muted/40 text-muted-foreground",
               )}
             >
               {#if Icon}<Icon class="size-5" />{/if}
@@ -589,6 +616,7 @@
             </div>
           </div>
         {/if}
+      </div>
       </div>
     {/key}
   {/if}

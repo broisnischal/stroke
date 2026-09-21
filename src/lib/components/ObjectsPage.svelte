@@ -10,8 +10,14 @@
   import Search from '@lucide/svelte/icons/search'
   import X from '@lucide/svelte/icons/x'
 
-  /** @type {{ active?: boolean, connectionType?: string | null }} */
-  let { active = false, connectionType = null } = $props()
+  /**
+   * @type {{
+   *   active?: boolean,
+   *   connectionType?: string | null,
+   *   onopen?: (args: { schema: string, name: string }) => void,
+   * }}
+   */
+  let { active = false, connectionType = null, onopen = () => {} } = $props()
 
   /** @typedef {'tables' | 'views' | 'functions' | 'triggers'} SubTab */
 
@@ -461,7 +467,16 @@
         </thead>
         <tbody>
           {#each rows as row, i (i)}
-            <tr class="obj-row border-b border-border/30 hover:bg-accent/25">
+            <!-- Tables and views open as a data tab; a function or a trigger has
+                 no grid to open, so those rows stay inert rather than pretending
+                 to be a link. -->
+            {@const openable = (activeSub === 'tables' || activeSub === 'views') && !!row.name}
+            <tr
+              class={cn('obj-row border-b border-border/30 hover:bg-accent/25', openable && 'cursor-pointer')}
+              onclick={openable
+                ? () => onopen({ schema: String(row.schema ?? ''), name: String(row.name) })
+                : undefined}
+            >
               <td class="px-3 py-1.5 font-mono tabular-nums text-muted-foreground">{i + 1}</td>
               {#each columns as col (col)}
                 {@const isSize = BYTE_COLS.has(col)}
@@ -473,9 +488,20 @@
                     : isNum ? 'tabular-nums text-foreground/80'
                     : 'text-muted-foreground',
                   )}
-                  title={fmt(col, row[col])}
+                  title={col === 'name' && openable ? `Open ${fmt(col, row[col])}` : fmt(col, row[col])}
                 >
-                  {fmt(col, row[col])}
+                  {#if col === 'name' && openable}
+                    <!-- The row takes the click for the pointer; this button is
+                         what the keyboard and a screen reader get, so the action
+                         is not mouse-only. -->
+                    <button
+                      type="button"
+                      class="max-w-full truncate text-left underline-offset-2 hover:underline focus-visible:underline"
+                      onclick={(e) => { e.stopPropagation(); onopen({ schema: String(row.schema ?? ''), name: String(row.name) }) }}
+                    >{fmt(col, row[col])}</button>
+                  {:else}
+                    {fmt(col, row[col])}
+                  {/if}
                 </td>
               {/each}
             </tr>

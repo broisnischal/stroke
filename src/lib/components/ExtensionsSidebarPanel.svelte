@@ -35,6 +35,9 @@
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import Link2 from "@lucide/svelte/icons/link-2";
   import BarChart3 from "@lucide/svelte/icons/bar-chart-3";
+  import Thermometer from "@lucide/svelte/icons/thermometer";
+  import CircleSlash from "@lucide/svelte/icons/circle-slash";
+  import Dices from "@lucide/svelte/icons/dices";
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import Wand2 from "@lucide/svelte/icons/wand-2";
   import Bookmark from "@lucide/svelte/icons/bookmark";
@@ -125,6 +128,9 @@
     "cell-transforms": Wand2,
     "saved-views": Bookmark,
     "find-replace": Replace,
+    freshness: Thermometer,
+    "nullish-values": CircleSlash,
+    "data-gen": Dices,
   });
 
   /** Human-readable kind label (mirrors ExtensionsPage KIND_LABEL). */
