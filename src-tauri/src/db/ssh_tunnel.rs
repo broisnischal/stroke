@@ -14,6 +14,16 @@ pub struct SshConfig {
     /// Leave empty to rely on the system SSH agent.
     #[serde(default)]
     pub private_key_path: String,
+    /// `ServerAliveInterval`, in seconds. A tunnel that sits idle behind a NAT
+    /// or a load balancer is dropped silently, and the first query after that
+    /// is what discovers it; a keepalive is how long the tunnel waits before
+    /// proving it is still there. 0 disables it.
+    #[serde(default = "default_keepalive")]
+    pub keepalive: u16,
+}
+
+fn default_keepalive() -> u16 {
+    30
 }
 
 fn default_ssh_port() -> u16 {
@@ -60,13 +70,20 @@ impl SshTunnel {
             "-o".into(), "ExitOnForwardFailure=yes".into(),
             // Accept new hosts but reject changed fingerprints
             "-o".into(), "StrictHostKeyChecking=accept-new".into(),
-            // Keep-alive so long-idle tunnels don't stall the pool
-            "-o".into(), "ServerAliveInterval=30".into(),
             "-o".into(), "ServerAliveCountMax=3".into(),
             "-o".into(), "ConnectTimeout=10".into(),
             "-p".into(), ssh.port.to_string(),
             "-L".into(), forward,
         ];
+
+        // Keep-alive so long-idle tunnels don't stall the pool. Configurable
+        // because the useful value is a property of the network in between, not
+        // of the database: 30s is right behind a NAT, pointless on a LAN, and
+        // too slow for a load balancer that reaps at 20.
+        if ssh.keepalive > 0 {
+            args.push("-o".into());
+            args.push(format!("ServerAliveInterval={}", ssh.keepalive));
+        }
 
         if !ssh.private_key_path.trim().is_empty() {
             args.push("-i".into());

@@ -23,6 +23,15 @@ pub struct PgConfig {
     pub user: String,
     pub password: String,
     pub ssl: bool,
+    /// libpq `sslmode`, for when `ssl` alone is not the whole answer: a managed
+    /// database usually wants `verify-full`, which needs a CA to verify against.
+    /// `None` keeps the previous behaviour (`require` when `ssl`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_mode: Option<String>,
+    /// Path to a CA certificate (`sslrootcert`). Required by `verify-ca` and
+    /// `verify-full` unless the CA is already in the system trust store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_root_cert: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh: Option<SshConfig>,
     /// Session time zone applied on every pooled connection (IANA name, e.g.
@@ -33,7 +42,31 @@ pub struct PgConfig {
 
 impl PgConfig {
     pub fn connection_url(&self) -> String {
-        let ssl = if self.ssl { "?sslmode=require" } else { "" };
+        // `sslMode` wins when set; `ssl` is the old boolean and still means
+        // `require`. A CA path only travels with a mode that verifies one.
+        let mode = self
+            .ssl_mode
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or(if self.ssl { "require" } else { "" });
+        let mut params: Vec<String> = Vec::new();
+        if !mode.is_empty() {
+            params.push(format!("sslmode={mode}"));
+            if let Some(ca) = self
+                .ssl_root_cert
+                .as_deref()
+                .map(str::trim)
+                .filter(|c| !c.is_empty())
+            {
+                params.push(format!("sslrootcert={}", urlencoding::encode(ca)));
+            }
+        }
+        let ssl = if params.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", params.join("&"))
+        };
         format!(
             "postgres://{}:{}@{}:{}/{}{}",
             urlencoding::encode(&self.user),
@@ -71,6 +104,13 @@ pub struct MysqlConfig {
     pub user: String,
     pub password: String,
     pub ssl: bool,
+    /// MySQL `ssl-mode`: DISABLED | PREFERRED | REQUIRED | VERIFY_CA |
+    /// VERIFY_IDENTITY. `None` keeps the previous behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_mode: Option<String>,
+    /// Path to a CA certificate (`ssl-ca`), for the verifying modes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_root_cert: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh: Option<SshConfig>,
     /// Session time zone applied on connect (`SET time_zone`). `None`/"SYSTEM"
@@ -81,7 +121,21 @@ pub struct MysqlConfig {
 
 impl MysqlConfig {
     pub fn connection_url(&self) -> String {
-        let ssl_mode = if self.ssl { "ssl-mode=required" } else { "ssl-mode=disabled" };
+        let mode = self
+            .ssl_mode
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or(if self.ssl { "required" } else { "disabled" });
+        let mut params = vec![format!("ssl-mode={mode}")];
+        if let Some(ca) = self
+            .ssl_root_cert
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+        {
+            params.push(format!("ssl-ca={}", urlencoding::encode(ca)));
+        }
         format!(
             "mysql://{}:{}@{}:{}/{}?{}",
             urlencoding::encode(&self.user),
@@ -89,7 +143,7 @@ impl MysqlConfig {
             self.host,
             self.port,
             self.database,
-            ssl_mode
+            params.join("&")
         )
     }
 }
@@ -1229,6 +1283,87 @@ mod tests {
     use super::*;
 
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    // ── TLS in the connection URL ─────────────────────────────────────────────
+
+    fn pg(ssl: bool, mode: Option<&str>, ca: Option<&str>) -> PgConfig {
+        PgConfig {
+            name: "t".into(),
+            host: "db.example.com".into(),
+            port: 5432,
+            database: "shop".into(),
+            user: "ada".into(),
+            password: "p@ss word".into(),
+            ssl,
+            ssl_mode: mode.map(str::to_string),
+            ssl_root_cert: ca.map(str::to_string),
+            ssh: None,
+            timezone: None,
+        }
+    }
+
+    #[test]
+    fn pg_url_omits_tls_params_when_tls_is_off() {
+        let url = pg(false, None, None).connection_url();
+        assert!(!url.contains("sslmode"), "{url}");
+        // Credentials are still encoded - the password here has an @ and a space.
+        assert!(url.contains("ada:p%40ss%20word@"), "{url}");
+    }
+
+    #[test]
+    fn pg_url_keeps_the_boolean_meaning_require() {
+        assert!(pg(true, None, None).connection_url().ends_with("?sslmode=require"));
+    }
+
+    #[test]
+    fn pg_url_takes_the_explicit_mode_over_the_boolean() {
+        let url = pg(true, Some("verify-full"), None).connection_url();
+        assert!(url.ends_with("?sslmode=verify-full"), "{url}");
+    }
+
+    #[test]
+    fn pg_url_carries_the_ca_path_encoded() {
+        let url = pg(true, Some("verify-ca"), Some("/home/a b/ca.pem")).connection_url();
+        assert!(url.contains("sslmode=verify-ca"), "{url}");
+        assert!(url.contains("sslrootcert=%2Fhome%2Fa%20b%2Fca.pem"), "{url}");
+    }
+
+    #[test]
+    fn pg_url_drops_a_ca_path_with_no_mode_to_verify_it() {
+        // TLS off means no TLS params at all, CA or not: a stale path left in a
+        // saved connection must not silently re-enable verification.
+        let url = pg(false, None, Some("/ca.pem")).connection_url();
+        assert!(!url.contains("sslrootcert"), "{url}");
+    }
+
+    fn my(ssl: bool, mode: Option<&str>, ca: Option<&str>) -> MysqlConfig {
+        MysqlConfig {
+            name: "t".into(),
+            host: "db.example.com".into(),
+            port: 3306,
+            database: "shop".into(),
+            user: "root".into(),
+            password: "secret".into(),
+            ssl,
+            ssl_mode: mode.map(str::to_string),
+            ssl_root_cert: ca.map(str::to_string),
+            ssh: None,
+            timezone: None,
+        }
+    }
+
+    #[test]
+    fn mysql_url_maps_the_boolean_to_its_own_spelling() {
+        assert!(my(false, None, None).connection_url().contains("ssl-mode=disabled"));
+        assert!(my(true, None, None).connection_url().contains("ssl-mode=required"));
+    }
+
+    #[test]
+    fn mysql_url_takes_a_verifying_mode_and_its_ca() {
+        let url = my(true, Some("verify_identity"), Some("/ca.pem")).connection_url();
+        assert!(url.contains("ssl-mode=verify_identity"), "{url}");
+        assert!(url.contains("ssl-ca=%2Fca.pem"), "{url}");
+    }
 
     // ── PathHealth ────────────────────────────────────────────────────────────
 

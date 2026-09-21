@@ -169,9 +169,42 @@
     }
   }
 
+  /**
+   * Nothing loads forever.
+   *
+   * Same guard as CloudflareLogin, for the same reason: the shared provider HTTP
+   * client had no timeout, so a stalled Neon/Supabase/PlanetScale/Prisma call
+   * left this `await` pending and the panel on its spinner with no error and no
+   * way back. The client is bounded now; this backstops the rest of the path.
+   * @template T
+   * @param {Promise<T>} work
+   * @param {number} ms
+   * @param {string} what
+   * @returns {Promise<T>}
+   */
+  function withTimeout(work, ms, what) {
+    /** @type {ReturnType<typeof setTimeout>} */
+    let timer
+    return Promise.race([
+      work,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Timed out ${what}. Check your connection and try again.`)),
+          ms,
+        )
+      }),
+    ]).finally(() => clearTimeout(timer))
+  }
+
   async function loadDatabases() {
+    phase = 'fetching'
+    errorMsg = ''
     try {
-      databases = await providerListDatabases(provider)
+      databases = await withTimeout(
+        providerListDatabases(provider),
+        20_000,
+        `listing your ${meta?.name ?? provider} databases`,
+      )
       phase = 'selecting'
     } catch (e) {
       phase = 'error'
@@ -320,13 +353,21 @@
     </ProviderAuthPanel>
 
   {:else if phase === 'error'}
+    <!-- Retry the step that failed. Dropping back to 'idle' made the user sign
+         in through the browser again even when the sign-in was fine and only
+         the database list fell over. -->
     <ProviderAuthPanel tone="error" title={shownError.title} subtitle={shownError.detail} hint="Nothing was saved">
       {#snippet mark()}<AlertTriangle class="size-4 shrink-0 text-destructive" />{/snippet}
       {#snippet action()}
-        <Button variant="outline" class="group" onclick={() => (phase = 'idle')}>
-          <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" />
-          Try again
-        </Button>
+        <div class="flex shrink-0 items-center gap-2">
+          <Button variant="outline" class="group" onclick={() => loadDatabases()}>
+            <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" />
+            Try again
+          </Button>
+          <Button variant="ghost" class="text-muted-foreground" onclick={() => (phase = 'idle')}>
+            Start over
+          </Button>
+        </div>
       {/snippet}
     </ProviderAuthPanel>
 

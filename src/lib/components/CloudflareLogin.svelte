@@ -69,6 +69,35 @@
     }
   })
 
+  /**
+   * Nothing loads forever.
+   *
+   * The panel sat on "Loading your Cloudflare accounts…" indefinitely: the
+   * shared Cloudflare HTTP client had no timeout (reqwest has no default), so a
+   * stalled request left the Tauri command awaiting and this `await` never
+   * returned - no error, no dropdown, no way back. The client is bounded now;
+   * this is the backstop for everything else on that path, the keychain read
+   * included.
+   * @template T
+   * @param {Promise<T>} work
+   * @param {number} ms
+   * @param {string} what
+   * @returns {Promise<T>}
+   */
+  function withTimeout(work, ms, what) {
+    /** @type {ReturnType<typeof setTimeout>} */
+    let timer
+    return Promise.race([
+      work,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Timed out ${what}. Check your connection and try again.`)),
+          ms,
+        )
+      }),
+    ]).finally(() => clearTimeout(timer))
+  }
+
   /** Turn a raw backend error into a calm title + one-line explanation. */
   function friendlyError(msg) {
     const m = String(msg ?? '')
@@ -110,10 +139,16 @@
   }
 
   async function loadAccounts() {
+    phase = 'fetching'
+    errorMsg = ''
     try {
       const { cfGetValidToken } = await import('$lib/cloudflare.js')
-      const token = await cfGetValidToken()
-      accounts = await cloudflareListAccounts(token)
+      const token = await withTimeout(cfGetValidToken(), 20_000, 'reading your Cloudflare session')
+      accounts = await withTimeout(
+        cloudflareListAccounts(token),
+        20_000,
+        'listing your Cloudflare accounts',
+      )
       phase = 'selecting'
       // Auto-select an account so the D1 database list loads immediately; the
       // user can still switch accounts via the dropdown when there are several.
@@ -137,8 +172,12 @@
     loadingDbs = true
     try {
       const { cfGetValidToken } = await import('$lib/cloudflare.js')
-      const token = await cfGetValidToken()
-      databases = await cloudflareListD1Databases(token, id)
+      const token = await withTimeout(cfGetValidToken(), 20_000, 'reading your Cloudflare session')
+      databases = await withTimeout(
+        cloudflareListD1Databases(token, id),
+        20_000,
+        'listing D1 databases for this account',
+      )
     } catch (e) {
       // Show the error card - staying in 'selecting' rendered a misleading
       // "No D1 databases in this account" empty state over a real failure.
@@ -221,13 +260,30 @@
     </ProviderAuthPanel>
 
   {:else if phase === 'error'}
-    <ProviderAuthPanel tone="error" title={shownError.title} subtitle={shownError.detail} hint="Nothing was saved">
+    <!-- Retry the step that failed. When the sign-in is still good and only the
+         account or database list fell over, sending the user back through the
+         browser is a five-click answer to a one-click problem. -->
+    {@const signedIn = !!email}
+    <ProviderAuthPanel
+      tone="error"
+      title={shownError.title}
+      subtitle={shownError.detail}
+      hint={signedIn ? email : 'Nothing was saved'}
+    >
       {#snippet mark()}<AlertTriangle class="size-4 shrink-0 text-destructive" />{/snippet}
       {#snippet action()}
-        <Button variant="outline" class="group" onclick={startAuth}>
-          <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" />
-          Try again
-        </Button>
+        <div class="flex shrink-0 items-center gap-2">
+          <Button variant="outline" class="group" onclick={() => (signedIn ? loadAccounts() : startAuth())}>
+            <RefreshCw class="size-3.5 transition-transform duration-500 ease-[var(--ease-out)] group-hover:rotate-180" />
+            Try again
+          </Button>
+          {#if signedIn}
+            <Button variant="ghost" class="text-muted-foreground" onclick={handleLogout}>
+              <LogOut class="size-3.5" />
+              Sign out
+            </Button>
+          {/if}
+        </div>
       {/snippet}
     </ProviderAuthPanel>
 
@@ -271,7 +327,7 @@
             <button
               {...props}
               type="button"
-              class= "field-surface flex h-9 w-full items-center gap-2 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover: focus:outline-none data-[state=open]:border-ring"
+              class="field-surface flex h-9 w-full items-center gap-2 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:outline-none data-[state=open]:border-ring"
             >
               <span class={cn('min-w-0 flex-1 truncate', !selectedAccountId && 'text-muted-foreground')}>
                 {selectedAccountName || '- select account -'}
@@ -308,7 +364,7 @@
               <button
                 {...props}
                 type="button"
-                class= "field-surface flex h-9 w-full items-center gap-2 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover: focus:outline-none data-[state=open]:border-ring"
+                class="field-surface flex h-9 w-full items-center gap-2 bg-muted/25 pl-3 pr-2.5 text-left text-ui-xs transition-[border-color,box-shadow] hover:border-border focus:outline-none data-[state=open]:border-ring"
               >
                 <DbIcon id="d1" class={cn('size-4 shrink-0', selectedDbName ? 'text-foreground' : 'text-muted-foreground')} />
                 <span class={cn('min-w-0 flex-1 truncate font-mono', !selectedDbName && 'font-sans text-muted-foreground')}>
