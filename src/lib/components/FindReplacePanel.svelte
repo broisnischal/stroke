@@ -16,6 +16,8 @@
    * @typedef {Object} Props
    * @property {Array<{ name: string, dataType?: string }>} columns
    * @property {unknown[][]} rows
+   * @property {string[]} primaryKey
+   * @property {Array<{ columns: string[] }>} foreignKeys
    * @property {string | null} tableName
    * @property {(edits: Array<{ rowIdx: number, colIdx: number, value: string }>) => Promise<void>} onapply
    * @property {(rowIdx: number, colIdx: number) => void} [onreveal]
@@ -23,7 +25,7 @@
   import SearchableMenu from './SearchableMenu.svelte'
   import Icon from './Icon.svelte'
   import { cn } from '$lib/utils.js'
-  import { isEditableType } from '$lib/cell-value.js'
+  import { annotateColumns, allTextColumnsAreKeys } from '$lib/find-replace-columns.js'
   import { keycaps } from '$lib/shortcuts.js'
 
   let {
@@ -31,6 +33,10 @@
     columns = [],
     /** @type {unknown[][]} */
     rows = [],
+    /** @type {string[]} */
+    primaryKey = [],
+    /** @type {Array<{ columns: string[] }>} */
+    foreignKeys = [],
     /** @type {string | null} */
     tableName = null,
     /** @type {(edits: Array<{ rowIdx: number, colIdx: number, value: string }>) => Promise<void>} */
@@ -66,20 +72,31 @@
     }
   })
 
-  // Only string-ish columns: rewriting numbers or JSON through a string replace
-  // is a footgun, and offering the column is what makes people try.
-  const editableCols = $derived(
-    columns.map((c, i) => ({ ...c, idx: i })).filter((c) => isEditableType(c.dataType ?? '')),
-  )
+  // The rule itself lives in `find-replace-columns.js`, with tests: it is the
+  // reason a replacement fails after the preview said it would work, which is
+  // not something to leave asserted only by a component.
+  const allCols = $derived(annotateColumns(columns, { primaryKey, foreignKeys }))
+  const editableCols = $derived(allCols.filter((c) => !c.blocked))
+  /**
+   * Applying needs a primary key: the batch update keys each new value to the
+   * row it belongs to. Said here rather than thrown from the apply, which is
+   * after the search, the replacement and the preview have all been read.
+   */
+  const noKey = $derived(!!tableName && primaryKey.length === 0)
 
   let colMenuOpen = $state(false)
+  // Blocked columns stay in the list, disabled, with the reason. Dropping them
+  // silently left the one column someone came here to change simply absent,
+  // with nothing to say why.
   const colItems = $derived(
-    editableCols.map((c) => ({
+    allCols.map((c) => ({
       value: String(c.idx),
       label: c.name,
       keywords: [c.name],
       idx: c.idx,
       dataType: c.dataType ?? '',
+      blocked: c.blocked,
+      disabled: !!c.blocked,
       active: c.idx === colIdx,
     })),
   )
@@ -220,7 +237,11 @@
       {/snippet}
       {#snippet item(it)}
         <span class="min-w-0 flex-1 truncate font-mono">{it.label}</span>
-        {#if it.dataType}<span class="shrink-0 text-ui-3xs text-muted-foreground">{it.dataType}</span>{/if}
+        {#if it.blocked}
+          <span class="shrink-0 text-ui-3xs text-muted-foreground">{it.blocked}</span>
+        {:else if it.dataType}
+          <span class="shrink-0 text-ui-3xs text-muted-foreground">{it.dataType}</span>
+        {/if}
         {#if it.active}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
       {/snippet}
     </SearchableMenu>
@@ -267,7 +288,7 @@
       <button
         type="button"
         class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-primary px-2 font-mono text-ui-3xs font-medium text-primary-foreground transition-[opacity,transform] hover:opacity-90 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40"
-        disabled={matches.length === 0 || applying || !!regexError}
+        disabled={matches.length === 0 || applying || !!regexError || noKey}
         onclick={handleApply}
         title={`Replace in ${matches.length} cell(s) · ${keycaps('Mod+Enter').join(' ')}`}
       >
@@ -278,6 +299,14 @@
 
     {#if regexError}
       <p class="font-mono text-ui-3xs leading-relaxed text-destructive">{regexError}</p>
+    {:else if noKey}
+      <!-- Before the search, not after it: the apply keys each new value to its
+           row by primary key, and without one it threw "Batch update requires a
+           primary key" once the whole query had already been typed. -->
+      <p class="flex items-start gap-1.5 text-ui-3xs leading-relaxed text-muted-foreground">
+        <Icon name="info" class="mt-px size-3 shrink-0" aria-hidden="true" />
+        <span class="min-w-0">This table has no primary key, so a replacement cannot be written back to a specific row. Matches still preview below.</span>
+      </p>
     {/if}
   </div>
 
@@ -285,7 +314,15 @@
   {#if !tableName}
     <p class="px-3 py-3 text-ui-3xs text-muted-foreground">Open a table to search its values.</p>
   {:else if editableCols.length === 0}
-    <p class="px-3 py-3 text-ui-3xs text-muted-foreground">No text columns in this table.</p>
+    <p class="px-3 py-3 text-ui-3xs leading-relaxed text-muted-foreground">
+      {#if allTextColumnsAreKeys(allCols)}
+        Every text column here is a key. Replacing inside a primary or foreign key
+        would rewrite the relationship rather than the value, so the picker lists
+        them but will not search them.
+      {:else}
+        No text columns in this table.
+      {/if}
+    </p>
   {:else if !findText}
     <p class="px-3 py-3 text-ui-3xs leading-relaxed text-muted-foreground">
       Type to preview changes in <span class="font-mono text-foreground/80">{activeColName}</span>.

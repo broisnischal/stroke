@@ -131,6 +131,13 @@
     /** @type {string | null} */
     frTableName = null,
     frEnabled = false,
+    // The key columns, so the panel can refuse to rewrite them. Replacing
+    // inside a foreign key is what produced "FOREIGN KEY constraint failed"
+    // from D1 - the new value referenced a parent row that does not exist.
+    /** @type {string[]} */
+    frPrimaryKey = [],
+    /** @type {Array<{ columns: string[] }>} */
+    frForeignKeys = [],
     /** @type {(edits: Array<{ rowIdx: number, colIdx: number, value: string }>) => Promise<void>} */
     onfindreplaceapply = async () => {},
     /** Put the grid's cell cursor on a match. */
@@ -1508,6 +1515,8 @@
           bind:focusFind={focusFindField}
           columns={frColumns}
           rows={frRows}
+          primaryKey={frPrimaryKey}
+          foreignKeys={frForeignKeys}
           tableName={frEnabled ? frTableName : null}
           onapply={onfindreplaceapply}
           onreveal={onrevealcell}
