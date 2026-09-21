@@ -9,6 +9,7 @@
   import AlertCircle     from '@lucide/svelte/icons/alert-circle'
   import Loader2         from '@lucide/svelte/icons/loader-2'
   import Sparkles        from '@lucide/svelte/icons/sparkles'
+  import { toast }       from '$lib/components/ui/sonner/toast.svelte.js'
   import ScrollText      from '@lucide/svelte/icons/scroll-text'
   import ExternalLink    from '@lucide/svelte/icons/external-link'
   import { cn }          from '$lib/utils.js'
@@ -129,10 +130,54 @@
   )
 
   onMount(() => {
+    // Runs in dev too: it is a version comparison, not an update check, and a
+    // dev build that has genuinely changed version should say so.
+    void announceNewVersion()
     if (import.meta.env.DEV) return
     const t = setTimeout(() => void checkForUpdate(), 3000)
     return () => clearTimeout(t)
   })
+
+  /** The build this app last ran as, so a new one can be recognised. */
+  const LAST_RUN_VERSION_KEY = 'stroke:last-run-version'
+
+  /**
+   * First launch on a new build: say which version this is and offer the
+   * changelog. The updater's own dialog is gone by now - it restarted the app to
+   * apply the download - so without this the update lands silently and the
+   * release notes it showed before installing are the last the user ever sees.
+   *
+   * Only ever announces a CHANGE. A fresh install has nothing stored, and
+   * "updated to v1.24" on a first run is a lie about something the user did not
+   * do; the version is recorded and the toast waits for the next upgrade.
+   */
+  async function announceNewVersion() {
+    let current = ''
+    try {
+      const { getVersion } = await import('@tauri-apps/api/app')
+      current = await getVersion()
+    } catch {
+      return // not running under Tauri - there is no app version to compare
+    }
+    if (!current) return
+
+    let previous = null
+    try {
+      previous = localStorage.getItem(LAST_RUN_VERSION_KEY)
+      localStorage.setItem(LAST_RUN_VERSION_KEY, current)
+    } catch {
+      return // storage unavailable: without a record this would fire every launch
+    }
+    if (!previous || previous === current) return
+
+    toast.success(`Updated to v${current}`, {
+      description: `You were on v${previous}.`,
+      // Longer than the 4.5s default: the toast carries an action, and an action
+      // that times out before it is read is decoration.
+      duration: 12000,
+      action: { label: "What's new", onClick: () => void openChangelog('update-toast') },
+    })
+  }
 
   async function checkForUpdate() {
     try {
@@ -185,16 +230,23 @@
     await invoke('restart_app')
   }
 
-  // Tagged so web analytics can attribute changelog views to the desktop app.
-  const CHANGELOG_URL = 'https://stroke.click/changelog?utm_source=stroke-app&utm_medium=update-dialog&utm_campaign=changelog'
+  // Tagged so web analytics can attribute changelog views to the desktop app,
+  // and to the surface they came from - the dialog and the post-update toast are
+  // different moments and read differently in the numbers.
+  const changelogUrl = (/** @type {string} */ medium) =>
+    `https://stroke.click/changelog?utm_source=stroke-app&utm_medium=${medium}&utm_campaign=changelog`
 
-  /** Open the online changelog in the user's browser (never the in-app tab). */
-  async function openChangelog() {
+  /**
+   * Open the online changelog in the user's browser (never the in-app tab).
+   * @param {string} [medium] where the click came from
+   */
+  async function openChangelog(medium = 'update-dialog') {
+    const url = changelogUrl(medium)
     try {
       const { openUrl } = await import('@tauri-apps/plugin-opener')
-      await openUrl(CHANGELOG_URL)
+      await openUrl(url)
     } catch {
-      window.open(CHANGELOG_URL, '_blank', 'noopener,noreferrer')
+      window.open(url, '_blank', 'noopener,noreferrer')
     }
   }
 </script>
