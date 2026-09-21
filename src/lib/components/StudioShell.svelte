@@ -22,10 +22,13 @@
   import GitCompare from '@lucide/svelte/icons/git-compare'
   import History from '@lucide/svelte/icons/history'
   import Plus from '@lucide/svelte/icons/plus'
+  import Search from '@lucide/svelte/icons/search'
+  import Gauge from '@lucide/svelte/icons/gauge'
+  import Network from '@lucide/svelte/icons/network'
   import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
   import { IS_MAC } from '$lib/shortcuts.js'
   import { findSearchInput, isTypingTarget } from '$lib/focus-search.js'
-  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode, appAutoSaveQueries } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode, appAutoSaveQueries, increaseZoom, decreaseZoom, resetZoom } from '$lib/stores/settings.js'
   import { requireUnlock } from '$lib/stores/app-lock.js'
   import { isTextEntryTarget, setVimSubMode } from '$lib/vim/vim.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
@@ -1180,6 +1183,8 @@
   let applyEdits = $state(() => {})
   /** @type {() => void} */
   let resetEdits = $state(() => {})
+  /** Copy the grid's staged changes as SQL (bound from DataTable). */
+  let copyEditsSql = $state(() => {})
   /** Bound from DataTable - stages the selected rows for deletion (red diff). */
   let stageDeleteSelectedRows = $state(() => {})
 
@@ -2392,6 +2397,97 @@ let rowSearch = $state('')
     })
   }
 
+  /** Flip the window in or out of full screen. Shared by F11 and the View menu. */
+  async function toggleFullscreen() {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      const win = getCurrentWindow()
+      await win.setFullscreen(!(await win.isFullscreen()))
+    } catch { /* not Tauri, or the window refused - nothing to fall back to */ }
+  }
+
+  /** Open another Stroke window (⌘⇧N and File ▸ New window). */
+  function openNewWindow() {
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke('open_new_window'))
+      .catch((err) => toast.error('Could not open a new window', { description: String(err) }))
+  }
+
+  /**
+   * What the menu bar can do, by name. Every entry is an action that already
+   * exists elsewhere in this component - the bar is a second door to them, not a
+   * second implementation.
+   */
+  const menuActions = $derived({
+    newTab: () => openWelcomeTab(),
+    newSql: () => openNewSqlTab(),
+    newWindow: openNewWindow,
+    openConnection: () => (showConnectionModal = true),
+    disconnect: () => { if (connection) showDisconnectDialog = true },
+    openSettings: () => (showSettingsModal = true),
+    closeTab: () => { if (activeTabId) void closeTab(activeTabId) },
+
+    search: () => tableToolbar?.focusRowSearch?.(),
+    findReplace: () => { if (connection && activeTable && columns.length && findReplaceEnabled) findReplaceOpen = true },
+    findInDatabase: () => openSearchTab(),
+    applyEdits: () => void applyEdits(),
+    copyEditsSql: () => void copyEditsSql(),
+    resetEdits: () => resetEdits(),
+
+    toggleSidebar,
+    toggleChat: () => { if (aiMode) exitAiMode(); toggleAiSidebar() },
+    zoomIn: () => increaseZoom(),
+    zoomOut: () => decreaseZoom(),
+    zoomReset: () => resetZoom(),
+    fullscreen: () => void toggleFullscreen(),
+    commandPalette: () => { commandPage = 'root'; commandOpen = true },
+
+    objects: () => openObjectsTab(),
+    insights: () => openInsightsTab(),
+    schema: () => openSchemaTab(),
+    erd: () => openErdTab(),
+    dataDiff: () => openDataDiffTab(),
+    dashboard: () => openDashboardTab(),
+    logs: () => openLogsTab(),
+    extensions: () => openExtensionsTab(),
+
+    shortcuts: () => (showShortcutsModal = true),
+    changelog: () => {
+      const url = 'https://stroke.click/changelog?utm_source=stroke-app&utm_medium=menu&utm_campaign=changelog'
+      void import('@tauri-apps/plugin-opener')
+        .then(({ openUrl }) => openUrl(url))
+        .catch(() => window.open(url, '_blank', 'noopener,noreferrer'))
+    },
+    reportIssue: () => (showReportIssueDialog = true),
+    checkUpdates: () => void updateDialog?.checkNow?.(),
+    about: () => (showAboutModal = true),
+  })
+
+  // A second Stroke window. Same process and the same connection - the backend
+  // holds one pool - so this is another view of the session, which is what makes
+  // "the table on one screen, the editor on the other" possible.
+  createHotkey('Mod+Shift+N', (e) => {
+    e.preventDefault()
+    openNewWindow()
+  })
+
+  // Staged grid changes: ⌘S writes them, ⌘⌥S copies the SQL. Both are guarded on
+  // there being staged changes AND a table tab being active, so the SQL editor's
+  // own ⌘S (save query) is untouched - the two never both apply.
+  createHotkey('Mod+S', (e) => {
+    if (activeTab?.kind !== 'table' || pendingEditCount === 0) return
+    e.preventDefault()
+    void applyEdits()
+  })
+  // Not ⌘⇧S: that already opens the SQL editor everywhere in the app, and a
+  // chord that means two things depending on whether a cell was edited is worse
+  // than one extra modifier.
+  createHotkey('Mod+Alt+S', (e) => {
+    if (activeTab?.kind !== 'table' || pendingEditCount === 0) return
+    e.preventDefault()
+    void copyEditsSql()
+  })
+
   // Find & replace in the current table - editor-style Ctrl/⌘+H.
   createHotkey('Mod+H', (e) => {
     if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
@@ -2722,12 +2818,7 @@ let rowSearch = $state('')
       const isMacFullscreen = e.key === 'f' && e.metaKey && e.ctrlKey && !e.shiftKey && !e.altKey
       if (!isF11 && !isMacFullscreen) return
       e.preventDefault()
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        const win = getCurrentWindow()
-        const current = await win.isFullscreen()
-        await win.setFullscreen(!current)
-      } catch { /* ignore */ }
+      await toggleFullscreen()
     }
     document.addEventListener('keydown', onFullscreenKey)
     return () => document.removeEventListener('keydown', onFullscreenKey)
@@ -7110,6 +7201,7 @@ let rowSearch = $state('')
   ontoggleaisidebar={() => { if (aiMode) exitAiMode(); toggleAiSidebar() }}
   ongoback={() => void navBack()}
   ongoforward={() => void navForward()}
+  {menuActions}
 />
 <div class="flex min-h-0 flex-1 overflow-hidden">
   {#if connection}
@@ -7334,6 +7426,7 @@ let rowSearch = $state('')
             onreopenclosed={reopenLastClosedTab}
             canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
+            onnewsql={() => { if (aiMode) exitAiMode(); openNewSqlTab() }}
           />
         {/if}
         {@render sharedContent()}
@@ -7354,6 +7447,7 @@ let rowSearch = $state('')
             onreopenclosed={reopenLastClosedTab}
             canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
+            onnewsql={() => { if (aiMode) exitAiMode(); openNewSqlTab() }}
             ondragtabstart={(id) => beginTabDrag(id)}
             ondragtabmove={(x, y) => moveTabDrag(x, y)}
             ondragtabend={() => endTabDrag()}
@@ -7496,7 +7590,11 @@ let rowSearch = $state('')
         >
           <svelte:boundary failed={tabError}>
             {#await import('./ObjectsPage.svelte')}<TabLoading />{:then { default: ObjectsPage }}
-              <ObjectsPage active={activeTab?.kind === 'objects'} connectionType={connection?.type ?? null} />
+              <ObjectsPage
+                active={activeTab?.kind === 'objects'}
+                connectionType={connection?.type ?? null}
+                onopen={({ schema, name }) => void openTableTab(schema || activeSchema, name)}
+              />
             {/await}
           </svelte:boundary>
         </div>
@@ -8041,6 +8139,7 @@ let rowSearch = $state('')
                 {rows}
                 {primaryKey}
                 {foreignKeys}
+                rowNumberOffset={infiniteScroll ? 0 : currentOffset}
                 {incomingForeignKeys}
                 onfetchrelatedrows={handleFetchRelatedRows}
                 schema={activeSchema}
@@ -8071,6 +8170,7 @@ let rowSearch = $state('')
                 bind:editingCell
                 bind:pendingEditCount
                 bind:applyEdits
+                bind:copyEditsSql
                 bind:resetEdits
                 bind:scrollToTop={scrollTableTop}
                 bind:scrollToBottom={scrollTableBottom}
@@ -8260,6 +8360,20 @@ let rowSearch = $state('')
           </button>
         {/snippet}
 
+        <!-- A second-tier destination: one line, no border, no chord. It has to
+             read as subordinate to the tiles at a glance, which is what keeps
+             the page a shortlist rather than a menu. -->
+        {#snippet jump(/** @type {any} */ Icon, /** @type {string} */ label, /** @type {() => void} */ onclick)}
+          <button
+            type="button"
+            {onclick}
+            class="group flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-left text-muted-foreground transition-colors duration-150 hover:bg-accent/40 hover:text-foreground"
+          >
+            <Icon class="size-3.5 shrink-0" />
+            <span class="truncate text-ui-2xs font-medium">{label}</span>
+          </button>
+        {/snippet}
+
         <!-- Scroll container keeps top/bottom padding reachable when the content
              outgrows the viewport (e.g. at high zoom); inner wrapper centers when it fits. -->
         <div class="min-h-0 flex-1 overflow-auto">
@@ -8286,31 +8400,55 @@ let rowSearch = $state('')
               </div>
             {/if}
           </div>
-          <!-- Five actions, not sixteen. A launcher is a shortlist: everything cut
-               from here is still one keystroke away in ⌘K and in the page navigator,
-               and the pages that got cut (Charts, Diagrams, Timeline, Data Diff,
-               Codegen, Objects, Insights, Security, Logs, Schema, Dashboard, ORM) are
-               things you go to once you already know the database - not the first
-               thing you do when a tab opens. Sixteen equal-weight tiles asked the
-               user to read the whole grid to find the one they wanted.
-          
-               One column at every width: a row of four 6.5rem tiles was unreadable
-               as soon as the sidebar was dragged wider, and a five-item list does
-               not need a grid to hold its shape. -->
+          <!-- Five tiles, not sixteen. Sixteen equal-weight tiles asked you to read
+               the whole grid to find the one you wanted; these five are what a tab
+               opens for. The rest are not gone - they sit in the quieter "Jump to"
+               list below, and in ⌘K. -->
           <!-- Column count comes from the space available, not a fixed number: the
                  pane narrows whenever the sidebar is dragged wider. At full width
                  the five tiles resolve to one clean row. -->
-            <div class="grid w-full max-w-lg grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-2">
+            <!-- Four columns, not five. At five the tiles came out ~96px wide and
+                 "Extensions" truncated to "Extensio…" - a launcher whose labels do
+                 not fit is not a launcher. The fifth tile was Shortcuts, which the
+                 footer below already offers, so dropping it cost nothing and left
+                 an exact row. -->
+            <div class="grid w-full max-w-lg grid-cols-2 gap-2 sm:grid-cols-4">
             {#if isRedis}
-              {@render row(KeyRound, "Keyspace", "Browse keys and values", openRedisTab, { wide: true })}
+              {@render row(KeyRound, "Keyspace", "Browse keys and values", openRedisTab, {})}
             {:else}
               {@render row(Terminal, "SQL", "Write and run a query", openSqlTab, { keys: [mod, "T"] })}
               {@render row(Sparkles, "AI", "Ask about this database", openAiTab, { pro: true, keys: [mod, shiftKey, "E"] })}
             {/if}
             {@render row(Blocks, "Extensions", "Add and manage extensions", openExtensionsTab, { pro: true })}
-            {@render row(Command, "Shortcuts", "Everything else lives here", () => (showShortcutsModal = true), { keys: [mod, "/"] })}
             {@render row(Database, "Connect", "Switch or add a connection", () => (showConnectionModal = true), {})}
           </div>
+
+          {#if connection && !isRedis}
+            <!-- Second tier, and deliberately quieter than the tiles above.
+                 The pages worth reaching from a fresh tab outnumber the five a
+                 shortlist can hold, but promoting them all to equal-weight tiles
+                 is what turned this page into a wall the last time. A plain
+                 two-column list of icon + label reads in one sweep, costs a
+                 third of the height per item, and leaves the tiles carrying the
+                 weight. Same max width as the grid above, so both blocks sit on
+                 one alignment edge. -->
+            <div class="flex w-full max-w-lg flex-col gap-2">
+              <p class="text-ui-3xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Jump to</p>
+              <!-- Two columns of four. Three columns left an orphan row of two
+                   hanging under a full one, which is the shape that reads as
+                   "unfinished" no matter how the items are ordered. -->
+              <div class="grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2">
+                {@render jump(Plus, "New query editor", openNewSqlTab)}
+                {@render jump(Search, "Find in database", openSearchTab)}
+                {@render jump(Boxes, "Database objects", openObjectsTab)}
+                {@render jump(GitBranch, "Schema explorer", openSchemaTab)}
+                {@render jump(Gauge, "Instance insights", openInsightsTab)}
+                {@render jump(GitCompare, "Data diff", openDataDiffTab)}
+                {@render jump(Network, "ER diagram", () => openErdTab())}
+                {@render jump(LayoutDashboard, "Dashboard", openDashboardTab)}
+              </div>
+            </div>
+          {/if}
 
 
           <!-- Footer -->
@@ -8408,6 +8546,7 @@ let rowSearch = $state('')
   applying={savingCell || deletingRows || insertingRow}
   onapplyedits={() => void applyEdits()}
   onresetedits={() => resetEdits()}
+  oncopyeditssql={() => void copyEditsSql()}
   showTableNav={activeTab?.kind === 'table'}
   onscrolltabletop={() => scrollTableTop()}
   onscrolltablebottom={() => scrollTableBottom()}

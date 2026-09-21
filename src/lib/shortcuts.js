@@ -100,6 +100,7 @@ export const SHORTCUT_GROUPS = [
     label: 'Views',
     icon: 'monitor',
     shortcuts: [
+      { combo: 'Mod+Shift+N', desc: 'New window' },
       { combo: 'Mod+Shift+D', desc: 'Disconnect' },
       { combo: 'Mod+Shift+S', desc: 'SQL editor' },
       { combo: 'Mod+Shift+O', desc: 'ORM Runner' },
@@ -110,7 +111,6 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Mod+R', desc: 'Refresh current view' },
       { combo: 'Mod+Shift+V', desc: 'Cycle table data view' },
       { combo: 'Alt+1-5', desc: 'Table / JSON / Record / Text / Chart view' },
-      { combo: 'Mod+Alt+F', desc: 'Find & replace in table' },
     ],
   },
   {
@@ -138,6 +138,10 @@ export const SHORTCUT_GROUPS = [
     icon: 'table-2',
     shortcuts: [
       { combo: 'Mod+F', desc: 'Search rows' },
+      // Both bindings are listed because both are real: macOS swallows Cmd+H to
+      // hide the app, so Mod+Alt+F is the one that always arrives.
+      { combo: 'Mod+H', desc: 'Find & replace in column' },
+      { combo: 'Mod+Alt+F', desc: 'Find & replace in column' },
       { combo: 'Alt+Shift+F', desc: 'Open filter menu' },
       { combo: 'Alt+Shift+S', desc: 'Open sort menu' },
       { combo: 'Alt+Shift+C', desc: 'Open columns menu' },
@@ -149,6 +153,8 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Mod+C', desc: 'Copy cell value' },
       { combo: 'Mod+Backspace', desc: 'Delete selected rows' },
       { combo: 'Mod+A', desc: 'Select all rows' },
+      { combo: 'Mod+S', desc: 'Apply staged changes' },
+      { combo: 'Mod+Alt+S', desc: 'Copy staged changes as SQL' },
       { combo: 'Mod+Z', desc: 'Undo cell edit' },
       { combo: 'Mod+Shift+Z', desc: 'Redo cell edit' },
       { combo: 'Mod+Up', desc: 'Scroll to top' },
