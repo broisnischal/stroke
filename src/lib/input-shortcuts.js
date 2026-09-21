@@ -213,6 +213,20 @@ function onInput(e) {
   record(/** @type {HTMLInputElement | HTMLTextAreaElement} */ (el))
 }
 
+/**
+ * Forget an element's undo history.
+ *
+ * The stack is keyed by ELEMENT, which is right for a field that holds one
+ * value for its lifetime and wrong for one that is re-pointed at a new value
+ * while staying mounted - the cell editor dock follows the grid's cursor, so
+ * without this an undo in row 12 could restore row 8's text.
+ * @param {HTMLInputElement | HTMLTextAreaElement | null} el
+ */
+export function resetInputHistory(el) {
+  if (!el) return
+  histories.set(el, { stack: [el.value], idx: 0, t: 0, suppress: false })
+}
+
 /** Install global listeners. Returns a cleanup function. */
 export function installInputShortcuts() {
   document.addEventListener('keydown', onKeyDown, true)

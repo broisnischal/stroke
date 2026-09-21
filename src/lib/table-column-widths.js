@@ -36,3 +36,24 @@ export function defaultColumnWidth(dataType) {
 export function clampColumnWidth(width) {
   return Math.round(Math.min(COL_WIDTH_MAX, Math.max(COL_WIDTH_MIN, width)))
 }
+
+/**
+ * Whether a column's values are drawn flush right, per Settings → Appearance →
+ * table alignment. `'numbers'` is the spreadsheet convention: quantities line up
+ * by place value so magnitudes are comparable down the column, prose stays left
+ * where the eye finds the start of each line.
+ *
+ * Shared so every surface that shows rows - the canvas grid and the related-rows
+ * panel docked under it - reaches the same verdict for the same column.
+ *
+ * @param {unknown} dataType declared SQL type, e.g. `numeric(10,2)`
+ * @param {string} mode `'left'` | `'numbers'` | `'right'`
+ */
+export function columnAlignsRight(dataType, mode) {
+  if (mode === 'right') return true
+  if (mode !== 'numbers') return false
+  const t = String(dataType ?? '')
+  // Booleans match /int/ on engines that spell them `tinyint(1)`, so they are
+  // excluded before the numeric test.
+  return !/bool/i.test(t) && /(int|numeric|decimal|real|double|float|money|number|serial)/i.test(t)
+}

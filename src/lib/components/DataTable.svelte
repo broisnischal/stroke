@@ -29,6 +29,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import MoveHorizontal from "@lucide/svelte/icons/move-horizontal";
   import Type from "@lucide/svelte/icons/type";
   import CopyPlus from "@lucide/svelte/icons/copy-plus";
+  import ArrowUpFromLine from "@lucide/svelte/icons/arrow-up-from-line";
+  import ArrowDownFromLine from "@lucide/svelte/icons/arrow-down-from-line";
   import Pencil from "@lucide/svelte/icons/pencil";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -50,9 +52,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   } from "$lib/stores/table-column-widths.js";
   import {
     clampColumnWidth,
+    columnAlignsRight,
     defaultColumnWidth,
   } from "$lib/table-column-widths.js";
   import { formatCompactCount } from "$lib/table-list.js";
+  import { keycaps } from "$lib/shortcuts.js";
   import { cn } from "$lib/utils.js";
   import { buildQuickFilter } from "$lib/quick-filter.js";
   import {
@@ -104,7 +108,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import Dices from "@lucide/svelte/icons/dices";
   import Clock from "@lucide/svelte/icons/clock";
   import MediaLightbox from "./MediaLightbox.svelte";
-  import CellEditorDialog from "./CellEditorDialog.svelte";
+  import CellEditorPanel from "./CellEditorPanel.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import ArrayCellEditor from "./ArrayCellEditor.svelte";
   import VectorCellViewer from "./VectorCellViewer.svelte";
@@ -329,7 +333,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  click) rather than roaming with the arrow keys. Lets the parent record a
      *  back/forward position for a short, deliberate move it would otherwise
      *  treat as roaming. */
-    onjump = /** @type {() => void} */ (() => {}),
     /** True when every row has been loaded in infinite scroll mode (no more pages). */
     endOfResults = false,
     /** Active row-search query (toolbar search). Matched substrings are
@@ -451,13 +454,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // drawer with its own internal scroll - instead of inline between rows (which
   // made grid scrolling fight the panel). Height is user-resizable + persisted.
   const FK_DOCK_MIN = 120, FK_DOCK_MAX = 600
-  let fkDockHeight = $state((() => {
+  /** @param {string} key @param {number} fallback */
+  function loadDockHeight(key, fallback) {
     try {
-      const n = Number(localStorage.getItem('stroke:fk-dock-height'))
+      const n = Number(localStorage.getItem(key))
       if (Number.isFinite(n) && n >= FK_DOCK_MIN && n <= FK_DOCK_MAX) return n
     } catch {}
-    return 260
-  })())
+    return fallback
+  }
+  let fkDockHeight = $state(loadDockHeight('stroke:fk-dock-height', 260))
+  /** The full-size cell editor is the second dock, and remembers its own height. */
+  let cellDockHeight = $state(loadDockHeight('stroke:cell-dock-height', 220))
   /** rAF handle + pending height for the dock drag. */
   let _fkDockRafId = 0
   let _fkDockPendingH = 0
@@ -473,11 +480,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     _activeResizeListeners = null
   }
 
-  /** @param {PointerEvent} e */
-  function startFkDockResize(e) {
+  /**
+   * Drag-resize a bottom dock. Both docks are flex siblings of the scroll
+   * container with the same constraints and the same reflow cost, so they share
+   * the drag rather than keeping two copies of it.
+   * @param {PointerEvent} e @param {'fk' | 'cell'} which
+   */
+  function startDockResize(e, which) {
     e.preventDefault()
     clearActiveResizeListeners()
-    const startY = e.clientY, startH = fkDockHeight
+    const startY = e.clientY, startH = which === 'fk' ? fkDockHeight : cellDockHeight
+    const storageKey = which === 'fk' ? 'stroke:fk-dock-height' : 'stroke:cell-dock-height'
+    const setH = (/** @type {number} */ h) => { if (which === 'fk') fkDockHeight = h; else cellDockHeight = h }
     // Cleared per drag: a bare click with no movement would otherwise flush the
     // PREVIOUS drag's height on pointerup and make the dock jump.
     _fkDockPendingH = 0
@@ -492,7 +506,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (_fkDockRafId) return
       _fkDockRafId = requestAnimationFrame(() => {
         _fkDockRafId = 0
-        fkDockHeight = _fkDockPendingH
+        setH(_fkDockPendingH)
       })
     }
     const up = () => {
@@ -502,8 +516,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (_fkDockRafId) { cancelAnimationFrame(_fkDockRafId); _fkDockRafId = 0 }
       // Land on the last position the pointer actually reached, not on whichever
       // frame happened to win the race with pointerup.
-      if (_fkDockPendingH) fkDockHeight = _fkDockPendingH
-      try { localStorage.setItem('stroke:fk-dock-height', String(fkDockHeight)) } catch {}
+      if (_fkDockPendingH) setH(_fkDockPendingH)
+      try { localStorage.setItem(storageKey, String(which === 'fk' ? fkDockHeight : cellDockHeight)) } catch {}
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -554,7 +568,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let suppressMenuSelect = $state(false);
   /** Row indices with inline JSON detail open. Seeded from initialExpandedRows
    *  so background/snapshot panes render already-expanded (no collapse flicker). */
-  let expandedRows = $state(new Set(initialExpandedRows ?? []));
+  //  Seeded ONCE on mount: untrack() says that to the compiler, which otherwise
+  //  warns that only the initial value is captured (state_referenced_locally).
+  let expandedRows = $state(untrack(() => new Set(initialExpandedRows ?? [])));
   /** @type {Record<string, number>} */
   let columnWidths = $state({});
   /** @type {string | null} */
@@ -692,7 +708,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    */
   const GUTTER_NUM_W = $derived(
     $appRowNumbers
-      ? Math.round((String(Math.max(1, rowNumberOffset + rows.length)).length * 7 + 16) * canvasZoom)
+      // 8px per digit: the numbers are drawn at the cell size now, and a mono
+      // digit is ~0.6em, so a 13px glyph needs the wider allowance or a
+      // six-figure row number clips against the first column's rule.
+      ? Math.round((String(Math.max(1, rowNumberOffset + rows.length)).length * 8 + 16) * canvasZoom)
       : 0,
   )
   /** @type {HTMLCanvasElement | null} */
@@ -1271,7 +1290,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {string} name
    * @returns {boolean} false if there is no such column
    */
-  function scrollColumnIntoView(name) {
+  function scrollColumnIntoView(name, behavior = "smooth") {
     const col = geom.cols.find((c) => c.name === name)
     if (!col) return false
     if (tableContainer && !col.pinned) {
@@ -1288,11 +1307,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       target = Math.max(0, target)
       if (Math.abs(target - _scrollLeft) > 1) {
-        tableContainer.scrollTo({ left: target, behavior: "smooth" })
+        tableContainer.scrollTo({ left: target, behavior })
       }
     }
     return true
   }
+
+  /**
+   * The cell cursor keeps itself visible horizontally.
+   *
+   * Tab and the arrow keys moved `focusedCol` and left the scroll where it was,
+   * so tabbing right walked the cursor off the edge of the viewport and the grid
+   * just sat there - the column it claimed to be on was somewhere past the right
+   * edge. Rows already did this (`scrollRowIntoView` in the key handlers); this
+   * is the other axis, done once here rather than in each of the six handlers
+   * that can move the column.
+   *
+   * `auto`, not `smooth`: a held arrow key fires faster than a smooth scroll
+   * settles, so each press would restart an animation that never arrives.
+   * Reads are untracked - the geometry it looks at (`geom`, `_scrollLeft`) is
+   * exactly what this write changes.
+   */
+  $effect(() => {
+    const ci = focusedCol
+    if (ci === null) return
+    untrack(() => {
+      const col = navigableColumns[ci]
+      if (col) scrollColumnIntoView(col.name, "auto")
+    })
+  })
 
   /**
    * Scroll a visible column into view (if it's off-screen) and briefly highlight
@@ -1326,7 +1369,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {number} rowIdx
    * @param {number} colIdx
    * @param {MouseEvent} [e]
-   * @param {{ requireModifier?: boolean }} [opts]
+   * @param {{ requireModifier?: boolean, newTab?: boolean }} [opts]
    */
   function tryFollowForeignKey(rowIdx, colIdx, e, opts = {}) {
     if (!foreignKeyForCell(rowIdx, colIdx)) return false;
@@ -1338,7 +1381,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       e.preventDefault();
       e.stopPropagation();
     }
-    onfollowforeignkey({ rowIdx, colIdx });
+    // `newTab` forces a second tab for a table that is already open, instead of
+    // activating the one that exists - the difference between "take me there"
+    // and "put it beside what I am looking at".
+    onfollowforeignkey({ rowIdx, colIdx, newTab: opts.newTab === true });
     return true;
   }
 
@@ -1831,22 +1877,45 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     applyScroll(initialScroll);
   });
 
+  /**
+   * Open the insert draft.
+   *
+   * The draft is one band pinned under the header - that is where every field
+   * is reachable and where it stays put while you scroll. `anchorRow` does not
+   * move the band; it scrolls the table so that row sits immediately beneath it,
+   * which is what makes "insert above this row" and "insert below this one"
+   * land where the menu said they would. A table's rows have no stored order,
+   * so the position is about where you are looking, not about the data.
+   * @param {number | null} [anchorRow]
+   */
+  function openInsertDraft(anchorRow = null) {
+    if (readonly) return
+    /** @type {Record<string, string>} */
+    const drafts = {}
+    for (const col of columns) {
+      drafts[col.name] = defaultInsertDraft(col, primaryKey)
+    }
+    newRowDrafts = drafts
+    // Focus first non-auto column (all columns, including hidden ones)
+    const first = columns.find((c) => !isAutoColumn(c, primaryKey))
+    newRowFocusCol = first?.name ?? columns[0]?.name ?? null
+    if (anchorRow === null) {
+      tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    // After the draft mounts: `insertRowOffset` is part of rowDocTop, so the
+    // target is only right once the band exists.
+    const idx = Math.min(Math.max(anchorRow, 0), Math.max(0, rows.length - 1))
+    void tick().then(() => {
+      if (!tableContainer) return
+      const top = Math.max(0, rowDocTop(idx) - HEADER_H - ROW_HEIGHT)
+      tableContainer.scrollTo({ top, behavior: 'smooth' })
+    })
+  }
+
   // Surface beginInsertRow to the parent (→ toolbar Add Row button).
   $effect(() => {
-    beginInsertRow = () => {
-      if (readonly) return;
-      /** @type {Record<string, string>} */
-      const drafts = {}
-      for (const col of columns) {
-        drafts[col.name] = defaultInsertDraft(col, primaryKey)
-      }
-      newRowDrafts = drafts
-      // Focus first non-auto column (all columns, including hidden ones)
-      const first = columns.find((c) => !isAutoColumn(c, primaryKey))
-      newRowFocusCol = first?.name ?? columns[0]?.name ?? null
-      // Scroll to top so the draft row is visible
-      tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
-    }
+    beginInsertRow = () => openInsertDraft()
   })
 
   // Surface staged-delete-of-selection to the parent (⌘⌫ / toolbar delete).
@@ -2259,8 +2328,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {number} rowIdx @param {number} colIdx
    */
   function openCellEditor(rowIdx, colIdx) {
+    if (!seedCellEditor(rowIdx, colIdx)) return;
+    // One dock at a time. Both live along the bottom edge, and stacking them
+    // leaves the grid a couple of rows tall.
+    fkSubview = null;
+    cellEditorOpen = true;
+  }
+
+  /**
+   * Point the editor at a cell. Split out of `openCellEditor` so the cursor can
+   * move the open dock from cell to cell without re-opening it.
+   * @param {number} rowIdx @param {number} colIdx
+   * @returns {boolean} whether the cell could be read
+   */
+  function seedCellEditor(rowIdx, colIdx) {
     const col = columns[colIdx];
-    if (!col || rowIdx < 0) return;
+    if (!col || rowIdx < 0) return false;
     const value = effectiveCellValue(rowIdx, colIdx);
     // Only a preview of an oversize cell was ever loaded; editing it would write
     // the preview back over the real value.
@@ -2270,8 +2353,32 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     cellEditorName = col.name ?? "value";
     cellEditorType = String(col.dataType ?? col.data_type ?? _colCache[colIdx]?.colType ?? "");
     cellEditorValue = oversize ? oversize.preview : value;
-    cellEditorOpen = true;
+    return true;
   }
+
+  /**
+   * The open dock follows the cell cursor.
+   *
+   * Arrowing through the grid with the editor open used to leave it showing the
+   * cell you opened it on, so the panel and the cursor disagreed about which
+   * value you were looking at - and the only way to edit the next row was to
+   * close the panel and press Shift+Space again. Now it reads like an inspector:
+   * move the cursor, the panel follows. `untrack` around the write keeps the
+   * effect off its own output; the cell coordinates it sets are exactly what it
+   * would otherwise re-enter on.
+   */
+  $effect(() => {
+    if (!cellEditorOpen) return;
+    const r = focusedRow;
+    const cv = focusedCol;
+    if (r === null || cv === null) return;
+    untrack(() => {
+      const ai = visToActualColIdx(cv);
+      if (ai < 0) return;
+      if (r === cellEditorRow && ai === cellEditorCol) return;
+      seedCellEditor(r, ai);
+    });
+  });
 
   /** Stage the edited value - same queue, undo and Apply as an inline edit. */
   function commitCellEditor(/** @type {string} */ next) {
@@ -3349,11 +3456,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         isVector: isVectorType(t),
         isGeom: isGeometryType(t),
         // Right-alignment under the 'numbers' setting: quantities line up by
-        // place value, prose stays left. Booleans match /int/ on engines that
-        // spell them tinyint(1), so they are excluded before the numeric test.
-        alignRight: align === 'right' ? true
-          : align !== 'numbers' ? false
-          : !/bool/i.test(t) && _statsNumericRe.test(t),
+        // place value, prose stays left.
+        alignRight: columnAlignsRight(t, align),
       }
     })
   })
@@ -4029,7 +4133,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "a" || e.key === "A")) {
       if (!editingCell) {
         e.preventDefault();
-        selected = allRowIndexSet();
+        // ⌘⇧A deselects, the way it does in every editor and image tool that
+        // has a select-all. Escape also clears a selection, but it is the key
+        // that unwinds everything else on screen too - the sub-view, a range, a
+        // column selection - so it is never the one you reach for when the only
+        // thing you want back is an empty checkbox column.
+        if (e.shiftKey) {
+          selected = new Set();
+          selectedCols = new Set();
+          _lastHeaderClickedCol = null;
+          scheduleDraw();
+        } else {
+          selected = allRowIndexSet();
+        }
       }
       return;
     }
@@ -4061,12 +4177,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "y" || e.key === "Y")) {
       if (!editingCell) { e.preventDefault(); void redoEdit(); return; }
     }
-    // Ctrl+Enter when not editing: start edit (same as Enter / F2)
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === "Enter" && !editingCell) {
+    // ⌘/Ctrl+Enter and Shift+Enter, when not editing.
+    //
+    // On a cell that holds a foreign key they follow it: ⌘↵ navigates to the
+    // referenced row (which is what the shortcuts dialog and the cell menu have
+    // always said it does - the chord used to start an edit instead, so the one
+    // documented FK keystroke was the one that did not work), and ⇧↵ opens that
+    // target in a NEW tab, beside the row you are reading. On any other cell
+    // both start the edit ⌘↵ started before.
+    if (!editingCell && !e.altKey && e.key === "Enter" && ((e.ctrlKey || e.metaKey) || e.shiftKey)) {
       e.preventDefault();
       if (focusedRow !== null && focusedCol !== null) {
         const ai = visToActualColIdx(focusedCol);
-        if (ai >= 0) startEdit(focusedRow, ai);
+        if (ai >= 0) {
+          // Shift alone means the new tab; ⌘⇧↵ follows in place, like ⌘↵.
+          const newTab = e.shiftKey && !(e.ctrlKey || e.metaKey);
+          if (tryFollowForeignKey(focusedRow, ai, e, { newTab })) return;
+          startEdit(focusedRow, ai);
+        }
       } else { focusedRow = 0; focusedCol = 0; }
       return;
     }
@@ -4074,6 +4202,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     if (editingCell) return;
     if (newRowDrafts) return;
+
+    // Mod+E toggles the focused row's detail panel - the same thing the gutter
+    // chevron and the context menu's Expand do, for a hand already on the
+    // keyboard. Below the `editingCell` guard on purpose: inside the inline
+    // editor the chord belongs to the text field.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "e" || e.key === "E")) {
+      if (showRowExpand && focusedRow !== null) { e.preventDefault(); toggleRowExpand(focusedRow); }
+      return;
+    }
 
     // Experimental Vim normal-mode: intercept plain command keys (hjkl, gg/G,
     // i/x/dd/yy, …) before the default arrow / type-to-edit handling.
@@ -4163,6 +4300,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         e.preventDefault();
         // Priority: close FK sub-view → collapse cell range → clear col selection
         // → close the most-recently-expanded row → clear cell focus.
+        if (cellEditorOpen) { cellEditorOpen = false; break; }
         if (fkSubview !== null) { fkSubview = null; break; }
         if (computeCellRange()) { clearCellRange(); scheduleDraw(); break; }
         if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null; scheduleDraw(); break; }
@@ -4235,6 +4373,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Canvas drawing ─────────────────────────────────────────────────────────
   const CELL_PAD_X = $derived(Math.round(10 * canvasZoom))
   const ICON_HIT = $derived(Math.round(24 * canvasZoom))
+
+  // The geometry, type sizes and appearance flags the canvas draws with, handed
+  // to the related-rows panel so its DOM table reads as one surface with the
+  // grid above it: same row height, same text size, same rules, same zebra, same
+  // alignment. `_fonts` itself is a nulled-and-refilled draw cache, not
+  // reactive, so the panel gets the derived numbers it is built from instead.
+  const gridMetrics = $derived({
+    zoom: canvasZoom,
+    cellPx: Math.max(9, Math.round(GRID_CELL_PX * canvasZoom)),
+    typePx: Math.max(7, Math.round(GRID_TYPE_PX * canvasZoom)),
+    rowH: ROW_HEIGHT,
+    headerH: HEADER_H,
+    padX: CELL_PAD_X,
+    rowRules: _tableStyle.rows === true,
+    colRules: _tableStyle.cols === true,
+    zebra: _tableStyle.zebra === true,
+    align: $appTableAlign,
+    rowNumbers: $appRowNumbers === true,
+  })
 
   // Cached glyph advance for the active ctx.font. Every table font is monospace,
   // so text width is O(1) (charCount × advance). This replaces the per-cell
@@ -4669,6 +4826,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       drawHeaderRow(ctx, {
         W, cPanel, cFg, cMuted, cGrid, cBorder, cMutedBg, cAccent, cPrimary, cRing,
         AMBER, AMBER_FG, BLUE_FG, RED, usedW,
+        // The header's own `#` label reads `c.fonts.type`, exactly as the row
+        // numbers under it do. Without this the row-number gutter threw
+        // `undefined is not an object` on the first frame it was drawn - the
+        // body context carried `fonts`, this one did not, and only the one
+        // branch gated on the gutter being enabled ever touched it.
+        fonts: _fonts,
       })
     }
 
@@ -4948,8 +5111,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.stroke()
     }
 
-    // Row ring when focused + selected.
-    if (focusedRow === idx && isSel) {
+    // Row ring when the row is focused + checked and the keyboard is on the ROW
+    // rather than on a cell in it.
+    //
+    // It used to draw whenever the row was focused, on top of the focused cell's
+    // own outline: a 1px stroke at ry+0.5 and a 2px stroke at ry+1, one pixel
+    // apart, running the width of the row. That is what read as a broken border
+    // - two teal lines with a sliver of row between them, stepping in and out
+    // where the cell's strokes started and stopped, and doubling the rule the
+    // row above already drew. One indicator at a time: the row tint says which
+    // row, the cell outline says which cell, and the ring is for when there is
+    // no cell to point at.
+    if (focusedRow === idx && isSel && focusedCol === null) {
       ctx.strokeStyle = withAlpha(c.cPrimary, 0.45)
       ctx.lineWidth = 1
       ctx.strokeRect(0.5, ry + 0.5, c.usedW - 1, rh - 1)
@@ -5326,23 +5499,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // the selection indicator, and a per-cell ring on the drag-end cell reads as a
     // stray highlight inside the block.
     if (isFocusedCell && !c.rangeColNames) {
+      // The same box whether or not the row is checked. The checked row used to
+      // get top-and-bottom strokes instead, spanning the cell's full width and
+      // butting into the row ring at both ends, so the cursor changed shape and
+      // the row grew edges depending on a checkbox. The row ring now stands down
+      // while a cell is focused (see drawBodyRow), which is what those two
+      // half-measures were working around.
       ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
       ctx.lineWidth = 2
-      if (c.selectedRows?.has(idx)) {
-        // On a checked row, top and bottom only. A full box around one cell of a
-        // row that is already tinted edge to edge added two vertical lines
-        // through the middle of that tint - the row says "this row", the cell
-        // cursor only has to say "this column", and the side strokes were the
-        // part that read as a stray border.
-        ctx.beginPath()
-        ctx.moveTo(cellX, ry + 1)
-        ctx.lineTo(cellX + w, ry + 1)
-        ctx.moveTo(cellX, ry + rh - 1)
-        ctx.lineTo(cellX + w, ry + rh - 1)
-        ctx.stroke()
-      } else {
-        ctx.strokeRect(cellX + 1.5, ry + 1.5, w - 3, rh - 3)
-      }
+      ctx.strokeRect(cellX + 1.5, ry + 1.5, w - 3, rh - 3)
     }
   }
 
@@ -5389,7 +5554,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // Right-aligned tabular digits: a column of numbers lines up on its last
       // digit or it reads as noise. Muted, and a shade brighter on the focused
       // row so the eye can find where it is without a second highlight.
-      ctx.font = c.fonts.type
+      //
+      // At the CELL size, not the type-annotation size: the gutter is a column
+      // of values like any other, and two point sizes in one row read as two
+      // different tables. Only the colour says it is chrome.
+      ctx.font = c.fonts.cell
       ctx.textAlign = 'right'
       ctx.fillStyle = focusedRow === idx ? c.cFg : c.cMuted
       ctx.fillText(String(rowNumberOffset + idx + 1), gx + GUTTER_NUM_W - Math.round(7 * canvasZoom), ry + rh / 2 + 0.5)
@@ -5442,8 +5611,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         gx += GUTTER_SELECT_W
       }
       if (GUTTER_NUM_W > 0) {
-        // Right-aligned like the numbers under it, so the column has one edge.
-        ctx.font = c.fonts.type
+        // Right-aligned like the numbers under it, so the column has one edge,
+        // and at the header's own weight like every other column name.
+        ctx.font = c.fonts.header
         ctx.textAlign = 'right'
         ctx.fillStyle = c.cMuted
         ctx.fillText('#', gx + GUTTER_NUM_W - Math.round(7 * canvasZoom), HEADER_H / 2 + 0.5)
@@ -5588,7 +5758,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // from both the edge and the type text.
     const SORT_ICON = 13
     const SORT_MARGIN_R = 9
-    const sortReserve = SORT_ICON + SORT_MARGIN_R + 4
+    // A pinned column says so in its own header, left of the sort glyph. The
+    // only sign before this was that the column stopped scrolling, which you
+    // find out by scrolling - and the pin state is the one column setting with
+    // no mark anywhere on the column it applies to.
+    const PIN_ICON = 11
+    const pinReserve = col.pinned ? PIN_ICON + 6 : 0
+    const sortReserve = SORT_ICON + SORT_MARGIN_R + 4 + pinReserve
     ctx.textBaseline = 'middle'
     ctx.textAlign = 'left'
 
@@ -5664,6 +5840,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.font = _fonts.type
       ctx.fillStyle = withAlpha(c.cMuted, 0.6)
       ctx.fillText(truncText(ctx, col.dataType, typeRoom), typeStartX, cy + 0.5)
+    }
+
+    // Pin glyph, just left of where the sort indicator sits.
+    if (col.pinned) {
+      drawIcon(
+        ctx, 'pin',
+        x + w - SORT_ICON - SORT_MARGIN_R - PIN_ICON - 4,
+        cy - PIN_ICON / 2,
+        PIN_ICON, withAlpha(c.cMuted, 0.75), 1.6,
+      )
     }
 
     // Sort indicator - right-aligned with a clear margin, vertically centred.
@@ -6165,10 +6351,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)
         if (vi >= 0) focusedCol = vi
-        // Clicking a cell is a deliberate jump, however short the distance, so it
-        // earns a back/forward entry. Arrow-key roaming deliberately does not -
-        // that is what the parent's row-gap threshold is for.
-        onjump()
         if (inspectorRow !== null) inspectorRow = idx
 
         const cached = _colCache[actualIdx]
@@ -6593,9 +6775,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                    jitter + ghost row. No `left` inset, so it still scrolls
                    horizontally in lock-step with the columns via native scroll. -->
               {#if newRowDrafts}
+                <!-- `cell-fields`: the app-wide rule (app.css) that makes a field
+                     inside a grid cell flush - no border, no radius, no background
+                     of its own. Without it every draft input drew the 2px border at
+                     the 12px field radius the unlayered bare-input rule gives any
+                     input, so a row of 28px cells came out as a row of pills inside
+                     a row that already has its own rules and its own insert ring.
+                     The same fix the cell editor and the structure grid carry. -->
                 <div
                   role="none"
-                  class="sticky z-20 flex border-b border-border/30 bg-panel ring-1 ring-inset ring-success/25"
+                  class="cell-fields sticky z-20 flex border-b border-border/30 bg-panel ring-1 ring-inset ring-success/25"
                   style="top:{HEADER_H}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
                   onkeydown={onNewRowKeydown}
                 >
@@ -6848,14 +7037,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                      px-3 made the value jump sides and shift 2px the moment you
                      started typing. Same padding, same alignment, no jump. -->
                 {@const eAlignRight = isRightAlignedColumn(editingCell?.colIdx ?? -1)}
-                {@const eFieldStyle = `padding-left:${CELL_PAD_X}px;padding-right:${CELL_PAD_X}px;text-align:${eAlignRight ? 'right' : 'left'}`}
+                <!-- The size the CANVAS drew this value at, not a `text-ui-*` rung.
+                     The two are different numbers: the grid's text is the user's
+                     grid text size scaled by `canvasZoom`, the UI scale is a
+                     separately-rounded ladder off the root px. The fields were on
+                     the second one, so a value grew a pixel or two and reflowed
+                     the moment you started editing it - the same jump the padding
+                     comment above describes, in the other axis, and one that
+                     showed up on every platform because nothing about it was
+                     platform-specific. -->
+                {@const eFontStyle = `font-size:${gridMetrics.cellPx}px`}
+                {@const eFieldStyle = `padding-left:${CELL_PAD_X}px;padding-right:${CELL_PAD_X}px;text-align:${eAlignRight ? 'right' : 'left'};${eFontStyle}`}
                 <!-- The date editor carries a calendar button beside its field, so
                      it pads only the side the text is anchored to and lets the
                      button sit on the other one. Padding both sides would push the
                      value off the x the canvas drew it at by the button's width. -->
                 {@const ePickerStyle = eAlignRight
-                  ? `padding-right:${CELL_PAD_X}px;text-align:right`
-                  : `padding-left:${CELL_PAD_X}px;text-align:left`}
+                  ? `padding-right:${CELL_PAD_X}px;text-align:right;${eFontStyle}`
+                  : `padding-left:${CELL_PAD_X}px;text-align:left;${eFontStyle}`}
                 <div
                   in:fade={{ duration: 100, easing: cubicOut }}
                   data-cell-editor
@@ -6901,7 +7100,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                           bind:this={editInput}
                           type="button"
                           aria-label="Edit {ecol?.name ?? 'cell'}"
-                          class="flex h-full w-full min-w-0 items-center gap-1 px-3 text-left font-mono text-ui-sm text-foreground outline-none"
+                          class="flex h-full w-full min-w-0 items-center gap-1 text-left font-mono text-foreground outline-none"
+                          style={eFieldStyle}
                         >
                           <span class="min-w-0 flex-1 truncate">
                             {editingCell?.draft || (eNullable ? 'NULL' : 'Select…')}
@@ -6924,7 +7124,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       bind:this={editInput}
                       disabled={saving}
                       aria-label="Toggle {ecol?.name ?? 'cell'}"
-                      class="flex h-full w-full items-center gap-2.5 px-3 font-mono text-ui-sm text-foreground outline-none"
+                      class="flex h-full w-full items-center gap-2.5 font-mono text-foreground outline-none"
+                      style={eFieldStyle}
                       onclick={async (e) => {
                         e.stopPropagation();
                         editingCell.draft = editingCell.draft === "true" ? "false" : "true";
@@ -6947,7 +7148,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       bind:this={editInput}
                       disabled={saving}
                       aria-label="Edit array {ecol?.name ?? 'cell'}"
-                      class="flex h-full w-full items-center gap-2 px-3 font-mono text-ui-xs text-foreground outline-none"
+                      class="flex h-full w-full items-center gap-2 font-mono text-foreground outline-none"
+                      style={eFieldStyle}
                       onclick={(e) => {
                         e.stopPropagation();
                         if (!editingCell) return;
@@ -7016,7 +7218,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       bind:value={editingCell.draft}
                       disabled={saving}
                       aria-label="Edit {ecol?.name ?? 'cell'}"
-                      class="box-border block h-full w-full min-w-0 max-w-full border-0 bg-transparent font-mono text-ui-xs text-foreground outline-none selection:bg-primary/20"
+                      class="box-border block h-full w-full min-w-0 max-w-full border-0 bg-transparent font-mono text-foreground outline-none selection:bg-primary/20"
                       style={eFieldStyle}
                       onclick={(e) => e.stopPropagation()}
                       onkeydown={handleEditKeydown}
@@ -7027,7 +7229,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       bind:value={editingCell.draft}
                       disabled={saving}
                       aria-label="Edit {ecol?.name ?? 'cell'}"
-                      class="box-border block h-full w-full min-w-0 max-w-full overflow-x-auto border-0 bg-transparent font-mono text-ui-xs text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
+                      class="box-border block h-full w-full min-w-0 max-w-full overflow-x-auto border-0 bg-transparent font-mono text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
                       style={eFieldStyle}
                       onclick={(e) => e.stopPropagation()}
                       onkeydown={handleEditKeydown}
@@ -7359,8 +7561,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               )}
           >
             <ExternalLink />
-            {menuCellNull ? 'Open Tab, value is NULL' : 'Open Tab'}
-            {#if !menuCellNull}<ContextMenu.Shortcut>⌘↵</ContextMenu.Shortcut>{/if}
+            {menuCellNull ? 'Open referenced row, value is NULL' : 'Open referenced row'}
+            {#if !menuCellNull}<ContextMenu.Shortcut combo="Mod+Enter" />{/if}
+          </ContextMenu.Item>
+          <!-- The same target, in a tab of its own. The pointer needs its own way
+               to ask for that: ⇧↵ does it from the keyboard, and "already open"
+               is exactly when you want a second copy rather than a jump. -->
+          <ContextMenu.Item
+            disabled={menuCellNull}
+            onSelect={() =>
+              runMenuAction(() =>
+                onfollowforeignkey({
+                  rowIdx: contextRowIdx,
+                  colIdx: contextColIdx,
+                  newTab: true,
+                }),
+              )}
+          >
+            <ExternalLink />
+            Open in new tab
+            {#if !menuCellNull}<ContextMenu.Shortcut combo="Shift+Enter" />{/if}
           </ContextMenu.Item>
         {/if}
         <ContextMenu.Separator />
@@ -7375,7 +7595,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           >
             <Pencil />
             Edit
-            <ContextMenu.Shortcut>Enter</ContextMenu.Shortcut>
+            <ContextMenu.Shortcut combo="Enter" />
           </ContextMenu.Item>
         {/if}
         {#if menuCellIsArray && menuEditable && !readonly}
@@ -7387,7 +7607,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Item onSelect={() => runMenuAction(() => copyCellValue(contextRowIdx, contextColIdx))}>
           <Copy />
           Copy
-          <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
+          <ContextMenu.Shortcut combo="Mod+C" />
         </ContextMenu.Item>
         <ContextMenu.Sub>
           <ContextMenu.SubTrigger>
@@ -7529,6 +7749,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRowExpand(contextRowIdx))}>
             <Braces />
             {isRowExpanded(contextRowIdx) ? "Collapse row JSON" : "Expand"}
+            <ContextMenu.Shortcut combo="Mod+E" />
           </ContextMenu.Item>
         {/if}
         <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRow(contextRowIdx))}>
@@ -7536,6 +7757,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {selected.has(contextRowIdx) ? "Deselect row" : "Select row"}
         </ContextMenu.Item>
         {#if hasTableContext}
+        <!-- Insert, anchored to the row you clicked. Both open the same draft
+             band under the header - "above" parks this row directly beneath it,
+             "below" parks the next one there, so the new row appears where the
+             label says. -->
+        <ContextMenu.Item
+          disabled={readonly}
+          onSelect={() => runMenuAction(() => openInsertDraft(contextRowIdx))}
+        >
+          <ArrowUpFromLine />
+          Insert row above
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          disabled={readonly}
+          onSelect={() => runMenuAction(() => openInsertDraft(contextRowIdx + 1))}
+        >
+          <ArrowDownFromLine />
+          Insert row below
+        </ContextMenu.Item>
         <ContextMenu.Item
           disabled={readonly}
           onSelect={() => runMenuAction(() => duplicateRow(contextRowIdx))}
@@ -7564,7 +7803,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             {selected.size > 1 && selected.has(contextRowIdx)
               ? `Delete ${formatCompactCount(selected.size)} rows`
               : "Delete row"}
-            <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
+            <ContextMenu.Shortcut combo="Mod+Backspace" />
           </ContextMenu.Item>
         {/if}
         {/if}
@@ -7587,10 +7826,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       aria-orientation="horizontal"
       aria-label="Resize related rows panel"
       class="absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize"
-      onpointerdown={startFkDockResize}
+      onpointerdown={(e) => startDockResize(e, 'fk')}
     ></div>
     <FkSubviewPanel
       data={fkSubview.data}
+      metrics={gridMetrics}
       fkLabel={fkSubview.label}
       sourceHint={`row ${fkIdx + 1}`}
       onclose={() => { fkSubview = null }}
@@ -7605,6 +7845,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           onfollowforeignkey({ rowIdx: fkIdx, colIdx: sv.colIdx ?? 0 })
         }
       }}
+    />
+  </div>
+{/if}
+
+<!-- Full-size cell editor, the second dock. Same place, same chrome and same
+     resize as the related-rows panel above - it used to be a centred modal,
+     which covered the rows the value came from and took the window for one
+     field. Mutually exclusive with that panel (see openCellEditor). -->
+{#if cellEditorOpen}
+  <div
+    class="relative z-10 flex shrink-0 flex-col border-t border-border/60 bg-background"
+    style="height:{cellDockHeight}px"
+  >
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize cell editor panel"
+      class="absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize"
+      onpointerdown={(e) => startDockResize(e, 'cell')}
+    ></div>
+    <CellEditorPanel
+      bind:open={cellEditorOpen}
+      colName={cellEditorName}
+      colType={cellEditorType}
+      value={cellEditorValue}
+      sourceHint={cellEditorRow >= 0 ? `row ${cellEditorRow + 1}` : ''}
+      readOnly={readonly || !canEditColumn(cellEditorCol)}
+      oncommit={commitCellEditor}
     />
   </div>
 {/if}
@@ -7673,15 +7942,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     />
   {/await}
 {/if}
-
-<CellEditorDialog
-  bind:open={cellEditorOpen}
-  colName={cellEditorName}
-  colType={cellEditorType}
-  value={cellEditorValue}
-  readOnly={readonly || !canEditColumn(cellEditorCol)}
-  oncommit={commitCellEditor}
-/>
 
 <VectorCellViewer
   bind:open={vectorViewerOpen}

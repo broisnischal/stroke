@@ -12,9 +12,24 @@
   import * as ContextMenu from '$lib/components/ui/context-menu/index.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { cn } from '$lib/utils.js'
+  import { clampColumnWidth, columnAlignsRight, defaultColumnWidth } from '$lib/table-column-widths.js'
 
+  /**
+   * Geometry and type sizes borrowed from the grid above (see `gridMetrics` in
+   * DataTable.svelte). They are px numbers rather than `text-ui-*` steps on
+   * purpose: the grid's text size is its own user setting (Settings →
+   * Appearance → Grid text size) scaled by the canvas zoom, not a rung of the
+   * UI scale, and the panel has to land on the same number to read as the same
+   * table. The fallbacks are the shipped defaults at 100%.
+   * @typedef {{ zoom: number, cellPx: number, typePx: number, rowH: number, headerH: number, padX: number, rowRules: boolean, colRules: boolean, zebra: boolean, align: string, rowNumbers: boolean }} GridMetrics
+   */
   let {
     data,
+    /** @type {GridMetrics} */
+    metrics = {
+      zoom: 1, cellPx: 13, typePx: 11, rowH: 28, headerH: 30, padX: 10,
+      rowRules: true, colRules: true, zebra: false, align: 'numbers', rowNumbers: true,
+    },
     fkLabel = '',
     /** Small context hint shown next to the badge (e.g. "row 12"). */
     sourceHint = '',
@@ -32,6 +47,34 @@
 
   const rowCount = $derived(data?.rows?.length ?? 0)
   const colNames = $derived((data?.columns ?? []).map((c) => c.name ?? c))
+
+  /**
+   * Column widths and alignment, from the same two helpers the grid above sizes
+   * its own columns with, so a uuid column is a uuid column's width in both.
+   * `table-layout: fixed` then makes these authoritative - auto layout treats a
+   * width as a suggestion and lets one long JSON value stretch a column off the
+   * edge of the panel, which is what made the columns here look nothing like
+   * the grid's.
+   */
+  const cols = $derived(
+    (data?.columns ?? []).map((c) => {
+      const type = c.dataType ?? c.data_type ?? ''
+      return {
+        name: c.name ?? c,
+        type,
+        w: Math.round(clampColumnWidth(defaultColumnWidth(type)) * metrics.zoom),
+        alignRight: columnAlignsRight(type, metrics.align),
+      }
+    }),
+  )
+
+  /** Row-number gutter, sized to the widest number drawn - the grid's formula. */
+  const numW = $derived(
+    metrics.rowNumbers ? Math.round((String(Math.max(1, rowCount)).length * 8 + 16) * metrics.zoom) : 0,
+  )
+
+  /** Fixed layout needs a total; `min-w-full` still stretches a narrow table. */
+  const tableW = $derived(cols.reduce((n, c) => n + c.w, 0) + numW)
 
   // ── Selection ───────────────────────────────────────────────────────────────
   // A cell here is addressed by row and column index, the same as the grid above.
@@ -121,9 +164,9 @@
 <div class="flex h-full min-h-0 w-full flex-col bg-background">
 
   <!-- Header: label chip + context left, actions right (Postman/DBeaver style) -->
-  <div class="flex shrink-0 items-center gap-2 border-b border-border/30 bg-muted/10 px-2.5 py-1.5">
+  <div class="flex h-8 shrink-0 items-center gap-2 border-b border-border/40 bg-muted/20 px-2.5">
     <span class="shrink-0 text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Related</span>
-    <span class="shrink-0 rounded border border-border/50 bg-muted/30 px-2 py-0.5 font-mono text-ui-xs font-medium text-foreground/75">
+    <span class="shrink-0 rounded-[3px] border border-border/50 bg-muted/40 px-1.5 py-px font-mono text-ui-2xs font-medium text-foreground/80">
       {fkLabel}
     </span>
     {#if sourceHint}
@@ -139,26 +182,26 @@
       {#if rowCount}
         <button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded px-2 py-1 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="inline-flex h-7 items-center gap-1.5 rounded px-2 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={() => copy(allTsv(), rowCount === 1 ? 'Row' : 'All rows')}
           title="Copy every row shown, tab-separated with a header"
         >
           Copy
-          <Copy class="size-3" />
+          <Copy class="size-3.5 shrink-0" />
         </button>
       {/if}
       <button
         type="button"
-        class="inline-flex items-center gap-1.5 rounded px-2 py-1 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        class="inline-flex h-7 items-center gap-1.5 rounded px-2 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={onfullview}
         title="Open the related table as a tab with this filter applied"
       >
         Open in sub view
-        <ExternalLink class="size-3" />
+        <ExternalLink class="size-3.5 shrink-0" />
       </button>
       <button
         type="button"
-        class="flex shrink-0 items-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        class="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={onclose}
         aria-label="Close related rows panel"
       >
@@ -171,14 +214,14 @@
   {#if data?.loading}
     <div class="flex flex-1 items-center gap-2 px-3 py-4">
       <Loader class="size-3.5 animate-spin text-muted-foreground" />
-      <span class="font-mono text-ui-xs text-muted-foreground">Loading related rows…</span>
+      <span class="font-mono text-ui-2xs text-muted-foreground">Loading related rows…</span>
     </div>
 
   {:else if data?.error}
     <div class="flex flex-1 items-start gap-2 px-3 py-3">
       <TriangleAlert class="mt-px size-3.5 shrink-0 text-destructive" />
       <div class="min-w-0">
-        <div class="text-ui-xs font-medium text-destructive">Couldn't load related rows</div>
+        <div class="text-ui-2xs font-medium text-destructive">Couldn't load related rows</div>
         <div class="mt-0.5 font-mono text-ui-2xs leading-relaxed break-words text-muted-foreground">{data.error}</div>
       </div>
     </div>
@@ -186,7 +229,7 @@
   {:else if !rowCount}
     <div class="flex flex-1 items-center gap-2 px-3 py-3">
       <Inbox class="size-3.5 shrink-0 text-muted-foreground" />
-      <span class="text-ui-xs italic text-muted-foreground">No related rows</span>
+      <span class="text-ui-2xs italic text-muted-foreground">No related rows</span>
     </div>
 
   {:else}
@@ -204,29 +247,72 @@
               {...props}
               role="grid"
               data-studio-selectable="text"
-              class="w-max min-w-full border-separate"
-              style="border-spacing:0"
+              class="min-w-full border-separate font-mono"
+              style="border-spacing:0; table-layout:fixed; width:{tableW}px; font-size:{metrics.cellPx}px; line-height:1"
               onkeydown={onGridKey}
             >
+              <colgroup>
+                {#if numW}<col style="width:{numW}px" />{/if}
+                {#each cols as c (c.name)}
+                  <col style="width:{c.w}px" />
+                {/each}
+              </colgroup>
+
               <thead class="sticky top-0 z-10">
                 <tr>
-                  {#each data.columns as col (col.name ?? col)}
-                    <th class="whitespace-nowrap border-b border-border/40 bg-background px-3 py-1.5 text-left">
-                      <span class="font-mono text-ui-xs font-bold text-foreground/75">{col.name ?? col}</span>
-                      {#if col.dataType ?? col.data_type}
-                        <span class="ml-1 font-mono text-ui-2xs font-normal text-muted-foreground">{col.dataType ?? col.data_type}</span>
+                  {#if numW}
+                    <th
+                      class="border-b border-border/60 bg-muted/25 text-right align-middle font-[530] text-muted-foreground/70"
+                      style="height:{metrics.headerH}px; padding:0 {Math.round(7 * metrics.zoom)}px"
+                      aria-label="Row number"
+                    >#</th>
+                  {/if}
+                  {#each cols as c (c.name)}
+                    <!-- Name at the grid's header weight (530), the type annotation
+                         a step below it, both in a band of the grid's header height. -->
+                    <th
+                      class={cn(
+                        'overflow-hidden border-b border-border/60 bg-muted/25 align-middle font-[530] whitespace-nowrap text-foreground/80',
+                        metrics.colRules && 'border-r border-r-border/25',
+                        c.alignRight ? 'text-right' : 'text-left',
+                      )}
+                      style="height:{metrics.headerH}px; padding:0 {metrics.padX}px"
+                      title={c.type ? `${c.name} · ${c.type}` : c.name}
+                    >
+                      {c.name}
+                      {#if c.type}
+                        <span class="ml-1 font-normal text-muted-foreground" style="font-size:{metrics.typePx}px">{c.type}</span>
                       {/if}
                     </th>
                   {/each}
                 </tr>
               </thead>
+
               <tbody>
                 {#each data.rows as row, i (i)}
-                  <tr class="hover:bg-muted/10">
-                    {#each data.columns as col, j (col.name ?? j)}
+                  <tr
+                    class={cn(
+                      'group/row',
+                      // Zebra is the grid's own shading, so the two surfaces
+                      // stripe in step rather than one banding and one not.
+                      metrics.zebra && i % 2 === 1 && 'bg-muted/[0.06]',
+                      sel?.r === i && 'bg-primary/[0.06]',
+                    )}
+                  >
+                    {#if numW}
+                      <td
+                        class={cn(
+                          'select-none text-right align-middle tabular-nums text-muted-foreground/60',
+                          metrics.rowRules && i < data.rows.length - 1 && 'border-b border-border/15',
+                        )}
+                        style="height:{metrics.rowH}px; padding:0 {Math.round(7 * metrics.zoom)}px"
+                      >{i + 1}</td>
+                    {/if}
+                    {#each cols as c, j (c.name)}
                       {@const v = cellAt(i, j)}
                       {@const isNullVal = v === null || v === undefined}
                       {@const isSel = sel?.r === i && sel?.c === j}
+                      {@const text = fmt(v)}
                       <!-- svelte-ignore a11y_click_events_have_key_events -->
                       <td
                         role="gridcell"
@@ -234,15 +320,20 @@
                         tabindex={isSel || (!sel && i === 0 && j === 0) ? 0 : -1}
                         aria-selected={isSel}
                         class={cn(
-                          'cursor-default whitespace-nowrap px-3 py-1.5 font-mono text-ui-xs outline-none',
-                          i < data.rows.length - 1 && 'border-b border-border/15',
-                          isNullVal && 'italic text-muted-foreground',
+                          'cursor-default overflow-hidden align-middle text-ellipsis whitespace-nowrap outline-none',
+                          metrics.rowRules && i < data.rows.length - 1 && 'border-b border-border/15',
+                          metrics.colRules && 'border-r border-r-border/15',
+                          c.alignRight && 'text-right tabular-nums',
+                          isNullVal && 'italic text-muted-foreground/70',
+                          !isSel && 'group-hover/row:bg-muted/10',
                           isSel && 'bg-primary/15 ring-1 ring-inset ring-primary/40',
                         )}
+                        style="height:{metrics.rowH}px; padding:0 {metrics.padX}px"
+                        title={isNullVal ? '' : text}
                         onclick={() => selectCell(i, j)}
                         onfocus={() => selectCell(i, j)}
                         oncontextmenu={() => selectCell(i, j)}
-                      >{fmt(v)}</td>
+                      >{text}</td>
                     {/each}
                   </tr>
                 {/each}
@@ -251,11 +342,11 @@
           {/snippet}
         </ContextMenu.Trigger>
 
-        <ContextMenu.Content class="min-w-52 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+        <ContextMenu.Content class="min-w-52">
           <ContextMenu.Item disabled={!sel} onSelect={() => sel && copy(fmt(cellAt(sel.r, sel.c)), 'Cell')}>
             <Copy />
             Copy cell
-            <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
+            <ContextMenu.Shortcut combo="Mod+C" />
           </ContextMenu.Item>
           <ContextMenu.Item
             disabled={!sel}

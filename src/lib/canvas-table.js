@@ -165,6 +165,8 @@ const ICON_PATHS = {
   "link-2": ["M9 17H7A5 5 0 0 1 7 7h2", "M15 7h2a5 5 0 1 1 0 10h-2", "M8 12h8"],
   // Sortable-column glyph (cleaner than arrow-up-down).
   "chevrons-up-down": ["m7 15 5 5 5-5", "m7 9 5-5 5 5"],
+  // Pinned-column glyph (lucide `pin`), for the header of a frozen column.
+  pin: ["M12 17v5", "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"],
 };
 
 /** @type {Map<string, Path2D[]>} */

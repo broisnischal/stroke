@@ -1,8 +1,5 @@
 <script>
   import Icon from "./Icon.svelte";
-  import CaseSensitive from "@lucide/svelte/icons/case-sensitive";
-  import WholeWord from "@lucide/svelte/icons/whole-word";
-  import Regex from "@lucide/svelte/icons/regex";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import Check from "@lucide/svelte/icons/check";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
@@ -14,7 +11,8 @@
   import { getColumnEnumValues } from "$lib/cell-value.js";
   import { slotRoll } from "$lib/actions/slot-text.js";
   import { cn } from "$lib/utils.js";
-  import { IS_MAC } from "$lib/shortcuts.js";
+  import { IS_MAC, keycaps } from "$lib/shortcuts.js";
+  import Kbd from "./Kbd.svelte";
   /** Tooltip keycaps. A control that has a shortcut should say so where the
    *  pointer already is - the shortcuts dialog is where you look when you do not
    *  know a key exists, not when you are already on the button. */
@@ -157,9 +155,9 @@
   } = $props();
 
   const ALL_SEARCH_OPTS = /** @type {const} */ ([
-    { key: "matchCase", icon: CaseSensitive, title: "Match case" },
-    { key: "wholeWord", icon: WholeWord, title: "Match whole word" },
-    { key: "regex", icon: Regex, title: "Use regular expression" },
+    { key: "matchCase", cap: "Aa", title: "Match case" },
+    { key: "wholeWord", cap: "ab", title: "Match whole word" },
+    { key: "regex", cap: ".*", title: "Use a regular expression" },
   ]);
   // Only the options this engine can honor (SQLite/D1 → match-case only, etc.).
   const SEARCH_OPTS = $derived(
@@ -167,19 +165,36 @@
   );
 
   let searchFocused = $state(false);
-  let searchOptsOpen = $state(false);
-  const searchOptsActive = $derived(
-    SEARCH_OPTS.some((o) => searchOptions[o.key]),
+  /**
+   * Whether to print the ⌘F keycaps inside the field.
+   *
+   * Only while it is empty and unfocused: once there is a query the clear ✕
+   * takes that corner, and once the field has focus the shortcut that puts it
+   * there has nothing left to say. It is a hint, not a label - `pointer-events-
+   * none` so a click through it still lands in the field.
+   */
+  const searchHintCaps = $derived(keycaps('Mod+F'));
+  const searchHint = $derived(
+    tableViewMode !== 'structure' && !searchFocused && !localSearch && columns.length > 0,
   );
-  // The options button lives next to the clear (✕); the toggles themselves live
-  // in its popover, so the input stays clean. Shown only where the engine can
-  // honor the options (e.g. Postgres regex path) and not in structure view.
+  /**
+   * The toggles sit in the field's trailing corner, and only once there is
+   * something to match.
+   *
+   * On an empty field they shared that corner with the ⌘F hint and the
+   * placeholder, so three controls and two labels fought over 90px and the word
+   * "Search…" ran under a keycap. They modify a query; with no query there is
+   * nothing for them to modify.
+   */
   const showSearchOpts = $derived(
-    searchOptionsSupported && tableViewMode !== "structure",
+    searchOptionsSupported &&
+      tableViewMode !== "structure" &&
+      SEARCH_OPTS.length > 0 &&
+      localSearch.trim() !== "",
   );
   // Keep the field expanded while focused, typing, or adjusting options.
   const searchExpanded = $derived(
-    searchFocused || searchOptsOpen || localSearch.trim() !== "",
+    searchFocused || localSearch.trim() !== "",
   );
 
   let viewsMenuOpen = $state(false);
@@ -696,7 +711,10 @@
         // field is the most shrinkable thing here; it gives way first, down to
         // a floor where the icon and a word of text still fit.
         "relative flex h-7 min-w-[7.5rem] shrink items-center transition-[width] duration-200",
-        searchExpanded ? "w-72" : "w-52",
+        // Wider at both sizes: the trailing corner now holds three toggles and a
+        // clear ✕ while you type, and 13rem left the query itself two words of
+        // room. Still `shrink`, so a narrow pane takes it back first.
+        searchExpanded ? "w-80" : "w-64",
       )}
       role="search"
       onfocusin={() => (searchFocused = true)}
@@ -705,13 +723,13 @@
         if (!e.currentTarget.contains(next)) searchFocused = false;
       }}
     >
-      <Icon name="search" class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
+      <Icon name="search" class="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground" />
       {#if tableViewMode === "structure"}
         <input
           bind:this={structureSearchEl}
           type="text"
           aria-label="Search column"
-          class= "field-surface h-7 w-full min-w-0 bg-transparent pl-7 pr-7 font-mono text-ui-sm outline-none"
+          class= "field-surface h-7 w-full min-w-0 rounded-full! bg-transparent pl-8 pr-7 font-mono text-ui-sm outline-none"
           placeholder="Search column…"
           value={structureSearch}
           oninput={(e) =>
@@ -727,8 +745,14 @@
           aria-label="Search all columns"
           title="Search every column ({KEY.search})"
           class={cn(
-            "field-surface h-7 w-full min-w-0 bg-transparent pl-7 text-ui-sm outline-none",
-            showSearchOpts ? "pr-14" : "pr-7",
+            // `rounded-full!` beats the unlayered bare-input frame rule in
+            // app.css, which is the same reason `border-ring!` below carries one.
+            "field-surface h-7 w-full min-w-0 rounded-full! bg-transparent pl-8 text-ui-sm outline-none",
+            // Right padding is whatever the cluster in that corner occupies:
+            // options trigger, keycaps, both, or neither.
+            // hint (⌘F) and the toggles never coexist: the hint is for an empty
+            // field, the toggles for a filled one.
+            searchHint ? "pr-12" : showSearchOpts ? "pr-[7.5rem]" : "pr-7",
             localSearch.trim() && "border-ring!",
           )}
           placeholder="Search…"
@@ -737,53 +761,37 @@
           oninput={(e) => handleSearchInput(e.currentTarget.value)}
         />
       {/if}
-      <!-- Right-side cluster: search options popover + clear (✕) -->
+      <!-- Right-side cluster: keycap hint + search options popover + clear (✕) -->
       <div class="absolute inset-y-0 right-1 flex items-center gap-0.5">
+        {#if searchHint}
+          <Kbd keys={searchHintCaps} class="pointer-events-none" aria-hidden="true" />
+        {/if}
         {#if showSearchOpts}
-          <Popover bind:open={searchOptsOpen}>
-            <PopoverTrigger
-              type="button"
-              title="Search options"
-              aria-label="Search options"
-              class={cn(
-                "relative inline-flex size-5 items-center justify-center rounded-md transition-[background-color,color] duration-150 ease-out",
-                searchOptsActive || searchOptsOpen
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
-              )}
-            >
-              <SlidersHorizontal class="size-3.5 shrink-0" />
-              {#if searchOptsActive}
-                <span
-                  class="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary ring-1 ring-background"
-                ></span>
-              {/if}
-            </PopoverTrigger>
-            <PopoverContent align="end" sideOffset={6} class="min-w-52 p-1">
-              {#each SEARCH_OPTS as opt (opt.key)}
-                {@const active = searchOptions[opt.key]}
-                <button
-                  type="button"
-                  aria-pressed={active}
-                  class={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm transition-colors",
-                    active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-                    "hover:bg-accent",
-                  )}
-                  onclick={() =>
-                    onsearchoptionschange({ ...searchOptions, [opt.key]: !active })}
-                >
-                  <opt.icon
-                    class={cn("size-4 shrink-0", active ? "text-primary" : "text-muted-foreground")}
-                  />
-                  <span class="min-w-0 flex-1 truncate text-left">{opt.title}</span>
-                  {#if active}
-                    <Check class="size-3.5 shrink-0 text-primary" />
-                  {/if}
-                </button>
-              {/each}
-            </PopoverContent>
-          </Popover>
+          <!-- A segmented control, not a popover list.
+               Three toggles behind a slider icon meant two clicks to reach a
+               state you could not see, and a popover that covered the results
+               it was about to change. `Aa`, `.*` and `ab` are what every
+               editor's find widget prints, they fit the field's own corner, and
+               each one's state is visible without opening anything. -->
+          <div class="flex shrink-0 items-center overflow-hidden rounded-md border border-border/50 bg-input/40">
+            {#each SEARCH_OPTS as opt, i (opt.key)}
+              {@const active = searchOptions[opt.key]}
+              <button
+                type="button"
+                aria-pressed={active}
+                aria-label={opt.title}
+                title={opt.title}
+                class={cn(
+                  "inline-flex h-5 items-center justify-center px-1.5 font-mono text-ui-3xs transition-colors",
+                  i > 0 && "border-l border-border/40",
+                  active
+                    ? "bg-primary/15 text-foreground"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                )}
+                onclick={() => onsearchoptionschange({ ...searchOptions, [opt.key]: !active })}
+              >{opt.cap}</button>
+            {/each}
+          </div>
         {/if}
         {#if localSearch}
           <button
@@ -1354,7 +1362,7 @@
       >
         <Icon name="more-horizontal" class="size-3.5" />
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" class="min-w-56 text-ui-sm [&_[data-slot=dropdown-menu-item]]:whitespace-nowrap [&_[data-slot=dropdown-menu-radio-item]]:whitespace-nowrap">
+      <DropdownMenu.Content align="end" class="min-w-56 [&_[data-slot=dropdown-menu-item]]:whitespace-nowrap [&_[data-slot=dropdown-menu-radio-item]]:whitespace-nowrap">
         {#if structureAllowed}
           <DropdownMenu.Item onSelect={ontogglestructure}>
             <Icon name="layout-list" class="size-3.5" />
@@ -1381,7 +1389,7 @@
             <DropdownMenu.Item disabled={total === 0 || readonly || !hasPrimaryKey} onSelect={onfindreplace}>
               <Icon name="replace" class="size-3.5" />
               Find & replace…
-              <DropdownMenu.Shortcut>{IS_MAC ? '⌘⌥F' : 'Ctrl+H'}</DropdownMenu.Shortcut>
+              <DropdownMenu.Shortcut combo={IS_MAC ? "Mod+Alt+F" : "Mod+H"} />
             </DropdownMenu.Item>
           {/if}
           <DropdownMenu.Item disabled={loading || columns.length === 0} onSelect={onopenvirtualcols}>
@@ -1487,7 +1495,7 @@
           >
             <Icon name="trash-2" />
             {deleteConfirmPending ? "Click again to confirm" : deleteLabel}
-            <DropdownMenu.Shortcut>⌘⌫</DropdownMenu.Shortcut>
+            <DropdownMenu.Shortcut combo="Mod+Backspace" />
           </DropdownMenu.Item>
         {/if}
       </DropdownMenu.Content>
