@@ -32,6 +32,18 @@ const JSON_RE = /^(jsonb|json)$/
 
 /** Distinct-value group is skipped past this many distinct values (not a picker). */
 const MAX_DISTINCT = 20
+/**
+ * Below this many non-empty values, "repeats" is noise: on a five-row page two
+ * matching names say nothing about the column.
+ */
+const MIN_DISTINCT_SAMPLE = 6
+/**
+ * How much of the column the distinct set may cover before it stops being a
+ * grouping. At 0.5 every value has to appear about twice on average - 18
+ * distinct names in 20 rows is a near-unique column, and listing them is the
+ * column reprinted into a menu rather than a filter anyone can use.
+ */
+const MAX_DISTINCT_RATIO = 0.5
 const MAX_DISTINCT_SHOWN = 15
 /** Top-level JSON keys shown as "has key" filters. */
 const MAX_JSON_KEYS = 12
@@ -143,7 +155,9 @@ function distinctValues(colValues) {
     seen.add(t)
     if (seen.size > MAX_DISTINCT) return null
   }
-  if (seen.size < 2 || seen.size >= nonNull) return null // no repeats → not categorical
+  if (nonNull < MIN_DISTINCT_SAMPLE) return null   // too little to call it anything
+  if (seen.size < 2) return null                   // one value: nothing to pick between
+  if (seen.size > nonNull * MAX_DISTINCT_RATIO) return null // near-unique → not a grouping
   return [...seen].sort()
 }
 

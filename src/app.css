@@ -277,24 +277,21 @@ textarea:not(.no-focus-ring):not(.no-field-frame) {
   box-shadow: none !important;
 }
 
-/* An editing cell keeps its field frame - the rounded, bordered input inside the
-   cell is the look, and it is the same frame every other field in the app wears.
-   What it must NOT have is a focus ring: the overlay around the cell is already
-   ringed (`ring-2 ring-inset` in DataTable), which is what marks an edit on a
-   canvas with no DOM to highlight. Two rings is what the enum and timestamp
-   editors were drawing. The overlay is the focus indicator; the control inside
-   it keeps its border and loses its outline. */
+/* An editing cell is frameless, for the same reason `.cell-fields` above is: the
+   cell IS the field. The overlay around it already draws the edit's only frame
+   (`ring-2 ring-inset ring-primary` in DataTable), which is what marks an edit on
+   a canvas with no DOM to highlight, and a 2px field border at the 12px field
+   radius inside that square 2px ring drew a second, rounder box a couple of
+   pixels in from the first - worst on the timestamp editor, where the border
+   traced only the text input and left the calendar button outside it. One ring,
+   flush with the cell, and the value sits where the canvas drew it. */
 [data-cell-editor] :is(input, textarea, select, button, [data-slot="select-trigger"]) {
   outline: none !important;
   box-shadow: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
 }
-/* The select trigger recolours its border while the menu is open, which reads as
-   a third accent line stacked on the overlay ring. Inside a cell it keeps the
-   resting field border. */
-[data-cell-editor] [data-slot="select-trigger"] {
-  border-color: var(--field-border) !important;
-}
-
 /* Fields that sit inside a container which already carries the frame (command
    palette, dropdown filters, the AI composer card) opt out. The outline follows
    the element's OWN border-radius, so on a square-cornered textarea inside a

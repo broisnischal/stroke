@@ -14,6 +14,17 @@
   import { getColumnEnumValues } from "$lib/cell-value.js";
   import { slotRoll } from "$lib/actions/slot-text.js";
   import { cn } from "$lib/utils.js";
+  import { IS_MAC } from "$lib/shortcuts.js";
+  /** Tooltip keycaps. A control that has a shortcut should say so where the
+   *  pointer already is - the shortcuts dialog is where you look when you do not
+   *  know a key exists, not when you are already on the button. */
+  const KEY = {
+    search: IS_MAC ? "⌘F" : "Ctrl+F",
+    filter: IS_MAC ? "⌥⇧F" : "Alt+Shift+F",
+    sort: IS_MAC ? "⌥⇧S" : "Alt+Shift+S",
+    columns: IS_MAC ? "⌥⇧C" : "Alt+Shift+C",
+    reset: IS_MAC ? "⌥⇧R" : "Alt+Shift+R",
+  };
   import { GAME_WORD, CLEAR_WORD, isMagic } from '$lib/games/easter-eggs.js'
   import {
     FILTER_OPS,
@@ -714,6 +725,7 @@
           type="text"
           role="searchbox"
           aria-label="Search all columns"
+          title="Search every column ({KEY.search})"
           class={cn(
             "field-surface h-7 w-full min-w-0 bg-transparent pl-7 text-ui-sm outline-none",
             showSearchOpts ? "pr-14" : "pr-7",
@@ -894,7 +906,7 @@
           filterCount > 0 ? "gap-1 !w-auto px-2" : "",
           (filterCount > 0 || filterBarOpen) && "bg-accent text-foreground",
         )}
-        title="Filter rows"
+        title="Filter rows ({KEY.filter})"
         disabled={loading || columns.length === 0}
         onclick={() => {
           if (filterBarOpen) filterBarOpen = false;
@@ -919,7 +931,7 @@
           <button
             {...props}
             class={cn(iconBtn, "shrink-0 @max-[420px]/tb:hidden", (rowSort?.column || sortMenuOpen) && "bg-accent text-foreground")}
-            title={sortLabel}
+            title="{sortLabel} ({KEY.sort})"
             disabled={loading || columns.length === 0}
           >
             <Icon name="arrow-up-down" class="size-3.5" />
@@ -957,7 +969,7 @@
           <button
             {...props}
             class={cn(iconBtn, "shrink-0 @max-[460px]/tb:hidden", hiddenCount > 0 ? "gap-1 w-auto px-2" : "", (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground")}
-            title="Show / hide columns"
+            title="Show / hide columns ({KEY.columns})"
             aria-label="Show or hide columns"
             disabled={loading || columns.length === 0}
           >
@@ -1033,7 +1045,7 @@
         <button
           type="button"
           class={cn(iconBtn, "shrink-0")}
-          title="Reset view: clear search, filters, sort, hidden columns and view mode"
+          title="Reset view: clear search, filters, sort, hidden columns and view mode ({KEY.reset})"
           disabled={loading}
           onclick={onresetview}
         >
@@ -1369,6 +1381,7 @@
             <DropdownMenu.Item disabled={total === 0 || readonly || !hasPrimaryKey} onSelect={onfindreplace}>
               <Icon name="replace" class="size-3.5" />
               Find & replace…
+              <DropdownMenu.Shortcut>{IS_MAC ? '⌘⌥F' : 'Ctrl+H'}</DropdownMenu.Shortcut>
             </DropdownMenu.Item>
           {/if}
           <DropdownMenu.Item disabled={loading || columns.length === 0} onSelect={onopenvirtualcols}>
@@ -1647,6 +1660,7 @@
           type="button"
           class="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-ui-sm text-muted-foreground transition-[color,background-color,transform] hover:bg-accent hover:text-foreground active:scale-[0.97]"
           onclick={addFilterAndFocus}
+          title="Add a filter condition ({KEY.filter} opens this bar)"
         >
           <Icon name="plus" class="size-3.5" />
           Add filter
@@ -1657,6 +1671,7 @@
             type="button"
             class="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-ui-sm text-muted-foreground transition-[color,background-color,transform] hover:bg-accent hover:text-foreground active:scale-[0.97]"
             onclick={clearFilters}
+            title="Remove every filter condition ({KEY.reset} also clears search, sort and hidden columns)"
           >
             Clear filters
           </button>

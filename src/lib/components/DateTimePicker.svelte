@@ -9,6 +9,9 @@
    * @property {boolean} [disabled]
    * @property {string} [colName]
    * @property {() => void} [onfocus]
+   * @property {(e: KeyboardEvent) => void} [onkeydown]
+   * @property {HTMLInputElement | null} [inputRef]
+   * @property {boolean} [iconTrailing]
    */
   import { Popover, PopoverTrigger, PopoverContent } from "$lib/components/ui/popover/index.js";
   import { Calendar } from "$lib/components/ui/calendar/index.js";
@@ -29,6 +32,22 @@
      * that genuinely want both are unaffected.
      */
     oninput = undefined,
+    /**
+     * Keys the picker does not claim itself (Enter, Tab, Ctrl+Backspace) go
+     * back to the caller, so an inline grid editor keeps its own commit and
+     * cancel keys while the field still owns ArrowDown and Escape.
+     */
+    onkeydown: onKeyDown = undefined,
+    /** The text field itself, for a caller that focuses or selects it. */
+    inputRef = $bindable(null),
+    /**
+     * Cell-editor trim: the calendar button sits after the value rather than
+     * before it, so the text stays on the x the canvas drew it at.
+     */
+    iconTrailing = false,
+    class: className = "",
+    inputClass = "",
+    inputStyle = "",
     showTime = true,
     disabled = false,
     colName,
@@ -189,22 +208,26 @@
        for "some Tuesday in March" - the field does both, and the value is the
        column's own text either way, so an epoch column stays editable as digits
        rather than being hidden behind a formatted label. -->
-  <div class="relative flex w-full min-w-0 items-center gap-1.5">
+  <div class={cn("relative flex w-full min-w-0 items-center gap-1.5", className)}>
     <!-- Anchor only: it spans the field so the calendar lines up with it, and
          takes no pointer events so the input keeps every click. -->
     <PopoverTrigger tabindex={-1} aria-hidden="true" class="pointer-events-none absolute inset-0 -z-10" />
-    <button
-      type="button"
-      {disabled}
-      tabindex={-1}
-      aria-label="Open calendar"
-      class="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-      onclick={() => (open = !open)}
-    >
-      <CalendarIcon class="size-3" />
-    </button>
+    {#snippet calendarButton()}
+      <button
+        type="button"
+        {disabled}
+        tabindex={-1}
+        aria-label="Open calendar"
+        class="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+        onclick={() => (open = !open)}
+      >
+        <CalendarIcon class="size-3" />
+      </button>
+    {/snippet}
+    {#if !iconTrailing}{@render calendarButton()}{/if}
     <input
       type="text"
+      bind:this={inputRef}
       {disabled}
       data-new-row-input={colName}
       value={value ?? ""}
@@ -215,16 +238,22 @@
       class={cn(
         "w-full min-w-0 bg-transparent font-mono text-ui-sm text-foreground outline-none",
         "placeholder:text-muted-foreground disabled:opacity-50",
+        inputClass,
       )}
+      style={inputStyle}
       oninput={(e) => onType(e.currentTarget.value)}
       onfocus={onfocus}
       onkeydown={(e) => {
         // The calendar is opt-in from the keyboard too, and Escape closes it
         // without the keystroke escaping to the row's cancel handler.
-        if (e.key === "ArrowDown" && !open) { e.preventDefault(); open = true }
-        else if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); open = false }
+        if (e.key === "ArrowDown" && !open) { e.preventDefault(); open = true; return }
+        if (e.key === "Escape" && open) { e.preventDefault(); e.stopPropagation(); open = false; return }
+        // Everything else is the caller's: without this the grid's inline editor
+        // never saw Enter or Tab, so a typed timestamp could not be committed.
+        onKeyDown?.(e);
       }}
     />
+    {#if iconTrailing}{@render calendarButton()}{/if}
   </div>
   <PopoverContent class="w-auto" align="start">
     <Calendar

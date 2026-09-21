@@ -5,7 +5,7 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight, appNumberGrouping, appHighlightActiveRow, appGridFontSize, appImagePreview, appOpenUrlsOnClick } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight, appNumberGrouping, appHighlightActiveRow, appGridFontSize, appImagePreview, appOpenUrlsOnClick, appRowNumbers } from '$lib/stores/settings.js'
   import { createSmoothScroll, wheelPixels } from '$lib/smooth-scroll.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
@@ -26,6 +26,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import Tag from "@lucide/svelte/icons/tag";
   import Ban from "@lucide/svelte/icons/ban";
   import Copy from "@lucide/svelte/icons/copy";
+  import MoveHorizontal from "@lucide/svelte/icons/move-horizontal";
+  import Type from "@lucide/svelte/icons/type";
   import CopyPlus from "@lucide/svelte/icons/copy-plus";
   import Pencil from "@lucide/svelte/icons/pencil";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
@@ -102,6 +104,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import Dices from "@lucide/svelte/icons/dices";
   import Clock from "@lucide/svelte/icons/clock";
   import MediaLightbox from "./MediaLightbox.svelte";
+  import CellEditorDialog from "./CellEditorDialog.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import ArrayCellEditor from "./ArrayCellEditor.svelte";
   import VectorCellViewer from "./VectorCellViewer.svelte";
@@ -218,6 +221,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     pendingEditCount = $bindable(0),
     /** Assigned by this component; the parent calls these to flush / discard staged edits. */
     applyEdits = $bindable(/** @type {() => void | Promise<void>} */ (() => {})),
+    /** Copy the staged changes as SQL instead of running them. */
+    copyEditsSql = $bindable(/** @type {() => void | Promise<void>} */ (() => {})),
     resetEdits = $bindable(/** @type {() => void} */ (() => {})),
     /** Assigned by this component; the parent (StatusBar) calls these to jump the
      *  table to the top / bottom. */
@@ -299,6 +304,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  loaded). Undefined rows render as a loading skeleton and the table reports
      *  its visible range via onvisiblerange so the parent can fetch/evict. */
     windowed = false,
+    /**
+     * Absolute index of `rows[0]` in the result set, so the row-number gutter
+     * counts from the page rather than from the screen: row 201 reads 201 on
+     * page 3, not 1. Windowed mode addresses rows absolutely already, so it
+     * passes 0.
+     */
+    rowNumberOffset = 0,
     /** Called (on change) with the currently visible row range in windowed mode. */
     onvisiblerange = /** @type {(start: number, end: number) => void} */ (() => {}),
     /** Windowed mode: what the parent's window fetcher is doing, so the grid can
@@ -673,6 +685,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const HEADER_H = $derived(Math.round(30 * canvasZoom))
   const GUTTER_EXPAND_W = $derived(Math.round(32 * canvasZoom))
   const GUTTER_SELECT_W = $derived(Math.round(36 * canvasZoom))
+  /**
+   * Row-number gutter, sized to the widest number it will actually draw. A fixed
+   * width either wastes space on a 50-row page or clips at a million rows, and
+   * this is measured from the page's last number, not from the total.
+   */
+  const GUTTER_NUM_W = $derived(
+    $appRowNumbers
+      ? Math.round((String(Math.max(1, rowNumberOffset + rows.length)).length * 7 + 16) * canvasZoom)
+      : 0,
+  )
   /** @type {HTMLCanvasElement | null} */
   let canvasEl = $state(null)
   /** @type {HTMLSpanElement | null} */
@@ -805,6 +827,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   );
   const menuEditable = $derived(canEditColumn(contextColIdx));
   const menuColPinned = $derived(pinnedColumns.has(menuColName));
+  /**
+   * NOT NULL column → no "Set NULL". The server would reject the write, so the
+   * item was an action that could only ever fail; it is dropped rather than
+   * disabled, because a disabled row still says "this is a thing you might do
+   * here" and on a NOT NULL column it never is.
+   */
+  const menuColNullable = $derived(columns[contextColIdx]?.nullable !== false);
   const menuCellNull = $derived(
     rows[contextRowIdx]?.[contextColIdx] === null ||
       rows[contextRowIdx]?.[contextColIdx] === undefined,
@@ -1552,10 +1581,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return built.ok ? /** @type {Record<string, unknown>} */ (built.values) : null;
   }
 
-  /** Open the DML preview for all staged changes (edits + deletes + a pending insert). */
-  function applyPendingEdits() {
+  /**
+   * The SQL for everything currently staged, in execution order.
+   *
+   * Pulled out of `applyPendingEdits` so "Copy to SQL" and "Apply" can never
+   * describe two different writes: the statements you copy are the statements
+   * that would run.
+   */
+  function pendingChangeSql() {
     const insertValues = pendingInsertValues();
-    if ((!hasPendingChanges && !insertValues) || saving) return;
     // A row staged for deletion doesn't need its cell updates written first.
     const editEntries = [...pendingEdits.values()].filter((e) => !pendingDeletes.has(e.rowIdx));
     const deleteIndices = [...pendingDeletes].sort((a, b) => a - b);
@@ -1566,6 +1600,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ...(deleteIndices.length ? buildDeleteStatements(deleteIndices, rows, dmlContext) : []),
       ...(insertValues ? buildInsertStatements(insertValues, dmlContext) : []),
     ];
+    return { insertValues, editEntries, deleteIndices, statements };
+  }
+
+  /**
+   * Put the staged changes on the clipboard as SQL and leave them staged.
+   *
+   * The way to get this SQL before was to open the preview dialog, select the
+   * text and cancel - and cancelling is one keystroke away from applying. A
+   * migration you want to paste into a review is not a write you want to run.
+   */
+  async function copyPendingChangeSql() {
+    const { statements, editEntries, deleteIndices, insertValues } = pendingChangeSql();
+    if (!statements.length) return;
+    const ok = await writeClipboard(formatSql(statements.join("\n")));
+    if (!ok) { toast.error("Could not copy to clipboard"); return; }
+    const parts = [];
+    if (editEntries.length) parts.push(`${editEntries.length} update${editEntries.length === 1 ? "" : "s"}`);
+    if (deleteIndices.length) parts.push(`${deleteIndices.length} delete${deleteIndices.length === 1 ? "" : "s"}`);
+    if (insertValues) parts.push("1 insert");
+    toast.success(`Copied ${statements.length} statement${statements.length === 1 ? "" : "s"}`, {
+      description: `${parts.join(", ")}. Your changes are still staged.`,
+    });
+  }
+
+  /** Open the DML preview for all staged changes (edits + deletes + a pending insert). */
+  function applyPendingEdits() {
+    const { insertValues, editEntries, deleteIndices, statements } = pendingChangeSql();
+    if ((!hasPendingChanges && !insertValues) || saving) return;
     const parts = [];
     if (editEntries.length) parts.push(`${editEntries.length} cell${editEntries.length === 1 ? "" : "s"} updated`);
     if (deleteIndices.length) parts.push(`${deleteIndices.length} row${deleteIndices.length === 1 ? "" : "s"} deleted`);
@@ -1710,6 +1772,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Surface staged-edit state to the parent (→ StatusBar Apply/Reset buttons).
   $effect(() => {
     applyEdits = applyPendingEdits;
+    copyEditsSql = copyPendingChangeSql;
     resetEdits = resetPendingEdits;
   });
   $effect(() => { pendingEditCount = pendingEdits.size + pendingDeletes.size; });
@@ -1967,6 +2030,28 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
   }
 
+  /**
+   * Copy one column's values, one per line, for the rows currently loaded.
+   *
+   * Scoped to the loaded page on purpose: the grid holds what it fetched, and
+   * silently issuing a second full-table read behind a menu item labelled "copy"
+   * is not what the label promises. The toast says how many rows went.
+   * @param {string} colName
+   */
+  async function copyColumnValues(colName) {
+    const ai = _nameToActualIdx.get(colName) ?? -1
+    if (ai < 0) return
+    const idx = selected.size > 0 ? [...selected].sort((a, b) => a - b) : rows.map((_, i) => i)
+    const text = idx.map((r) => cellCopyText(r, ai)).join('\n')
+    if (await writeClipboard(text)) {
+      toast.success(`Copied ${idx.length.toLocaleString()} ${idx.length === 1 ? 'value' : 'values'}`, {
+        description: colName,
+      })
+    } else {
+      toast.error('Could not copy to clipboard')
+    }
+  }
+
   async function copyColSelection() {
     const activeCols = columns.filter((c) => selectedCols.has(c.name))
     if (!activeCols.length) return
@@ -2159,6 +2244,45 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Open the dedicated array editor for a cell (from the context menu). */
+  // ── Full-size cell editor (Shift+Space) ───────────────────────────────────
+  let cellEditorOpen = $state(false);
+  let cellEditorRow = $state(-1);
+  let cellEditorCol = $state(-1);
+  let cellEditorName = $state("");
+  let cellEditorType = $state("");
+  let cellEditorValue = $state(/** @type {unknown} */ (null));
+
+  /**
+   * Open the focused cell at full size. A 28px row is the wrong surface for a
+   * paragraph, a stack trace or a 40-line payload, and the inline editor shows
+   * one line of it.
+   * @param {number} rowIdx @param {number} colIdx
+   */
+  function openCellEditor(rowIdx, colIdx) {
+    const col = columns[colIdx];
+    if (!col || rowIdx < 0) return;
+    const value = effectiveCellValue(rowIdx, colIdx);
+    // Only a preview of an oversize cell was ever loaded; editing it would write
+    // the preview back over the real value.
+    const oversize = oversizeCellInfo(value);
+    cellEditorRow = rowIdx;
+    cellEditorCol = colIdx;
+    cellEditorName = col.name ?? "value";
+    cellEditorType = String(col.dataType ?? col.data_type ?? _colCache[colIdx]?.colType ?? "");
+    cellEditorValue = oversize ? oversize.preview : value;
+    cellEditorOpen = true;
+  }
+
+  /** Stage the edited value - same queue, undo and Apply as an inline edit. */
+  function commitCellEditor(/** @type {string} */ next) {
+    const rowIdx = cellEditorRow, colIdx = cellEditorCol;
+    if (!canEditColumn(colIdx)) return;
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, next);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: next }];
+    futureEdits = [];
+  }
+
   function openArrayEditor(rowIdx, colIdx) {
     const col = columns[colIdx];
     if (!col) return;
@@ -3024,7 +3148,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
   // ── Canvas geometry (single source of truth for draw + hit-test) ───────────
   const gutterWidth = $derived(
-    (showRowExpand ? GUTTER_EXPAND_W : 0) + (showSelection ? GUTTER_SELECT_W : 0),
+    (showRowExpand ? GUTTER_EXPAND_W : 0) + (showSelection ? GUTTER_SELECT_W : 0) + GUTTER_NUM_W,
   )
   const geom = $derived(
     computeColumnGeometry({
@@ -3095,22 +3219,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Handles hidden behind the frozen pinned region are dropped - except the
     // pinned columns' own edges, which are what defines that region.
     const occludeLeft = geom.frozenWidth
+    // A handle is centred on its column's right edge and is 10px wide, so the
+    // last column's handle lands half outside the viewport as soon as the table
+    // is scrolled to its end - and the sliver that remains sits under the
+    // vertical scrollbar. The last column could not be resized at all. Every
+    // handle is pulled far enough in to keep its whole target reachable; at 7px
+    // the grab zone still overlaps the edge it resizes.
+    const maxX = _viewportWidth - 7
+    const place = (/** @type {number} */ x) => Math.min(x, maxX)
     for (const col of geom.cols) {
       const x = colDrawnX(col, geom, _scrollLeft) + col.w
       if ((!col.pinned && x < occludeLeft - 6) || x > _viewportWidth + 6) continue
-      out.push({ name: col.name, x })
+      out.push({ name: col.name, x: place(x) })
     }
     // Virtual expr column resize handles
     for (const vc of _vexprLayout) {
       const x = vc.x + vc.w - _scrollLeft
       if (x < occludeLeft - 6 || x > _viewportWidth + 6) continue
-      out.push({ name: `__vcol__${vc.id}`, x })
+      out.push({ name: `__vcol__${vc.id}`, x: place(x) })
     }
     // Virtual rel column resize handles (right edge of each virtual col)
     for (const vp of _vrelLayout) {
       const x = vp.x + vp.w - _scrollLeft
       if (x < occludeLeft - 6 || x > _viewportWidth + 6) continue
-      out.push({ name: `__vrel__${vp.i}`, x })
+      out.push({ name: `__vrel__${vp.i}`, x: place(x) })
     }
     return out
   })
@@ -3902,6 +4034,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
 
+    // Shift+Space: the focused cell, full size. Space alone stays free for the
+    // row-selection convention, and the grid has no other use for the chord.
+    if (e.key === " " && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!editingCell && focusedRow !== null && focusedCol !== null) {
+        const ai = visToActualColIdx(focusedCol);
+        if (ai >= 0) {
+          e.preventDefault();
+          openCellEditor(focusedRow, ai);
+          return;
+        }
+      }
+    }
+
     // Ctrl+C (copy selection/range/cell) is handled by the document-capture
     // listener above so it works regardless of which grid element holds focus.
 
@@ -4468,6 +4613,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       cFg, cText, cMuted, cGrid, cBorder, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
       AMBER, BLUE_FG, RED, cPrimary, frozenW, tableStyle, dotSize, vSeps, firstColIdx,
       rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
+      // Checked rows, so the cell cursor can drop its side strokes on a row that
+      // is already tinted end to end.
+      selectedRows: selected,
       // Frame-constant snapshots of the reactive values the per-cell loops read.
       // Every entry below was previously read straight off the reactive graph
       // inside drawCell, i.e. once per cell per frame. A $derived read is not a
@@ -4850,44 +4998,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const isVHov = hoveredRow === idx && hoveredColName === _vrelHoverKeys[vi]
       if (!_fonts) return
 
-      // Badge: a quiet chip that is always a chip. It used to be a fully rounded
-      // capsule with no border at rest, so hovering conjured a lozenge out of
-      // what looked like plain text, and a long table name inside a full-radius
-      // pill read as a balloon. Now the shape never changes on hover - only its
-      // surface and border strength do - and the radius matches the app's
-      // rounded-md, not a capsule.
-      const badgeFontPx = Math.max(10, _fonts.cellPx - 1)
-      const bPadX = Math.round(9 * canvasZoom)
-      const bH = Math.min(Math.round(badgeFontPx * 1.9), rh - Math.round(6 * canvasZoom))
-      const bR = Math.min(Math.round(6 * canvasZoom), Math.round(bH / 2))
-      ctx.font = `500 ${badgeFontPx}px ${_fonts.family}`
+      // A relation is a link, so it draws as one: the link glyph, then the table
+      // name as plain text. It was a bordered chip on every row - and the value
+      // is the same for every row in the column, so a screenful of them was
+      // thirty identical lozenges carrying one word of information between them.
+      // The icon says "relation" once per cell; the text carries the name.
+      const relFontPx = Math.max(10, _fonts.cellPx - 1)
+      ctx.font = `500 ${relFontPx}px ${_fonts.family}`
+      const relPadX = Math.round(10 * canvasZoom)
+      const relIcon = Math.round(12 * canvasZoom)
+      const relGap = Math.round(7 * canvasZoom)
 
-      // Consistent side gutters so the chip is centered with breathing room.
-      const gutter = Math.round(12 * canvasZoom)
-      const maxLabelW = cw - gutter * 2 - bPadX * 2
-      const labelTxt = truncText(ctx, vc.label, maxLabelW)
-      const textW = textWidth(ctx, labelTxt)
-      const bW = Math.min(textW + bPadX * 2, cw - gutter * 2)
-      const bX = Math.round(cellX + (cw - bW) / 2)
-      const bY = Math.round(ry + (rh - bH) / 2)
+      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.06); ctx.fillRect(cellX, ry, cw, rh) }
 
-      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(cellX, ry, cw, rh) }
-
-      ctx.fillStyle = isActive
-        ? withAlpha(c.cPrimary, 0.12)
-        : isVHov ? withAlpha(c.cMutedBg, 0.55) : withAlpha(c.cMutedBg, 0.32)
-      roundRect(ctx, bX, bY, bW, bH, bR); ctx.fill()
-
-      // Hairline at rest too, so the chip has an edge without shouting.
-      ctx.strokeStyle = isActive
-        ? withAlpha(c.cPrimary, 0.32)
-        : isVHov ? withAlpha(c.cMuted, 0.28) : withAlpha(c.cBorder, 0.5)
-      ctx.lineWidth = 1
-      roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
-
-      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, isVHov ? 0.85 : 0.7)
-      ctx.textBaseline = 'middle'; ctx.textAlign = 'center'
-      ctx.fillText(labelTxt, bX + bW / 2, ry + rh / 2 + 0.5)
+      drawIcon(
+        ctx, 'link-2',
+        cellX + relPadX, ry + (rh - relIcon) / 2, relIcon,
+        isActive ? c.cPrimary : withAlpha(c.cMuted, isVHov ? 1 : 0.8),
+        1.8,
+      )
+      const relTextX = cellX + relPadX + relIcon + relGap
+      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, isVHov ? 0.9 : 0.62)
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left'
+      ctx.fillText(truncText(ctx, vc.label, cw - (relTextX - cellX) - relPadX), relTextX, ry + rh / 2 + 0.5)
     }
 
     // ── Batched grid pass ───────────────────────────────────────────────────
@@ -5195,7 +5328,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (isFocusedCell && !c.rangeColNames) {
       ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
       ctx.lineWidth = 2
-      ctx.strokeRect(cellX + 1.5, ry + 1.5, w - 3, rh - 3)
+      if (c.selectedRows?.has(idx)) {
+        // On a checked row, top and bottom only. A full box around one cell of a
+        // row that is already tinted edge to edge added two vertical lines
+        // through the middle of that tint - the row says "this row", the cell
+        // cursor only has to say "this column", and the side strokes were the
+        // part that read as a stray border.
+        ctx.beginPath()
+        ctx.moveTo(cellX, ry + 1)
+        ctx.lineTo(cellX + w, ry + 1)
+        ctx.moveTo(cellX, ry + rh - 1)
+        ctx.lineTo(cellX + w, ry + rh - 1)
+        ctx.stroke()
+      } else {
+        ctx.strokeRect(cellX + 1.5, ry + 1.5, w - 3, rh - 3)
+      }
     }
   }
 
@@ -5237,6 +5384,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         { checked: selected.has(idx) },
         { border: c.cMuted, fill: c.cPrimary, mark: c.cPanel })
       gx += GUTTER_SELECT_W
+    }
+    if (GUTTER_NUM_W > 0) {
+      // Right-aligned tabular digits: a column of numbers lines up on its last
+      // digit or it reads as noise. Muted, and a shade brighter on the focused
+      // row so the eye can find where it is without a second highlight.
+      ctx.font = c.fonts.type
+      ctx.textAlign = 'right'
+      ctx.fillStyle = focusedRow === idx ? c.cFg : c.cMuted
+      ctx.fillText(String(rowNumberOffset + idx + 1), gx + GUTTER_NUM_W - Math.round(7 * canvasZoom), ry + rh / 2 + 0.5)
+      ctx.textAlign = 'left'
+      gx += GUTTER_NUM_W
     }
     // (Gutter separator is batched once per row in drawBodyRow.)
   }
@@ -5282,6 +5440,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           { checked: allSelected, indeterminate: someSelected },
           { border: c.cMuted, fill: c.cPrimary, mark: c.cPanel })
         gx += GUTTER_SELECT_W
+      }
+      if (GUTTER_NUM_W > 0) {
+        // Right-aligned like the numbers under it, so the column has one edge.
+        ctx.font = c.fonts.type
+        ctx.textAlign = 'right'
+        ctx.fillStyle = c.cMuted
+        ctx.fillText('#', gx + GUTTER_NUM_W - Math.round(7 * canvasZoom), HEADER_H / 2 + 0.5)
+        ctx.textAlign = 'left'
+        gx += GUTTER_NUM_W
       }
       ctx.strokeStyle = c.cGrid
       ctx.lineWidth = 1
@@ -5339,11 +5506,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.strokeStyle = c.cGrid; ctx.lineWidth = 1
       ctx.beginPath(); ctx.moveTo(x + cw - 0.5, 0); ctx.lineTo(x + cw - 0.5, HEADER_H); ctx.stroke()
       if (!_fonts) continue
-      // Centre the header label over the centred cell badge - a left-aligned label
-      // above centred pills reads as a misaligned "gap" in the relation column.
+      // Left-aligned, on the same x as the cell text below it. It was centred to
+      // sit over centred chips; with the chips gone, centring it would leave the
+      // header floating half a column right of its own values.
+      const hdrTextX = Math.round(10 * canvasZoom) + Math.round(12 * canvasZoom) + Math.round(7 * canvasZoom)
       ctx.font = _fonts.header; ctx.fillStyle = withAlpha(c.cMuted, 0.6)
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.fillText(truncText(ctx, vc.label, cw - 24), x + cw / 2, HEADER_H / 2 + 0.5)
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      ctx.fillText(truncText(ctx, vc.label, cw - hdrTextX - 12), x + hdrTextX, HEADER_H / 2 + 0.5)
       // Resize edge affordance (matches regular column behaviour)
       if (_resizeHoverCol === vrelKey || resizingColName === vrelKey) {
         ctx.strokeStyle = withAlpha(c.cPrimary, 0.7)
@@ -6265,6 +6434,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
     pendingEditCount = 0
     applyEdits = () => {}
+    copyEditsSql = () => {}
     resetEdits = () => {}
     scrollToTop = () => {}
     scrollToBottom = () => {}
@@ -6319,7 +6489,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           oncontextmenu={(e) => onCanvasContextMenu(e, bitsContextMenu)}
           onscroll={onContainerScroll}
           onkeydown={handleTableKeydown}
-          onfocusin={() => { isTableFocused = true; }}
+          onfocusin={(e) => {
+            isTableFocused = true;
+            // Tab in from the sidebar lands on the grid itself. With no cell
+            // cursor there is nothing on screen to say focus arrived at all, so
+            // the first cell takes it - the same one an arrow key would have
+            // moved to. Only when the container is the target: focus entering a
+            // cell editor or a new-row field must not reset the cursor.
+            if (e.target === tableContainer && focusedRow === null && rows.length && visibleColumns.length) {
+              focusedRow = 0; focusedCol = 0;
+            }
+          }}
           onfocusout={(e) => {
             if (!tableContainer?.contains(e.relatedTarget instanceof Element ? e.relatedTarget : null)) {
               isTableFocused = false;
@@ -6669,6 +6849,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                      started typing. Same padding, same alignment, no jump. -->
                 {@const eAlignRight = isRightAlignedColumn(editingCell?.colIdx ?? -1)}
                 {@const eFieldStyle = `padding-left:${CELL_PAD_X}px;padding-right:${CELL_PAD_X}px;text-align:${eAlignRight ? 'right' : 'left'}`}
+                <!-- The date editor carries a calendar button beside its field, so
+                     it pads only the side the text is anchored to and lets the
+                     button sit on the other one. Padding both sides would push the
+                     value off the x the canvas drew it at by the button's width. -->
+                {@const ePickerStyle = eAlignRight
+                  ? `padding-right:${CELL_PAD_X}px;text-align:right`
+                  : `padding-left:${CELL_PAD_X}px;text-align:left`}
                 <div
                   in:fade={{ duration: 100, easing: cubicOut }}
                   data-cell-editor
@@ -6789,30 +6976,39 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                          Picking commits immediately (like the enum dropdown): a
                          click-away cancels the inline edit, so we can't defer the
                          commit without losing the pick. -->
-                    <div class="flex h-full w-full items-center px-3">
-                      <!-- `editingCell?.draft`, not `editingCell.draft`: a prop is a
-                           lazy getter, and picking a date runs onchange → commitEdit,
-                           which sets `editingCell = null` synchronously. The picker's
-                           own deriveds then re-read this getter before it unmounts, so
-                           a bare dereference throws (null is not an object). -->
-                      <DateTimePicker
-                        colName={ecol?.name}
-                        showTime={eDateTime}
-                        disabled={saving}
-                        value={editingCell?.draft ?? ''}
-                        oninput={(v) => {
-                          // Typing only stages. Committing here would end the
-                          // edit after the first character, which is what made
-                          // the field look like it refused input.
-                          if (editingCell) editingCell.draft = v;
-                        }}
-                        onchange={(v) => {
-                          if (!editingCell) return;
-                          editingCell.draft = v;
-                          void commitEdit();
-                        }}
-                      />
-                    </div>
+                    <!-- `editingCell?.draft`, not `editingCell.draft`: a prop is a
+                         lazy getter, and picking a date runs onchange → commitEdit,
+                         which sets `editingCell = null` synchronously. The picker's
+                         own deriveds then re-read this getter before it unmounts, so
+                         a bare dereference throws (null is not an object).
+                         -
+                         It wears the same padding, alignment and type size as the
+                         plain text editor above, and hands its input to `editInput`
+                         and its spare keys to `handleEditKeydown`, so a timestamp
+                         commits on Enter and tabs on Tab like every other cell. -->
+                    <DateTimePicker
+                      bind:inputRef={editInput}
+                      colName={ecol?.name}
+                      showTime={eDateTime}
+                      disabled={saving}
+                      iconTrailing={!eAlignRight}
+                      class={eAlignRight ? 'h-full pl-2' : 'h-full pr-2'}
+                      inputClass="text-ui-xs"
+                      inputStyle={ePickerStyle}
+                      value={editingCell?.draft ?? ''}
+                      oninput={(v) => {
+                        // Typing only stages. Committing here would end the
+                        // edit after the first character, which is what made
+                        // the field look like it refused input.
+                        if (editingCell) editingCell.draft = v;
+                      }}
+                      onchange={(v) => {
+                        if (!editingCell) return;
+                        editingCell.draft = v;
+                        void commitEdit();
+                      }}
+                      onkeydown={handleEditKeydown}
+                    />
                   {:else if eTimeOnly}
                     <input
                       bind:this={editInput}
@@ -7014,33 +7210,67 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {$t('menu.hideColumn')}
         </ContextMenu.Item>
         <ContextMenu.Separator />
-        <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'left'))}>
-          <ChevronLeft />
-          {$t('menu.moveLeft')}
-        </ContextMenu.Item>
-        <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'right'))}>
-          <ChevronRight />
-          {$t('menu.moveRight')}
-        </ContextMenu.Item>
-        <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'first'))}>
-          <ChevronsLeft />
-          {$t('menu.moveFirst')}
-        </ContextMenu.Item>
-        <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'last'))}>
-          <ChevronsRight />
-          {$t('menu.moveLast')}
-        </ContextMenu.Item>
-        {#if columnOrder.length > 0}
-          <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnOrder())}>
-            <RotateCcw />
-            {$t('menu.resetOrder')}
-          </ContextMenu.Item>
-        {/if}
-        <ContextMenu.Separator />
+        <!-- One "Move" entry instead of four stacked ones. Four of the menu's
+             fourteen rows were the same verb with a different adverb, which is
+             what a submenu is for - and it puts "Reset order" next to the actions
+             that change the order rather than five rows below them. -->
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger disabled={hIsFirst && hIsLast}>
+            <MoveHorizontal />
+            {$t('menu.move')}
+          </ContextMenu.SubTrigger>
+          <ContextMenu.SubContent class="min-w-44">
+            <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'left'))}>
+              <ChevronLeft />
+              {$t('menu.moveLeft')}
+            </ContextMenu.Item>
+            <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'right'))}>
+              <ChevronRight />
+              {$t('menu.moveRight')}
+            </ContextMenu.Item>
+            <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'first'))}>
+              <ChevronsLeft />
+              {$t('menu.moveFirst')}
+            </ContextMenu.Item>
+            <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'last'))}>
+              <ChevronsRight />
+              {$t('menu.moveLast')}
+            </ContextMenu.Item>
+            {#if columnOrder.length > 0}
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnOrder())}>
+                <RotateCcw />
+                {$t('menu.resetOrder')}
+              </ContextMenu.Item>
+            {/if}
+          </ContextMenu.SubContent>
+        </ContextMenu.Sub>
         <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnWidth(hcol))}>
           <RotateCcw />
           {$t('menu.resetWidth')}
         </ContextMenu.Item>
+        <ContextMenu.Separator />
+        <!-- Copying a column was only possible by selecting it first; the header
+             menu is where you are already pointing at the column. -->
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger>
+            <Copy />
+            {$t('menu.copy')}
+          </ContextMenu.SubTrigger>
+          <ContextMenu.SubContent class="min-w-48">
+            <ContextMenu.Item onSelect={() => runMenuAction(() => void copyColumnValues(hcol))}>
+              <Copy />
+              All cell values
+              <span class="ml-auto text-ui-3xs tabular-nums text-muted-foreground">
+                {(selected.size > 0 ? selected.size : rows.length).toLocaleString()}
+              </span>
+            </ContextMenu.Item>
+            <ContextMenu.Item onSelect={() => runMenuAction(() => void writeClipboard(hcol))}>
+              <Type />
+              Column name
+            </ContextMenu.Item>
+          </ContextMenu.SubContent>
+        </ContextMenu.Sub>
         {#if hasTableContext}
           <ContextMenu.Separator />
           <ContextMenu.Item onSelect={() => runMenuAction(() => { statsCol = statsCol === hcol ? null : hcol })}>
@@ -7275,13 +7505,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         {/if}
         <ContextMenu.Separator />
         {#if hasTableContext}
-          <ContextMenu.Item
-            disabled={!menuEditable || menuCellNull || readonly}
-            onSelect={() => runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
-          >
-            <CircleSlash />
-            Set NULL
-          </ContextMenu.Item>
+          {#if menuColNullable}
+            <ContextMenu.Item
+              disabled={!menuEditable || menuCellNull || readonly}
+              onSelect={() => runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
+            >
+              <CircleSlash />
+              Set NULL
+            </ContextMenu.Item>
+          {/if}
           {#if selected.size > 1 && selected.has(contextRowIdx)}
             <ContextMenu.Item
               disabled={!menuEditable || menuCellOversize || readonly}
@@ -7441,6 +7673,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     />
   {/await}
 {/if}
+
+<CellEditorDialog
+  bind:open={cellEditorOpen}
+  colName={cellEditorName}
+  colType={cellEditorType}
+  value={cellEditorValue}
+  readOnly={readonly || !canEditColumn(cellEditorCol)}
+  oncommit={commitCellEditor}
+/>
 
 <VectorCellViewer
   bind:open={vectorViewerOpen}

@@ -178,6 +178,8 @@ const DICT = {
     'menu.clearSort': 'Clear sort',
     'menu.filterByColumn': 'Filter by this column',
     'menu.hideColumn': 'Hide column',
+    'menu.move': 'Move',
+    'menu.copy': 'Copy',
     'menu.moveLeft': 'Move left',
     'menu.moveRight': 'Move right',
     'menu.moveFirst': 'Move to first',
