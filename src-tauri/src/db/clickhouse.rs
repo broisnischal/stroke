@@ -18,6 +18,9 @@ fn client() -> &'static reqwest::Client {
             .tcp_keepalive(std::time::Duration::from_secs(60))
             .pool_max_idle_per_host(10)
             .pool_idle_timeout(std::time::Duration::from_secs(90))
+            // Bounded, but generously: this carries queries, not just metadata.
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(120))
             .build()
             .expect("failed to build ClickHouse HTTP client")
     })
@@ -57,6 +60,31 @@ fn is_read_query(sql: &str) -> bool {
 /// wrapped with `FORMAT JSONCompact` and parsed into columns + rows; write/DDL
 /// statements return an empty result with a success message.
 pub async fn query(config: &ClickhouseConfig, sql: &str) -> Result<SqlResult, String> {
+    query_in(config, &config.database, sql).await
+}
+
+/// Which database a statement runs against: the schema the sidebar has selected,
+/// or the connection's own when that is blank.
+///
+/// ClickHouse databases are what the app calls schemas, and everything here used
+/// to be pinned to the one named on the connection - `list_schemas` returned
+/// `[config.database]` and nothing else, and every query resolved
+/// `currentDatabase()` to it. A connection opened on `default` therefore showed
+/// "Nothing in default yet" with no way to reach the databases that did have
+/// tables, because the switcher had a single entry.
+fn database_for(config: &ClickhouseConfig, schema: &str) -> String {
+    let s = schema.trim();
+    if s.is_empty() { config.database.clone() } else { s.to_string() }
+}
+
+/// `query`, against a named database. The database goes on the URL rather than
+/// into the SQL, so `currentDatabase()` and unqualified table names both resolve
+/// to it and no statement here needs to be rewritten.
+pub async fn query_in(
+    config: &ClickhouseConfig,
+    database: &str,
+    sql: &str,
+) -> Result<SqlResult, String> {
     let trimmed = sql.trim().trim_end_matches(';');
     let read = is_read_query(trimmed);
     let body = if read {
@@ -65,7 +93,7 @@ pub async fn query(config: &ClickhouseConfig, sql: &str) -> Result<SqlResult, St
         trimmed.to_string()
     };
 
-    let url = format!("{}/?database={}", config.base_url(), urlencoding::encode(&config.database));
+    let url = format!("{}/?database={}", config.base_url(), urlencoding::encode(database));
     let t0 = Instant::now();
     let res = client()
         .post(&url)
@@ -144,10 +172,29 @@ fn quote_ident(ident: &str) -> String {
 
 // ── Schema introspection ───────────────────────────────────────────────────────
 
-pub async fn list_tables(config: &ClickhouseConfig) -> Result<Vec<TableInfo>, String> {
+/// Every database on the server, which is what the sidebar's schema switcher
+/// offers. `system` is included deliberately - it is where ClickHouse keeps the
+/// tables worth looking at when something is wrong, and the switcher marks a
+/// system schema with its own icon.
+pub async fn list_schemas(config: &ClickhouseConfig) -> Result<Vec<String>, String> {
+    let r = query(config, "SELECT name FROM system.databases ORDER BY name").await?;
+    let name_i = col_index(&r, "name");
+    let mut names: Vec<String> = r
+        .rows
+        .iter()
+        .filter_map(|row| Some(row.get(name_i)?.as_str()?.to_string()))
+        .collect();
+    // A server that answers but lists nothing still has the one we are on.
+    if names.is_empty() {
+        names.push(config.database.clone());
+    }
+    Ok(names)
+}
+
+pub async fn list_tables(config: &ClickhouseConfig, schema: &str) -> Result<Vec<TableInfo>, String> {
     let sql = "SELECT name, engine, coalesce(total_rows, 0) AS rows \
                FROM system.tables WHERE database = currentDatabase() ORDER BY name";
-    let r = query(config, sql).await?;
+    let r = query_in(config, &database_for(config, schema), sql).await?;
     let name_i = col_index(&r, "name");
     let eng_i = col_index(&r, "engine");
     let rows_i = col_index(&r, "rows");
@@ -172,6 +219,7 @@ pub async fn list_indexes(_config: &ClickhouseConfig) -> Result<Vec<IndexInfo>, 
 
 pub async fn get_column_structure(
     config: &ClickhouseConfig,
+    schema: &str,
     table: &str,
 ) -> Result<Vec<ColumnStructureRow>, String> {
     let sql = format!(
@@ -179,7 +227,7 @@ pub async fn get_column_structure(
          FROM system.columns WHERE database = currentDatabase() AND table = '{}' ORDER BY position",
         table.replace('\'', "\\'")
     );
-    let r = query(config, &sql).await?;
+    let r = query_in(config, &database_for(config, schema), &sql).await?;
     let pos_i = col_index(&r, "position");
     let name_i = col_index(&r, "name");
     let type_i = col_index(&r, "type");
@@ -209,9 +257,9 @@ pub async fn get_column_structure(
         .collect())
 }
 
-pub async fn get_ddl(config: &ClickhouseConfig, table: &str) -> Result<String, String> {
+pub async fn get_ddl(config: &ClickhouseConfig, schema: &str, table: &str) -> Result<String, String> {
     let sql = format!("SHOW CREATE TABLE {}", quote_ident(table));
-    let r = query(config, &sql).await?;
+    let r = query_in(config, &database_for(config, schema), &sql).await?;
     Ok(r.rows
         .first()
         .and_then(|row| row.first())
@@ -224,6 +272,7 @@ pub async fn get_ddl(config: &ClickhouseConfig, table: &str) -> Result<String, S
 
 pub async fn get_table_rows(
     config: &ClickhouseConfig,
+    schema: &str,
     table: &str,
     limit: i64,
     offset: i64,
@@ -243,7 +292,7 @@ pub async fn get_table_rows(
     let has_search = search.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
     let has_filters = filters.as_ref().is_some_and(|f| !f.is_empty());
     let cols = if include_meta || has_search || has_filters {
-        get_column_structure(config, table).await?
+        get_column_structure(config, schema, table).await?
     } else {
         Vec::new()
     };
@@ -261,7 +310,9 @@ pub async fn get_table_rows(
     // round-trips concurrently, matching the pg and D1 paths.
     let count_sql = format!("SELECT count() FROM {tq}{where_clause}");
     let data_sql = format!("SELECT * FROM {tq}{where_clause}{order} LIMIT {limit} OFFSET {offset}");
-    let (count_res, data_res) = tokio::join!(query(config, &count_sql), query(config, &data_sql));
+    let db = database_for(config, schema);
+    let (count_res, data_res) =
+        tokio::join!(query_in(config, &db, &count_sql), query_in(config, &db, &data_sql));
     let total = count_res?
         .rows
         .first()

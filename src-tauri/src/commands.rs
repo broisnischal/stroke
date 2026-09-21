@@ -854,6 +854,8 @@ pub async fn pg_count_table_rows(
     table: String,
     search: Option<String>,
     search_is_regex: Option<bool>,
+    // Optional - defaults to false. Mirrors the rows query's own flag.
+    search_case_sensitive: Option<bool>,
     filters: Option<Vec<crate::db::RowFilter>>,
 ) -> Result<i64, String> {
     count_table_rows(
@@ -862,6 +864,7 @@ pub async fn pg_count_table_rows(
         table,
         search,
         search_is_regex.unwrap_or(false),
+        search_case_sensitive.unwrap_or(false),
         filters,
     )
     .await

@@ -423,7 +423,7 @@ pub async fn geo_features(
                 f
             })
             .collect();
-        build_where(&columns?, None, false, &filters)?
+        build_where(&columns?, None, false, false, &filters)?
     };
 
     // Viewport clause, appended to the user's filter. A missing bbox means "the

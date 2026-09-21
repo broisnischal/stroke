@@ -11,6 +11,8 @@ pub mod libsql;
 pub mod live;
 pub mod mysql;
 pub mod redis;
+#[cfg(test)]
+mod dialect_matrix;
 mod query;
 mod schema;
 pub mod sql_util;

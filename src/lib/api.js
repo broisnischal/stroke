@@ -753,7 +753,7 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
  * count is unavailable (non-Postgres engine); callers keep their current total.
  * @param {string} schema
  * @param {string} table
- * @param {{ search?: string, searchIsRegex?: boolean, filters?: { column: string, op: string, value?: string }[] }} [query]
+ * @param {{ search?: string, searchIsRegex?: boolean, searchCaseSensitive?: boolean, filters?: { column: string, op: string, value?: string }[] }} [query]
  * @returns {Promise<number>}
  */
 export async function countTableRows(schema, table, query = {}) {
@@ -762,6 +762,9 @@ export async function countTableRows(schema, table, query = {}) {
     table,
     search: query.search?.trim() || null,
     searchIsRegex: query.searchIsRegex ?? false,
+    // Mirrors getTableRows: a count taken under a different predicate than the
+    // rows is a pager that disagrees with the page.
+    searchCaseSensitive: query.searchCaseSensitive ?? false,
     filters: query.filters?.length ? query.filters : null,
   })
   return Number(n)

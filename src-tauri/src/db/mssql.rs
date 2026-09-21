@@ -39,8 +39,30 @@ pub async fn connect(cfg: &MssqlConfig) -> Result<MssqlClient, String> {
                 .await
                 .map_err(|e| format!("MS SQL connection failed: {e}"))
         }
-        Err(e) => Err(format!("MS SQL connection failed: {e}")),
+        Err(e) => Err(explain_connect_error(cfg, &e.to_string())),
     }
+}
+
+/// Turn a driver error into something that says what to do about it.
+///
+/// One case earns its own sentence. SQL Server 2022 ships a self-signed
+/// certificate that is X.509 v1, and negotiates TLS 1.3 - and the rustls
+/// backend's "trust the certificate anyway" verifier does not override
+/// `verify_tls13_signature`, so rustls parses the certificate after all and
+/// rejects the version. What reaches the user is
+/// `invalid peer certificate: Other(UnsupportedCertVersion)`, which names
+/// neither the cause nor the one setting that avoids it.
+fn explain_connect_error(cfg: &MssqlConfig, err: &str) -> String {
+    if cfg.encrypt && err.contains("UnsupportedCertVersion") {
+        return format!(
+            "MS SQL connection failed: the server's certificate is an older \
+             format (X.509 v1) that this client cannot negotiate TLS 1.3 \
+             against, even with \"Trust server certificate\" on. Turn \
+             Encrypt off for this connection, or install a v3 certificate on \
+             the server. ({err})"
+        );
+    }
+    format!("MS SQL connection failed: {err}")
 }
 
 fn build_config(cfg: &MssqlConfig) -> Config {

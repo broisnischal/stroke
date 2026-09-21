@@ -923,9 +923,43 @@ fn is_missing_binary_output(err: &str) -> bool {
     err.contains("no binary output function available for type")
 }
 
-/// The columns of a table whose types have no binary output function, in
-/// attribute order. Only consulted after a fetch has already failed with
-/// `is_missing_binary_output`, so an ordinary table never pays for it.
+/// Postgres types whose binary form a cell cannot render, though the server
+/// will happily send it.
+///
+/// The OID-alias family is the whole list. `typsend` for `regproc` is
+/// `regprocsend`, so the fetch succeeds and hands over four big-endian bytes -
+/// which is not text, is not a type the extension decoder models, and so came
+/// out of `cell_to_json` as a hex preview. `pg_aggregate.aggfnoid` read
+/// `\x00000aba` where psql shows `array_agg_transfn`; that name only exists in
+/// the type's *text* output, which is why these are cast rather than decoded.
+pub(crate) const PG_TEXT_ONLY_TYPES: &[&str] = &[
+    "regproc",
+    "regprocedure",
+    "regoper",
+    "regoperator",
+    "regclass",
+    "regcollation",
+    "regtype",
+    "regrole",
+    "regnamespace",
+    "regconfig",
+    "regdictionary",
+];
+
+/// True when a result column's type is one of those - matched on the type name
+/// the driver reports, which is upper-case for types sqlx models and the raw
+/// `typname` for the rest.
+fn pg_type_is_text_only(type_name: &str) -> bool {
+    let lower = type_name.to_ascii_lowercase();
+    PG_TEXT_ONLY_TYPES.contains(&lower.as_str())
+}
+
+/// The columns of a table that have to be read as text, in attribute order.
+///
+/// Two kinds: a type with no binary output function at all, and a type whose
+/// binary output a cell cannot render (`PG_TEXT_ONLY_TYPES`). Cheap to ask for
+/// and only asked when a fetch has already failed, or has already come back
+/// with one of those types in it - an ordinary table never pays for it.
 async fn fetch_text_only_columns(
     pool: &sqlx::PgPool,
     schema: &str,
@@ -941,16 +975,32 @@ async fn fetch_text_only_columns(
         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
         JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
         LEFT JOIN pg_catalog.pg_type b ON b.oid = t.typbasetype
+        -- An array's element type, and that element's base type when it is a
+        -- domain. `_aclitem` has `array_send`, so its own typsend is not 0 and
+        -- the column looked binary-safe - but array_send calls the element's
+        -- send function, and aclitem has none. `pg_class.relacl` is that
+        -- column, and it failed the whole SELECT: "no binary output function
+        -- available for type aclitem", on a table with 30 readable columns.
+        LEFT JOIN pg_catalog.pg_type e
+               ON e.oid = NULLIF(t.typelem, 0) AND t.typcategory = 'A'
+        LEFT JOIN pg_catalog.pg_type eb ON eb.oid = NULLIF(e.typbasetype, 0)
         WHERE n.nspname = $1 AND c.relname = $2
           AND a.attnum > 0 AND NOT a.attisdropped
-          -- typsend = 0 renders as '-': no binary send function. A domain
-          -- inherits its base type's, hence the COALESCE.
-          AND COALESCE(NULLIF(t.typsend, 0), b.typsend, 0) = 0
+          AND (
+            -- typsend = 0 renders as '-': no binary send function. A domain
+            -- inherits its base type's, hence the COALESCE.
+            COALESCE(NULLIF(t.typsend, 0), b.typsend, 0) = 0
+            OR (e.oid IS NOT NULL AND COALESCE(NULLIF(e.typsend, 0), eb.typsend, 0) = 0)
+            -- Sends fine, reads as bytes: the OID-alias family.
+            OR t.typname = ANY($3)
+            OR (e.oid IS NOT NULL AND e.typname = ANY($3))
+          )
         ORDER BY a.attnum
         "#,
     )
     .bind(schema)
     .bind(table)
+    .bind(PG_TEXT_ONLY_TYPES)
     .fetch_all(pool)
     .await
     .map_err(|e| format!("Failed to inspect column types: {e}"))?;
@@ -1010,17 +1060,27 @@ async fn text_safe_projection(
     Ok(Some((parts.join(", "), text_only)))
 }
 
-/// Which of `names` are types with no binary output function. Used to decide
-/// what a hand-written query needs cast; asked only after one has already failed.
+/// Which of `names` a hand-written query needs cast to text: no binary output
+/// function, an array whose element has none, or one of the OID aliases whose
+/// binary form a cell cannot render. Same three rules as
+/// `fetch_text_only_columns`, asked by type name rather than by column.
 async fn types_without_binary_output(pool: &sqlx::PgPool, names: &[String]) -> Vec<String> {
     if names.is_empty() {
         return Vec::new();
     }
     sqlx::query_scalar::<_, String>(
-        "SELECT typname::text FROM pg_catalog.pg_type
-         WHERE typname = ANY($1) AND COALESCE(NULLIF(typsend, 0), 0) = 0",
+        "SELECT t.typname::text
+         FROM pg_catalog.pg_type t
+         LEFT JOIN pg_catalog.pg_type e
+                ON e.oid = NULLIF(t.typelem, 0) AND t.typcategory = 'A'
+         WHERE t.typname = ANY($1)
+           AND (COALESCE(NULLIF(t.typsend, 0), 0) = 0
+                OR (e.oid IS NOT NULL AND COALESCE(NULLIF(e.typsend, 0), 0) = 0)
+                OR t.typname = ANY($2)
+                OR (e.oid IS NOT NULL AND e.typname = ANY($2)))",
     )
     .bind(names)
+    .bind(PG_TEXT_ONLY_TYPES)
     .fetch_all(pool)
     .await
     .unwrap_or_default()
@@ -1371,29 +1431,42 @@ fn build_any_column_condition(
     Ok(())
 }
 
+/// `search_case_sensitive` picks the OPERATOR, rather than being folded into
+/// the pattern.
+///
+/// The frontend used to express "match case" for Postgres by prefixing the
+/// regex with the ARE option `(?c)` and leaving the operator as `~*`, so the
+/// flag never reached this function at all - Postgres was the one engine whose
+/// case-sensitive substring search was impossible to express (it always
+/// `ILIKE`d), and a pattern-level option is a silent no-op the moment anything
+/// prepends to the pattern. `~` vs `~*` and `LIKE` vs `ILIKE` say the same
+/// thing in a way the query plan and a log line both show.
 pub(super) fn build_where(
     columns: &[String],
     search: Option<&str>,
     search_is_regex: bool,
+    search_case_sensitive: bool,
     filters: &[RowFilter],
 ) -> Result<WhereClause, String> {
     let mut builder = QueryBuilder::new();
 
     if let Some(term) = search.map(str::trim).filter(|s| !s.is_empty()) {
         if search_is_regex {
+            let op = if search_case_sensitive { "~" } else { "~*" };
             let pattern = builder.push_bind(term.to_string());
             let parts: Vec<String> = columns
                 .iter()
-                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ~* {pattern}")))
+                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text {op} {pattern}")))
                 .collect();
             if !parts.is_empty() {
                 builder.push_condition(format!("({})", parts.join(" OR ")), None);
             }
         } else {
+            let op = if search_case_sensitive { "LIKE" } else { "ILIKE" };
             let pattern = builder.push_bind(format!("%{}%", escape_ilike_pattern(term)));
             let parts: Vec<String> = columns
                 .iter()
-                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ILIKE {pattern} ESCAPE '\\'")))
+                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text {op} {pattern} ESCAPE '\\'")))
                 .collect();
             if !parts.is_empty() {
                 builder.push_condition(format!("({})", parts.join(" OR ")), None);
@@ -1580,7 +1653,7 @@ pub async fn get_table_rows(
         }
         ActiveConnection::Clickhouse(cfg) => {
             return super::clickhouse::get_table_rows(
-                &cfg, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
+                &cfg, &schema, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
             ).await;
         }
         ActiveConnection::Redis(cfg) => {
@@ -1614,7 +1687,7 @@ pub async fn get_table_rows(
     } else {
         vec![]
     };
-    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, &filters)?;
+    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, search_case_sensitive, &filters)?;
     let order_by = build_order_by(
         &table_columns,
         sort_column.as_deref(),
@@ -1787,6 +1860,41 @@ pub async fn get_table_rows(
         }
     };
 
+    // The other half of the same problem, and the half that does not announce
+    // itself: an OID-alias column sends fine, so the page above succeeded and
+    // every one of its cells is four bytes of hex. Detected from the types the
+    // server just reported rather than from a catalog query, so a table without
+    // one of these columns never asks anything extra - and re-read once, with
+    // those columns cast, because the name is only in the text output.
+    let rows = if !text_only.is_empty()
+        || !rows
+            .first()
+            .map(|r| r.columns().iter().any(|c| pg_type_is_text_only(c.type_info().name())))
+            .unwrap_or(false)
+    {
+        rows
+    } else {
+        match text_safe_projection(&pool, &schema, &table).await {
+            Ok(Some((projection, cols))) => {
+                let retry_sql = format!("SELECT {projection} {data_tail}");
+                match bind_page(&retry_sql, &where_clause.binds, keyset_bind.as_ref(), limit, offset)
+                    .fetch_all(&pool)
+                    .await
+                {
+                    Ok(retried) => {
+                        text_only = cols;
+                        data_sql = retry_sql;
+                        retried
+                    }
+                    // The hex is wrong but it is not nothing; a failed retry
+                    // must not turn a readable page into an error.
+                    Err(_) => rows,
+                }
+            }
+            _ => rows,
+        }
+    };
+
     // Column names + types come from the result set itself (free, always fresh).
     let mut columns: Vec<ColumnInfo> = if let Some(first) = rows.first() {
         first
@@ -1892,6 +2000,9 @@ pub async fn count_table_rows(
     table: String,
     search: Option<String>,
     search_is_regex: bool,
+    // Must mirror the rows query, or the pager counts a different predicate
+    // than the one on screen.
+    search_case_sensitive: bool,
     filters: Option<Vec<RowFilter>>,
 ) -> Result<i64, String> {
     match require_conn(&state)? {
@@ -1909,7 +2020,7 @@ pub async fn count_table_rows(
     } else {
         vec![]
     };
-    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, &filters)?;
+    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, search_case_sensitive, &filters)?;
     let table_ref = format!(r#""{schema}"."{table}""#);
 
     const ESTIMATE_THRESHOLD: i64 = 100_000;

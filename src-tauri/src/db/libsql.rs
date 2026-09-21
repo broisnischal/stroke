@@ -13,6 +13,9 @@ fn client() -> &'static reqwest::Client {
             .tcp_keepalive(std::time::Duration::from_secs(60))
             .pool_max_idle_per_host(10)
             .pool_idle_timeout(std::time::Duration::from_secs(90))
+            // Bounded, but generously: this carries queries, not just metadata.
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(120))
             .build()
             .expect("failed to build LibSQL HTTP client")
     })
