@@ -25,7 +25,7 @@
   import Search from '@lucide/svelte/icons/search'
   import Gauge from '@lucide/svelte/icons/gauge'
   import Network from '@lucide/svelte/icons/network'
-  import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
+  import { createHotkey } from '@tanstack/svelte-hotkeys'
   import { IS_MAC } from '$lib/shortcuts.js'
   import { findSearchInput, isTypingTarget } from '$lib/focus-search.js'
   import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode, appAutoSaveQueries, increaseZoom, decreaseZoom, resetZoom } from '$lib/stores/settings.js'
@@ -2255,12 +2255,15 @@ let rowSearch = $state('')
     closeActiveTab()
   })
 
-  // Chord: Ctrl/⌘+K then W → close all tabs. (Mod+K opens the command palette;
-  // the W step dismisses it and closes everything.)
-  createHotkeySequence(['Mod+K', 'W'], (e) => {
+  // Close all tabs. This was the sequence `Mod+K` then `W`, which could not
+  // work: `Mod+K` is bound to the command palette, so the first step opened a
+  // dialog and moved focus into its search field - the `W` then went in as a
+  // character and never reached the document, and on the occasions it did, the
+  // palette had already flashed open and shut. A chord whose first key is
+  // already a command cannot be a prefix.
+  createHotkey('Mod+Shift+W', (e) => {
     if (!connection) return
     e.preventDefault()
-    commandOpen = false
     void closeAllTabs()
   })
 
@@ -2398,6 +2401,7 @@ let rowSearch = $state('')
     disconnect: () => { if (connection) showDisconnectDialog = true },
     openSettings: () => (showSettingsModal = true),
     closeTab: () => { if (activeTabId) void closeTab(activeTabId) },
+    closeAllTabs: () => void closeAllTabs(),
 
     search: () => tableToolbar?.focusRowSearch?.(),
     findReplace: () => openFindReplacePanel(),

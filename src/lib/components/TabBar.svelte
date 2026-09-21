@@ -267,9 +267,7 @@
           <ContextMenu.Item variant="destructive" onSelect={oncloseall}>
             <Icon name="trash-2" class="size-3.5" />
             Close All Tabs
-            <!-- A space is a sequence: ⌘K, then W. <Kbd> prints it as two cap
-                 groups, because `⌘KW` would read as one three-key press. -->
-            <ContextMenu.Shortcut combo="Mod+K W" />
+            <ContextMenu.Shortcut combo="Mod+Shift+W" />
           </ContextMenu.Item>
         </ContextMenu.Content>
       </ContextMenu.Root>
