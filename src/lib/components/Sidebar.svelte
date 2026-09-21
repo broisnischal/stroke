@@ -4,6 +4,7 @@
   import { createHotkey } from "@tanstack/svelte-hotkeys";
   import Icon from "./Icon.svelte";
   import SearchableMenu from "./SearchableMenu.svelte";
+  import FindReplacePanel from "./FindReplacePanel.svelte";
   import { listDatabases, canSwitchDatabase, currentDatabaseKey } from "$lib/databases.js";
   import { dbAdminKind, dbActionBlocker } from "$lib/database-admin.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
@@ -120,6 +121,32 @@
     oncountrows = /** @type {(table: string) => void} */ (() => {}),
     /** Copy the table's column names as a comma-separated list. */
     oncopycolumns = /** @type {(table: string) => void} */ (() => {}),
+    // ── Find & replace panel ────────────────────────────────────────────────
+    // The panel works on the rows the grid has loaded, so the data comes from
+    // the shell rather than being fetched again here.
+    /** @type {Array<{ name: string, dataType?: string }>} */
+    frColumns = [],
+    /** @type {unknown[][]} */
+    frRows = [],
+    /** @type {string | null} */
+    frTableName = null,
+    frEnabled = false,
+    /** @type {(edits: Array<{ rowIdx: number, colIdx: number, value: string }>) => Promise<void>} */
+    onfindreplaceapply = async () => {},
+    /** Put the grid's cell cursor on a match. */
+    onrevealcell = /** @type {(rowIdx: number, colIdx: number) => void} */ (() => {}),
+    /** Assigned here; the shell calls it to show the panel and focus its field. */
+    openFindReplace = $bindable(/** @type {() => void} */ (() => {})),
+    /**
+     * Assigned here; the shell calls it once a database switch has landed.
+     *
+     * This used to be inferred in the sidebar, by bookmarking `activeDbKey` and
+     * watching it change. The shell is the only place that actually knows a
+     * switch happened - it is the thing that performs one - and an inference
+     * that has to survive a disconnect, a reconnect and a rebuilt connection
+     * object is a guess with three ways to be wrong.
+     */
+    showTablesTab = $bindable(/** @type {() => void} */ (() => {})),
   } = $props();
 
   const openTableSet = $derived(new Set(openTables))
@@ -366,7 +393,7 @@
    *
    * Materialized views ride in the Views tab - they are views, and splitting
    * them out is what produced six sections in the first place.
-   * @typedef {'tables' | 'views' | 'recent' | 'databases'} SidebarTab
+   * @typedef {'tables' | 'views' | 'recent' | 'databases' | 'search'} SidebarTab
    */
   const SIDEBAR_TAB_KEY = 'stroke:sidebar-tab'
   /** @type {{ id: SidebarTab, label: string, icon: string }[]} */
@@ -378,6 +405,10 @@
     { id: 'databases', label: 'Databases', icon: 'database' },
     { id: 'views',     label: 'Views',     icon: 'table-view' },
     { id: 'recent',    label: 'Recent',    icon: 'clock' },
+    // Last, and not a list: find & replace is a tool that works on the table
+    // you already have open, so it belongs where the other panels live rather
+    // than in a modal over the rows it is about to rewrite.
+    { id: 'search',    label: 'Find & replace', icon: 'replace' },
   ]
   function loadSidebarTab() {
     try {
@@ -387,6 +418,17 @@
     return /** @type {SidebarTab} */ ('tables')
   }
   let sidebarTab = $state(loadSidebarTab())
+
+  $effect(() => {
+    openFindReplace = () => {
+      sidebarTab = 'search'
+      // After the tab renders, or the field is not in the DOM yet.
+      tick().then(() => focusFindField())
+    }
+    showTablesTab = () => { sidebarTab = 'tables' }
+  })
+  /** Assigned by the panel. */
+  let focusFindField = $state(/** @type {() => void} */ (() => {}))
 
   /**
    * Keyboard access to the strip. Registered here rather than in StudioShell
@@ -452,7 +494,9 @@
     recent:    { icon: 'clock',      title: 'No recents',   hint: 'Tables you open appear here.' },
     databases: { icon: 'database',   title: 'No databases', hint: 'Nothing else on this server.' },
   }
-  const tabIsEmpty = $derived(!loadingTables && !!connectionName && tabCounts[sidebarTab] === 0)
+  const tabIsEmpty = $derived(
+    sidebarTab !== 'search' && !loadingTables && !!connectionName && tabCounts[sidebarTab] === 0,
+  )
   /** True when the tab has rows but the filter hid all of them. */
   const tabEmptyFromFilter = $derived(
     tabIsEmpty &&
@@ -475,6 +519,7 @@
     // The recents list is capped at 5 rows, so that is the denominator too.
     recent: Math.min(recentTabs.length, 5),
     databases: dbEntries.length,
+    search: 0,
   })
 
   /** How many rows each tab holds, after the filter. @type {Record<SidebarTab, number>} */
@@ -483,29 +528,10 @@
     views: filteredViews.length + filteredMatViews.length,
     recent: Math.min(filteredRecent.length, 5),
     databases: filteredDbEntries.length,
+    search: 0,
   })
   $effect(() => { try { localStorage.setItem(SIDEBAR_TAB_KEY, sidebarTab) } catch {} })
 
-  /** The database the sidebar has settled on. Held outside `$state` on purpose:
-      it is a bookmark for the effect below, not something the UI reads. */
-  let settledDbKey = activeDbKey
-  // Switching database lands on Tables. The Databases tab is a switcher, not a
-  // destination - once it has done its job, the list still under the cursor
-  // belongs to a database you are no longer looking at. Driven off the key
-  // rather than off the click so it fires when the switch actually lands: a
-  // click that opens the confirm dialog and gets cancelled must not move the tab,
-  // and a switch made from the command palette or the context menu must.
-  $effect(() => {
-    const key = activeDbKey
-    // Disconnected. Keep the bookmark - a reconnect puts the same key back, and
-    // that is not a switch.
-    if (!key) return
-    // First connection of the session, so the tab restored from localStorage stands.
-    if (!settledDbKey) { settledDbKey = key; return }
-    if (key === settledDbKey) return
-    settledDbKey = key
-    sidebarTab = 'tables'
-  })
 
   // The old per-section visibility flags are now just "is this the open tab".
   // Keeping the names means the ~900 lines of list markup below did not have to
@@ -1326,6 +1352,10 @@
           </div>
         </div>
 
+        <!-- The filter row belongs to the lists. Find & replace brings its own
+             fields, so leaving this here would be a second search box with
+             nothing to search. -->
+        {#if sidebarTab !== 'search'}
         <!-- Filter row: the schema the list belongs to, and the filter itself. -->
         <div class="flex h-9 shrink-0 items-center gap-1.5 border-b border-sidebar-border px-2">
           <!-- Shown when the engine actually has schemas to pick between, which
@@ -1338,7 +1368,7 @@
           {#if schemas.length > 0}
             <div class="max-w-[8rem] shrink-0">
                     <SearchableMenu
-                      contentClass="w-[var(--bits-popover-anchor-width)] min-w-[180px]"
+                      contentClass="min-w-60"
                       placeholder="Search schemas…"
                       empty="No schema"
                       items={schemaMenuItems}
@@ -1373,7 +1403,13 @@
                           <Icon name="box" class={cn('size-3.5 shrink-0', isSystemSchema(it.value) ? 'text-muted-foreground/60' : 'text-muted-foreground')} />
                           <span class="min-w-0 flex-1 truncate">{it.label}</span>
                           {#if isSystemSchema(it.value)}
-                            <span class="shrink-0 text-ui-3xs text-muted-foreground">system</span>
+                            <!-- A padlock, not the word "system". The word was as
+                                 long as the names it sat beside, so it pushed
+                                 `information_schema` into an ellipsis to label the
+                                 thing it had just made unreadable. -->
+                            <span class="flex shrink-0 items-center" title="System schema" aria-label="System schema">
+                              <Icon name="lock" class="size-3 text-muted-foreground/70" />
+                            </span>
                           {/if}
                           {#if it.value === activeSchema}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
                         {/if}
@@ -1461,11 +1497,22 @@
                not they have anything to say, because a polite region inserted at
                the moment its text appears is announced unreliably. -->
           <span id="sidebar-filter-hint" class="sr-only"
-            >Filters the {activeTabLabel.toLowerCase()} list. Tab or press the down arrow to move into the results, then the arrow keys to move through them. When one row matches, press Enter to open it.</span>
+            >Filters the {activeTabLabel.toLowerCase()} list. Tab or press the down arrow to move into the results, then Tab or the arrow keys to move through them. Press Enter to open a row, or Shift and Enter to open it and move into the data grid.</span>
           <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">{filterStatus}</span>
         </div>
+        {/if}
       </div>
 
+      {#if sidebarTab === 'search'}
+        <FindReplacePanel
+          bind:focusFind={focusFindField}
+          columns={frColumns}
+          rows={frRows}
+          tableName={frEnabled ? frTableName : null}
+          onapply={onfindreplaceapply}
+          onreveal={onrevealcell}
+        />
+      {:else}
       <div class="flex min-h-0 flex-1 flex-col">
         <div
           bind:this={scrollContainerEl}
@@ -1484,12 +1531,37 @@
           }}
           onkeydown={(e) => {
             if (e.key === 'Escape' && selectedItems.size > 0) { clearSelection(); return }
-            // Tab off a row leaves the list - forward into the content, back to
-            // the filter it was narrowed from. Only from a row: the section
-            // headers' own buttons keep the plain tab order.
+            // Shift+Enter opens the row AND hands focus to the grid, which is
+            // the one thing Enter deliberately does not do: Enter keeps you in
+            // the list so you can keep looking, and there was no way to say
+            // "this one, and let me work in it" without reaching for the mouse.
+            if (e.key === 'Enter' && e.shiftKey) {
+              const row = e.target instanceof Element ? e.target.closest('[data-sidebar-row]') : null
+              if (!(row instanceof HTMLElement)) return
+              e.preventDefault()
+              row.click()
+              // After the click: opening a table re-renders the content region,
+              // and the grid has to exist before it can take focus.
+              tick().then(() => focusMainRegion())
+              return
+            }
+            // Tab walks the list, one row per press, because that is what the
+            // key does everywhere else in this panel and pressing it twice from
+            // the filter box otherwise skipped the whole list to land in the
+            // grid. Tab off the LAST row still leaves for the content region -
+            // a list you cannot tab out of is a focus trap - and Shift+Tab off
+            // the first returns to the filter the list was narrowed from.
+            // Shift+Enter (above) is the deliberate way into the grid.
             if (e.key === 'Tab') {
               const onRow = e.target instanceof Element && e.target.closest('[data-sidebar-row]')
               if (!onRow) return
+              const rows = listRowButtons()
+              const i = rows.indexOf(/** @type {HTMLElement} */ (document.activeElement))
+              const next = i === -1 ? null : rows[i + (e.shiftKey ? -1 : 1)]
+              if (next) {
+                e.preventDefault(); kbdNav = true; next.focus()
+                return
+              }
               if (e.shiftKey) {
                 if (!filterEl) return
                 e.preventDefault(); kbdNav = true; filterEl.focus(); filterEl.select()
@@ -1603,7 +1675,7 @@
                               {/if}
                             </button>
                           </ContextMenu.Trigger>
-                          <ContextMenu.Content class="min-w-52 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          <ContextMenu.Content class="min-w-52">
                             {#if !isCurrent}
                               <ContextMenu.Item onSelect={() => { focusListAfterSwitch(); onswitchdatabase(db) }}>
                                 <Icon name="arrow-right" />
@@ -1684,7 +1756,10 @@
                         onclick={() => onrecentselect(item.schema, item.table)}
                         onkeydown={(e) => {
                           // role="button" has to answer Space as well as Enter (ARIA APG).
-                          if (e.key === 'Enter' || e.key === ' ') {
+                          // Shift+Enter belongs to the list's own handler, which
+                          // opens the row AND moves focus into the grid - taking
+                          // it here too would open it twice.
+                          if ((e.key === 'Enter' && !e.shiftKey) || e.key === ' ') {
                             e.preventDefault()
                             onrecentselect(item.schema, item.table)
                             return
@@ -1793,7 +1868,7 @@
                           {/if}
                         </button>
                       </ContextMenu.Trigger>
-                      <ContextMenu.Content class="min-w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                      <ContextMenu.Content class="min-w-48">
                         {#if isSelected && selectedItems.size > 1}
                           <!-- Multi-select: actions apply to all selected tables -->
                           <ContextMenu.Item onSelect={openSelected}>
@@ -2005,7 +2080,7 @@
                     </ul>
                   {/snippet}
                 </ContextMenu.Trigger>
-            <ContextMenu.Content class="min-w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+            <ContextMenu.Content class="min-w-48">
               {#if menuTableSelected && selectedItems.size > 1}
                 <!-- Multi-select: actions apply to all selected tables -->
                 <ContextMenu.Item onSelect={openSelected}>
@@ -2200,7 +2275,7 @@
                 </ul>
                 {/snippet}
                 </ContextMenu.Trigger>
-                <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                <ContextMenu.Content class="min-w-44">
                   <ContextMenu.Item onSelect={() => toggleSelect(menuView)}>
                     {#if selectedItems.has(menuView)}
                       <Icon name="square" />
@@ -2354,7 +2429,7 @@
                 </ul>
                 {/snippet}
                 </ContextMenu.Trigger>
-                <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                <ContextMenu.Content class="min-w-44">
                   <ContextMenu.Item onSelect={() => toggleSelect(menuMatView)}>
                     {#if selectedItems.has(menuMatView)}
                       <Icon name="square" />
@@ -2379,6 +2454,7 @@
 
         </div>
       </div>
+      {/if}
     </div>
     {:else if navSidebarPanel === "connections"}
       <ConnectionsSidebarPanel
@@ -2396,7 +2472,7 @@
 
   </aside>
   </ContextMenu.Trigger>
-  <ContextMenu.Content class="min-w-52 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:items-center [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:whitespace-nowrap [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]_svg]:size-3.5 [&_[data-slot=context-menu-item]_svg]:shrink-0">
+  <ContextMenu.Content class="min-w-52">
     <ContextMenu.Item onSelect={() => onmoveside(side === "right" ? "left" : "right")}>
       {#if side === "right"}
         <PanelLeft /> Move sidebar to the left

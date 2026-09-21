@@ -376,6 +376,20 @@
 >
   <!-- ── Left group ──────────────────────────────────────────────────── -->
   <div class="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
+    <!-- The sidebar toggle, first thing on the bar and hard against the left
+         edge - the same corner the sidebar itself occupies, so the control sits
+         on the thing it controls. It used to be in the title bar, beside the
+         back/forward arrows that are now gone. -->
+    <button
+      type="button"
+      class="mr-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+      aria-pressed={sidebarVisible}
+      title={sidebarVisible ? `Hide sidebar (${IS_MAC ? '⌘B' : 'Ctrl+B'})` : `Show sidebar (${IS_MAC ? '⌘B' : 'Ctrl+B'})`}
+      aria-label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+      onclick={ontoggleSidebar}
+    >
+      <Icon name={sidebarVisible ? 'panel-left-close' : 'panel-left-open'} class="size-3.5" />
+    </button>
     {#if connection}
 
       <!-- Connection switcher -->
@@ -759,17 +773,18 @@
               <DropdownMenu.Item onSelect={onapplyedits}>
                 <Icon name="check" class="size-3.5" />
                 Apply changes
-                <DropdownMenu.Shortcut>{IS_MAC ? '⌘S' : 'Ctrl+S'}</DropdownMenu.Shortcut>
+                <DropdownMenu.Shortcut combo="Mod+S" />
               </DropdownMenu.Item>
               <DropdownMenu.Item onSelect={oncopyeditssql}>
                 <Icon name="clipboard-copy" class="size-3.5" />
                 Copy to SQL
-                <DropdownMenu.Shortcut>{IS_MAC ? '⌘⌥S' : 'Ctrl+Alt+S'}</DropdownMenu.Shortcut>
+                <DropdownMenu.Shortcut combo="Mod+Alt+S" />
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
-              <DropdownMenu.Item onSelect={onresetedits}>
+              <DropdownMenu.Item onSelect={onresetedits} variant="destructive">
                 <Icon name="undo-2" class="size-3.5" />
                 Discard changes
+                <DropdownMenu.Shortcut combo="Mod+Alt+Backspace" />
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>
