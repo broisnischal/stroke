@@ -2,6 +2,7 @@ import { saveSqlDraft } from '$lib/stores/sql-draft.js'
 
 const STORAGE_KEY = 'stroke:connections'
 const LAST_ID_KEY  = 'stroke:last-connection-id'
+const DISCONNECTED_KEY = 'stroke:disconnected'
 
 /**
  * @typedef {'postgres' | 'sqlite' | 'd1' | 'mysql' | 'mariadb' | 'cockroachdb' | 'libsql' | 'clickhouse' | 'duckdb' | 'mssql' | 'redis'} DbType
@@ -223,6 +224,50 @@ export function setConnectionGroup(id, group) {
   return list
 }
 
+/**
+ * What a connection actually dials, as one comparable string. Name is not part
+ * of it: "prod" and "prod copy" pointing at the same database on the same
+ * server as the same user are the case worth catching, and two rows on one
+ * database under different logins are genuinely different connections.
+ *
+ * @param {any} conn
+ * @returns {string} '' when there is not enough of a target to compare
+ */
+export function connectionTargetKey(conn) {
+  if (!conn) return ''
+  const type = String(conn.type ?? '').toLowerCase()
+  const norm = (v) => String(v ?? '').trim()
+  if (type === 'sqlite' || type === 'duckdb') {
+    const path = norm(conn.filePath)
+    // Two `:memory:` databases are two databases - nothing is shared between them.
+    return path && path !== ':memory:' ? `${type}|${path}` : ''
+  }
+  if (type === 'libsql') {
+    const url = norm(conn.url).toLowerCase()
+    return url ? `libsql|${url}` : ''
+  }
+  if (type === 'd1') {
+    const db = norm(conn.databaseId)
+    return db ? `d1|${norm(conn.accountId)}|${db}` : ''
+  }
+  const host = norm(conn.host).toLowerCase()
+  if (!host) return ''
+  return [type, host, norm(conn.port), norm(conn.database), norm(conn.user)].join('|')
+}
+
+/**
+ * The saved connection `conn` would duplicate, or null. `skipId` is the row
+ * being edited - a connection is never a duplicate of itself.
+ * @param {any} conn
+ * @param {any[]} list
+ * @param {string | null} [skipId]
+ */
+export function findDuplicateConnection(conn, list, skipId = null) {
+  const key = connectionTargetKey(conn)
+  if (!key) return null
+  return list.find((c) => c.id !== skipId && connectionTargetKey(c) === key) ?? null
+}
+
 // ── Last-connection helpers ───────────────────────────────────────────────────
 
 /** @returns {string | null} */
@@ -235,6 +280,28 @@ export function setLastConnectionId(id) {
   try {
     if (id) localStorage.setItem(LAST_ID_KEY, id)
     else    localStorage.removeItem(LAST_ID_KEY)
+  } catch {}
+}
+
+/**
+ * Did the last session end with a deliberate Disconnect?
+ *
+ * The last-connection id outlives a disconnect on purpose - the modal still
+ * highlights where you were, and reconnecting is one click. But auto-reconnect
+ * read that id as "resume this", so quitting while disconnected came back
+ * connected on the next launch, which is the one thing Disconnect was asked to
+ * prevent. This flag is what tells the two apart.
+ * @returns {boolean}
+ */
+export function wasDisconnected() {
+  try { return localStorage.getItem(DISCONNECTED_KEY) === '1' } catch { return false }
+}
+
+/** @param {boolean} v */
+export function setWasDisconnected(v) {
+  try {
+    if (v) localStorage.setItem(DISCONNECTED_KEY, '1')
+    else   localStorage.removeItem(DISCONNECTED_KEY)
   } catch {}
 }
 

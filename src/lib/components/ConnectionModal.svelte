@@ -35,6 +35,7 @@
     newConnectionId,
     getLastConnectionId,
     setLastConnectionId,
+    findDuplicateConnection,
   } from "$lib/stores/connections.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import SearchableMenu from "./SearchableMenu.svelte";
@@ -47,12 +48,19 @@
   import { Dialog as DialogPrimitive } from "bits-ui";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
+  import { IS_MAC } from '$lib/shortcuts.js';
+  import { focusTrap } from '$lib/actions/focus-trap.js';
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import { parseConnectionUri, detectConnectionUri } from "$lib/connection-uri.js";
   import { PROVIDERS, providerBuildConnection } from "$lib/providers.js";
 
   let {
     open = $bindable(false),
+    /**
+     * Engine to open straight into, e.g. from the welcome screen's chips. Cleared
+     * once consumed so the next plain open starts on the picker again.
+     */
+    initialEngine = $bindable(""),
     onconnected = (conn, id) => {},
     maxConnections = Infinity,
     /** Name of the live session, '' when nothing is connected. Drives Disconnect. */
@@ -200,7 +208,7 @@
   const ENGINE_TINT = {
     postgres: "text-sky-500/80",
     cockroachdb: "text-teal-500/80",
-    mysql: "text-amber-500/80",
+    mysql: "text-cyan-500/80", // the dolphin is teal, not amber
     mariadb: "text-orange-500/80",
     sqlite: "text-blue-500/80",
     "sqlite-memory": "text-blue-500/80",
@@ -244,6 +252,16 @@
   const firstSavedMatch = $derived(savedMatches[0] ?? null);
 
   /**
+   * The rail is one tab stop, not one per row: Tab from the filter lands on the
+   * selected connection (or the first), and the arrow keys walk from there. A
+   * list of forty rows that each take a Tab is not a keyboard path, it is a
+   * reason to reach for the mouse.
+   */
+  const savedRovingId = $derived(
+    savedMatches.find((c) => c.id === editingId)?.id ?? savedMatches[0]?.id ?? null,
+  );
+
+  /**
    * Whether rows still play their staggered entrance.
    *
    * The stagger is a first-impression flourish, and it is the wrong thing the
@@ -257,8 +275,12 @@
   /** Move focus from the filter into the list, so a match can be reached without
    *  leaving the keyboard. Rows carry tabindex, so they take focus directly. */
   function focusFirstSavedRow() {
-    /** @type {HTMLElement | null} */
-    const row = document.querySelector('[data-conn-row]');
+    const rows = /** @type {HTMLElement[]} */ ([
+      ...document.querySelectorAll("[data-conn-row]"),
+    ]);
+    // `tabIndex` rather than an attribute selector: whether the framework writes
+    // the property or the attribute is not something this has to know.
+    const row = rows.find((r) => r.tabIndex === 0) ?? rows[0];
     row?.focus();
   }
   let lastId = $state(getLastConnectionId());
@@ -503,6 +525,67 @@
     }
   }
 
+  /**
+   * A connection string in the clipboard is where this dialog usually starts -
+   * copied out of a provider dashboard, a .env, or a teammate's message - and
+   * the first thing anyone does here is paste it. So the dialog pastes it.
+   *
+   * Strictly: only a string that parses as a connection URI, only into an empty
+   * bar, and nothing is applied until Continue is pressed. It saves the paste,
+   * not the decision. A `.env` line is unwrapped (`DATABASE_URL="postgres://…"`)
+   * because that is the form the string is usually copied in.
+   */
+  /** What the clipboard last put in the bar, so a refill can tell its own text from typing. */
+  let clipboardFilled = "";
+  /** A string the user cleared away. Putting it back on the next focus would be a fight. */
+  let clipboardDismissed = "";
+
+  // Re-read on every window focus, not only on open: the usual shape of this is
+  // copying the string from a provider dashboard in the browser and coming
+  // back, and by then the dialog has been open for a minute. Both events are
+  // bound - a Tauri window focus fires `focus` on the webview, and a workspace
+  // switch or an unminimise only fires `visibilitychange`.
+  $effect(() => {
+    if (!open) return;
+    const reread = () => { if (step === "pick") void prefillFromClipboard(); };
+    const onVisible = () => { if (!document.hidden) reread(); };
+    window.addEventListener("focus", reread);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", reread);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  });
+
+  async function prefillFromClipboard() {
+    try {
+      const raw = String((await navigator.clipboard.readText()) ?? "").trim();
+      if (!raw || raw.length > 2000 || raw.includes("\n")) return;
+      const unwrapped = raw
+        .replace(/^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*/, "")
+        .replace(/^["']|["']$/g, "")
+        .trim();
+      const candidate = detectConnectionUri(raw) ? raw : detectConnectionUri(unwrapped) ? unwrapped : "";
+      if (!candidate) return;
+      // Anything the user did in the meantime wins - this lands a tick or two
+      // after the dialog opened, and re-runs every time the window is focused.
+      if (!open || step !== "pick") return;
+      if (candidate === quickUri) return;                 // already there
+      if (candidate === clipboardDismissed) return;       // they cleared this one away
+      // Only ever replaces an empty bar or the text this put there itself.
+      // Typing beats the clipboard, always.
+      if (quickUri.trim() && quickUri !== clipboardFilled) return;
+      quickUri = candidate;
+      clipboardFilled = candidate;
+      quickHint = "Pasted from your clipboard - press Continue to use it.";
+      await tick();
+      quickUriEl?.focus();
+      quickUriEl?.select?.();
+    } catch {
+      // No clipboard access (browser dev, or the OS said no): the bar stays empty.
+    }
+  }
+
   function useQuickUri() {
     const raw = quickUri.trim();
     quickHint = "";
@@ -530,6 +613,8 @@
     const ok = applyConnectionUriFrom(raw, hit.uriType);
     if (!ok && !quickHint) quickHint = "Could not read that string.";
     quickUri = "";
+    // Used. Coming back to the picker should not hand it over again.
+    clipboardDismissed = raw;
   }
 
   /** A card in step 1 was chosen: set the engine and move on. @param {string} id */
@@ -1342,23 +1427,24 @@
     return null;
   });
 
-  /** Left-rail subtitle: engine, or the studio a connection was picked up from. */
-  function connSubtitle(conn, cid) {
-    const source = conn.origin
-      ? conn.toolLabel || (conn.origin === "docker" ? "Docker" : "Studio")
-      : driverById(cid).label;
-    return `${source} · ${connDetail(conn)}`;
-  }
-
-  function connDetail(conn) {
-    if (conn.type === "sqlite" || conn.type === "duckdb")
-      return conn.filePath === ":memory:" ? "in-memory" : conn.filePath || "—";
-    if (conn.type === "libsql") return conn.url || "—";
-    if (conn.type === "d1")
-      return conn.accountId?.slice(0, 8)
-        ? `${conn.accountId.slice(0, 8)}…`
-        : "—";
-    return `${conn.host ?? ""}/${conn.database ?? ""}`;
+  /**
+   * The one line under a connection's name, and it answers one question: which
+   * database does this open? It used to print source · image · host, which is
+   * the connection string in three parts - at 11px in a 220px rail the host was
+   * always truncated mid-word, and every one of those fields is already on the
+   * form this row opens.
+   */
+  function connSubtitle(conn) {
+    if (conn.type === "sqlite" || conn.type === "duckdb") {
+      if (conn.filePath === ":memory:") return "in-memory";
+      return String(conn.filePath ?? "").split(/[\\/]/).pop() || "—";
+    }
+    if (conn.type === "libsql") {
+      try { return new URL(conn.url).pathname.replace(/^\//, "") || conn.url; }
+      catch { return conn.url || "—"; }
+    }
+    if (conn.type === "d1") return conn.database || conn.name || "—";
+    return conn.database || "—";
   }
 
   function relativeTime(ts) {
@@ -1376,10 +1462,17 @@
       saved = loadSavedConnections().sort(byLastConnected);
       lastId = getLastConnectionId();
       resetForm(null);
+      duplicatePrompt = null;
+      duplicateAck = false;
+      clipboardFilled = "";
+      clipboardDismissed = "";
+      // Arriving from an engine chip skips the picker - that choice is already made.
+      if (initialEngine) { pickEngine(initialEngine); initialEngine = ""; }
       engineQuery = "";
       quickUri = "";
       quickHint = "";
       void refreshLocal();
+      void prefillFromClipboard();
       // The paste bar takes focus: the modal opens, you paste, you press Enter.
       // Only on the front page - a saved connection opens straight into its form.
       void tick().then(() => { if (step === "pick") quickUriEl?.focus(); });
@@ -1806,6 +1899,7 @@
     }
     error = "";
     const payload = formPayload();
+    if (blockedAsDuplicate(payload, handleSave)) return;
     const existing = editingId ? saved.find((s) => s.id === editingId) : null;
     const id = existing?.id ?? newConnectionId();
     // lastConnectedAt is deliberately NOT touched - nothing was connected, so
@@ -1830,20 +1924,33 @@
     }, 2000);
   }
 
-  async function handleConnect() {
-    if (!editingId && saved.length >= maxConnections) {
+  /**
+   * Dial the form's connection.
+   *
+   * `save: false` is the plain Connect: it opens the session and writes nothing,
+   * for the case where the row is already on file (or deliberately is not).
+   * @param {{ save?: boolean }} [opts]
+   */
+  async function handleConnect(opts = {}) {
+    const save = opts.save !== false;
+    if (save && !editingId && saved.length >= maxConnections) {
       failWith(
         `Free plan allows ${maxConnections} saved connections. Upgrade to Stroke Pro for unlimited.`,
       );
       return;
     }
+    // Built before the spinner goes up: the duplicate check needs the resolved
+    // target, and in connection-string mode that is what parses the URI into
+    // fields. It reads state and allocates an object - nothing that can fail.
+    const payload = formPayload();
+    // Only for a row that does not exist yet: connecting to a connection you
+    // already have saved is not a filing decision, and being asked about it on
+    // the way in is the wrong question at the wrong time.
+    if (save && !editingId && blockedAsDuplicate(payload, () => void handleConnect({ save }))) return;
     const myOp = ++opId;
     connecting = editingId ?? "__new__";
     error = "";
     try {
-      // In connection-string mode the payload is built from the individual
-      // fields, so parse the URI into them first (finally clears `connecting`).
-      const payload = formPayload();
       const existing = editingId ? saved.find((s) => s.id === editingId) : null;
       const id = existing?.id ?? newConnectionId();
       // Persist BEFORE dialling. Everything the user typed is worth keeping the
@@ -1854,17 +1961,26 @@
       // connections look like they were disappearing after being saved.
       // lastConnectedAt stays at its previous value so a failed attempt does not
       // jump the row to the top of the recents list or turn it into "Resume".
-      saved = upsertConnection(
-        buildSavedConn(payload, id, existing?.lastConnectedAt),
-      ).sort(byLastConnected);
-      editingId = id;
+      if (save) {
+        saved = upsertConnection(
+          buildSavedConn(payload, id, existing?.lastConnectedAt),
+        ).sort(byLastConnected);
+        editingId = id;
+      }
       await openConnection(payload);
       if (myOp !== opId) return; // cancelled by the user
       const saved_conn = buildSavedConn(payload, id, Date.now());
-      saved = upsertConnection(saved_conn).sort(byLastConnected);
-      setLastConnectionId(id);
+      if (save) {
+        saved = upsertConnection(saved_conn).sort(byLastConnected);
+        setLastConnectionId(id);
+      }
       open = false;
-      await onconnected(saved_conn, id);
+      // The id is what files this as the last connection - and the shell writes
+      // the payload back under it, so an unsaved EDIT must not travel with one
+      // or "connect without saving" would save. An untouched saved row has
+      // nothing to leak, so it keeps its id and still resumes on next launch.
+      const handoverId = save || (editingId && !isDirty) ? id : "";
+      await onconnected(saved_conn, handoverId);
     } catch (e) {
       if (myOp === opId) failWith(friendlyError(e));
     } finally {
@@ -1873,6 +1989,30 @@
   }
 
   const isBusy = $derived(testing || !!connecting);
+
+  /**
+   * A second connection to a database you already have saved is usually a
+   * mistake - a re-paste of the same URI, or a second pass through the Docker
+   * scan - and the list is sorted by last use, so the copy hides the original.
+   * It is not always a mistake though (a read-only twin, a different name for a
+   * different project), so this asks rather than refuses.
+   * @type {{ existing: any, proceed: () => void } | null}
+   */
+  let duplicatePrompt = $state(null);
+  /** Set by "Save anyway", so the retry of the same action goes straight through. */
+  let duplicateAck = false;
+
+  /**
+   * Returns true when the action should stop and let the user answer first.
+   * @param {any} payload @param {() => void} proceed
+   */
+  function blockedAsDuplicate(payload, proceed) {
+    if (duplicateAck) return false;
+    const existing = findDuplicateConnection(payload, saved, editingId);
+    if (!existing) return false;
+    duplicatePrompt = { existing, proceed };
+    return true;
+  }
 
   // Transient "Saved" confirmation on the Save button (no toast - the dialog
   // stays open, so the feedback belongs on the control that was pressed).
@@ -2542,8 +2682,25 @@
             </button>
           </aside>
         {:else}
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
           <aside
             class="relative flex min-h-0 flex-col overflow-hidden border-r border-border/15 bg-muted/[0.015]"
+            onkeydowncapture={(e) => {
+              // One rule for the whole rail: Tab goes to the connections.
+              //
+              // Per-control handlers kept missing a stop - the filter, its ✕, the
+              // scroll box Chromium makes focusable on its own, a context-menu
+              // wrapper - and each miss reads as "Tab did nothing", because none
+              // of those stops draw anything. Caught in the capture phase from
+              // the rail itself, so it does not matter which of them holds focus.
+              // A row is the exception: Tab off a row leaves for the form, which
+              // is where it should go next.
+              if (e.key !== "Tab" || e.shiftKey || !savedMatches.length) return;
+              const el = /** @type {HTMLElement | null} */ (e.target);
+              if (el?.closest?.("[data-conn-row]")) return;
+              e.preventDefault();
+              focusFirstSavedRow();
+            }}
           >
             <!-- Title -->
             <div class="flex h-[52px] shrink-0 items-center gap-2 px-4">
@@ -2572,17 +2729,33 @@
 
             <!-- New connection button -->
             <div class="shrink-0 border-t border-border/15 px-2 pb-2 pt-2">
+              <!-- Same geometry as a connection row - icon slot, gap and radius -
+                   so "New connection" and every saved name start on one left
+                   edge. It sat on its own grid before, which read as a control
+                   bolted above the list rather than the first entry in it. -->
               <button
                 type="button"
                 onclick={() => resetForm(null)}
+                onkeydown={(e) => {
+                  // Straight into the list. Chromium makes a scrollable container
+                  // a tab stop of its own (keyboard-focusable scrollers), so left
+                  // to the browser this Tab can land on the scroll box instead of
+                  // a row - a stop with nothing on it.
+                  if (e.key === "Tab" && !e.shiftKey && savedMatches.length) {
+                    e.preventDefault();
+                    focusFirstSavedRow();
+                  }
+                }}
                 class={cn(
-                  "flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left text-ui-xs transition-[color,background-color,border-color,transform] duration-150 ease-out active:scale-[0.98]",
+                  "flex w-full items-center gap-2.5 rounded-md border px-2 py-1.5 text-left text-ui-xs outline-none transition-[color,background-color,border-color,transform] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring active:scale-[0.98]",
                   !editingId
                     ? "border-border/40 bg-muted/40 font-medium text-foreground"
                     : "border-transparent text-muted-foreground hover:bg-muted/25 hover:text-foreground",
                 )}
               >
-                <Icon name="plus" class="size-3.5 shrink-0" />
+                <span class="flex size-6 shrink-0 items-center justify-center">
+                  <Icon name="plus" class="size-3.5" />
+                </span>
                 New connection
               </button>
             </div>
@@ -2606,11 +2779,19 @@
                   <!-- The shared Input, resized to the rail's compact scale, so
                        the focus ring and border states match the engine search
                        rather than being approximated a second time. -->
+                  <!-- Not a forward tab stop. The rail's job is the list, and a
+                       filter field standing between the two took a whole Tab to
+                       pass on the way to it. It is still reachable without a
+                       mouse - Shift+Tab off the top row lands here, and typing
+                       into it is a click or that chord away - so the path exists,
+                       it just is not in the way. -->
                   <Input
                     bind:ref={savedSearchEl}
                     bind:value={savedQuery}
                     placeholder="Filter connections…"
                     aria-label="Filter saved connections"
+                    title="Filter connections (Shift+Tab from the list)"
+                    tabindex="-1"
                     autocomplete="off"
                     spellcheck="false"
                     class="h-8 rounded-md border pl-8 pr-8 text-ui-xs"
@@ -2624,15 +2805,25 @@
                         savedQuery = "";
                         return;
                       }
-                      // Enter takes the top match, the same way clicking it would.
+                      // Enter takes the top match, the same way clicking it would;
+                      // Mod+Enter connects to it instead of just opening it.
                       if (e.key === "Enter" && firstSavedMatch) {
                         e.preventDefault();
-                        resetForm(firstSavedMatch);
+                        if (e.metaKey || e.ctrlKey) { if (!connecting) void connectWith(firstSavedMatch); }
+                        else resetForm(firstSavedMatch);
                         return;
                       }
                       // Down arrow hands off to the list, so a filtered result can
                       // be reached without going back to the mouse.
                       if (e.key === "ArrowDown" && savedMatches.length) {
+                        e.preventDefault();
+                        focusFirstSavedRow();
+                        return;
+                      }
+                      // So does Tab. Left to the browser it walks whatever the
+                      // scroll container wraps the list in first, which spends a
+                      // keystroke on a stop with nothing to show for it.
+                      if (e.key === "Tab" && !e.shiftKey && savedMatches.length) {
                         e.preventDefault();
                         focusFirstSavedRow();
                       }
@@ -2641,7 +2832,9 @@
                   {#if savedQuery}
                     <button
                       type="button"
-                      aria-label="Clear filter"
+                      aria-label="Clear filter (Escape)"
+                      title="Clear filter (Esc)"
+                      tabindex="-1"
                       onclick={() => {
                         savedQuery = "";
                         savedSearchEl?.focus();
@@ -2686,7 +2879,7 @@
                       <div
                         data-conn-row
                         class={cn(
-                          "group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.98]",
+                          "group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none focus:bg-muted/60 focus:text-foreground focus:outline-2 focus:-outline-offset-2 focus:outline-ring active:scale-[0.98]",
                           savedStagger && "cn-stagger-in",
                           isSel
                             ? "bg-muted/50 text-foreground"
@@ -2696,11 +2889,39 @@
                           ? `animation-delay: ${Math.min(i, 12) * 40}ms`
                           : ""}
                         role="button"
-                        tabindex="0"
+                        tabindex={conn.id === savedRovingId ? 0 : -1}
                         onclick={() => resetForm(conn)}
                         ondblclick={() => { if (!connecting) void connectWith(conn); }}
                         onkeydown={(e) => {
-                          if (e.key === "Enter") { resetForm(conn); return; }
+                          // Enter opens the connection in the form, the same as a
+                          // click. Mod+Enter connects, the same as a double-click -
+                          // the keyboard gets both gestures the mouse has.
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                              if (!connecting) void connectWith(conn);
+                            } else resetForm(conn);
+                            return;
+                          }
+                          if (e.key === "Delete" || e.key === "Backspace") {
+                            e.preventDefault();
+                            handleDelete(conn.id);
+                            // The element that had focus no longer exists - hand it
+                            // to whatever took its place rather than letting it fall
+                            // back to the document.
+                            void tick().then(() => {
+                              if (savedMatches.length) focusFirstSavedRow();
+                              else savedSearchEl?.focus();
+                            });
+                            return;
+                          }
+                          // Shift+Tab is the way back to the filter, the mirror of
+                          // the Tab that got here.
+                          if (e.key === "Tab" && e.shiftKey && savedSearchEl) {
+                            e.preventDefault();
+                            savedSearchEl.focus();
+                            return;
+                          }
                           // Arrow keys walk the list; Up off the top row returns
                           // to the filter, so the whole rail is one keyboard path.
                           if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -2710,7 +2931,7 @@
                           if (next < 0) savedSearchEl?.focus();
                           else /** @type {HTMLElement|undefined} */ (rows[next])?.focus();
                         }}
-                        title="Click to edit · double-click to connect"
+                        title="Click to edit · double-click to connect ({IS_MAC ? '⌘' : 'Ctrl'}+Enter)"
                       >
                         {#if isSel}
                           <span
@@ -2721,7 +2942,9 @@
                         <button
                           type="button"
                           class="relative flex size-6 shrink-0 items-center justify-center rounded-md disabled:opacity-30"
-                          title="Connect"
+                          title="Connect ({IS_MAC ? '⌘' : 'Ctrl'}+Enter)"
+                          aria-label="Connect to {conn.name || 'this connection'}"
+                          tabindex="-1"
                           disabled={!!connecting}
                           onclick={(e) => {
                             e.stopPropagation();
@@ -2760,7 +2983,7 @@
                           <p
                             class="mt-0.5 truncate text-ui-2xs leading-tight text-muted-foreground"
                           >
-                            {connSubtitle(conn, cid)}
+                            {connSubtitle(conn)}
                           </p>
                         </div>
 
@@ -2768,6 +2991,9 @@
                         <button
                           type="button"
                           class="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-150 hover:text-destructive group-hover:opacity-100"
+                          title="Delete (Del)"
+                          aria-label="Delete {conn.name || 'this connection'}"
+                          tabindex="-1"
                           onclick={(e) => {
                             e.stopPropagation();
                             handleDelete(conn.id);
@@ -2858,7 +3084,10 @@
                 </button>
               </div>
             {:else}
-              <div class="flex items-center gap-2 pe-6">
+              <!-- pe-14, not pe-6: the URL button now sits at the right edge of
+                   this row and the dialog's own close ✕ floats over the same
+                   corner (right-4, size-8). -->
+              <div class="flex items-center gap-2 pe-14">
                 <button
                   type="button"
                   onclick={backToPick}
@@ -2886,7 +3115,8 @@
                       {...props}
                       type="button"
                       aria-label="Database engine"
-                      class="field-surface flex h-8 min-w-0 items-center gap-2 px-2.5 text-left transition-colors hover:bg-accent/40"
+                      class="field-surface flex h-8 min-w-0 max-w-[22rem] items-center gap-2 px-2.5 text-left transition-colors hover:bg-accent/40"
+                      title={editingId ? name || activeDriver.label : activeDriver.label}
                     >
                       <DbIcon
                         id={activeDriver.id}
@@ -2908,6 +3138,37 @@
                   {/snippet}
                 </SearchableMenu>
 
+                <!-- Opens the URL bar above the footer. It sat down there beside
+                     the status text, in the row your eye goes to last, wearing
+                     the quietest treatment on the form - so the fastest way to
+                     fill this form was also the hardest thing on it to find. Up
+                     here it is a control among controls; the bar it opens stays
+                     where the fields are. -->
+                {#if entryMode === "manual" && hasFieldToggle}
+                  <button
+                    type="button"
+                    aria-expanded={importOpen}
+                    aria-controls="cn-url-bar"
+                    title="Fill this form from a connection string"
+                    onclick={() => {
+                      importOpen = !importOpen;
+                      uriHint = "";
+                      if (importOpen)
+                        void tick().then(() =>
+                          document.getElementById("cn-import-uri")?.focus(),
+                        );
+                    }}
+                    class={cn(
+                      "field-surface ms-auto inline-flex h-8 shrink-0 items-center gap-1.5 px-2.5 text-ui-2xs transition-colors",
+                      importOpen
+                        ? "bg-accent/60 text-foreground"
+                        : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                    )}
+                  >
+                    <Icon name="link-2" class="size-3.5 shrink-0" aria-hidden="true" />
+                    Paste a URL
+                  </button>
+                {/if}
               </div>
             {/if}
           </div>
@@ -2950,7 +3211,13 @@
                           aria-label="Paste a connection string"
                           spellcheck="false"
                           class="h-9 pl-8 font-mono text-ui-xs"
-                          oninput={() => (quickHint = "")}
+                          oninput={(e) => {
+                            quickHint = "";
+                            // Cleared on purpose: do not hand the same string
+                            // back on the next window focus.
+                            const v = /** @type {HTMLInputElement} */ (e.currentTarget).value;
+                            if (!v.trim() && clipboardFilled) clipboardDismissed = clipboardFilled;
+                          }}
                           onkeydown={(e) => {
                             if (e.key !== "Enter") return;
                             e.preventDefault();
@@ -3963,36 +4230,6 @@
                   {/if}
                 </div>
 
-                <!-- Opens the URL bar directly above this row. It lived in the
-                     header, where it was the only control on the form that was
-                     not a field, and where it was furthest from the bar it
-                     opened. The bar's own button keeps the "Use URL" wording,
-                     because it is the one that does it. -->
-                {#if step === "form" && entryMode === "manual" && hasFieldToggle}
-                  <button
-                    type="button"
-                    aria-expanded={importOpen}
-                    aria-controls="cn-url-bar"
-                    onclick={() => {
-                      importOpen = !importOpen;
-                      uriHint = "";
-                      if (importOpen)
-                        void tick().then(() =>
-                          document.getElementById("cn-import-uri")?.focus(),
-                        );
-                    }}
-                    class={cn(
-                      "me-2 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-ui-2xs outline-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                      importOpen
-                        ? "bg-accent/60 text-foreground"
-                        : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-                    )}
-                  >
-                    <Icon name="link-2" class="size-3.5 shrink-0" aria-hidden="true" />
-                    Paste a URL
-                  </button>
-                {/if}
-
                 <!-- Actions, shared Button variants (Resume ghost · Stop soft-destructive
                    · Test outline · Connect solid primary), one system app-wide. -->
                 <!-- Two groups, spaced apart rather than run together. Disconnect and
@@ -4073,6 +4310,20 @@
                           class="size-3.5 text-success"
                         />Saved{:else}Save{/if}
                     </Button>
+                    {#if editingId}
+                      <!-- Connect without writing anything. The primary beside it
+                           saves the form first, which is what you want after an
+                           edit - this is for the other case: open the connection
+                           that is already on file and leave it alone. -->
+                      <Button
+                        variant="outline"
+                        disabled={isBusy}
+                        title="Connect without saving changes"
+                        onclick={() => void handleConnect({ save: false })}
+                      >
+                        Connect
+                      </Button>
+                    {/if}
                     <Button
                       class={cn(
                         "px-5",
@@ -4081,7 +4332,7 @@
                       )}
                       disabled={isBusy}
                       title="Connect (↵)"
-                      onclick={handleConnect}
+                      onclick={() => void handleConnect()}
                     >
                       {#if connecting === (editingId ?? "__new__")}
                         <Icon
@@ -4110,6 +4361,70 @@
         <Icon name="x" class="size-3.5" />
         <span class="sr-only">Close</span>
       </button>
+
+      <!-- Duplicate-target confirmation. Same shape as the discard prompt: this
+           is the other question the dialog can ask, and two different-looking
+           confirmations in one dialog is one design too many. -->
+      {#if duplicatePrompt}
+        <div
+          class="absolute inset-0 z-[60] flex items-center justify-center bg-black/65 p-6"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="cn-duplicate-title"
+          tabindex="-1"
+          use:focusTrap
+        >
+          <div class="w-full max-w-[26rem] rounded-[10px] border border-border/40 bg-background p-5 elevate-3-rim">
+            <div class="flex items-start gap-3">
+              <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning">
+                <Icon name="alert-circle" class="size-4" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <!-- The name is data, not a heading. It used to be spliced into
+                     the title, and a saved connection named after its RDS
+                     endpoint turned one line into four before the question was
+                     even reached. Title states the fact; the name sits under it
+                     on its own line, clipped to two. -->
+                <h3 id="cn-duplicate-title" class="text-ui-sm font-semibold text-foreground">
+                  This database is already saved
+                </h3>
+                <p class="mt-1.5 line-clamp-2 break-all font-mono text-ui-2xs leading-snug text-foreground/70">
+                  {duplicatePrompt.existing.name || 'Unnamed'}
+                </p>
+                <p class="mt-2 text-ui-xs leading-relaxed text-muted-foreground">
+                  Same server, same database, same user. Save this one as well?
+                </p>
+              </div>
+            </div>
+            <div class="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                data-autofocus
+                onclick={() => {
+                  const existing = duplicatePrompt?.existing;
+                  duplicatePrompt = null;
+                  if (existing) resetForm(existing);
+                }}
+                class="field-surface inline-flex h-8 shrink-0 items-center px-3 text-ui-xs text-muted-foreground transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
+              >
+                Open it
+              </button>
+              <button
+                type="button"
+                onclick={() => {
+                  const proceed = duplicatePrompt?.proceed;
+                  duplicatePrompt = null;
+                  duplicateAck = true;
+                  proceed?.();
+                }}
+                class="inline-flex h-8 shrink-0 items-center rounded-lg bg-primary px-3.5 text-ui-xs font-semibold text-primary-foreground transition-[opacity,transform] duration-150 ease-out hover:opacity-90 active:scale-[0.97]"
+              >
+                Save anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      {/if}
 
       <!-- Discard-changes confirmation (styled, blocks close until answered) -->
       {#if confirmDiscardOpen}
