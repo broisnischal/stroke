@@ -2273,6 +2273,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     for (const i of indices) {
       const drafts = newRowDrafts[i]
       if (!drafts) continue
+      // A required column left blank is a failure the row already knows about.
+      // Sending it to find out costs a round trip and comes back as a message
+      // about a field nobody is looking at.
+      const missing = insertMissing[i] ?? []
+      if (missing.length) {
+        focusFirstMissing(i)
+        toast.error(
+          missing.length === 1
+            ? `${missing[0]} is required`
+            : `${missing.length} required fields are empty`,
+          { description: `Row ${i + 1}: ${missing.join(', ')}` },
+        )
+        return
+      }
       const built = buildInsertPayload(editableCols, primaryKey, drafts)
       if (!built.ok) {
         toast.error(`Cannot insert row ${i + 1}`, { description: built.message })
@@ -2333,17 +2347,28 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * you about a missing value was an error from the database.
    */
   const insertMissing = $derived.by(() => {
-    if (!newRowDrafts?.length) return /** @type {string[]} */ ([])
+    if (!newRowDrafts?.length) return /** @type {string[][]} */ ([])
     const required = columns.filter((c) => insertOmitBehaviour(c, primaryKey) === 'required')
-    /** @type {string[]} */
-    const out = []
-    for (const d of newRowDrafts) {
-      for (const c of required) {
-        if (!String(d?.[c.name] ?? '').trim() && !out.includes(c.name)) out.push(c.name)
-      }
-    }
-    return out
+    return newRowDrafts.map((d) =>
+      required.filter((c) => !String(d?.[c.name] ?? '').trim()).map((c) => c.name),
+    )
   })
+
+  /**
+   * Put the caret on the first column a staged row still needs.
+   *
+   * Said before the database says it: a failed insert names the column in a
+   * toast, which is the right words in the wrong place - the field it is about
+   * is on screen and nothing points at it.
+   * @param {number} rowIdx
+   */
+  function focusFirstMissing(rowIdx) {
+    const miss = insertMissing[rowIdx]?.[0]
+    if (!miss) return false
+    newRowFocusIdx = rowIdx
+    newRowFocusCol = miss
+    return true
+  }
 
   /**
    * Whether a draft holds anything a person put there.
@@ -7600,12 +7625,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                              the batch is what you want after filling several in,
                              and the row you are looking at is what you want when
                              only one of them is ready. -->
+                        {@const missingHere = insertMissing[di] ?? []}
                         <Check
-                          class="size-3 cursor-pointer text-primary hover:text-primary"
+                          class={cn(
+                            'size-3 cursor-pointer',
+                            missingHere.length ? 'text-warning' : 'text-primary',
+                          )}
                           onclick={() => void submitNewRow(di === 0 ? null : di)}
-                          title={di === 0 && draftCount > 1
-                            ? `Insert all ${draftCount} rows (⌘↵)`
-                            : 'Insert this row (⌘↵)'}
+                          title={missingHere.length
+                            ? `${missingHere.length} required field${missingHere.length === 1 ? '' : 's'} still empty: ${missingHere.join(', ')}`
+                            : di === 0 && draftCount > 1
+                              ? `Insert all ${draftCount} rows (⌘↵)`
+                              : 'Insert this row (⌘↵)'}
                         />
                       {/if}
                     </div>
