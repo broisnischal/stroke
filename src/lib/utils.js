@@ -26,6 +26,22 @@ const twMerge = extendTailwindMerge({
   },
 })
 
+// The pool on this side is gone (closed by a reconnect, a disconnect, or a
+// dropped peer) - the host itself may be perfectly reachable. Rebuilding the
+// pool fixes it, so these heal in place instead of reading as "you are offline".
+const POOL_LOST_PATTERNS = [
+  'closed pool',             // sqlx: "attempted to acquire a connection on a closed pool"
+  'pool has been closed',
+  'poolclosed',
+  'pool timed out',          // sqlx pool acquire timeout (idle/dead peer)
+  'connection closed',
+  'connection was closed',
+  'server closed the connection',
+  'terminating connection',  // Postgres idle-timeout / admin close
+  'connection is closed',
+  'no active connection',
+]
+
 const NETWORK_ERROR_PATTERNS = [
   'failed to lookup address',
   'nodename nor servname',
@@ -49,14 +65,7 @@ const NETWORK_ERROR_PATTERNS = [
   'os error 51',   // ENETUNREACH macOS (Wi‑Fi dropped)
   'os error 65',   // EHOSTUNREACH macOS
   'cannot reach',            // our own preflight message
-  'pool timed out',          // sqlx pool acquire timeout (idle/dead peer)
-  'pool has been closed',
-  'poolclosed',
-  'connection closed',
-  'connection was closed',
-  'server closed the connection',
-  'terminating connection',  // Postgres idle-timeout / admin close
-  'connection is closed',
+  ...POOL_LOST_PATTERNS,
   // NB: deliberately NOT matching bare 'timed out' / 'i/o error' - those also fire
   // on a statement/lock timeout (a slow query, not a dropped connection), which
   // would spuriously flag connectionLost and churn the pool on every subsequent tap.
@@ -68,8 +77,22 @@ const NETWORK_ERROR_PATTERNS = [
  * @param {string} msg
  */
 export function isNetworkError(msg) {
-  const lower = msg.toLowerCase()
+  const lower = String(msg ?? '').toLowerCase()
   return NETWORK_ERROR_PATTERNS.some((p) => lower.includes(p))
+}
+
+/**
+ * Split the connectivity errors into the two states worth telling apart:
+ * `dropped` - the pool on this side died, one reconnect away from working;
+ * `unreachable` - the host itself is not answering.
+ * Returns null for SQL / application errors.
+ * @param {string} msg
+ * @returns {'dropped' | 'unreachable' | null}
+ */
+export function connectionErrorKind(msg) {
+  const lower = String(msg ?? '').toLowerCase()
+  if (POOL_LOST_PATTERNS.some((p) => lower.includes(p))) return 'dropped'
+  return NETWORK_ERROR_PATTERNS.some((p) => lower.includes(p)) ? 'unreachable' : null
 }
 
 /** @param {...import('clsx').ClassValue} inputs */
