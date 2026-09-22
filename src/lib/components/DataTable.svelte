@@ -2316,18 +2316,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Auto-focus the new-row input when focus column changes.
   $effect(() => {
+    // Only what asks for focus is a dependency. Reading the drafts here made
+    // every keystroke re-run this, and a re-run moves the caret: typing in the
+    // second staged row put the next character in the first one.
     const col = newRowFocusCol
     const bandIdx = newRowFocusIdx
-    if (!col || !newRowDrafts?.length) return
-    tick().then(() => {
-      // Scoped to the staged row that asked for focus. A global lookup by column
-      // name lands in the first band every time, so with three rows staged the
-      // caret jumped back to the top one on every move.
-      const band = document.querySelector(`[data-new-row="${bandIdx}"]`)
-      const el = /** @type {HTMLElement|null} */ (
-        band?.querySelector(`[data-new-row-input="${col}"]`) ?? null
-      )
-      el?.focus()
+    if (!col) return
+    untrack(() => {
+      if (!newRowDrafts?.length) return
+      tick().then(() => {
+        // Scoped to the staged row that asked for focus. A global lookup by
+        // column name lands in the first band every time, so with three rows
+        // staged the caret jumped back to the top one on every move.
+        const band = document.querySelector(`[data-new-row="${bandIdx}"]`)
+        const el = /** @type {HTMLElement|null} */ (
+          band?.querySelector(`[data-new-row-input="${col}"]`) ?? null
+        )
+        // Already there: focusing again would put the caret back at the end of
+        // whatever was just typed.
+        if (el && document.activeElement !== el) el.focus()
+      })
     })
   })
 
