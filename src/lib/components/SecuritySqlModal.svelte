@@ -13,6 +13,7 @@
   import X from '@lucide/svelte/icons/x'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Play from '@lucide/svelte/icons/play'
+  import { focusTrap } from '$lib/actions/focus-trap.js'
 
   let {
     title = '',
@@ -123,6 +124,7 @@
   tabindex="-1"
   onclick={(e) => { if (e.target === e.currentTarget && !running) onclose() }}
   onkeydown={(e) => { if (e.key === 'Escape' && !running) onclose() }}
+  use:focusTrap={{ autoFocus: false }}
 >
   <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
   <div

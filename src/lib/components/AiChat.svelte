@@ -109,6 +109,7 @@
   import { generateSuggestions } from "$lib/ai-suggestions.js";
   import { formatCompactCount } from "$lib/table-list.js";
   import { svgToPngBlob, downloadBlob, canvasToPngBlob } from "$lib/svg-png.js";
+  import { focusTrap } from "$lib/actions/focus-trap.js";
 
   /**
    * @typedef {
@@ -4941,6 +4942,7 @@
     onkeydown={(e) => {
       if (e.key === "Escape") closeChartFullscreen();
     }}
+    use:focusTrap
   >
     <!-- Header -->
     <div
@@ -4992,6 +4994,8 @@
     aria-modal="true"
     aria-label="Diagram fullscreen"
     class="fixed inset-0 z-[500] flex flex-col bg-background"
+    tabindex="-1"
+    use:focusTrap
   >
     <!-- Header toolbar -->
     <div

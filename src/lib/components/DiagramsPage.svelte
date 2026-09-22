@@ -20,6 +20,7 @@
   import Check from '@lucide/svelte/icons/check'
   import Search from '@lucide/svelte/icons/search'
   import { cn } from '$lib/utils.js'
+  import { focusTrap } from '$lib/actions/focus-trap.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
 
   /**
@@ -428,6 +429,8 @@
     class="fixed inset-0 z-50 flex flex-col bg-background"
     role="dialog"
     aria-modal="true"
+    tabindex="-1"
+    use:focusTrap
   >
     <div class="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-2.5">
       <span class="min-w-0 flex-1 truncate text-ui-sm font-medium text-foreground">{selected?.name ?? 'Diagram'}</span>

@@ -5,6 +5,7 @@
   import ZoomOut from '@lucide/svelte/icons/zoom-out'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { cn } from '$lib/utils.js'
+  import { focusTrap } from '$lib/actions/focus-trap.js'
 
   /** @type {{ url: string | null, type?: 'image' | 'pdf', onclose: () => void }} */
   let { url = null, type = 'image', onclose } = $props()
@@ -170,6 +171,7 @@
     onclick={onclose}
     onkeydown={handleKey}
     onwheel={onWheel}
+    use:focusTrap={{ autoFocus: false }}
   >
     <!-- Top toolbar -->
     <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->

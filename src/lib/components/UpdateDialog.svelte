@@ -13,6 +13,7 @@
   import ScrollText      from '@lucide/svelte/icons/scroll-text'
   import ExternalLink    from '@lucide/svelte/icons/external-link'
   import { cn }          from '$lib/utils.js'
+  import { focusTrap } from '$lib/actions/focus-trap.js'
 
   let {
     onupdatefound = /** @type {() => void} */ (() => {}),
@@ -262,6 +263,8 @@
     role="dialog"
     aria-modal={isModal}
     aria-label="Application update"
+    tabindex="-1"
+    use:focusTrap={{ enabled: isModal }}
   >
     {#if isModal}
       <button
