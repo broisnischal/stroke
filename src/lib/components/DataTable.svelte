@@ -2458,7 +2458,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         )
         // Already there: focusing again would put the caret back at the end of
         // whatever was just typed.
-        if (el && document.activeElement !== el) el.focus()
+        if (el && document.activeElement !== el) {
+          // The band is pinned to the viewport, so the browser has nothing to
+          // scroll when focus lands on a field whose column is off to the right
+          // - it would leave the caret on a cell nobody can see. Suppress its
+          // attempt and move the grid to the column instead, the same way the
+          // cell cursor does when Tab walks it past the edge.
+          el.focus({ preventScroll: true })
+          scrollColumnIntoView(col, 'auto')
+        }
       })
     })
   })
@@ -3812,19 +3820,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => {
     canScrollHorizontally = totalContentWidth > _viewportWidth + 1
   })
-  // Insert row spans ALL columns (including hidden) so every field can be filled.
   /**
-   * The band's width, from the same columns the canvas draws.
+   * Where a staged-row cell sits inside the band's scrolling layer.
    *
-   * It used to span every column, hidden ones included, which is a different
-   * width and a different set of x positions than the grid underneath - so one
-   * hidden column slid every staged cell after it out of line with its header,
-   * and the drift was widest at the far end where the relationship columns sit.
-   * A hidden column takes the database's default; unhide it to type into it.
+   * Every x and every width in the band comes from `geom`, the same object the
+   * canvas draws from, because a second sum of the same widths drifts the
+   * moment one of the two reads something the other does not. This one used to
+   * add up the gutters and the columns by hand and left the row-number gutter
+   * out, so every staged cell sat that gutter's width to the left of the column
+   * it belonged to - which is the band and the grid sliding past each other
+   * when you drag a wide table sideways.
+   *
+   * The layer is translated by `-_scrollLeft`, so an ordinary column sits at its
+   * content x and the transform carries it. A pinned column has to undo that
+   * shift once it reaches its frozen slot: `colDrawnX` already works that out
+   * for the canvas, and adding the scroll back puts its answer in the layer's
+   * coordinates.
+   * @param {{ name: string, contentX: number, w: number, pinned: boolean }} col
    */
-  const insertRowTotalWidth = $derived(
-    gutterWidth + visibleColumns.reduce((acc, c) => acc + widthForColumn(c.name, c.dataType ?? c.data_type ?? ''), 0)
-  )
+  function bandCellX(col) {
+    return col.pinned ? colDrawnX(col, geom, _scrollLeft) + _scrollLeft : col.contentX
+  }
 
   /**
    * Column order for the cell cursor.
@@ -3875,14 +3891,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const gutterWidth = $derived(
     (showRowExpand ? GUTTER_EXPAND_W : 0) + (showSelection ? GUTTER_SELECT_W : 0) + GUTTER_NUM_W,
   )
-  const geom = $derived(
-    computeColumnGeometry({
-      columns: visibleColumns.map((c) => ({ name: c.name, dataType: c.dataType ?? c.data_type ?? '' })),
-      widthOf: (name) => widthForColumn(name, ''),
+  const geom = $derived.by(() => {
+    const cols = visibleColumns.map((c) => ({ name: c.name, dataType: c.dataType ?? c.data_type ?? '' }))
+    // The type matters: `widthForColumn` falls back to the type's default width
+    // whenever a column has no stored width yet, which is every column for the
+    // frame between a table switch and the effect that seeds `columnWidths`.
+    // Passing '' here and the real type elsewhere made those two callers size
+    // the same column differently for that frame.
+    const typeOf = new Map(cols.map((c) => [c.name, c.dataType]))
+    return computeColumnGeometry({
+      columns: cols,
+      widthOf: (name) => widthForColumn(name, typeOf.get(name) ?? ''),
       isPinned: (name) => pinnedColumns.has(name),
       gutterWidth,
-    }),
-  )
+    })
+  })
   // FK sub-view is a zero-cost overlay - it does NOT push rows down and is NOT
   // included in rowTops. This eliminates the fkSubviewHeight→_mergedHeights→rowTops
   // reactive chain that caused lag every time the panel opened or changed height.
@@ -7528,6 +7551,256 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               onpointermove={guarded(onCanvasPointerMove)}
               onpointerleave={guarded(onCanvasPointerLeave)}
             ></canvas>
+            <!-- Inline insert-row form, inside the canvas's own sticky
+                 anchor. The staged rows have to land on the columns the canvas
+                 draws, so they take their origin from the same pinned box the
+                 canvas does rather than a second one of their own: whatever the
+                 viewport's left edge turns out to be, both are measuring from
+                 it. In the sizer instead, a sticky box has to satisfy its `left`
+                 inset and its containing block's right edge at once, and which
+                 of those wins depends on how wide the box is - which is a
+                 property of the table, not of the band. -->
+            {#if newRowDrafts?.length}
+            {#each newRowDrafts as rowDraft, di (di)}
+              <!-- `cell-fields`: the app-wide rule (app.css) that makes a field
+                   inside a grid cell flush - no border, no radius, no background
+                   of its own. Without it every draft input drew the 2px border at
+                   the 12px field radius the unlayered bare-input rule gives any
+                   input, so a row of 28px cells came out as a row of pills inside
+                   a row that already has its own rules and its own insert ring.
+                   The same fix the cell editor and the structure grid carry.
+                   -
+                   One band per staged row, stacked under the header in the order
+                   they were added. `top` is a viewport y, so the stack holds its
+                   place under the header for nothing per scroll frame, and
+                   `z-index` descends so an earlier row's ring is never drawn
+                   over by the one below it.
+                   -
+                   Horizontally the box is the viewport's width and clips; only
+                   the layer inside it moves, translated by the same
+                   `_scrollLeft` the canvas draws with. Left to native scroll it
+                   moved the instant the wheel did while the columns behind it
+                   repainted on the next frame, and the two slid past each other
+                   - the parallax you see dragging a wide table sideways. -->
+              <div
+                role="none"
+                data-new-row={di}
+                class={cn(
+                  // One ring per row drew a line between every pair of staged
+                  // rows on top of the border that was already there, which is
+                  // the doubled edge. The stack reads as a band instead: a faint
+                  // tint throughout, ordinary row rules between, and one firm
+                  // edge where it meets the data.
+                  // The pickers carry their own type scale, so the size is
+                  // pushed onto everything the band renders - a staged row has
+                  // to line up with the rows under it, and those are drawn at
+                  // the grid's own font size, not at a rung of the UI scale.
+                  'cell-fields absolute overflow-hidden [&_button]:text-[length:inherit] [&_input]:text-[length:inherit] [&_span]:text-[length:inherit]',
+                )}
+                style="top:{HEADER_H + di * ROW_HEIGHT}px; left:0; height:{ROW_HEIGHT}px; width:{_viewportWidth}px; z-index:{20 - Math.min(di, 9)}; font-size:{gridMetrics.cellPx}px"
+                onkeydown={(e) => onNewRowKeydown(e, di)}
+              >
+                <!-- The scrolling layer. The box above is pinned to the
+                     viewport and clips; this is the only thing that moves, and
+                     it moves by the same `_scrollLeft` the canvas draws with,
+                     in one transform for the whole row. Every cell inside is
+                     placed at its column's content x, so the band cannot drift
+                     away from the grid however far sideways you drag. -->
+                <div
+                  class={cn(
+                    'absolute inset-y-0 left-0 bg-panel',
+                    di === draftCount - 1
+                      ? 'border-b-2 border-success/35'
+                      : 'border-b border-border/30',
+                  )}
+                  style="width:{totalContentWidth}px; transform:translateX({-_scrollLeft}px)"
+                >
+                {#if showRowExpand}
+                  <div class="absolute inset-y-0 flex items-center justify-center border-r border-border/20 bg-primary/5" style="left:0; width:{GUTTER_EXPAND_W}px">
+                    {#if insertSaving}
+                      <Loader class="size-3 animate-spin text-muted-foreground" />
+                    {:else}
+                      <!-- The tick on the FIRST row inserts every staged row;
+                           on the rest it inserts just that one. One click for
+                           the batch is what you want after filling several in,
+                           and the row you are looking at is what you want when
+                           only one of them is ready. -->
+                      {@const missingHere = insertMissing[di] ?? []}
+                      <Check
+                        class={cn(
+                          'size-3 cursor-pointer',
+                          missingHere.length ? 'text-warning' : 'text-primary',
+                        )}
+                        onclick={() => void submitNewRow(di === 0 ? null : di)}
+                        title={missingHere.length
+                          ? `${missingHere.length} required field${missingHere.length === 1 ? '' : 's'} still empty: ${missingHere.join(', ')}`
+                          : di === 0 && draftCount > 1
+                            ? `Insert all ${draftCount} rows (⌘↵)`
+                            : 'Insert this row (⌘↵)'}
+                      />
+                    {/if}
+                  </div>
+                {/if}
+                {#if showSelection}
+                  <div class="absolute inset-y-0 flex items-center justify-center border-r border-border/20 bg-primary/5" style="left:{showRowExpand ? GUTTER_EXPAND_W : 0}px; width:{GUTTER_SELECT_W}px">
+                    <button
+                      type="button"
+                      class="inline-flex size-4 items-center justify-center rounded text-muted-foreground hover:text-destructive"
+                      onclick={() => removeDraftRow(di)}
+                      title={draftCount > 1 ? 'Discard this row' : 'Cancel'}
+                    >
+                      <X class="size-3" />
+                    </button>
+                  </div>
+                {/if}
+                <!-- The row-number gutter. Nothing to number in a row that
+                     does not exist yet, so it draws as an empty slot - but it
+                     has to BE there, because the canvas puts every column
+                     after it and the band has to agree on where the columns
+                     start. -->
+                {#if GUTTER_NUM_W > 0}
+                  <div
+                    class="absolute inset-y-0 border-r border-border/20 bg-primary/5"
+                    style="left:{(showRowExpand ? GUTTER_EXPAND_W : 0) + (showSelection ? GUTTER_SELECT_W : 0)}px; width:{GUTTER_NUM_W}px"
+                    aria-hidden="true"
+                  ></div>
+                {/if}
+                {#each visibleColumns as col, ci (col.name)}
+                  {@const gcol = geom.cols[ci]}
+                  {@const dt = col.dataType ?? col.data_type ?? ''}
+                  {@const omit = insertOmitBehaviour(col, primaryKey)}
+                  {@const isAuto = omit === 'auto'}
+                  {@const blankLabel = omit === 'default' ? 'default' : omit === 'null' ? 'NULL' : 'Required'}
+                  <!-- Only a Required blank stops the insert, so only it is
+                       worth noticing before you submit. The rest describe a
+                       value the database will supply and recede accordingly -
+                       nothing is wrong yet, so nothing is coloured as wrong. -->
+                  {@const blankClass = omit === 'required'
+                    ? 'placeholder:text-muted-foreground'
+                    : 'placeholder:italic placeholder:text-muted-foreground'}
+                  {@const enumValues = getColumnEnumValues(col)}
+                  {@const isBoolean = isBooleanType(dt)}
+                  {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
+                  {@const isDateOnly = isDateOnlyType(dt)}
+                  {@const isTimeOnly = isTimeOnlyType(dt)}
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  {#if gcol}
+                  <div
+                    class="absolute inset-y-0 flex items-center overflow-hidden border-r border-border/35 bg-success/[0.03] px-2"
+                    style="left:{bandCellX(gcol)}px; width:{gcol.w}px;{gcol.pinned ? ' z-index:1;' : ''}"
+                    oncontextmenu={(e) => openDraftMenu(e, di, col.name)}
+                  >
+                    {#if isAuto}
+                      <!-- Writable, with the generated value as the placeholder.
+                           Leaving it blank is the normal path and the label says
+                           so; typing an explicit id is legitimate (importing a
+                           row that must keep its key, backfilling a gap) and
+                           refusing it means dropping to raw SQL for a one-cell
+                           exception. Empty still omits the column entirely, so
+                           the sequence is untouched unless you overrule it. -->
+                      <KeyRound class="mr-1 size-3 shrink-0 text-muted-foreground" />
+                      <input
+                        data-new-row-input={col.name}
+                        type="text"
+                        disabled={insertSaving}
+                        placeholder={dt.toLowerCase().includes('int') || dt.toLowerCase().includes('serial')
+                          ? 'auto-increment'
+                          : 'generated'}
+                        title="The database fills this in. Type a value only to override it."
+                        class="w-full min-w-0 bg-transparent font-mono text-[length:inherit] text-foreground outline-none placeholder:italic placeholder:text-muted-foreground disabled:opacity-50"
+                        value={rowDraft[col.name] ?? ''}
+                        oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
+                        onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                      />
+                    {:else if enumValues || isBoolean}
+                      <!-- The same searchable menu the inline cell editor uses
+                           for an enum, so picking a value is one control in the
+                           app rather than two takes on it. The blank row stays
+                           first and says what leaving the field alone does -
+                           `default`, `NULL` or `Required` - which is the one
+                           thing an insert needs that an edit never does. -->
+                      {@const opts = enumValues ?? ['true', 'false']}
+                      {@const picked = rowDraft[col.name] ?? ''}
+                      <SearchableMenu
+                        items={[{ value: '', label: blankLabel }, ...opts.map((o) => ({ value: o, label: o }))]}
+                        placeholder="Search values…"
+                        contentClass="w-56"
+                        align="start"
+                        onselect={(it) => setNewRowDraft(di, col.name, it.value ?? '')}
+                      >
+                        {#snippet trigger(props)}
+                          <button
+                            {...props}
+                            data-new-row-input={col.name}
+                            type="button"
+                            disabled={insertSaving}
+                            aria-label="{col.name} value"
+                            class="flex h-full w-full min-w-0 items-center gap-1 bg-transparent text-left font-mono text-[length:inherit] outline-none disabled:opacity-50"
+                            onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                          >
+                            <span class={cn('min-w-0 flex-1 truncate', picked ? 'text-foreground' : blankClass.replace(/placeholder:/g, ''))}>
+                              {picked || blankLabel}
+                            </span>
+                            <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
+                          </button>
+                        {/snippet}
+                        {#snippet item(it)}
+                          <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                          {#if picked === it.value}
+                            <Icon name="check" class="size-3.5 shrink-0 text-primary" />
+                          {/if}
+                        {/snippet}
+                      </SearchableMenu>
+                    {:else if isDateTime || isDateOnly}
+                      <!-- The same shape the inline cell editor uses: calendar
+                           on the trailing edge, value at the grid's type size,
+                           field filling the cell. It wore the picker's default
+                           layout - icon first, its own font - so a staged row
+                           looked like a form dropped on top of the table rather
+                           than a row of it. -->
+                      <DateTimePicker
+                        colName={col.name}
+                        showTime={isDateTime}
+                        disabled={insertSaving}
+                        iconTrailing={true}
+                        class="h-full w-full min-w-0 pr-1"
+                        inputClass="text-[length:inherit]"
+                        value={rowDraft[col.name] ?? ''}
+                        onchange={(v) => setNewRowDraft(di, col.name, v)}
+                        onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                      />
+                    {:else if isTimeOnly}
+                      <input
+                        data-new-row-input={col.name}
+                        type="time"
+                        disabled={insertSaving}
+                        class="w-full bg-transparent font-mono text-[length:inherit] text-foreground outline-none disabled:opacity-50"
+                        value={rowDraft[col.name] ?? ''}
+                        oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
+                        onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                      />
+                    {:else}
+                      <input
+                        data-new-row-input={col.name}
+                        type="text"
+                        disabled={insertSaving}
+                        placeholder={blankLabel}
+                        class={cn(
+                          "w-full bg-transparent font-mono text-[length:inherit] text-foreground outline-none disabled:opacity-50",
+                          blankClass,
+                        )}
+                        value={rowDraft[col.name] ?? ''}
+                        oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
+                        onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                      />
+                    {/if}
+                  </div>
+                  {/if}
+                {/each}
+                </div>
+              </div>
+            {/each}
+            {/if}
           </div>
 
           {#if visibleColumns.length > 0}
@@ -7561,231 +7834,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               {/each}
             </div>
 
+
             <!-- Sizer: establishes the scroll range; DOM overlays are positioned
                  within it in content coordinates. -->
             <div
               class="relative"
               style="width:{resizingColName ? Math.max(totalContentWidth, _scrollLeft + _viewportWidth) : totalContentWidth}px; height:{spacerHeight}px"
             >
-              <!-- Inline insert-row form. Pinned below the header with
-                   position:sticky so the compositor holds it at viewport-y
-                   HEADER_H (zero per-frame JS), the old absolute + JS
-                   top:{HEADER_H + _physScrollTop} recomputed layout every scroll
-                   frame, which lagged the native scroll and produced the vertical
-                   jitter + ghost row. No `left` inset, so it still scrolls
-                   horizontally in lock-step with the columns via native scroll. -->
-              {#each newRowDrafts ?? [] as rowDraft, di (di)}
-                <!-- `cell-fields`: the app-wide rule (app.css) that makes a field
-                     inside a grid cell flush - no border, no radius, no background
-                     of its own. Without it every draft input drew the 2px border at
-                     the 12px field radius the unlayered bare-input rule gives any
-                     input, so a row of 28px cells came out as a row of pills inside
-                     a row that already has its own rules and its own insert ring.
-                     The same fix the cell editor and the structure grid carry.
-                     -
-                     One band per staged row, stacked under the header in the order
-                     they were added. `top` walks down by a row height each time,
-                     and `z-index` descends so an earlier row's ring is never drawn
-                     over by the one below it.
-                     -
-                     Horizontally it is pinned (`left:0`) and translated by the
-                     same `_scrollLeft` the canvas draws with, exactly like the
-                     canvas's own sticky wrapper. Left to native scroll it moved
-                     the instant the wheel did while the columns behind it
-                     repainted on the next frame, and the two slid past each other
-                     - the parallax you see dragging a wide table sideways. -->
-                <div
-                  role="none"
-                  data-new-row={di}
-                  class={cn(
-                    // One ring per row drew a line between every pair of staged
-                    // rows on top of the border that was already there, which is
-                    // the doubled edge. The stack reads as a band instead: a faint
-                    // tint throughout, ordinary row rules between, and one firm
-                    // edge where it meets the data.
-                    // The pickers carry their own type scale, so the size is
-                    // pushed onto everything the band renders - a staged row has
-                    // to line up with the rows under it, and those are drawn at
-                    // the grid's own font size, not at a rung of the UI scale.
-                    'cell-fields sticky flex overflow-hidden bg-panel [&_button]:text-[length:inherit] [&_input]:text-[length:inherit] [&_span]:text-[length:inherit]',
-                    di === draftCount - 1
-                      ? 'border-b-2 border-success/35'
-                      : 'border-b border-border/30',
-                  )}
-                  style="top:{HEADER_H + di * ROW_HEIGHT}px; left:0; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px; z-index:{20 - Math.min(di, 9)}; font-size:{gridMetrics.cellPx}px; transform:translateX({-_scrollLeft}px)"
-                  onkeydown={(e) => onNewRowKeydown(e, di)}
-                >
-                  {#if showRowExpand}
-                    <div class="flex shrink-0 items-center justify-center border-r border-border/20 bg-primary/5" style="width:{GUTTER_EXPAND_W}px">
-                      {#if insertSaving}
-                        <Loader class="size-3 animate-spin text-muted-foreground" />
-                      {:else}
-                        <!-- The tick on the FIRST row inserts every staged row;
-                             on the rest it inserts just that one. One click for
-                             the batch is what you want after filling several in,
-                             and the row you are looking at is what you want when
-                             only one of them is ready. -->
-                        {@const missingHere = insertMissing[di] ?? []}
-                        <Check
-                          class={cn(
-                            'size-3 cursor-pointer',
-                            missingHere.length ? 'text-warning' : 'text-primary',
-                          )}
-                          onclick={() => void submitNewRow(di === 0 ? null : di)}
-                          title={missingHere.length
-                            ? `${missingHere.length} required field${missingHere.length === 1 ? '' : 's'} still empty: ${missingHere.join(', ')}`
-                            : di === 0 && draftCount > 1
-                              ? `Insert all ${draftCount} rows (⌘↵)`
-                              : 'Insert this row (⌘↵)'}
-                        />
-                      {/if}
-                    </div>
-                  {/if}
-                  {#if showSelection}
-                    <div class="flex shrink-0 items-center justify-center border-r border-border/20 bg-primary/5" style="width:{GUTTER_SELECT_W}px">
-                      <button
-                        type="button"
-                        class="inline-flex size-4 items-center justify-center rounded text-muted-foreground hover:text-destructive"
-                        onclick={() => removeDraftRow(di)}
-                        title={draftCount > 1 ? 'Discard this row' : 'Cancel'}
-                      >
-                        <X class="size-3" />
-                      </button>
-                    </div>
-                  {/if}
-                  {#each visibleColumns as col (col.name)}
-                    {@const dt = col.dataType ?? col.data_type ?? ''}
-                    {@const omit = insertOmitBehaviour(col, primaryKey)}
-                    {@const isAuto = omit === 'auto'}
-                    {@const blankLabel = omit === 'default' ? 'default' : omit === 'null' ? 'NULL' : 'Required'}
-                    <!-- Only a Required blank stops the insert, so only it is
-                         worth noticing before you submit. The rest describe a
-                         value the database will supply and recede accordingly -
-                         nothing is wrong yet, so nothing is coloured as wrong. -->
-                    {@const blankClass = omit === 'required'
-                      ? 'placeholder:text-muted-foreground'
-                      : 'placeholder:italic placeholder:text-muted-foreground'}
-                    {@const enumValues = getColumnEnumValues(col)}
-                    {@const isBoolean = isBooleanType(dt)}
-                    {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
-                    {@const isDateOnly = isDateOnlyType(dt)}
-                    {@const isTimeOnly = isTimeOnlyType(dt)}
-                    {@const colWidth = widthForColumn(col.name, dt)}
-                    <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <div
-                      class="flex shrink-0 items-center overflow-hidden border-r border-border/35 bg-success/[0.03] px-2"
-                      style="width:{colWidth}px"
-                      oncontextmenu={(e) => openDraftMenu(e, di, col.name)}
-                    >
-                      {#if isAuto}
-                        <!-- Writable, with the generated value as the placeholder.
-                             Leaving it blank is the normal path and the label says
-                             so; typing an explicit id is legitimate (importing a
-                             row that must keep its key, backfilling a gap) and
-                             refusing it means dropping to raw SQL for a one-cell
-                             exception. Empty still omits the column entirely, so
-                             the sequence is untouched unless you overrule it. -->
-                        <KeyRound class="mr-1 size-3 shrink-0 text-muted-foreground" />
-                        <input
-                          data-new-row-input={col.name}
-                          type="text"
-                          disabled={insertSaving}
-                          placeholder={dt.toLowerCase().includes('int') || dt.toLowerCase().includes('serial')
-                            ? 'auto-increment'
-                            : 'generated'}
-                          title="The database fills this in. Type a value only to override it."
-                          class="w-full min-w-0 bg-transparent font-mono text-[length:inherit] text-foreground outline-none placeholder:italic placeholder:text-muted-foreground disabled:opacity-50"
-                          value={rowDraft[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
-                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
-                        />
-                      {:else if enumValues || isBoolean}
-                        <!-- The same searchable menu the inline cell editor uses
-                             for an enum, so picking a value is one control in the
-                             app rather than two takes on it. The blank row stays
-                             first and says what leaving the field alone does -
-                             `default`, `NULL` or `Required` - which is the one
-                             thing an insert needs that an edit never does. -->
-                        {@const opts = enumValues ?? ['true', 'false']}
-                        {@const picked = rowDraft[col.name] ?? ''}
-                        <SearchableMenu
-                          items={[{ value: '', label: blankLabel }, ...opts.map((o) => ({ value: o, label: o }))]}
-                          placeholder="Search values…"
-                          contentClass="w-56"
-                          align="start"
-                          onselect={(it) => setNewRowDraft(di, col.name, it.value ?? '')}
-                        >
-                          {#snippet trigger(props)}
-                            <button
-                              {...props}
-                              data-new-row-input={col.name}
-                              type="button"
-                              disabled={insertSaving}
-                              aria-label="{col.name} value"
-                              class="flex h-full w-full min-w-0 items-center gap-1 bg-transparent text-left font-mono text-[length:inherit] outline-none disabled:opacity-50"
-                              onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
-                            >
-                              <span class={cn('min-w-0 flex-1 truncate', picked ? 'text-foreground' : blankClass.replace(/placeholder:/g, ''))}>
-                                {picked || blankLabel}
-                              </span>
-                              <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
-                            </button>
-                          {/snippet}
-                          {#snippet item(it)}
-                            <span class="min-w-0 flex-1 truncate">{it.label}</span>
-                            {#if picked === it.value}
-                              <Icon name="check" class="size-3.5 shrink-0 text-primary" />
-                            {/if}
-                          {/snippet}
-                        </SearchableMenu>
-                      {:else if isDateTime || isDateOnly}
-                        <!-- The same shape the inline cell editor uses: calendar
-                             on the trailing edge, value at the grid's type size,
-                             field filling the cell. It wore the picker's default
-                             layout - icon first, its own font - so a staged row
-                             looked like a form dropped on top of the table rather
-                             than a row of it. -->
-                        <DateTimePicker
-                          colName={col.name}
-                          showTime={isDateTime}
-                          disabled={insertSaving}
-                          iconTrailing={true}
-                          class="h-full w-full min-w-0 pr-1"
-                          inputClass="text-[length:inherit]"
-                          value={rowDraft[col.name] ?? ''}
-                          onchange={(v) => setNewRowDraft(di, col.name, v)}
-                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
-                        />
-                      {:else if isTimeOnly}
-                        <input
-                          data-new-row-input={col.name}
-                          type="time"
-                          disabled={insertSaving}
-                          class="w-full bg-transparent font-mono text-[length:inherit] text-foreground outline-none disabled:opacity-50"
-                          value={rowDraft[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
-                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
-                        />
-                      {:else}
-                        <input
-                          data-new-row-input={col.name}
-                          type="text"
-                          disabled={insertSaving}
-                          placeholder={blankLabel}
-                          class={cn(
-                            "w-full bg-transparent font-mono text-[length:inherit] text-foreground outline-none disabled:opacity-50",
-                            blankClass,
-                          )}
-                          value={rowDraft[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
-                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
-                        />
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              {/each}
-
               <!-- JSON expand panels (independent from FK sub-view).
                    Same pin pattern as the FK sub-view: outer absolute for vertical
                    position, inner position:sticky;left:0 for the horizontal pin. This
