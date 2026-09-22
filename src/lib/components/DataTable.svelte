@@ -2579,6 +2579,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * one line of it.
    * @param {number} rowIdx @param {number} colIdx
    */
+  // Closing the dock releases what it was holding. A loaded value can be 8MB of
+  // string, and keeping it referenced after the panel is gone is 8MB retained
+  // for a panel nobody is looking at - per table, until the next one replaces it.
+  $effect(() => {
+    if (cellEditorOpen) return
+    untrack(() => {
+      if (cellEditorValue !== null) cellEditorValue = null
+      cellEditorOversize = null
+      cellEditorTruncated = false
+    })
+  })
+
   function openCellEditor(rowIdx, colIdx) {
     if (!seedCellEditor(rowIdx, colIdx)) return;
     cellEditorDetached = false;
@@ -5902,7 +5914,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     //    they land in empty space rather than over the text. Geometry must
     //    match cellButtonRects(), which is the click target for these.
     const capped = !!c.oversizeCells && isOversizeValue(value)
-    const loadingCell = capped && !!c.loadingCells?.has(`${idx}:${actualIdx}`)
+    // The key is only built when something is actually loading. Formatting one
+    // per capped cell per frame is a string allocated 60 times a second to ask a
+    // question whose answer is almost always "none of them".
+    const loadingCell = capped && c.loadingCells.size > 0 && c.loadingCells.has(`${idx}:${actualIdx}`)
     if (isHover || loadingCell) {
       if (alignRight) {
         if (isHover) drawIcon(ctx, 'copy', cellX + 9, cy - 7, 14, c.cMuted, 1.8)

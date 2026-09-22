@@ -39,6 +39,7 @@
    *   not the value.
    * @property {(next: string) => void} oncommit
    */
+  import { untrack } from 'svelte'
   import Pencil from '@lucide/svelte/icons/pencil'
   import Copy from '@lucide/svelte/icons/copy'
   import Download from '@lucide/svelte/icons/download'
@@ -137,6 +138,7 @@
     wasOpen = true
     original = text
     draft = text
+    seedToken++
     // Undo/redo, word-delete and line-delete for every plain field in the app
     // live in `input-shortcuts.js`, and its history is keyed by element. This
     // textarea outlives the cell it is showing, so the history has to be
@@ -185,10 +187,46 @@
    */
   const RAW_WINDOW = 128 * 1024
   let rawOffset = $state(0)
+  let seedToken = $state(0)
   // A new cell, or a value that just arrived, starts at the top.
-  $effect(() => { void draft; rawOffset = 0 })
-  const rawWindowText = $derived(heavy ? draft.slice(rawOffset, rawOffset + RAW_WINDOW) : '')
-  const rawWindowEnd = $derived(Math.min(rawOffset + RAW_WINDOW, draft.length))
+  $effect(() => { void seedToken; rawOffset = 0 })
+
+  /**
+   * The slice on screen, and where it came from.
+   *
+   * Typing inside the window splices back into the full value, so the window is
+   * its own state rather than a derived of `draft` - re-slicing on every
+   * keystroke would cut the character just typed off the far edge.
+   */
+  let windowDraft = $state('')
+  let windowStart = 0
+  let windowLen = 0
+  $effect(() => {
+    void seedToken
+    const at = rawOffset
+    untrack(() => {
+      windowStart = at
+      windowDraft = draft.slice(at, at + RAW_WINDOW)
+      windowLen = windowDraft.length
+    })
+  })
+  const rawWindowEnd = $derived(windowStart + windowLen)
+
+  /**
+   * Whether the window can be typed into.
+   *
+   * Never on a value that was cut at the fetch ceiling: the text on screen is
+   * not the whole value, and staging it would write the part that was loaded
+   * over the part that was not. That is data loss, not an edit.
+   */
+  const canEditWindow = $derived(!readOnly && !oversize && !truncatedLoad)
+
+  /** @param {string} next */
+  function applyWindowEdit(next) {
+    draft = draft.slice(0, windowStart) + next + draft.slice(windowStart + windowLen)
+    windowDraft = next
+    windowLen = next.length
+  }
   // A new cell is a new decision.
   $effect(() => { void colName; void sourceHint; forceParse = false })
 
@@ -763,7 +801,16 @@
           <span class="font-mono text-ui-3xs text-muted-foreground tabular-nums">
             {formatBytes(rawOffset)}–{formatBytes(rawWindowEnd)} of {formatBytes(draft.length)}
           </span>
-          <span class="rounded-[3px] border border-border/40 px-1.5 py-px font-mono text-ui-3xs text-muted-foreground">read-only</span>
+          {#if canEditWindow}
+            <span class="rounded-[3px] border border-primary/30 bg-primary/10 px-1.5 py-px font-mono text-ui-3xs text-primary">editable</span>
+          {:else}
+            <span
+              class="rounded-[3px] border border-border/40 px-1.5 py-px font-mono text-ui-3xs text-muted-foreground"
+              title={truncatedLoad
+                ? 'Only part of this value is loaded. Editing it here would write what was loaded over what was not.'
+                : 'This value is not loaded'}
+            >read-only</span>
+          {/if}
           <div class="ml-auto flex items-center gap-1">
             <button
               type="button"
@@ -779,9 +826,15 @@
             >More</button>
           </div>
         </div>
-        <pre
-          class="app-scroll min-h-0 flex-1 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] px-3 py-2 font-mono text-ui-2xs text-foreground"
-          style="line-height:{LINE_H}px">{rawWindowText}</pre>
+        <textarea
+          value={windowDraft}
+          readonly={!canEditWindow}
+          spellcheck="false"
+          aria-label="{colName} value, characters {windowStart} to {rawWindowEnd}"
+          oninput={(e) => applyWindowEdit(/** @type {HTMLTextAreaElement} */ (e.currentTarget).value)}
+          class="no-field-frame app-scroll min-h-0 flex-1 resize-none whitespace-pre-wrap [overflow-wrap:anywhere] bg-transparent px-3 py-2 font-mono text-ui-2xs text-foreground outline-none"
+          style="line-height:{LINE_H}px; tab-size:2"
+        ></textarea>
       </div>
     {/if}
     <!-- `hidden`, not unmounted: the textarea holds the draft, the undo history
