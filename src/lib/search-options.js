@@ -18,6 +18,35 @@
 
 /** @typedef {{ matchCase?: boolean, wholeWord?: boolean, regex?: boolean }} SearchOptions */
 
+/**
+ * The find widget's modifier keys, straight out of VS Code: Alt+C match case,
+ * Alt+R regular expression, Alt+W whole word. Returns the option to toggle, or
+ * null when the event is something else.
+ *
+ * Keyed on `e.code`, not `e.key`: Alt+letter produces a different character on
+ * plenty of layouts (macOS Alt+C is ç, Alt+W is ∑), so the physical key is the
+ * only stable identity a chord like this has.
+ *
+ * @param {KeyboardEvent} e
+ * @returns {'matchCase' | 'wholeWord' | 'regex' | null}
+ */
+export function searchOptionHotkey(e) {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null
+  switch (e.code) {
+    case 'KeyC': return 'matchCase'
+    case 'KeyR': return 'regex'
+    case 'KeyW': return 'wholeWord'
+    default: return null
+  }
+}
+
+/** The chord each option answers to, for titles and tooltips. */
+export const SEARCH_OPTION_KEYS = /** @type {const} */ ({
+  matchCase: 'Alt+C',
+  wholeWord: 'Alt+W',
+  regex: 'Alt+R',
+})
+
 /** @param {string} s */
 export const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 

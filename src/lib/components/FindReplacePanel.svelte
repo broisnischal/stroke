@@ -27,6 +27,7 @@
   import { cn } from '$lib/utils.js'
   import { annotateColumns, allTextColumnsAreKeys } from '$lib/find-replace-columns.js'
   import { keycaps } from '$lib/shortcuts.js'
+  import { searchOptionHotkey, SEARCH_OPTION_KEYS } from '$lib/search-options.js'
 
   let {
     /** @type {Array<{ name: string, dataType?: string }>} */
@@ -47,6 +48,15 @@
     focusFind = $bindable(/** @type {() => void} */ (() => {})),
   } = $props()
 
+  /**
+   * Which column to search, or `ANY_COLUMN` for all of them at once.
+   *
+   * One column at a time is the safe default, but a rename that has to land in
+   * `email`, `fullName` and `address` is three passes of the same search with
+   * the same replacement - and the apply path is already per-cell, so searching
+   * every editable column costs nothing but the loop.
+   */
+  const ANY_COLUMN = -2
   let colIdx = $state(-1)
   /**
    * The three matching options are independent, the way they are in an editor's
@@ -88,8 +98,20 @@
   // Blocked columns stay in the list, disabled, with the reason. Dropping them
   // silently left the one column someone came here to change simply absent,
   // with nothing to say why.
-  const colItems = $derived(
-    allCols.map((c) => ({
+  const colItems = $derived([
+    ...(editableCols.length > 1
+      ? [{
+          value: String(ANY_COLUMN),
+          label: 'Any column',
+          keywords: ['any', 'all', 'every', 'columns'],
+          idx: ANY_COLUMN,
+          dataType: `${editableCols.length} searchable`,
+          blocked: '',
+          disabled: false,
+          active: colIdx === ANY_COLUMN,
+        }]
+      : []),
+    ...allCols.map((c) => ({
       value: String(c.idx),
       label: c.name,
       keywords: [c.name],
@@ -99,12 +121,26 @@
       disabled: !!c.blocked,
       active: c.idx === colIdx,
     })),
+  ])
+
+  /**
+   * The columns this search runs over. Keys stay out of it whichever way the
+   * picker is set: rewriting inside a primary or foreign key changes which row
+   * a row is, not what it says.
+   */
+  const targetCols = $derived(
+    colIdx === ANY_COLUMN ? editableCols : editableCols.filter((c) => c.idx === colIdx),
   )
 
   // Default to the first editable column, and re-pick when the table changes
   // under the panel - the sidebar keeps it mounted across tab switches.
   $effect(() => {
     void tableName
+    if (colIdx === ANY_COLUMN) {
+      // Still meaningful on any table that has something to search.
+      if (!editableCols.length) colIdx = -1
+      return
+    }
     if (colIdx < 0 || !editableCols.some((c) => c.idx === colIdx)) {
       colIdx = editableCols[0]?.idx ?? -1
     }
@@ -143,7 +179,7 @@
   const matches = $derived.by(() => {
     /** @type {Match[]} */
     const out = []
-    if (colIdx < 0 || !findText || regexError) return out
+    if (!targetCols.length || !findText || regexError) return out
     /** @type {RegExp | null} */
     let re = null
     try {
@@ -153,15 +189,17 @@
     }
     if (!re) return out
     for (let r = 0; r < rows.length; r++) {
-      const v = rows[r]?.[colIdx]
-      // Only string cells - rewriting numbers or JSON through a string replace
-      // is a footgun.
-      if (typeof v !== 'string') continue
-      // `lastIndex` survives a call on a /g/ regex, so a shared instance would
-      // skip every other row.
-      re.lastIndex = 0
-      const next = v.replace(re, replaceText)
-      if (next !== v) out.push({ rowIdx: r, colIdx, old: v, value: next })
+      for (const col of targetCols) {
+        const v = rows[r]?.[col.idx]
+        // Only string cells - rewriting numbers or JSON through a string replace
+        // is a footgun.
+        if (typeof v !== 'string') continue
+        // `lastIndex` survives a call on a /g/ regex, so a shared instance would
+        // skip every other row.
+        re.lastIndex = 0
+        const next = v.replace(re, replaceText)
+        if (next !== v) out.push({ rowIdx: r, colIdx: col.idx, old: v, value: next })
+      }
     }
     return out
   })
@@ -169,7 +207,15 @@
   /** Rendering every match in a narrow panel costs more than it tells you. */
   const PREVIEW_CAP = 200
   const shown = $derived(matches.slice(0, PREVIEW_CAP))
-  const activeColName = $derived(editableCols.find((c) => c.idx === colIdx)?.name ?? '')
+  const activeColName = $derived(
+    colIdx === ANY_COLUMN
+      ? `any of ${editableCols.length} columns`
+      : editableCols.find((c) => c.idx === colIdx)?.name ?? '',
+  )
+  /** Column name per match - only worth the row when the search spans columns. */
+  const showMatchColumn = $derived(colIdx === ANY_COLUMN)
+  /** @param {number} idx */
+  const colNameAt = (idx) => allCols.find((c) => c.idx === idx)?.name ?? ''
 
   async function handleApply() {
     if (!matches.length || applying) return
@@ -189,18 +235,34 @@
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
       void handleApply()
+      return
+    }
+    const opt = searchOptionHotkey(e)
+    if (opt) {
+      e.preventDefault()
+      if (opt === 'matchCase') caseSensitive = !caseSensitive
+      else if (opt === 'regex') useRegex = !useRegex
+      else wholeValue = !wholeValue
     }
   }
 
   /** The three matching options, so the markup stays a loop. Any combination. */
   const OPTIONS = $derived([
-    { id: 'case', cap: 'Aa', title: 'Match case', on: () => caseSensitive, toggle: () => (caseSensitive = !caseSensitive) },
-    { id: 'regex', cap: '.*', title: 'Use a regular expression', on: () => useRegex, toggle: () => (useRegex = !useRegex) },
-    { id: 'whole', cap: 'ab', title: 'Match the whole value', on: () => wholeValue, toggle: () => (wholeValue = !wholeValue) },
+    { id: 'case', cap: 'Aa', keys: SEARCH_OPTION_KEYS.matchCase, title: `Match case (${SEARCH_OPTION_KEYS.matchCase})`, on: () => caseSensitive, toggle: () => (caseSensitive = !caseSensitive) },
+    { id: 'regex', cap: '.*', keys: SEARCH_OPTION_KEYS.regex, title: `Use a regular expression (${SEARCH_OPTION_KEYS.regex})`, on: () => useRegex, toggle: () => (useRegex = !useRegex) },
+    { id: 'whole', cap: 'ab', keys: SEARCH_OPTION_KEYS.wholeWord, title: `Match the whole value (${SEARCH_OPTION_KEYS.wholeWord})`, on: () => wholeValue, toggle: () => (wholeValue = !wholeValue) },
   ])
 
+  /**
+   * One frame for every control in this panel.
+   *
+   * The border never moves: hover and focus change colour, not width, and focus
+   * draws the app's own 2px outline just outside the edge rather than thickening
+   * the border - which is what made the column picker read as a heavier control
+   * than the two fields underneath it while it had focus.
+   */
   const fieldCls =
-    'no-focus-ring h-7 w-full min-w-0 rounded-md border border-border/50 bg-input/30 px-2 font-mono text-ui-2xs text-foreground transition-colors placeholder:text-muted-foreground hover:border-border focus:border-ring/60 focus:outline-none'
+    'no-focus-ring h-7 w-full min-w-0 rounded-md border border-border/50 bg-input/30 px-2 font-mono text-ui-2xs text-foreground transition-colors placeholder:text-muted-foreground hover:border-border focus:border-border focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring'
 </script>
 
 <div class="flex h-full min-h-0 w-full flex-col">
@@ -228,10 +290,14 @@
           {...props}
           type="button"
           aria-label="Column to search"
-          class={cn(fieldCls, 'flex items-center gap-1.5 text-left', colMenuOpen && 'border-border')}
+          class={cn(
+            fieldCls,
+            'flex items-center gap-1.5 text-left',
+            colMenuOpen && 'border-border outline-2 -outline-offset-0 outline-ring',
+          )}
         >
           <Icon name="columns-3" class="size-3.5 shrink-0 text-muted-foreground" />
-          <span class="min-w-0 flex-1 truncate">{activeColName || 'No text column'}</span>
+          <span class="min-w-0 flex-1 truncate">{colIdx === ANY_COLUMN ? 'Any column' : (activeColName || 'No text column')}</span>
           <Icon name="chevron-down" class="size-3 shrink-0 text-muted-foreground" />
         </button>
       {/snippet}
@@ -259,14 +325,17 @@
       <!-- One segmented control, not three separate chips: they are three
            settings for the field beside them, and each in its own bordered box
            read as three more buttons competing with it. -->
-      <div class="flex shrink-0 items-center overflow-hidden rounded-md border border-border/50 bg-input/30">
+      <div class="flex h-7 shrink-0 items-center overflow-hidden rounded-md border border-border/50 bg-input/30">
         {#each OPTIONS as opt, i (opt.id)}
           <button
             type="button"
             aria-pressed={opt.on()}
+            aria-label={opt.title}
+            aria-keyshortcuts={opt.keys}
             title={opt.title}
+            tabindex="-1"
             class={cn(
-              'inline-flex size-7 items-center justify-center font-mono text-ui-3xs transition-colors',
+              'inline-flex h-full w-7 items-center justify-center font-mono text-ui-3xs transition-colors',
               i > 0 && 'border-l border-border/40',
               opt.on() ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground',
             )}
@@ -336,7 +405,7 @@
       </span>
     </div>
     <div class="app-scroll min-h-0 flex-1 overflow-y-auto py-0.5">
-      {#each shown as m (m.rowIdx)}
+      {#each shown as m (`${m.rowIdx}:${m.colIdx}`)}
         <!-- Each match is a button: clicking it moves the grid's cell cursor to
              that cell, which is the whole reason this belongs beside the table
              rather than on top of it. -->
@@ -348,6 +417,9 @@
         >
           <span class="flex min-w-0 items-center gap-1.5">
             <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground/60">{m.rowIdx + 1}</span>
+            {#if showMatchColumn}
+              <span class="shrink-0 truncate font-mono text-ui-3xs text-primary/80">{colNameAt(m.colIdx)}</span>
+            {/if}
             <span class="min-w-0 flex-1 truncate font-mono text-ui-3xs text-muted-foreground line-through decoration-destructive/40">{m.old}</span>
           </span>
           <span class="flex min-w-0 items-center gap-1.5">

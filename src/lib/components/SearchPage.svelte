@@ -1,6 +1,6 @@
 <script>
   import { getTableRows } from '$lib/api.js'
-  import { buildSearchQuery, searchOptionsSupported } from '$lib/search-options.js'
+  import { buildSearchQuery, searchOptionsSupported, searchOptionHotkey, SEARCH_OPTION_KEYS } from '$lib/search-options.js'
   import Search from '@lucide/svelte/icons/search'
   import Table2 from '@lucide/svelte/icons/table-2'
   import Eye from '@lucide/svelte/icons/eye'
@@ -131,6 +131,14 @@
     if (e.key === 'Enter') {
       e.preventDefault()
       void runSearch()
+      return
+    }
+    const opt = searchOptionHotkey(e)
+    if (opt && optionsSupported) {
+      e.preventDefault()
+      if (opt === 'matchCase') matchCase = !matchCase
+      else if (opt === 'wholeWord') wholeWord = !wholeWord
+      else { useRegex = !useRegex; regexError = '' }
     }
   }
 
@@ -178,7 +186,9 @@
       {#if optionsSupported}
         <button
           type="button"
-          title="Match case"
+          title="Match case ({SEARCH_OPTION_KEYS.matchCase})"
+          aria-label="Match case ({SEARCH_OPTION_KEYS.matchCase})"
+          aria-keyshortcuts={SEARCH_OPTION_KEYS.matchCase}
           aria-pressed={matchCase}
           class={cn(
             'flex size-6 shrink-0 items-center justify-center rounded text-ui-xs font-mono transition-colors',
@@ -190,7 +200,9 @@
         >Aa</button>
         <button
           type="button"
-          title="Match whole word"
+          title="Match whole word ({SEARCH_OPTION_KEYS.wholeWord})"
+          aria-label="Match whole word ({SEARCH_OPTION_KEYS.wholeWord})"
+          aria-keyshortcuts={SEARCH_OPTION_KEYS.wholeWord}
           aria-pressed={wholeWord}
           class={cn(
             'flex size-6 shrink-0 items-center justify-center rounded text-ui-xs font-mono transition-colors',
@@ -202,7 +214,9 @@
         ><span class="underline underline-offset-2">ab</span></button>
         <button
           type="button"
-          title="Use regular expression"
+          title="Use regular expression ({SEARCH_OPTION_KEYS.regex})"
+          aria-label="Use regular expression ({SEARCH_OPTION_KEYS.regex})"
+          aria-keyshortcuts={SEARCH_OPTION_KEYS.regex}
           aria-pressed={useRegex}
           class={cn(
             'flex size-6 shrink-0 items-center justify-center rounded text-ui-xs font-mono transition-colors',

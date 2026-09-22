@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSearchQuery, supportedSearchOptions, hasActiveSearchOptions } from './search-options.js'
+import { buildSearchQuery, supportedSearchOptions, hasActiveSearchOptions, searchOptionHotkey } from './search-options.js'
 
 const OFF = { matchCase: false, wholeWord: false, regex: false }
 
@@ -89,5 +89,27 @@ describe('hasActiveSearchOptions', () => {
     expect(hasActiveSearchOptions(OFF)).toBe(false)
     expect(hasActiveSearchOptions(null)).toBe(false)
     expect(hasActiveSearchOptions({ ...OFF, regex: true })).toBe(true)
+  })
+})
+
+describe('searchOptionHotkey', () => {
+  /** @param {Partial<KeyboardEvent>} e */
+  const ev = (e) => /** @type {KeyboardEvent} */ ({ altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...e })
+
+  it('reads the editor chords off the physical key', () => {
+    expect(searchOptionHotkey(ev({ altKey: true, code: 'KeyC' }))).toBe('matchCase')
+    expect(searchOptionHotkey(ev({ altKey: true, code: 'KeyR' }))).toBe('regex')
+    expect(searchOptionHotkey(ev({ altKey: true, code: 'KeyW' }))).toBe('wholeWord')
+  })
+
+  it('ignores the same letters without Alt, and Alt with another modifier', () => {
+    expect(searchOptionHotkey(ev({ code: 'KeyC' }))).toBe(null)
+    expect(searchOptionHotkey(ev({ altKey: true, ctrlKey: true, code: 'KeyC' }))).toBe(null)
+    // Alt+Shift+R is "reset table view" - it must not land here too.
+    expect(searchOptionHotkey(ev({ altKey: true, shiftKey: true, code: 'KeyR' }))).toBe(null)
+  })
+
+  it('ignores every other key', () => {
+    expect(searchOptionHotkey(ev({ altKey: true, code: 'KeyX' }))).toBe(null)
   })
 })
