@@ -393,6 +393,8 @@
     showConnectionModal = true
     try { await disconnectPostgres() } catch { /* nothing to tear down */ }
   }
+  /** Assigned by ObjectsPage so ⌘F can reach its search box. */
+  let objectsFocusSearch = $state(/** @type {() => void} */ (() => {}))
   let showConnectionModal = $state(false)
   /** Engine chosen on the welcome screen - the modal opens straight into its form. */
   let connectionModalEngine = $state('')
@@ -2259,6 +2261,9 @@ let rowSearch = $state('')
 
   createHotkey('Mod+F', (e) => {
     if (commandOpen || showConnectionModal || showSettingsModal) return
+    // Find means "search what this page is showing", and on the objects page
+    // that is its own box. It used to mean nothing there at all.
+    if (activeTab?.kind === 'objects') { e.preventDefault(); objectsFocusSearch?.(); return }
     if (activeTab?.kind !== 'table' || !activeTable) return
     e.preventDefault()
     tableToolbar?.focusRowSearch?.()
@@ -7649,6 +7654,7 @@ let rowSearch = $state('')
           <svelte:boundary failed={tabError}>
             {#await import('./ObjectsPage.svelte')}<TabLoading />{:then { default: ObjectsPage }}
               <ObjectsPage
+                bind:focusSearch={objectsFocusSearch}
                 active={activeTab?.kind === 'objects'}
                 connectionType={connection?.type ?? null}
                 onopen={({ schema, name }) => void openTableTab(schema || activeSchema, name)}

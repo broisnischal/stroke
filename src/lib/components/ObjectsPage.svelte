@@ -17,7 +17,19 @@
    *   onopen?: (args: { schema: string, name: string }) => void,
    * }}
    */
-  let { active = false, connectionType = null, onopen = () => {} } = $props()
+  let {
+    active = false,
+    connectionType = null,
+    onopen = () => {},
+    /** Assigned here; the shell calls it for ⌘F. */
+    focusSearch = $bindable(/** @type {() => void} */ (() => {})),
+  } = $props()
+
+  /** @type {HTMLInputElement | null} */
+  let searchEl = $state(null)
+  $effect(() => {
+    focusSearch = () => { searchEl?.focus(); searchEl?.select() }
+  })
 
   /** @typedef {'tables' | 'views' | 'functions' | 'triggers'} SubTab */
 
@@ -403,10 +415,20 @@
       <div class="relative flex h-7 w-64 items-center">
         <Search class="pointer-events-none absolute left-2.5 size-3.5 shrink-0 text-muted-foreground" />
         <input
+          bind:this={searchEl}
           type="text"
+          role="searchbox"
+          aria-label="Search {activeSub}"
+          autocomplete="off"
+          spellcheck="false"
           bind:value={objQuery}
           placeholder="Search {activeSub}…"
-          class= "field-surface h-7 w-full border-transparent bg-accent/40 pl-8 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground transition-colors focus: focus:bg-input/30 focus:outline-none"
+          onkeydown={(e) => {
+            // Escape clears the filter rather than closing anything: the list
+            // behind it is the page, and there is nothing to close.
+            if (e.key === 'Escape' && objQuery) { e.preventDefault(); e.stopPropagation(); objQuery = '' }
+          }}
+          class="field-surface h-7 w-full border-transparent bg-accent/40 pl-8 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground transition-colors focus:bg-input/30 focus:outline-none"
         />
         {#if objQuery}
           <button

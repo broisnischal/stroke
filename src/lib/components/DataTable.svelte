@@ -7,6 +7,7 @@
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
   import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight, appNumberGrouping, appHighlightActiveRow, appGridFontSize, appImagePreview, appOpenUrlsOnClick, appRowNumbers } from '$lib/stores/settings.js'
   import { createSmoothScroll, wheelPixels } from '$lib/smooth-scroll.js'
+  import { isJsonColumnType } from '$lib/cell-expand.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -1988,11 +1989,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Surface staged-edit state to the parent (→ StatusBar Apply/Reset buttons).
   $effect(() => {
-    applyEdits = applyPendingEdits;
+    // Apply means "commit what I have staged", and a filled-in draft row is part
+    // of that - so it takes the press, and the edits take the next one.
+    //
+    // Not one atomic action on purpose: the insert goes through the DML confirm,
+    // which is a dialog the user can cancel, so awaiting it here would leave
+    // Apply hanging on a promise that never settles. One press, one commit, and
+    // the count says how much is left.
+    applyEdits = async () => {
+      if (newRowDrafts) { submitNewRow(); return; }
+      await applyPendingEdits();
+    };
     copyEditsSql = copyPendingChangeSql;
-    resetEdits = resetPendingEdits;
+    resetEdits = () => {
+      if (newRowDrafts) cancelNewRow();
+      resetPendingEdits();
+    };
   });
-  $effect(() => { pendingEditCount = pendingEdits.size + pendingDeletes.size; });
+  // An open insert draft counts. It is a change you have made and not applied,
+  // which is exactly what that number means everywhere else - and without it the
+  // Apply/Reset pair stayed hidden while a filled-in row sat under the header
+  // with no way to commit it but a click on a 12px tick.
+  $effect(() => {
+    pendingEditCount = pendingEdits.size + pendingDeletes.size + (newRowDrafts ? 1 : 0);
+  });
 
   // Surface scroll-to-top / scroll-to-bottom to the parent (→ StatusBar buttons).
   $effect(() => {
@@ -2158,6 +2178,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       .filter((c) => !String(newRowDrafts?.[c.name] ?? '').trim())
       .map((c) => c.name)
   })
+
+  /**
+   * Whether a draft holds anything a person put there.
+   *
+   * A fresh draft is not empty - date columns seed themselves with now, and a
+   * generated column carries its placeholder - so "has content" means it differs
+   * from what opening it would produce.
+   * @param {Record<string, string>} drafts
+   */
+  function draftHasContent(drafts) {
+    return columns.some((col) => {
+      const seeded = defaultInsertDraft(col, primaryKey)
+      return String(drafts[col.name] ?? '') !== String(seeded ?? '')
+    })
+  }
 
   /** @param {string} colName @param {string} value */
   function setNewRowDraft(colName, value) {
@@ -2837,7 +2872,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // A generated value and the key are the database's to assign - copying
       // them is what would make the insert collide with the row it came from.
       const auto = isAutoColumn(col, primaryKey) || primaryKey.includes(col.name);
-      drafts[col.name] = auto ? defaultInsertDraft(col, primaryKey) : valueToEditString(row[i]);
+      if (auto) { drafts[col.name] = defaultInsertDraft(col, primaryKey); return; }
+      const v = row[i];
+      // A json column takes JSON TEXT, and `valueToEditString` hands back the
+      // bare value for anything that is not an object - so a json column holding
+      // the string "sdf asdf" was copied in as sdf asdf, which is not JSON, and
+      // the insert came back "answerField: Invalid JSON". Re-encode it.
+      const isJsonCol = isJsonColumnType(col.dataType ?? col.data_type ?? '');
+      if (isJsonCol && v !== null && v !== undefined) {
+        try { drafts[col.name] = JSON.stringify(v); return } catch { /* fall through */ }
+      }
+      drafts[col.name] = valueToEditString(v);
     });
     newRowDrafts = drafts;
     const firstEditable = columns.find((c) => !isAutoColumn(c, primaryKey));
@@ -4050,7 +4095,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Per-tab expand/sub-view state preservation ───────────────────────────────
   // Expand rows and FK sub-view are saved per columnWidthsKey so switching tabs
   // restores exactly what the user had open in each table.
-  /** @type {Map<string, { expandedRows: Set<number>, fkSubview: typeof fkSubview }>} */
+  /** @type {Map<string, { expandedRows: Set<number>, fkSubview: typeof fkSubview, newRowDrafts: Record<string, string> | null, newRowFocusCol: string | null }>} */
   const _tabExpandCache = new Map()
   // Cap the per-tab cache: each entry can retain a whole FK sub-view's fetched
   // rows, so an unbounded map would accumulate row data for every table visited
@@ -4069,6 +4114,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         _tabExpandCache.set(_lastTabKey, {
           expandedRows: new Set(expandedRows),
           fkSubview: fkSubview,
+          // The draft belongs to the table it was opened on. One component serves
+          // every tab, so without this the Add row you started in one table was
+          // sitting in the next one you switched to, over a different set of
+          // columns.
+          //
+          // An UNTOUCHED draft is not kept. It costs a row of height, so every
+          // tab switch with one open shifted the rows under it - a layout change
+          // for something nobody had typed into yet. A draft with anything in it
+          // is work, and work is kept.
+          newRowDrafts: newRowDrafts && draftHasContent(newRowDrafts) ? { ...newRowDrafts } : null,
+          newRowFocusCol: newRowDrafts && draftHasContent(newRowDrafts) ? newRowFocusCol : null,
         })
         // Evict least-recently-used entries (oldest insertion order) over the cap.
         while (_tabExpandCache.size > TAB_EXPAND_CACHE_MAX) {
@@ -4084,6 +4140,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const saved = _tabExpandCache.get(newKey)
       expandedRows = saved ? new Set(saved.expandedRows) : new Set()
       fkSubview = saved?.fkSubview ?? null
+      newRowDrafts = saved?.newRowDrafts ? { ...saved.newRowDrafts } : null
+      newRowFocusCol = saved?.newRowFocusCol ?? null
       const restored = loadPendingChanges(newKey)
       pendingEdits = restored.edits
       pendingDeletes = restored.deletes
