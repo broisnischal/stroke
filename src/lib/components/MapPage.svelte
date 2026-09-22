@@ -938,7 +938,7 @@
             class="py-1.5 pl-2 text-ui-xs"
           >
             <span class="truncate">{layerLabel(l)}</span>
-            <span class="ml-auto shrink-0 pl-3 text-ui-2xs text-muted-foreground/60">
+            <span class="ml-auto shrink-0 pl-3 text-ui-2xs text-muted-foreground">
               {l.geomType} · {rowsLabel(l.rows)}
             </span>
           </Select.Item>
@@ -981,7 +981,7 @@
 
           {#if opNeedsValue}
             <input
-              class="h-7 w-[140px] rounded-md border border-border bg-muted/30 px-2 text-ui-xs outline-none focus:border-ring"
+            class= "field-surface h-7 w-[140px] bg-muted/30 px-2 text-ui-xs outline-none focus:border-ring"
               placeholder="Value"
               bind:value={filterValue}
               onkeydown={(e) => e.key === 'Enter' && applyFilter()}
@@ -1016,7 +1016,7 @@
           {#each BASEMAPS as b (b.id)}
             <Select.Item value={b.id} label={b.label} class="py-1.5 pl-2 text-ui-xs">
               <span class="truncate">{b.label}</span>
-              <span class="ml-auto shrink-0 pl-3 text-ui-2xs text-muted-foreground/60">
+              <span class="ml-auto shrink-0 pl-3 text-ui-2xs text-muted-foreground">
                 {b.offline ? 'offline' : 'online tiles'}
               </span>
             </Select.Item>
@@ -1069,7 +1069,7 @@
   >
     {#if !available}
       <div class="flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
-        <Globe class="size-8 shrink-0 text-muted-foreground/40" />
+        <Globe class="size-8 shrink-0 text-muted-foreground" />
         <p class="text-ui-xl font-medium">No spatial data here</p>
         <p class="max-w-md text-ui-sm text-muted-foreground">
           The map reads PostGIS geometry and geography columns. Install the extension with
@@ -1079,7 +1079,7 @@
       </div>
     {:else if !layers.length}
       <div class="flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
-        <Layers class="size-8 shrink-0 text-muted-foreground/40" />
+        <Layers class="size-8 shrink-0 text-muted-foreground" />
         <p class="text-ui-xl font-medium">Nothing to map yet</p>
         <p class="max-w-md text-ui-sm text-muted-foreground">
           PostGIS {postgisVersion} is installed, but no table has a geometry or geography column.
@@ -1138,7 +1138,7 @@
           <div class="min-h-0 flex-1 overflow-y-auto p-2.5">
             <dl class="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1">
               {#each selectedEntries as [key, value] (key)}
-                <dt class="truncate text-ui-2xs text-muted-foreground/70">{key}</dt>
+                <dt class="truncate text-ui-2xs text-muted-foreground">{key}</dt>
                 <dd class="min-w-0 break-words font-mono text-ui-2xs">
                   {value === null ? 'NULL' : typeof value === 'object' ? JSON.stringify(value) : String(value)}
                 </dd>
@@ -1157,12 +1157,12 @@
             <!-- Density legend. The ramp is doing the encoding, so it has to say
                  what it encodes; a heatmap without a scale is decoration. -->
             <div class="flex w-fit items-center gap-2 rounded-lg border border-border/50 bg-background/80 px-2.5 py-1.5 backdrop-blur">
-              <span class="text-ui-3xs uppercase tracking-[0.08em] text-muted-foreground/60">Density</span>
+              <span class="text-ui-3xs uppercase tracking-[0.08em] text-muted-foreground">Density</span>
               <span
                 class="h-1.5 w-24 rounded-full"
                 style="background:linear-gradient(90deg, rgba({palette.accent},0.35), rgba({palette.accent},0.65), rgb({palette.accent}))"
               ></span>
-              <span class="font-mono text-ui-3xs tabular-nums text-muted-foreground/60">
+              <span class="font-mono text-ui-3xs tabular-nums text-muted-foreground">
                 {peakCount.toLocaleString()}
               </span>
             </div>
@@ -1178,20 +1178,20 @@
               <span class="font-mono tabular-nums">
                 {matched.toLocaleString()}
               </span>
-              <span class="text-muted-foreground/60">
+              <span class="text-muted-foreground">
                 {matched === 1 ? 'row' : 'rows'} in view
               </span>
               {#if mode === 'clusters'}
-                <span class="text-muted-foreground/30">·</span>
-                <span class="text-muted-foreground/60 tabular-nums">
+                <span class="text-muted-foreground">·</span>
+                <span class="text-muted-foreground tabular-nums">
                   {features.length.toLocaleString()} clusters
                 </span>
               {/if}
-              <span class="text-muted-foreground/30">·</span>
-              <span class="text-muted-foreground/50">SRID {layer.srid || 'unset'}</span>
+              <span class="text-muted-foreground">·</span>
+              <span class="text-muted-foreground">SRID {layer.srid || 'unset'}</span>
               {#if queryMs}
-                <span class="text-muted-foreground/30">·</span>
-                <span class="text-muted-foreground/50 tabular-nums">{queryMs} ms</span>
+                <span class="text-muted-foreground">·</span>
+                <span class="text-muted-foreground tabular-nums">{queryMs} ms</span>
               {/if}
             </div>
           {/if}
@@ -1201,7 +1201,7 @@
           <span
             class={cn(
               'pointer-events-none absolute right-0 -top-5 rounded bg-background/70 px-1.5 py-0.5 text-ui-3xs backdrop-blur',
-              tileErrors > 0 ? 'text-muted-foreground' : 'text-muted-foreground/60',
+              tileErrors > 0 ? 'text-muted-foreground' : 'text-muted-foreground',
             )}
           >
             {#if tileErrors > 0}
@@ -1218,11 +1218,11 @@
                as you move and can be read at a glance. -->
           <div class="flex shrink-0 items-center gap-2.5 rounded-lg border border-border/50 bg-background/80 px-2.5 py-1.5 font-mono text-ui-2xs tabular-nums backdrop-blur">
             <span>
-              <span class="text-muted-foreground/45">{cursor.lat >= 0 ? 'N' : 'S'}</span>
+              <span class="text-muted-foreground">{cursor.lat >= 0 ? 'N' : 'S'}</span>
               {Math.abs(cursor.lat).toFixed(4)}°
             </span>
             <span>
-              <span class="text-muted-foreground/45">{cursor.lon >= 0 ? 'E' : 'W'}</span>
+              <span class="text-muted-foreground">{cursor.lon >= 0 ? 'E' : 'W'}</span>
               {Math.abs(cursor.lon).toFixed(4)}°
             </span>
           </div>

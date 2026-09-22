@@ -16,8 +16,15 @@
  * `scroll` events as before - this module only moves scrollTop.
  */
 
-/** Fraction of the remaining distance covered per frame. */
+/** Fraction of the remaining distance covered per 60Hz frame. */
 const EASE = 0.22
+/** The frame the EASE above is quoted against, in ms. */
+const EASE_REF_MS = 1000 / 60
+/** Cap on a single frame's step, so a stalled tab doesn't teleport on resume. */
+const MAX_FRAME_MS = 64
+/** Floor on a frame's step. A clock too coarse to resolve the gap between two
+ *  frames would otherwise report 0ms, and an ease of zero never converges. */
+const MIN_FRAME_MS = 4
 /** Below this many pixels the animation stops and snaps. */
 const EPSILON = 0.5
 /** A "line" of wheel delta, for deltaMode 1 (Firefox / some Linux mice). */
@@ -59,6 +66,8 @@ export function createSmoothScroll(el) {
   let curTop = targetTop
   let curLeft = targetLeft
   let raf = 0
+  /** Timestamp of the last animated frame, 0 when the animation is at rest. */
+  let _lastFrame = 0
 
   const maxTop = () => Math.max(0, el.scrollHeight - el.clientHeight)
   const maxLeft = () => Math.max(0, el.scrollWidth - el.clientWidth)
@@ -84,9 +93,26 @@ export function createSmoothScroll(el) {
   function stop() {
     if (raf) cancelAnimationFrame(raf)
     raf = 0
+    _lastFrame = 0
   }
 
   function frame() {
+    // Clock read here rather than from rAF's timestamp argument: a scheduler that
+    // calls the callback with no argument (jsdom, a test stub, a polyfill) would
+    // otherwise make `dt` NaN and the animation would never converge.
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
+    // Ease by ELAPSED TIME, not per frame. A fixed fraction per frame means the
+    // animation converges twice as fast on a 120Hz display as on a 60Hz one, so
+    // the same wheel notch travelled a different distance per unit time - and on
+    // ProMotion, where most of this app runs, it also halved the ease the feel
+    // was tuned for. Normalising against a 60Hz frame makes the curve identical
+    // at any refresh rate.
+    const dt =
+      _lastFrame === 0
+        ? EASE_REF_MS
+        : Math.min(MAX_FRAME_MS, Math.max(MIN_FRAME_MS, now - _lastFrame))
+    _lastFrame = now
+    const ease = 1 - Math.pow(1 - EASE, dt / EASE_REF_MS)
     const dTop = targetTop - curTop
     const dLeft = targetLeft - curLeft
     if (Math.abs(dTop) < EPSILON && Math.abs(dLeft) < EPSILON) {
@@ -97,11 +123,21 @@ export function createSmoothScroll(el) {
       el.scrollTop = Math.round(curTop)
       el.scrollLeft = Math.round(curLeft)
       raf = 0
+      _lastFrame = 0
       return
     }
     // Re-clamp as we go: content can shrink under us (a filter, a smaller page).
-    curTop = clamp(curTop + dTop * EASE, maxTop())
-    curLeft = clamp(curLeft + dLeft * EASE, maxLeft())
+    curTop = clamp(curTop + dTop * ease, maxTop())
+    curLeft = clamp(curLeft + dLeft * ease, maxLeft())
+    // Written FRACTIONAL on purpose, and rounded only at the landing below.
+    //
+    // Rounding here instead looks like the obvious fix for the canvas drawing text
+    // at integer offsets, and it is not. The ease moves curTop by a shrinking
+    // fraction each frame, so the tail of every scroll advances by less than a
+    // pixel per frame - at 120Hz, where each frame carries about half the delta it
+    // did at 60. Rounding the write turns that tail into 0,0,1,0,1 and the whole
+    // gesture ends in visible steps. The sub-pixel offset this leaves against the
+    // canvas is under half a pixel; the stepping it would cost is not.
     el.scrollTop = curTop
     el.scrollLeft = curLeft
     raf = requestAnimationFrame(frame)

@@ -471,6 +471,22 @@
    * @param {any} row
    * @param {boolean} [toDefault]
    */
+  /**
+   * True once the server has told us it will not take `ALTER SYSTEM` at all.
+   *
+   * Managed Postgres (RDS, Cloud SQL, Azure, Neon…) blocks the statement
+   * outright: the parameters live in the provider's own parameter group, not in
+   * `postgresql.auto.conf`. Learned from the first rejection rather than guessed
+   * from the hostname, which would be wrong for a self-hosted server behind a
+   * proxy and for every provider not on the list.
+   */
+  let configWritesBlocked = $state(false)
+
+  /** @param {unknown} e */
+  function isAlterSystemBlocked(e) {
+    return /alter system .*not supported|permission denied .*alter system|must be superuser to execute alter system/i.test(String(e))
+  }
+
   async function applySetting(row, toDefault = false) {
     if (savingSetting) return
     savingSetting = row.name
@@ -479,9 +495,19 @@
       if (res.requiresRestart) toast.warning('Restart required', { description: res.message, duration: 7000 })
       else toast.success(res.message)
       openSetting = ''
+      configWritesBlocked = false
       await refreshConfig()
     } catch (e) {
-      toast.error('Could not change setting', { description: String(e), duration: 8000 })
+      if (isAlterSystemBlocked(e)) {
+        configWritesBlocked = true
+        toast.error('This server does not allow ALTER SYSTEM', {
+          description:
+            'Managed Postgres keeps its settings in the provider\'s parameter group - RDS parameter groups, Cloud SQL flags, Azure server parameters. Change it there and the value shows up here.',
+          duration: 10000,
+        })
+      } else {
+        toast.error('Could not change setting', { description: String(e), duration: 8000 })
+      }
     } finally {
       savingSetting = ''
     }
@@ -492,6 +518,29 @@
   function keysOf(rows) { return rows?.length ? Object.keys(rows[0]) : [] }
   /** @param {any} v */
   function cell(v) { return v === null || v === undefined ? '–' : Array.isArray(v) ? (v.length ? v.join(', ') : '–') : String(v) }
+
+  /**
+   * Columns whose every present value is a number. Those get right-aligned
+   * tabular figures, so PIDs and counts line up on the decimal down the column
+   * instead of ragging against a left edge like prose.
+   * @param {any[]} rows @param {string[]} cols
+   */
+  function numericCols(rows, cols) {
+    /** @type {Set<string>} */
+    const out = new Set()
+    for (const k of cols) {
+      let seen = false
+      let allNumeric = true
+      for (const row of rows) {
+        const v = row[k]
+        if (v === null || v === undefined) continue
+        seen = true
+        if (typeof v !== 'number') { allNumeric = false; break }
+      }
+      if (seen && allNumeric) out.add(k)
+    }
+    return out
+  }
 
   const ACRONYMS = new Set(['id', 'ids', 'pid', 'pids', 'db', 'ip', 'addr', 'xid', 'lsn', 'wal', 'gid', 'sql', 'os', 'tcp', 'io'])
   /** `blocking_pids` → `Blocking PIDs`. Raw catalog column names are not labels. */
@@ -525,7 +574,7 @@
         <p class="mt-0.5 flex min-w-0 items-center gap-1.5 text-ui-2xs text-muted-foreground">
           <span class="truncate font-mono text-foreground/70">{connectionName || '—'}</span>
           {#if version}
-            <span class="text-muted-foreground/40">·</span>
+            <span class="text-muted-foreground">·</span>
             <span class="shrink-0 truncate">{isPg ? 'PostgreSQL' : 'MySQL'} {version.version}</span>
           {/if}
         </p>
@@ -535,7 +584,7 @@
     {#if supported}
       <div class="flex shrink-0 items-center gap-2">
         {#if lastUpdated}
-          <span class="hidden text-ui-2xs tabular-nums text-muted-foreground/70 sm:inline">Updated {agoLabel}</span>
+          <span class="hidden text-ui-2xs tabular-nums text-muted-foreground sm:inline">Updated {agoLabel}</span>
         {/if}
         <button
           type="button"
@@ -560,7 +609,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground focus-visible:border-ring/55 focus-visible:ring-2 focus-visible:ring-ring/18 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+          class= "field-surface inline-flex h-7 items-center gap-1.5 px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground focus-visible:border-ring/55 focus-visible:ring-2 focus-visible:ring-ring/18 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
           disabled={refreshing}
           onclick={() => void refreshAll()}
         >
@@ -573,9 +622,9 @@
 
   {#if !supported}
     <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-      <Database class="size-5 text-muted-foreground/40" />
+      <Database class="size-5 text-muted-foreground" />
       <p class="text-ui-sm text-muted-foreground">Instance Insights needs a server-based engine</p>
-      <p class="max-w-sm text-ui-xs text-muted-foreground/60">
+      <p class="max-w-sm text-ui-xs text-muted-foreground">
         Live sessions, transaction rates and server configuration come from PostgreSQL and MySQL catalogs.
         Embedded engines don't expose them.
       </p>
@@ -686,7 +735,7 @@
         </div>
 
         {#if !autoRefresh}
-          <p class="mt-3 flex items-center gap-1.5 text-ui-2xs text-muted-foreground/70">
+          <p class="mt-3 flex items-center gap-1.5 text-ui-2xs text-muted-foreground">
             Rates are sampled per refresh - turn on <span class="font-medium text-foreground/80">Live</span> to watch them move.
           </p>
         {/if}
@@ -779,7 +828,7 @@
             </div>
             <button
               type="button"
-              class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              class= "field-surface inline-flex h-7 shrink-0 items-center gap-1.5 px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
               disabled={refreshing}
               onclick={() => void withSpinner(refreshConfig)}
             >
@@ -794,11 +843,11 @@
                at a fixed size, and status stays a real segmented control. -->
           <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
             <div class="relative min-w-0 flex-1">
-              <Search class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/50" />
+              <Search class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <input
                 bind:value={configSearch}
                 placeholder="Search settings by name, category, or description…"
-                class="h-9 w-full rounded-lg border-2 border-border bg-muted/30 pl-9 pr-9 text-ui-sm text-foreground transition-[border-color,box-shadow] outline-none placeholder:text-muted-foreground/50 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                class= "field-surface h-9 w-full bg-muted/30 pl-9 pr-9 text-ui-sm text-foreground transition-[border-color,box-shadow] outline-none placeholder:text-muted-foreground"
               />
               {#if configSearch}
                 <button
@@ -836,14 +885,14 @@
                 {/snippet}
                 {#snippet item(it)}
                   <span class="min-w-0 flex-1 truncate">{it.label}</span>
-                  <span class="shrink-0 text-ui-2xs tabular-nums text-muted-foreground/60">
+                  <span class="shrink-0 text-ui-2xs tabular-nums text-muted-foreground">
                     {it.value === 'all' ? config.length : (configGroups.find((g) => g.id === it.value)?.n ?? 0)}
                   </span>
                   {#if it.value === configGroup}<Check class="size-3.5 shrink-0 text-primary" />{/if}
                 {/snippet}
               </SearchableMenu>
 
-              <div class="inline-flex h-9 shrink-0 items-center gap-0.5 rounded-lg border-2 border-border bg-muted/30 p-0.5">
+                <div class= "field-surface inline-flex h-9 shrink-0 items-center gap-0.5 bg-muted/30 p-0.5">
                 {#each statusOptions as o (o.id)}
                   <button
                     type="button"
@@ -888,22 +937,44 @@
               <section>
                 {#if sec.group}
                   <div class="mb-1.5 flex items-baseline gap-2">
-                    <h3 class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">{sec.group}</h3>
-                    <span class="text-ui-3xs tabular-nums text-muted-foreground/40">{sec.rows.length}</span>
+                    <h3 class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">{sec.group}</h3>
+                    <span class="text-ui-3xs tabular-nums text-muted-foreground">{sec.rows.length}</span>
                   </div>
                 {/if}
                 <!-- One row per setting; content-visibility keeps the ~350-row list
                      smooth by skipping layout/paint for rows that are off-screen. -->
-                <div class="overflow-hidden rounded-lg border border-border/50 bg-muted/[0.04]">
+                <!-- Hairlines, not a card. Each section was a bordered, tinted
+                     panel holding rows that are themselves separated by borders,
+                     inside a page that is already a panel - three nested frames
+                     for one list. The heading above and the space between
+                     sections carry the grouping; a rule per row is all the
+                     structure the rows need. -->
+                <div class="border-t border-border/25">
                   {#each sec.rows as row (row.name)}
                     {@const open = openSetting === row.name}
-                    {@const editable = row.editable !== false && !$readOnlyMode}
+                    {@const editable = row.editable !== false && !$readOnlyMode && !configWritesBlocked}
                     {@const modified = isModified(row)}
+                    <!-- A write that needs a restart leaves `source` at `default`
+                         until the server comes back, so `isModified` reads false
+                         and the only way back out - ALTER SYSTEM RESET, which is
+                         what this button sends - was disabled exactly when it was
+                         needed. A queued change you cannot cancel is a trap. -->
+                    {@const canReset = modified || !!row.pendingRestart}
+                    {@const resetLabel = !modified && row.pendingRestart ? 'Discard' : 'Reset'}
+                    <!-- pg setting names are [a-z0-9_], so they make valid ids as-is. -->
+                    {@const panelId = `cfg-panel-${row.name}`}
+                    {@const fieldId = `cfg-value-${row.name}`}
+                    {@const labelId = `cfg-label-${row.name}`}
                     <div class={cn('cfg-row border-b border-border/25 last:border-b-0', open && 'bg-muted/20')}>
+                      <!-- The focus style was `focus-visible:bg-accent/40` with the
+                           outline removed - the exact same treatment as `hover`, so a
+                           keyboard user could not tell which of 364 rows they were on.
+                           Project ring, inset so the rounded card does not clip it. -->
                       <button
                         type="button"
                         aria-expanded={open}
-                        class="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
+                        aria-controls={panelId}
+                        class="flex w-full items-center gap-3 px-3 py-2 text-left outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
                         onclick={() => toggleSetting(row)}
                       >
                         <div class="min-w-0 flex-1">
@@ -914,11 +985,11 @@
                             {/if}
                             {#if row.pendingRestart}
                               <span class="inline-flex shrink-0 items-center gap-1 rounded bg-warning/12 px-1 py-px text-ui-3xs text-warning">
-                                <PowerOff class="size-2.5" /> restart pending
+                                <PowerOff class="size-3" /> restart pending
                               </span>
                             {/if}
                             {#if row.editable === false}
-                              <Lock class="size-3 shrink-0 text-muted-foreground/50" aria-label="Read-only setting" />
+                              <Lock class="size-3 shrink-0 text-muted-foreground" role="img" aria-label="Read-only setting" />
                             {/if}
                           </div>
                           {#if row.description}
@@ -928,27 +999,32 @@
 
                         <span class="flex shrink-0 items-baseline gap-1.5">
                           <span class="max-w-[14rem] truncate rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-ui-2xs tabular-nums text-foreground">{shownValue(row)}</span>
-                          {#if row.unit}<span class="font-mono text-ui-3xs text-muted-foreground/70">{row.unit}</span>{/if}
+                          {#if row.unit}<span class="font-mono text-ui-3xs text-muted-foreground">{row.unit}</span>{/if}
                         </span>
-                        <ChevronRight class={cn('size-3.5 shrink-0 self-center text-muted-foreground/50 transition-transform duration-150', open && 'rotate-90')} />
+                        <ChevronRight class={cn('size-3.5 shrink-0 self-center text-muted-foreground transition-transform duration-150', open && 'rotate-90')} />
                       </button>
 
                       {#if open}
-                        <div class="border-t border-border/30 px-3 pb-3 pt-3">
-                          <div class="flex flex-wrap items-end gap-2">
+                        <div id={panelId} class="border-t border-border/30 px-3 pb-3 pt-3">
+                          <div class="flex max-w-3xl flex-wrap items-end gap-2">
                             <div class="min-w-[13rem] flex-1">
                               <div class="mb-1 flex items-baseline justify-between gap-2">
-                                <span class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/55">New value</span>
-                                <span class="truncate font-mono text-ui-3xs text-muted-foreground/60">
+                                <label
+                                  id={labelId}
+                                  for={row.vartype === 'bool' ? undefined : fieldId}
+                                  class="text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground"
+                                >New value</label>
+                                <span class="truncate font-mono text-ui-3xs text-muted-foreground">
                                   current: {shownValue(row)}{row.unit ? ` ${row.unit}` : ''}
                                 </span>
                               </div>
                               {#if row.vartype === 'bool'}
-                                <div class="inline-flex h-9 items-center gap-0.5 rounded-lg border-2 border-border bg-muted/30 p-0.5">
+                              <div role="group" aria-labelledby={labelId} class="field-surface inline-flex h-9 items-center gap-0.5 bg-muted/30 p-0.5">
                                   {#each ['on', 'off'] as v (v)}
                                     <button
                                       type="button"
                                       disabled={!editable}
+                                      aria-pressed={draft === v}
                                       onclick={() => (draft = v)}
                                       class={cn('h-full rounded-md px-4 font-mono text-ui-xs transition-colors disabled:opacity-40', draft === v ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}
                                     >{v}</button>
@@ -956,23 +1032,37 @@
                                 </div>
                               {:else if row.vartype === 'enum' && row.enumVals?.length}
                                 <select
+                                  id={fieldId}
                                   bind:value={draft}
                                   disabled={!editable}
-                                  class="h-9 w-full rounded-lg border-2 border-border bg-muted/30 px-2.5 font-mono text-ui-sm text-foreground transition-[border-color,box-shadow] outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 disabled:opacity-40"
+                                  class= "field-surface h-9 w-full bg-muted/30 px-2.5 font-mono text-ui-sm text-foreground transition-[border-color,box-shadow] outline-none disabled:opacity-40"
                                 >
                                   {#each row.enumVals as v (v)}<option value={v}>{v}</option>{/each}
                                 </select>
                               {:else}
+                                <!-- Deliberately `type="text"`, never `type="number"`.
+                                     Svelte coerces `bind:value` on a number input to a
+                                     JS number, and `instance_set_config` takes an
+                                     Option<String> - so every integer and real setting
+                                     failed at the IPC boundary with "invalid type:
+                                     floating point `0.2`, expected a string", which is
+                                     most of the 364. `inputmode` still brings up the
+                                     numeric keypad, and the spinner was wrong here
+                                     anyway: half of pg's "integer" settings are written
+                                     with a unit (`8MB`, `1min`), which a number input
+                                     will not accept at all. -->
                                 <input
+                                  id={fieldId}
                                   bind:value={draft}
                                   disabled={!editable}
-                                  type={row.vartype === 'integer' || row.vartype === 'real' ? 'number' : 'text'}
+                                  type="text"
+                                  inputmode={row.vartype === 'integer' ? 'numeric' : row.vartype === 'real' ? 'decimal' : 'text'}
                                   placeholder={row.bootVal || 'value'}
                                   onkeydown={(e) => {
                                     if (e.key === 'Enter' && editable && draft !== row.value) { e.preventDefault(); void applySetting(row) }
                                     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); openSetting = '' }
                                   }}
-                                  class="h-9 w-full rounded-lg border-2 border-border bg-muted/30 px-3 font-mono text-ui-sm tabular-nums text-foreground transition-[border-color,box-shadow] outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 disabled:opacity-40"
+                                  class= "field-surface h-9 w-full bg-muted/30 px-3 font-mono text-ui-sm tabular-nums text-foreground transition-[border-color,box-shadow] outline-none placeholder:text-muted-foreground disabled:opacity-40"
                                 />
                               {/if}
                             </div>
@@ -990,40 +1080,61 @@
                                 variant="ghost"
                                 size="lg"
                                 class="text-muted-foreground hover:text-foreground"
-                                disabled={!editable || savingSetting === row.name || !modified}
-                                title={modified ? `Reset to the server default${row.bootVal ? ` (${row.bootVal})` : ''}` : 'Already at the server default'}
+                                disabled={!editable || savingSetting === row.name || !canReset}
+                                title={!modified && row.pendingRestart
+                                  ? 'Drop the queued change - the server keeps running the value it has now'
+                                  : modified
+                                    ? `Reset to the server default${row.bootVal ? ` (${row.bootVal})` : ''}`
+                                    : 'Already at the server default'}
                                 onclick={() => void applySetting(row, true)}
                               >
-                                <RotateCcw /> Reset
+                                <RotateCcw /> {resetLabel}
                               </Button>
                             </div>
                           </div>
 
                           <!-- Everything the server knows about this setting, as a
                                readable grid rather than one run-on mono line. -->
-                          <dl class="mt-3 grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">
+                          <!-- Same column as the field above it: on a wide window
+                               these six pairs were strung across 1,900px, so the
+                               value sat half a screen from its own label. -->
+                          <dl class="mt-3 grid max-w-3xl grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
                             {#each [['Category', row.category], ['Type', row.vartype], ['Unit', row.unit], ['Default', row.bootVal], ['Range', (row.minVal || row.maxVal) ? `${row.minVal || '−∞'} … ${row.maxVal || '∞'}` : ''], ['Source', row.source]] as [k, v] (k)}
                               {#if v}
                                 <div class="flex min-w-0 items-baseline gap-2">
-                                  <dt class="w-[4.5rem] shrink-0 text-ui-3xs uppercase tracking-[0.06em] text-muted-foreground/55">{k}</dt>
+                                  <dt class="w-[4.5rem] shrink-0 text-ui-3xs uppercase tracking-[0.06em] text-muted-foreground">{k}</dt>
                                   <dd class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-foreground/85" title={String(v)}>{v}</dd>
                                 </div>
                               {/if}
                             {/each}
                           </dl>
 
-                          {#if row.editable === false}
-                            <p class="mt-3 rounded-md bg-muted/40 px-2.5 py-1.5 text-ui-2xs text-muted-foreground">
+                          <!-- Notes read as notes: one line of text at the size of
+                               the metadata above it. They were full-width tinted
+                               bands, which gave a sentence of context the weight of
+                               an alert and stacked a fourth surface into the row. -->
+                          {#if configWritesBlocked}
+                            <p class="mt-3 flex max-w-3xl items-start gap-1.5 text-ui-2xs text-muted-foreground">
+                              <Lock class="mt-px size-3 shrink-0" />
+                              <span>
+                                This server refuses <span class="font-mono">ALTER SYSTEM</span>, which is how managed
+                                Postgres is set up - its settings live in the provider's parameter group (RDS parameter
+                                groups, Cloud SQL flags, Azure server parameters). Values changed there show up here.
+                              </span>
+                            </p>
+                          {:else if row.editable === false}
+                            <p class="mt-3 max-w-3xl text-ui-2xs text-muted-foreground">
                               Compiled into the server - it can only change by rebuilding or re-initialising the cluster.
                             </p>
                           {:else if $readOnlyMode}
-                            <p class="mt-3 rounded-md bg-muted/40 px-2.5 py-1.5 text-ui-2xs text-muted-foreground">{READ_ONLY_HINT}</p>
+                            <p class="mt-3 max-w-3xl text-ui-2xs text-muted-foreground">{READ_ONLY_HINT}</p>
                           {:else if row.requiresRestart}
-                            <p class="mt-3 rounded-md bg-warning/10 px-2.5 py-1.5 text-ui-2xs text-warning">
-                              Applying writes the value now, but the server has to restart before it takes effect.
+                            <p class="mt-3 flex max-w-3xl items-start gap-1.5 text-ui-2xs text-warning">
+                              <PowerOff class="mt-px size-3 shrink-0" />
+                              <span>Applying writes the value now, but the server has to restart before it takes effect.</span>
                             </p>
                           {:else if isPg}
-                            <p class="mt-3 text-ui-2xs text-muted-foreground/70">
+                            <p class="mt-3 max-w-3xl text-ui-2xs text-muted-foreground">
                               Written with <span class="font-mono">ALTER SYSTEM</span> and reloaded - persists across restarts. Needs a superuser role.{row.context && CONTEXT_HELP[row.context] ? ` ${CONTEXT_HELP[row.context]}.` : ''}
                             </p>
                           {/if}
@@ -1087,7 +1198,7 @@
       </svg>
     {:else}
       <!-- Placeholder keeps every card the same height while samples accumulate. -->
-      <svg viewBox="0 0 100 28" preserveAspectRatio="none" class="size-full text-muted-foreground/25" aria-hidden="true">
+      <svg viewBox="0 0 100 28" preserveAspectRatio="none" class="size-full text-muted-foreground" aria-hidden="true">
         <line x1="0" y1="14" x2="100" y2="14" stroke="currentColor" stroke-width="1" stroke-dasharray="3 4" vector-effect="non-scaling-stroke" />
       </svg>
     {/if}
@@ -1099,7 +1210,7 @@
     <!-- Row 1: label + status hint. Every card shares this grid so the four
          cards line up line-for-line across the row (DESIGN_SYSTEM §9). -->
     <div class="flex items-baseline justify-between gap-2">
-      <span class="truncate text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/60" title={s.help}>{s.label}</span>
+      <span class="truncate text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground" title={s.help}>{s.label}</span>
       {#if s.hint}
         <span class={cn('shrink-0 text-ui-3xs tabular-nums', toneClass(s.tone))}>{s.hint}</span>
       {/if}
@@ -1160,7 +1271,7 @@
     {:else}
       <div class="flex h-52 flex-col items-center justify-center gap-1 rounded-md bg-muted/20 text-center">
         <p class="text-ui-xs text-muted-foreground">Collecting samples…</p>
-        <p class="max-w-[18rem] text-ui-2xs text-muted-foreground/60">
+        <p class="max-w-[18rem] text-ui-2xs text-muted-foreground">
           Rates need two readings. {autoRefresh ? 'The next one lands in a few seconds.' : 'Turn on Live, or hit Refresh again.'}
         </p>
       </div>
@@ -1182,7 +1293,7 @@
     {#if s.onRefresh}
       <button
         type="button"
-        class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+        class= "field-surface inline-flex h-7 shrink-0 items-center gap-1.5 px-2.5 text-ui-xs text-foreground/85 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
         disabled={refreshing}
         onclick={s.onRefresh}
       >
@@ -1195,36 +1306,61 @@
 
 {#snippet dataGrid(/** @type {any[]} */ rows, /** @type {string} */ empty)}
   {#if !rows || rows.length === 0}
-    <div class="rounded-lg border border-border/40 bg-muted/[0.04] py-10 text-center text-ui-xs text-muted-foreground/70">{empty}</div>
+    <div class="rounded-lg border border-border/40 bg-muted/[0.04] py-10 text-center text-ui-xs text-muted-foreground">{empty}</div>
   {:else}
     <!-- Column list computed ONCE per grid. It used to be re-derived inside the
          row loop, so a 200-session table allocated 200 throwaway Object.keys()
          arrays on every render of this page. -->
     {@const cols = keysOf(rows)}
-    <div class="app-scroll max-h-96 overflow-auto rounded-lg border border-border/50">
-      <table class="w-full border-collapse text-ui-2xs">
+    {@const numeric = numericCols(rows, cols)}
+    <!-- `insight-grid` (see <style>) does two things the shared .app-scroll
+         cannot: it lets a wheel that runs out of table keep scrolling the page,
+         and it gives the horizontal bar enough height to read as an affordance.
+         The cap is viewport-relative so a tall screen shows more than 24rem of
+         a 200-session table instead of the same short window everywhere. -->
+    <div class="app-scroll insight-grid max-h-[min(32rem,60vh)] overflow-auto rounded-lg border border-border/50">
+      <!-- w-max lets every column take its natural width and the container do the
+           scrolling. Under w-full the browser squeezed columns to fit and then
+           overflowed anyway, so the widths were wrong AND the tail was cut. -->
+      <table class="w-max min-w-full border-collapse text-ui-2xs">
         <thead>
           <tr>
-            <th class="sticky top-0 z-10 w-8 whitespace-nowrap border-b border-border/50 bg-panel px-2 py-1.5 text-right font-medium text-muted-foreground/60">#</th>
+            <th class="sticky top-0 z-10 w-8 whitespace-nowrap border-b border-border/50 bg-panel px-2 py-1.5 text-right text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">#</th>
             {#each cols as k (k)}
-              <th class="sticky top-0 z-10 whitespace-nowrap border-b border-border/50 bg-panel px-2.5 py-1.5 text-left font-medium text-muted-foreground">{humanize(k)}</th>
+              <th
+                class={cn(
+                  'sticky top-0 z-10 whitespace-nowrap border-b border-border/50 bg-panel px-2.5 py-1.5 text-ui-3xs font-semibold uppercase tracking-[0.06em] text-muted-foreground',
+                  numeric.has(k) ? 'text-right' : 'text-left',
+                )}
+              >{humanize(k)}</th>
             {/each}
           </tr>
         </thead>
         <tbody>
           {#each rows as row, i (i)}
             <tr class={cn('transition-colors hover:bg-accent/30', isBlocked(row) && 'bg-destructive/[0.06]')}>
-              <td class="border-b border-border/20 px-2 py-1 text-right tabular-nums text-muted-foreground/50">{i + 1}</td>
+              <td class="border-b border-border/20 px-2 py-1 text-right tabular-nums text-muted-foreground">{i + 1}</td>
               {#each cols as k (k)}
                 {@const raw = row[k]}
                 {@const text = cell(raw)}
-                <td class="max-w-[280px] truncate border-b border-border/20 px-2.5 py-1 font-mono text-foreground/85" title={text}>
+                <td
+                  class={cn(
+                    'max-w-[280px] truncate border-b border-border/20 px-2.5 py-1 font-mono text-foreground/85',
+                    numeric.has(k) && 'text-right tabular-nums',
+                  )}
+                  title={text.length > 32 ? text : undefined}
+                >
                   {#if k === 'state' || k === 'command'}
                     {#if raw}
                       <span class={cn('inline-flex items-center rounded px-1.5 py-px font-sans text-ui-3xs', stateTone(raw))}>{raw}</span>
                     {:else}
-                      <span class="text-muted-foreground/40">–</span>
+                      <span class="text-muted-foreground">–</span>
                     {/if}
+                  {:else if typeof raw === 'boolean'}
+                    <!-- A column of identical-weight true/false is unreadable at a
+                         glance. Only the true half carries information here, so
+                         false recedes to the muted tone. -->
+                    <span class={raw ? 'text-foreground/85' : 'text-muted-foreground/70'}>{raw}</span>
                   {:else}
                     {text}
                   {/if}
@@ -1239,6 +1375,35 @@
 {/snippet}
 
 <style>
+  /* Inline data tables inside the page scroller.
+     app.css already carves out horizontal-only scrollers from the blanket
+     `overscroll-behavior: contain`, for the reason documented there: a contained
+     box swallows every wheel tick under the pointer. These grids scroll on both
+     axes, so they missed that carve-out and hit the bug anyway - a wheel over a
+     table stopped dead at its last row instead of carrying on down the page.
+     Same split as the horizontal case: the page never scrolls sideways, so x
+     stays contained, and y chains once the table is out of rows.
+
+     The shared bar is 4px, which on a table that scrolls sideways is not enough
+     to read as "there is more to the right". 8px with a visible resting thumb is
+     the affordance, since a column cut off at the right edge is otherwise the
+     only cue that anything is hidden. */
+  .insight-grid {
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+  }
+  .insight-grid::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .insight-grid::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--muted-foreground) 32%, transparent);
+    border-radius: 9999px;
+  }
+  .insight-grid::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--muted-foreground) 52%, transparent);
+  }
+
   /* Config list perf: content-visibility lets the engine skip layout/paint for
      off-screen rows, so scrolling the full ~350-row pg_settings list stays smooth.
      The intrinsic size is the collapsed row height - `auto` lets the engine

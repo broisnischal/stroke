@@ -133,15 +133,15 @@
         pathFocused ? 'border-input' : 'hover:border-border/60',
       )}
     >
-      <Icon name="list-filter" class="size-3 shrink-0 text-muted-foreground/50" />
-      <span class="select-none font-mono text-ui-xs text-muted-foreground/60">$</span>
+      <Icon name="list-filter" class="size-3 shrink-0 text-muted-foreground" />
+      <span class="select-none font-mono text-ui-xs text-muted-foreground">$</span>
       <input
         bind:this={pathInput}
         type="text"
         bind:value={jsonPath}
         aria-label="JSONPath filter"
         placeholder=".field  ·  [0]  ·  .items[*].name  ·  ..key"
-        class="min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/35 focus:outline-none"
+        class="no-focus-ring min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
         spellcheck="false"
         autocomplete="off"
         onfocus={() => { pathFocused = true }}
@@ -152,7 +152,7 @@
         <button
           type="button"
           aria-label="Clear filter"
-          class="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground"
+          class="inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
           onmousedown={(e) => e.preventDefault()}
           onclick={() => { jsonPath = ''; pathInput?.focus() }}
         >
@@ -173,14 +173,14 @@
     {#if pathResult && !pathResult.ok}
       <span class="shrink-0 pr-1 font-mono text-ui-2xs text-destructive">{pathResult.error}</span>
     {:else if pathResult?.ok}
-      <span class="shrink-0 pr-1 font-mono text-ui-2xs tabular-nums text-muted-foreground/50">{describeResult(pathResult.value)}</span>
+      <span class="shrink-0 pr-1 font-mono text-ui-2xs tabular-nums text-muted-foreground">{describeResult(pathResult.value)}</span>
     {/if}
   </div>
 
   <!-- Monaco JSON body (⌘F to search) -->
   {#if columns.length === 0}
     <div class="flex min-h-0 flex-1 items-center justify-center bg-panel">
-      <p class="font-mono text-ui-sm text-muted-foreground/40">No data to display</p>
+      <p class="font-mono text-ui-sm text-muted-foreground">No data to display</p>
     </div>
   {:else}
     <MonacoTextView text={displayedJson} language="json" wordWrap={$appJsonWordWrap ? 'on' : 'off'} />

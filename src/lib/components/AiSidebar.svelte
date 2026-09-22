@@ -1,5 +1,6 @@
 <script>
   import { tick, onMount, onDestroy } from "svelte";
+  import { getAppScale } from '$lib/app-zoom.js';
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import Loader2 from "@lucide/svelte/icons/loader-2";
   import Send from "@lucide/svelte/icons/send";
@@ -366,6 +367,8 @@
   const initialLayout = loadLayout()
   let width = $state(initialLayout.aiSidebarWidth)
   let resizeStartWidth = initialLayout.aiSidebarWidth
+  /** App scale sampled at drag start - `dx` is screen px, `width` is px at 100%. */
+  let resizeScale = 1
 
   // ── Streaming ─────────────────────────────────────────────────────────────
   let streamingContent = $state('')
@@ -769,16 +772,16 @@
 
 <div
   class="relative flex h-full min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-l border-border/50 bg-background"
-  style="width: {width}px; min-width: {width}px; max-width: {width}px"
+  style="width: calc({width}px * var(--app-scale, 1)); min-width: calc({width}px * var(--app-scale, 1)); max-width: calc({width}px * var(--app-scale, 1))"
   data-studio-region="ai-sidebar"
 >
   <div class="absolute inset-y-0 left-0 z-20">
-    <ResizeHandle edge="start" onresizestart={() => { resizeStartWidth = width }} onresize={(dx) => { width = clampAiSidebarWidth(resizeStartWidth + dx) }} onresizeend={() => saveLayout({ aiSidebarWidth: width })} />
+    <ResizeHandle edge="start" onresizestart={() => { resizeStartWidth = width; resizeScale = getAppScale() }} onresize={(dx) => { width = clampAiSidebarWidth(resizeStartWidth + dx / resizeScale) }} onresizeend={() => saveLayout({ aiSidebarWidth: width })} />
   </div>
 
   <!-- Header -->
   <div class="studio-chrome flex h-9 shrink-0 items-center gap-1.5 border-b border-border/50 px-3" data-studio-chrome>
-    <Sparkles class="size-3.5 shrink-0 text-primary/70" />
+    <Sparkles class="size-3.5 shrink-0 text-primary" />
     <span class="min-w-0 flex-1 text-ui-xs font-semibold text-foreground/70">Assistant</span>
 
     <!-- Model picker -->
@@ -786,18 +789,18 @@
 
     <div class="flex items-center">
       <button type="button"
-        class={cn('inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground', historyOpen && 'bg-accent text-foreground')}
+        class={cn('inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground', historyOpen && 'bg-accent text-foreground')}
         title="Conversation history"
         onclick={() => { historyOpen = !historyOpen; if (historyOpen) void loadConvList() }}
       ><History class="size-3.5" /></button>
       <button type="button"
-        class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
+        class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
         title="New chat"
         disabled={items.length === 0 && !loading}
         onclick={() => void newChat()}
       ><Plus class="size-3.5" /></button>
       <button type="button"
-        class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+        class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         title="Close (⌘I)"
         onclick={onclose}
       ><X class="size-3.5" /></button>
@@ -811,22 +814,22 @@
       <div class="flex items-center justify-between gap-2 border-b border-border/50 px-3 py-2.5">
         <span class="text-ui-xs font-medium text-foreground/70">History</span>
         {#if convList.length}
-          <button type="button" class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive" onclick={() => void clearAllConversations()}>
+          <button type="button" class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive" onclick={() => void clearAllConversations()}>
             <Trash2 class="size-3" />Clear all
           </button>
         {/if}
       </div>
       <div class="app-scroll min-h-0 flex-1 overflow-y-auto p-1">
         {#if convList.length === 0}
-          <p class="px-3 py-5 text-center text-ui-xs text-muted-foreground/50">No saved chats yet</p>
+          <p class="px-3 py-5 text-center text-ui-xs text-muted-foreground">No saved chats yet</p>
         {:else}
           {#each convList as conv (conv.id)}
             <div class={cn('group flex items-center gap-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent/40', conv.id === activeConvId && 'bg-accent/60')}>
               <button type="button" class="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left" onclick={() => void selectConversation(conv.id)}>
                 <span class="w-full truncate text-ui-xs text-foreground/80">{conv.title}</span>
-                <span class="text-ui-2xs text-muted-foreground/50">{relTime(conv.updatedAt)}</span>
+                <span class="text-ui-2xs text-muted-foreground">{relTime(conv.updatedAt)}</span>
               </button>
-              <button type="button" class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/30 opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100" onclick={() => void removeConversation(conv.id)}>
+              <button type="button" class="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100" onclick={() => void removeConversation(conv.id)}>
                 <Trash2 class="size-3" />
               </button>
             </div>
@@ -849,11 +852,11 @@
         <div class="space-y-1.5">
           <p class="text-ui-sm font-medium text-foreground/80">Ask anything</p>
           {#if schemaContext.activeTable}
-            <p class="font-mono text-ui-xs text-muted-foreground/55">{schemaContext.activeSchema}.{schemaContext.activeTable}</p>
+            <p class="font-mono text-ui-xs text-muted-foreground">{schemaContext.activeSchema}.{schemaContext.activeTable}</p>
           {:else if schemaContext.tables?.length}
-            <p class="font-mono text-ui-xs text-muted-foreground/55">{schemaContext.activeSchema} · {schemaContext.tables.length} tables</p>
+            <p class="font-mono text-ui-xs text-muted-foreground">{schemaContext.activeSchema} · {schemaContext.tables.length} tables</p>
           {:else}
-            <p class="text-ui-xs text-muted-foreground/50">Knows your schema, table, and editor</p>
+            <p class="text-ui-xs text-muted-foreground">Knows your schema, table, and editor</p>
           {/if}
         </div>
 
@@ -873,8 +876,8 @@
                   class="flex items-center gap-2.5 bg-background px-3.5 py-2.5 text-left transition-colors hover:bg-muted/25 disabled:opacity-40"
                   onclick={() => void send([s])}
                 >
-                  <Sparkles class="size-3 shrink-0 text-muted-foreground/30" />
-                  <span class="text-ui-xs text-muted-foreground/65">{s}</span>
+                  <Sparkles class="size-3 shrink-0 text-muted-foreground" />
+                  <span class="text-ui-xs text-muted-foreground">{s}</span>
                 </button>
               {/each}
             </div>
@@ -898,8 +901,8 @@
 
           {:else if item.kind === 'thinking'}
             <div class="flex items-center gap-2.5">
-              <Sparkles class="size-3 shrink-0 animate-pulse text-primary/70" />
-              <span class="agent-think-label text-ui-xs text-muted-foreground/60 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span>
+              <Sparkles class="size-3 shrink-0 animate-pulse text-primary" />
+              <span class="agent-think-label text-ui-xs text-muted-foreground transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span>
             </div>
 
           {:else if item.kind === 'streaming'}
@@ -917,16 +920,16 @@
                   <div class="overflow-hidden rounded-lg border border-border/50 bg-card/30">
                     <div class="group/sqlbar flex items-center gap-2 border-b border-border/30 bg-muted/8 px-2.5 py-1.5">
                       <button type="button" class="flex min-w-0 flex-1 items-center gap-1.5 text-left" onclick={() => toggleCollapse(sqlKey)}>
-                        <span class="flex size-4 shrink-0 items-center justify-center text-muted-foreground/40">
+                        <span class="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
                           {#if sqlOpen}<ChevronDown class="size-3.5" />{:else}<ChevronRight class="size-3.5" />{/if}
                         </span>
-                        <span class="shrink-0 rounded border border-border/40 bg-muted/50 px-1 font-mono text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/55">SQL</span>
-                        <span class="min-w-0 truncate font-mono text-ui-2xs text-muted-foreground/45">{part.content.trim().replace(/\s+/g, ' ').slice(0, 60)}</span>
+                        <span class="shrink-0 rounded border border-border/40 bg-muted/50 px-1 font-mono text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground">SQL</span>
+                        <span class="min-w-0 truncate font-mono text-ui-2xs text-muted-foreground">{part.content.trim().replace(/\s+/g, ' ').slice(0, 60)}</span>
                       </button>
                       <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/sqlbar:opacity-100">
-                        <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" title="Copy" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
-                        <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" title="Accept" onclick={() => acceptSql(part.content)}><CornerDownLeft class="size-3" /></button>
-                        <button type="button" class="inline-flex h-6 items-center gap-1 rounded bg-primary px-2 text-ui-3xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40" disabled={loading} onclick={() => void runSqlBlock(part.content)}><Play class="size-2.5" />Run</button>
+                        <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground" title="Copy" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
+                        <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground" title="Accept" onclick={() => acceptSql(part.content)}><CornerDownLeft class="size-3" /></button>
+                        <button type="button" class="inline-flex h-6 items-center gap-1 rounded bg-primary px-2 text-ui-3xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40" disabled={loading} onclick={() => void runSqlBlock(part.content)}><Play class="size-3" />Run</button>
                       </div>
                     </div>
                     <AiSqlBlock sql={part.content} open={sqlOpen} />
@@ -935,14 +938,14 @@
                 {:else if part.type === 'mermaid'}
                   <div class="overflow-hidden rounded-lg border border-border/50">
                     <div class="flex items-center justify-between gap-1 border-b border-border/30 bg-muted/10 px-2.5 py-1.5">
-                      <span class="font-mono text-ui-2xs text-muted-foreground/55">diagram</span>
-                      <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" title="Copy" aria-label="Copy" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
+                      <span class="font-mono text-ui-2xs text-muted-foreground">diagram</span>
+                      <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground" title="Copy" aria-label="Copy" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
                     </div>
                     <ShikiBlock code={part.content} lang="plaintext" embedded />
                   </div>
 
                 {:else if part.type === 'error'}
-                  <p class="text-ui-xs text-muted-foreground/70">{part.content}</p>
+                  <p class="text-ui-xs text-muted-foreground">{part.content}</p>
 
                 {:else if part.type === 'confirm_prompt'}
                   <div class="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/6 px-3 py-2 text-ui-xs text-warning">
@@ -954,13 +957,13 @@
                   {@const codeOpen = !collapsed.has(codeKey)}
                   <div class="overflow-hidden rounded-lg border border-border/50">
                     <div class="flex items-center justify-between gap-1 border-b border-border/30 bg-muted/10 px-2.5 py-1.5">
-                      <button type="button" class="flex items-center gap-1 text-ui-2xs text-muted-foreground/55 hover:text-foreground" onclick={() => toggleCollapse(codeKey)}>
+                      <button type="button" class="flex items-center gap-1 text-ui-2xs text-muted-foreground hover:text-foreground" onclick={() => toggleCollapse(codeKey)}>
                         {#if codeOpen}<ChevronDown class="size-3" />{:else}<ChevronRight class="size-3" />{/if}
                         <span class="font-mono">{part.lang || 'code'}</span>
                       </button>
                       <div class="flex gap-0.5">
-                        <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" title="Copy" aria-label="Copy" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
-                        <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 hover:bg-muted/60 hover:text-foreground" title="Accept" onclick={() => acceptCode(part.lang, part.content)}><CornerDownLeft class="size-3" /></button>
+                        <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground" title="Copy" aria-label="Copy" onclick={() => copyText(part.content)}><Copy class="size-3" /></button>
+                        <button type="button" class="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted/60 hover:text-foreground" title="Accept" onclick={() => acceptCode(part.lang, part.content)}><CornerDownLeft class="size-3" /></button>
                       </div>
                     </div>
                     {#if codeOpen}<ShikiBlock code={part.content} lang={part.lang || 'plaintext'} embedded />{/if}
@@ -971,9 +974,9 @@
 
           {:else if item.kind === 'executing'}
             <div class="flex items-center gap-2.5">
-              <Loader2 class="size-3 shrink-0 animate-spin text-muted-foreground/50" />
-              <span class="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 font-mono text-ui-3xs font-medium text-warning/70">SQL</span>
-              <span class="min-w-0 truncate text-ui-xs text-muted-foreground/45">{item.sql}</span>
+              <Loader2 class="size-3 shrink-0 animate-spin text-muted-foreground" />
+              <span class="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 font-mono text-ui-3xs font-medium text-warning">SQL</span>
+              <span class="min-w-0 truncate text-ui-xs text-muted-foreground">{item.sql}</span>
             </div>
 
           {:else if item.kind === 'result'}
@@ -982,11 +985,11 @@
               <button type="button"
                 class={cn('flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/20', resOpen && 'border-b border-border/30')}
                 onclick={() => toggleResult(item.id)}>
-                {#if resOpen}<ChevronDown class="size-3 shrink-0 text-muted-foreground/40" />{:else}<ChevronRight class="size-3 shrink-0 text-muted-foreground/40" />{/if}
-                <Table2 class={cn('size-3 shrink-0', item.isSchema ? 'text-primary/50' : 'text-muted-foreground/40')} />
-                <span class="min-w-0 flex-1 truncate text-ui-xs text-muted-foreground/55">{item.sql || 'Query'}</span>
+                {#if resOpen}<ChevronDown class="size-3 shrink-0 text-muted-foreground" />{:else}<ChevronRight class="size-3 shrink-0 text-muted-foreground" />{/if}
+                <Table2 class={cn('size-3 shrink-0', item.isSchema ? 'text-primary' : 'text-muted-foreground')} />
+                <span class="min-w-0 flex-1 truncate text-ui-xs text-muted-foreground">{item.sql || 'Query'}</span>
                 {#if !item.error}
-                  <span class="shrink-0 rounded bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/50">{formatCompactCount(item.total)} {item.total === 1 ? 'row' : 'rows'}</span>
+                  <span class="shrink-0 rounded bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs tabular-nums text-muted-foreground">{formatCompactCount(item.total)} {item.total === 1 ? 'row' : 'rows'}</span>
                 {/if}
               </button>
               {#if resOpen}
@@ -996,10 +999,10 @@
                     <p class="font-mono text-ui-2xs leading-relaxed text-destructive">{item.error}</p>
                   </div>
                 {:else if item.rows.length === 0}
-                  <p class="px-2.5 py-2.5 text-center text-ui-2xs italic text-muted-foreground/50">No rows returned.</p>
+                  <p class="px-2.5 py-2.5 text-center text-ui-2xs italic text-muted-foreground">No rows returned.</p>
                 {:else}
                   <div class="overflow-x-auto"><DataTable columns={item.columns} rows={item.rows.slice(0, 15)} embedded showSelection={false} /></div>
-                  {#if item.total > 15}<p class="border-t border-border/20 px-2.5 py-1 text-ui-3xs text-muted-foreground/40">Showing 15 of {formatCompactCount(item.total)} rows</p>{/if}
+                  {#if item.total > 15}<p class="border-t border-border/20 px-2.5 py-1 text-ui-3xs text-muted-foreground">Showing 15 of {formatCompactCount(item.total)} rows</p>{/if}
                 {/if}
               {/if}
             </div>
@@ -1012,7 +1015,7 @@
               </div>
               <pre class="whitespace-pre-wrap px-2.5 py-2 font-mono text-ui-2xs text-foreground">{item.sql}</pre>
               <div class="flex items-center justify-end gap-2 border-t border-destructive/15 px-2.5 py-1.5">
-                <button type="button" class="inline-flex h-7 items-center rounded-md border border-border px-3 text-ui-2xs text-muted-foreground hover:bg-accent" onclick={() => item.resolve(false)}>Cancel</button>
+                <button type= "field-surface button"class="inline-flex h-7 items-center px-3 text-ui-2xs text-muted-foreground hover:bg-accent"onclick={() => item.resolve(false)}>Cancel</button>
                 <button type="button" class="inline-flex h-7 items-center rounded-md bg-destructive px-3 text-ui-2xs font-medium text-destructive-foreground hover:opacity-90" onclick={() => item.resolve(true)}>Execute</button>
               </div>
             </div>
@@ -1026,7 +1029,7 @@
               {:else}
                 <div class="mb-0.5 flex items-center gap-1.5">
                   <span class="min-w-0 flex-1 truncate font-mono text-ui-3xs font-medium text-foreground/55">{item.spec.title || ''}</span>
-                  <span class="font-mono text-ui-3xs capitalize text-muted-foreground/25 opacity-0 transition-opacity group-hover/chart:opacity-100">{item.spec.type}</span>
+                  <span class="font-mono text-ui-3xs capitalize text-muted-foreground opacity-0 transition-opacity group-hover/chart:opacity-100">{item.spec.type}</span>
                 </div>
                 <div style="height:{['choropleth','dendrogram','tree','sankey'].includes(item.spec.type) ? 340 : 240}px; width:100%">
                   <AiChartRenderer spec={item.spec} noTitle={true} />
@@ -1039,8 +1042,8 @@
 
         {#if showWorking}
           <div class="flex items-center gap-2.5">
-            <Sparkles class="size-3 shrink-0 animate-pulse text-primary/70" />
-            <span class="agent-think-label text-ui-xs text-muted-foreground/60 transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span>
+            <Sparkles class="size-3 shrink-0 animate-pulse text-primary" />
+            <span class="agent-think-label text-ui-xs text-muted-foreground transition-opacity duration-200 {thinkingVisible ? 'opacity-100' : 'opacity-0'}">{aiStatusHint || thinkingPhrase}</span>
           </div>
         {/if}
 
@@ -1081,7 +1084,7 @@
               class={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors', active ? 'bg-accent' : 'hover:bg-accent/40')}
               onmousedown={(e) => { e.preventDefault(); insertMention(item.insert) }}
             >
-              <Table2 class={cn('size-3 shrink-0', active ? 'text-primary' : 'text-muted-foreground/40')} />
+              <Table2 class={cn('size-3 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
               <span class={cn('min-w-0 flex-1 truncate font-mono text-ui-2xs', active ? 'text-foreground' : 'text-foreground/70')}>{item.label}</span>
             </button>
           {/each}
@@ -1099,9 +1102,9 @@
               class={cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors', active ? 'bg-accent' : 'hover:bg-accent/40')}
               onmousedown={(e) => { e.preventDefault(); runSlash(item) }}
             >
-              <span class={cn('w-14 shrink-0 truncate font-mono text-ui-2xs', active ? 'text-primary' : 'text-muted-foreground/55')}>/{item.cmd}</span>
+              <span class={cn('w-14 shrink-0 truncate font-mono text-ui-2xs', active ? 'text-primary' : 'text-muted-foreground')}>/{item.cmd}</span>
               <span class="shrink-0 text-ui-2xs font-medium text-foreground/85">{item.label}</span>
-              <span class="min-w-0 flex-1 truncate text-right text-ui-3xs text-muted-foreground/40">{item.desc}</span>
+              <span class="min-w-0 flex-1 truncate text-right text-ui-3xs text-muted-foreground">{item.desc}</span>
             </button>
           {/each}
         </div>
@@ -1114,20 +1117,20 @@
       {#if contextTables.length || schemaContext.activeTable || (currentView === 'sql' && currentSql.trim())}
         <div class="flex flex-wrap items-center gap-1 border-b border-border/30 px-2.5 py-1.5">
           {#each contextTables as t (t)}
-            <span class="inline-flex items-center gap-1 rounded-md bg-primary/10 py-0.5 pl-1.5 pr-1 font-mono text-ui-3xs text-primary/80">
-              <Table2 class="size-2.5 shrink-0" />{t}
-              <button type="button" class="ml-0.5 flex rounded-md text-primary/45 transition-colors hover:text-primary" title="Remove" onclick={() => (contextTables = contextTables.filter((x) => x !== t))}>
+            <span class="inline-flex items-center gap-1 rounded-md bg-primary/10 py-0.5 pl-1.5 pr-1 font-mono text-ui-3xs text-primary">
+              <Table2 class="size-3 shrink-0" />{t}
+              <button type="button" class="ml-0.5 flex rounded-md text-primary transition-colors hover:text-primary" title="Remove" onclick={() => (contextTables = contextTables.filter((x) => x !== t))}>
                 <X class="size-2.5" />
               </button>
             </span>
           {/each}
           {#if schemaContext.activeTable && !contextTables.includes(`${schemaContext.activeSchema}.${schemaContext.activeTable}`)}
-            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/55">
-              <Table2 class="size-2.5 shrink-0" />{schemaContext.activeSchema}.{schemaContext.activeTable}
+            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground">
+              <Table2 class="size-3 shrink-0" />{schemaContext.activeSchema}.{schemaContext.activeTable}
             </span>
           {/if}
           {#if currentView === 'sql' && currentSql.trim()}
-            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/55">SQL editor</span>
+            <span class="inline-flex items-center gap-1 rounded-md bg-muted/50 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground">SQL editor</span>
           {/if}
         </div>
       {/if}
@@ -1140,29 +1143,29 @@
         rows="1"
         placeholder={configured ? 'Ask anything,  @ tables · / commands' : 'Configure a model first'}
         disabled={!configured}
-        class="no-focus-ring max-h-40 min-h-[2.25rem] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-ui-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 disabled:opacity-60"
+        class="no-focus-ring max-h-40 min-h-[2.25rem] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-ui-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-60"
       ></textarea>
 
       <!-- Bottom toolbar -->
       <div class="flex items-center gap-1 px-2 pb-1.5">
         <button type="button"
-          class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-muted-foreground"
+          class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-muted-foreground"
           title="Mention a table (@)"
           onclick={() => { inputText += '@'; inputRef?.focus(); void tick().then(resizeInput) }}
         ><At class="size-3.5" /></button>
         <button type="button"
-          class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-muted-foreground"
+          class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-muted-foreground"
           title="Quick commands (/)"
           onclick={() => { inputText = '/'; slashQuery = ''; slashIdx = 0; slashOpen = true; inputRef?.focus(); void tick().then(resizeInput) }}
         ><Slash class="size-3.5" /></button>
         <div class="flex-1"></div>
         {#if loading}
           <button type="button" class="inline-flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background text-foreground/60 transition-colors hover:border-ring/50 hover:text-foreground" onclick={stop} title="Stop">
-            <Square class="size-2.5 fill-current" />
+            <Square class="size-3 fill-current" />
           </button>
         {:else}
           <button type="button"
-            class={cn('flex size-7 shrink-0 items-center justify-center rounded-lg transition-all', inputText.trim() && configured ? 'bg-primary text-primary-foreground hover:opacity-90' : 'bg-muted/40 text-muted-foreground/25 cursor-not-allowed')}
+            class={cn('flex size-7 shrink-0 items-center justify-center rounded-lg transition-all', inputText.trim() && configured ? 'bg-primary text-primary-foreground hover:opacity-90' : 'bg-muted/40 text-muted-foreground cursor-not-allowed')}
             disabled={!inputText.trim() || !configured}
             onclick={() => void send()}
             title="Send (Enter)"

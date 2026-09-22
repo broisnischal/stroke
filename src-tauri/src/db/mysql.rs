@@ -9,6 +9,59 @@ use std::time::Instant;
 
 const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
 
+/// A text value out of MySQL's `information_schema`.
+///
+/// Those columns are declared `varchar` but carry a `utf8mb3_bin` collation, so
+/// MySQL sets the protocol's BINARY flag on them and sqlx types the column
+/// `VARBINARY`. `try_get::<String>` then fails on a column that is plainly
+/// text - `mismatched types; Rust type String (as SQL type VARCHAR) is not
+/// compatible with SQL type VARBINARY`.
+///
+/// Every metadata decode in this file read `try_get::<String>(i).ok()?`, which
+/// *drops the row* on that error. The result was a MySQL connection whose
+/// sidebar said "No tables" for a database that had them, with no error
+/// anywhere to say why - and the same silence behind blank index, trigger,
+/// function and column metadata. Read the bytes when the string decode is
+/// refused, and take the text from them.
+pub(crate) fn my_text(row: &sqlx::mysql::MySqlRow, idx: usize) -> Option<String> {
+    if let Ok(s) = row.try_get::<Option<String>, _>(idx) {
+        return s;
+    }
+    match row.try_get::<Option<Vec<u8>>, _>(idx) {
+        Ok(Some(b)) => Some(String::from_utf8_lossy(&b).into_owned()),
+        _ => None,
+    }
+}
+
+/// The same, by column name.
+pub(crate) fn my_text_named(row: &sqlx::mysql::MySqlRow, name: &str) -> Option<String> {
+    if let Ok(s) = row.try_get::<Option<String>, _>(name) {
+        return s;
+    }
+    match row.try_get::<Option<Vec<u8>>, _>(name) {
+        Ok(Some(b)) => Some(String::from_utf8_lossy(&b).into_owned()),
+        _ => None,
+    }
+}
+
+/// An integer out of `information_schema`, whatever numeric type it arrives as.
+///
+/// `COALESCE(TABLE_ROWS, 0)` is `decimal(21,0)`, not the `bigint unsigned` the
+/// column is declared as - so `try_get::<u64>` fails and the estimate silently
+/// read 0 for every table.
+pub(crate) fn my_int(row: &sqlx::mysql::MySqlRow, idx: usize) -> Option<i64> {
+    if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
+        return v;
+    }
+    if let Ok(v) = row.try_get::<Option<u64>, _>(idx) {
+        return v.map(|n| n as i64);
+    }
+    if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
+        return v.map(|n| n as i64);
+    }
+    my_text(row, idx).and_then(|t| t.trim().parse::<i64>().ok())
+}
+
 fn bt(s: &str) -> String {
     super::sql_util::quote_backtick(s)
 }
@@ -104,9 +157,43 @@ pub fn cell_to_json(row: &sqlx::mysql::MySqlRow, idx: usize) -> Value {
         return text_cell(row, idx, v);
     }
     if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-        return v.map(|b| json!(format!("[{} bytes]", b.len()))).unwrap_or(Value::Null);
+        return v.map(|b| binary_cell(row, idx, b)).unwrap_or(Value::Null);
     }
     Value::Null
+}
+
+/// A binary column that is plainly text comes back as text.
+///
+/// MySQL types the result columns of `SHOW …` statements (and several
+/// `information_schema` views) as VARBINARY even though they hold names, so
+/// `try_get::<String>` refuses them - sqlx will not decode binary as UTF-8 - and
+/// they fell through to the byte-count placeholder. `SHOW DATABASES` therefore
+/// returned `"[18 bytes]"` for every row: the database switcher listed one
+/// indistinguishable entry per database, and the sidebar's keyed `{#each}` threw
+/// `each_key_duplicate` and took the whole panel down.
+///
+/// The test is stricter than "valid UTF-8": a real BLOB can be valid UTF-8 by
+/// accident, so the bytes must also carry no control characters other than tab,
+/// newline and carriage return. Anything else keeps the placeholder, because a
+/// grid cell is the wrong place to dump a megabyte of PNG.
+fn binary_cell(row: &sqlx::mysql::MySqlRow, idx: usize, bytes: Vec<u8>) -> Value {
+    if bytes.len() <= super::sql_util::CELL_VALUE_CAP {
+        if let Ok(text) = std::str::from_utf8(&bytes) {
+            if is_plain_text(text) {
+                return text_cell(row, idx, Some(text.to_string()));
+            }
+        }
+    }
+    json!(format!("[{} bytes]", bytes.len()))
+}
+
+/// Text a person could read in a table cell: no C0 controls beyond the three
+/// whitespace ones, and no NULs.
+fn is_plain_text(s: &str) -> bool {
+    !s.is_empty()
+        && !s.chars().any(|c| {
+            (c.is_control() && c != '\t' && c != '\n' && c != '\r') || c == '\u{0}'
+        })
 }
 
 /// String cell, capped - a multi-MB cell shipped whole freezes the webview
@@ -428,6 +515,8 @@ pub async fn get_table_rows(
     };
 
     Ok(TableRows {
+        // Preview fetching is a Postgres path (pg_stats + pg_column_size).
+        preview_columns: Vec::new(),
         columns,
         rows: data,
         total,
@@ -782,5 +871,38 @@ fn bind_value<'q>(
         Value::Number(n) => q.bind(n.as_f64().unwrap_or(0.0)),
         Value::String(s) => q.bind(s.as_str()),
         other => q.bind(other.to_string()),
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::is_plain_text;
+
+    #[test]
+    fn a_database_name_is_plain_text() {
+        // The case that broke the switcher: `SHOW DATABASES` types this column
+        // as VARBINARY, so it arrived as bytes and was rendered "[18 bytes]".
+        assert!(is_plain_text("information_schema"));
+        assert!(is_plain_text("shop"));
+    }
+
+    #[test]
+    fn text_with_ordinary_whitespace_is_still_text() {
+        assert!(is_plain_text("two words"));
+        assert!(is_plain_text("a\tb\nc\r"));
+    }
+
+    #[test]
+    fn control_bytes_and_nuls_are_not_text() {
+        assert!(!is_plain_text("\u{0}"));
+        assert!(!is_plain_text("png\u{1}\u{2}"));
+        assert!(!is_plain_text("\u{7}bell"));
+    }
+
+    #[test]
+    fn empty_is_not_text() {
+        // An empty BLOB is not a name; let it report its length instead.
+        assert!(!is_plain_text(""));
     }
 }

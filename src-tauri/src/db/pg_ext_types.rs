@@ -340,6 +340,39 @@ pub fn hex_preview(b: &[u8], max_bytes: usize) -> String {
     out
 }
 
+// ── Identifier and position types ───────────────────────────────────────────
+// oid, xid, xid8 and pg_lsn are fixed-width unsigned integers on the wire that
+// sqlx has no decoder for, so they reached the generic text path. Four bytes are
+// valid UTF-8 often enough that half a catalog column came out as mojibake and
+// the other half as a hex preview: `SELECT * FROM pg_replication_slots` printed
+// datoid as "⍰-" and catalog_xmin as "\x0052ab7c".
+//
+// Each is gated on an exact byte width. That width is the only thing separating
+// the binary wire form from the same value delivered as text, and being wrong in
+// that direction would turn a readable number back into a wrong one.
+
+/// `oid` and `xid`: 4-byte big-endian unsigned.
+fn u32_id_to_text(bytes: &[u8]) -> Option<String> {
+    let arr: [u8; 4] = bytes.try_into().ok()?;
+    Some(u32::from_be_bytes(arr).to_string())
+}
+
+/// `xid8`: 8-byte big-endian unsigned - a full 64-bit transaction id.
+fn u64_id_to_text(bytes: &[u8]) -> Option<String> {
+    let arr: [u8; 8] = bytes.try_into().ok()?;
+    Some(u64::from_be_bytes(arr).to_string())
+}
+
+/// `pg_lsn`: a 64-bit WAL position. Postgres prints it as two hex halves joined
+/// by a slash - `16/B374D848` - in uppercase with no zero padding, which is what
+/// `pg_lsn_out` does, so match it exactly or the value won't round-trip into a
+/// query the user writes from what they read here.
+fn pg_lsn_to_text(bytes: &[u8]) -> Option<String> {
+    let arr: [u8; 8] = bytes.try_into().ok()?;
+    let v = u64::from_be_bytes(arr);
+    Some(format!("{:X}/{:X}", v >> 32, v & 0xFFFF_FFFF))
+}
+
 /// Decode by type name, for the types the driver hands back raw.
 /// Returns None when the name isn't one of ours or the bytes don't fit the format.
 pub fn decode_ext_type(type_name: &str, bytes: &[u8]) -> Option<String> {
@@ -349,6 +382,9 @@ pub fn decode_ext_type(type_name: &str, bytes: &[u8]) -> Option<String> {
         "SPARSEVEC" => sparsevec_to_text(bytes),
         "GEOMETRY" | "GEOGRAPHY" => ewkb_to_ewkt(bytes),
         "BIT" | "VARBIT" | "BIT VARYING" => varbit_to_text(bytes),
+        "OID" | "XID" => u32_id_to_text(bytes),
+        "XID8" => u64_id_to_text(bytes),
+        "PG_LSN" => pg_lsn_to_text(bytes),
         _ => None,
     }
 }
@@ -512,5 +548,45 @@ mod tests {
         assert_eq!(decode_ext_type("VECTOR", &vec_bytes(&[1.0])).unwrap(), "[1]");
         assert_eq!(decode_ext_type("vector", &vec_bytes(&[1.0])).unwrap(), "[1]");
         assert!(decode_ext_type("TEXT", b"hello").is_none());
+    }
+
+    #[test]
+    fn reads_oid_and_xid_as_numbers() {
+        // 0x00013da2 = 81314 - the datoid that printed as "⍰-" before this.
+        assert_eq!(decode_ext_type("OID", &[0x00, 0x01, 0x3d, 0xa2]).unwrap(), "81314");
+        assert_eq!(decode_ext_type("XID", &[0x00, 0x52, 0xab, 0x7c]).unwrap(), "5417852");
+        assert_eq!(decode_ext_type("oid", &[0x00, 0x00, 0x00, 0x00]).unwrap(), "0");
+        // Full 32-bit range, where an i32 decode would have wrapped negative.
+        assert_eq!(decode_ext_type("OID", &[0xff, 0xff, 0xff, 0xff]).unwrap(), "4294967295");
+    }
+
+    #[test]
+    fn reads_xid8_across_the_64_bit_range() {
+        assert_eq!(
+            decode_ext_type("XID8", &[0, 0, 0, 0, 0x00, 0x52, 0xab, 0x7c]).unwrap(),
+            "5417852"
+        );
+        assert_eq!(
+            decode_ext_type("XID8", &[0xff; 8]).unwrap(),
+            "18446744073709551615"
+        );
+    }
+
+    #[test]
+    fn prints_pg_lsn_the_way_postgres_does() {
+        // 16/B374D848, the form pg_lsn_out emits and pg_lsn_in accepts back.
+        let bytes = 0x0000_0016_B374_D848u64.to_be_bytes();
+        assert_eq!(decode_ext_type("PG_LSN", &bytes).unwrap(), "16/B374D848");
+        assert_eq!(decode_ext_type("PG_LSN", &0u64.to_be_bytes()).unwrap(), "0/0");
+    }
+
+    #[test]
+    fn refuses_widths_that_are_not_the_wire_format() {
+        // The width gate is what keeps a text-format value from being read as
+        // packed bytes, so a wrong length must decline rather than guess.
+        assert!(decode_ext_type("OID", b"81314").is_none());
+        assert!(decode_ext_type("OID", &[0x00, 0x01]).is_none());
+        assert!(decode_ext_type("PG_LSN", &[0x00; 4]).is_none());
+        assert!(decode_ext_type("XID8", &[0x00; 4]).is_none());
     }
 }

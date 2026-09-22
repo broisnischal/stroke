@@ -97,20 +97,20 @@
           aria-label="App PIN"
         />
       </div>
-      <p class="mt-2 h-4 text-ui-2xs {wrong ? 'text-destructive' : 'text-muted-foreground/55'}">
+      <p class="mt-2 h-4 text-ui-2xs {wrong ? 'text-destructive' : 'text-muted-foreground'}">
         {#if checking}Checking…{:else if wrong}Wrong PIN. Try again.{/if}
       </p>
 
       <div class="mt-4 flex items-center gap-3 text-ui-2xs">
         <button
           type="button"
-          class="text-muted-foreground/55 underline underline-offset-2 transition-colors hover:text-foreground"
+          class="text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
           onclick={() => (showHelp = !showHelp)}>Forgot your PIN?</button
         >
         <span class="text-border/70">·</span>
         <button
           type="button"
-          class="text-muted-foreground/55 transition-colors hover:text-foreground"
+          class="text-muted-foreground transition-colors hover:text-foreground"
           onclick={quit}>Quit</button
         >
       </div>

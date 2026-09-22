@@ -126,7 +126,7 @@
             </div>
           </button>
         {/each}
-        <p class="pt-1 text-center text-ui-xs text-muted-foreground/60">
+        <p class="pt-1 text-center text-ui-xs text-muted-foreground">
           Requires Docker Desktop to be installed and running
         </p>
       </div>

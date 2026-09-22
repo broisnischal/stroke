@@ -31,6 +31,59 @@ renderer is right — and gives server-side clustering nothing to cluster.
 Seeding runs once, on first start, and finishes when the log prints
 `== stroke_vec: ready ==` / `== stroke_geo: ready ==`.
 
+# Dialect fixtures
+
+`docker/dialects.yml` is the other stack: one container per engine Stroke can
+talk to, every one carrying the same `shop` schema, so the sidebar, grid, DDL
+and object pages can be compared across engines instead of one at a time.
+
+```sh
+scripts/dialects.sh up        # start everything, seed what the image cannot
+scripts/dialects.sh status    # what is up and how many rows it holds
+scripts/dialects.sh verify    # walk every engine through Stroke's own code
+scripts/dialects.sh down      # stop; add --volumes to discard the data
+```
+
+| engine | address | user | password |
+| --- | --- | --- | --- |
+| PostgreSQL | `127.0.0.1:55432/shop` | `stroke` | `stroke` |
+| CockroachDB | `127.0.0.1:56257/defaultdb` | `root` | *(none)* |
+| MySQL | `127.0.0.1:53306/shop` | `root` | `stroke` |
+| MariaDB | `127.0.0.1:53307/shop` | `root` | `stroke` |
+| ClickHouse | `127.0.0.1:58123/shop` | `stroke` | `stroke` |
+| Redis | `127.0.0.1:56379/0` | — | *(none)* |
+| SQL Server | `127.0.0.1:51433/shop` | `sa` | `Stroke!passw0rd` |
+
+Postgres, MySQL, MariaDB and ClickHouse seed themselves from
+`docker/seed/<engine>`. CockroachDB, Redis and SQL Server have no init-dir, so
+`scripts/dialects.sh up` seeds them once they answer.
+
+Two notes that are easy to trip over:
+
+- **SQL Server, leave Encrypt off.** With Encrypt on, the handshake against its
+  self-signed certificate fails even with "Trust server certificate" on -
+  `invalid peer certificate: Other(UnsupportedCertVersion)`. With it off the
+  login packet is still encrypted, which is what the driver's own TLS handshake
+  log line is. `db/mssql.rs` explains it in the error message.
+- **Redis has no table list.** `db::redis::list_tables` is a documented stub -
+  keyspace browsing is not built yet. The fixture still seeds `shop:*` keys of
+  every Redis type, so there is something to browse the day it lands.
+
+## verify
+
+`scripts/dialects.sh verify` runs `src-tauri/src/db/dialect_matrix.rs`: for each
+engine it calls the same `list_schemas` / `list_tables` the sidebar calls, and
+prints a row per engine. An engine that is not running is skipped; an engine
+that IS running and answers wrongly fails.
+
+It exists because a MySQL connection with tables in it listed an empty sidebar
+and nothing caught it: `information_schema` hands `TABLE_NAME` back as
+VARBINARY, sqlx refused the `String` decode, and the `filter_map(…ok()?)` around
+it dropped every row - no error, nothing in a log. Every other test in the crate
+either ran against SQLite or asserted on a string of SQL rather than on what a
+server sends back.
+
+
 ## Connections
 
 Both images are recognised by Stroke's Docker scanner, so they appear under

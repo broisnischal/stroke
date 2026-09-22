@@ -4,7 +4,7 @@ version = "0.1.4"
 description = "Stroke — fast, minimal desktop database client"
 authors = ["Nischal Dahal"]
 license-file = "../LICENSE"
-repository = "https://github.com/broisnischal/stroke"
+repository = "https://github.com/stroke-app/stroke"
 edition = "2021"
 rust-version = "1.77.2"
 

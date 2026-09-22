@@ -19,17 +19,17 @@
     }))
   })
 
-  const used   = $derived(segments.reduce((s, d) => s + d.value, 0))
-  const total  = $derived.by(() => {
+  const used = $derived(segments.reduce((s, d) => s + d.value, 0))
+  const total = $derived.by(() => {
     if (spec?.z_col && spec.data?.[0]?.[spec.z_col] != null) return Math.max(used, Number(spec.data[0][spec.z_col]))
     return used || 100
   })
-  const pct    = $derived(segments.map(s => ({ ...s, width: total > 0 ? (s.value / total) * 100 : 0 })))
+  const pct = $derived(segments.map(s => ({ ...s, width: total > 0 ? (s.value / total) * 100 : 0 })))
   const remain = $derived(Math.max(0, total - used))
 </script>
 
 {#if !segments.length}
-  <div class="flex h-full items-center justify-center text-ui-xs text-muted-foreground/50">No data</div>
+  <div class="flex h-full items-center justify-center text-ui-xs text-muted-foreground">No data</div>
 {:else}
   <div class="flex h-full flex-col justify-center gap-3 px-4 py-3">
     {#if !noTitle && spec?.title}
@@ -38,11 +38,11 @@
 
     <!-- Usage line -->
     <div class="flex items-baseline justify-between">
-      <span class="font-mono text-ui-2xs text-muted-foreground/60">
+      <span class="font-mono text-ui-2xs text-muted-foreground">
         {used.toLocaleString()} used
         {#if remain > 0}· {remain.toLocaleString()} available{/if}
       </span>
-      <span class="font-mono text-ui-2xs text-muted-foreground/50">{total.toLocaleString()} total</span>
+      <span class="font-mono text-ui-2xs text-muted-foreground">{total.toLocaleString()} total</span>
     </div>
 
     <!-- Bar -->
@@ -61,7 +61,7 @@
       {#each segments as seg (seg.name)}
         <div class="flex items-center gap-1.5">
           <span class="size-2.5 shrink-0 rounded-sm" style="background:{seg.color}"></span>
-          <span class="font-mono text-ui-3xs text-muted-foreground/70">{seg.name}</span>
+          <span class="font-mono text-ui-3xs text-muted-foreground">{seg.name}</span>
           <span class="font-mono text-ui-3xs text-foreground/50">{seg.value.toLocaleString()}</span>
         </div>
       {/each}

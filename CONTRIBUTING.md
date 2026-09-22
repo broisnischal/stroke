@@ -6,7 +6,7 @@ a change from your machine into a release.
 
 ## Before you start
 
-- **Bugs** — [open an issue](https://github.com/broisnischal/stroke/issues)
+- **Bugs** — [open an issue](https://github.com/stroke-app/stroke/issues)
   with your OS, the database engine, and steps to reproduce. Screenshots or a
   screen recording help a lot.
 - **Features** — open an issue first so we can agree on the shape before you
@@ -19,7 +19,7 @@ You need [Node.js](https://nodejs.org) 20.19+ (or 22.12+ — CI builds on 22)
 and the [Rust toolchain](https://rustup.rs).
 
 ```bash
-git clone https://github.com/broisnischal/stroke
+git clone https://github.com/stroke-app/stroke
 cd stroke
 npm install
 npm run tauri          # full desktop app in dev mode (hot-reloads)

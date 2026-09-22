@@ -259,12 +259,12 @@
   <!-- Toolbar -->
   <div class="flex items-center gap-2 border-b border-border/20 bg-muted/20 px-3 py-1">
     {#if rowLabel}
-      <span class="font-mono text-ui-xs text-muted-foreground/40 select-none">{rowLabel}</span>
+      <span class="font-mono text-ui-xs text-muted-foreground select-none">{rowLabel}</span>
       <span class="text-border/40 select-none text-ui-xs">·</span>
     {/if}
     <button
       type="button"
-      class="inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-ui-xs text-muted-foreground/60 transition-colors hover:bg-accent/40 hover:text-foreground"
+      class="inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
       onclick={copyJson}
     >
       {#if copied}
@@ -281,7 +281,7 @@
         title="Toggle word wrap"
         class={[
           'inline-flex items-center gap-1.5 rounded px-2 py-0.5 font-mono text-ui-xs transition-colors hover:bg-accent/40 hover:text-foreground',
-          $appJsonWordWrap ? 'text-foreground bg-accent/30' : 'text-muted-foreground/60',
+          $appJsonWordWrap ? 'text-foreground bg-accent/30' : 'text-muted-foreground',
         ].join(' ')}
         onclick={() => {
           const next = !$appJsonWordWrap
@@ -301,7 +301,7 @@
         title="Tree view, expand and collapse nested values"
         class={[
           'inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-ui-xs transition-colors',
-          viewMode === 'tree' ? 'bg-background text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
+          viewMode === 'tree' ? 'bg-background text-foreground' : 'text-muted-foreground hover:text-foreground',
         ].join(' ')}
         onclick={() => setViewMode('tree')}
       >
@@ -313,7 +313,7 @@
         title="Raw JSON text"
         class={[
           'inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-ui-xs transition-colors',
-          viewMode === 'raw' ? 'bg-background text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
+          viewMode === 'raw' ? 'bg-background text-foreground' : 'text-muted-foreground hover:text-foreground',
         ].join(' ')}
         onclick={() => setViewMode('raw')}
       >
@@ -328,7 +328,7 @@
         type="button"
         title="Close (Esc)"
         aria-label="Close expanded row"
-        class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent/50 hover:text-foreground"
+        class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
         onclick={onclose}
       >
         <X class="size-3.5" />
@@ -351,7 +351,7 @@
       oncontextmenu={handleContextMenu}
     >
       {#if !html}
-        <p class="font-mono text-ui-sm text-muted-foreground/40">Loading…</p>
+        <p class="font-mono text-ui-sm text-muted-foreground">Loading…</p>
       {:else}
         <div
           class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-ui-sm [&_pre]:leading-relaxed [&_.json-inspector-url]:text-link [&_.json-inspector-url]:hover:underline [&_.json-inspector-url]:underline-offset-2 {wrapClass === 'whitespace-pre-wrap break-all' ? '[&_pre]:whitespace-pre-wrap [&_pre]:break-all' : '[&_pre]:whitespace-pre'}"

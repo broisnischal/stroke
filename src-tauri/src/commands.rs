@@ -259,6 +259,54 @@ pub async fn read_file(path: String) -> Result<String, String> {
     tokio::fs::read_to_string(&path).await.map_err(|e| e.to_string())
 }
 
+/// Open another Stroke window.
+///
+/// Windows share this process, and with it the active connection: the backend
+/// holds one pool, not one per window. That is the point - the second window is
+/// another view of the same session (a table on one screen, the SQL editor on
+/// the other), not a second client - but it does mean switching connection in
+/// either window switches it for both.
+///
+/// The chrome is built to match the main window exactly: frameless everywhere,
+/// macOS keeping its native traffic lights, and the dark base colour painted
+/// before the first frame so no white flash escapes while the frontend boots.
+#[tauri::command]
+pub fn open_new_window(app: tauri::AppHandle) -> Result<(), String> {
+    // Labels must be unique and stable-ish; the counter restarts with the app,
+    // and a closed label is free to reuse, so probe for the first gap.
+    let label = (2..64)
+        .map(|n| format!("main-{n}"))
+        .find(|l| app.webview_windows().get(l.as_str()).is_none())
+        .ok_or_else(|| "Too many windows are already open".to_string())?;
+
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        &label,
+        tauri::WebviewUrl::App("/".into()),
+    )
+    .title("Stroke")
+    .inner_size(1280.0, 800.0)
+    .min_inner_size(960.0, 600.0)
+    .resizable(true)
+    .background_color(tauri::window::Color(8, 8, 8, 255));
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.decorations(false);
+    }
+
+    let window = builder.build().map_err(|e| e.to_string())?;
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
 /// Restart the application - called after an update is installed.
 #[tauri::command]
 pub fn restart_app(app: tauri::AppHandle) {
@@ -287,7 +335,7 @@ use crate::db::{
     list_schemas, list_tables, list_indexes, list_enums, list_functions, list_triggers, list_sequences, ping_connection, table_row_counts,
     truncate_table, drop_table, get_table_column_structure, get_schema_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
     test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_redis_connection, test_sqlite_connection,
-    update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, FunctionInfo, ExplainResult, IndexInfo, LibSqlConfig,
+    update_table_cell, fetch_cell_value, ConnectionConfig, D1Config, DbState, EnumInfo, FunctionInfo, ExplainResult, IndexInfo, LibSqlConfig,
     SqlResult, SqliteConfig, TableInfo, TableRowCount, TableRows, TriggerInfo, SequenceInfo,
     ColumnStructureRow, TableColumnStructure, IncomingForeignKey, InsertRowResult, TunnelState,
     explain_pg, explain_mysql, explain_sqlite, explain_from_text_lines, explain_from_sqlite_plan,
@@ -774,6 +822,10 @@ pub async fn pg_get_table_rows(
     // Null placement for ORDER BY ("first"/"last"); absent keeps NULLS LAST.
     // Applied on dialects with explicit null placement (Postgres, SQLite, D1/libSQL).
     nulls_order: Option<String>,
+    // Optional - defaults to true. When false, a wide column is fetched whole
+    // like every other column, which is what the app did before and what the
+    // setting turns back on for anyone who wants it.
+    preview_wide: Option<bool>,
 ) -> Result<TableRows, String> {
     get_table_rows(
         state,
@@ -792,6 +844,7 @@ pub async fn pg_get_table_rows(
         sorts.unwrap_or_default(),
         keyset,
         nulls_order,
+        preview_wide.unwrap_or(true),
     )
     .await
 }
@@ -806,6 +859,8 @@ pub async fn pg_count_table_rows(
     table: String,
     search: Option<String>,
     search_is_regex: Option<bool>,
+    // Optional - defaults to false. Mirrors the rows query's own flag.
+    search_case_sensitive: Option<bool>,
     filters: Option<Vec<crate::db::RowFilter>>,
 ) -> Result<i64, String> {
     count_table_rows(
@@ -814,6 +869,7 @@ pub async fn pg_count_table_rows(
         table,
         search,
         search_is_regex.unwrap_or(false),
+        search_case_sensitive.unwrap_or(false),
         filters,
     )
     .await
@@ -983,6 +1039,19 @@ pub async fn pg_update_table_cell(
     value: Value,
 ) -> Result<(), String> {
     update_table_cell(state, schema, table, primary_key, column, value).await
+}
+
+/// Load one cell in full - the value a browse page deliberately did not fetch.
+#[tauri::command]
+pub async fn pg_fetch_cell_value(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    primary_key: HashMap<String, Value>,
+    column: String,
+    max_bytes: Option<i64>,
+) -> Result<crate::db::CellValueResult, String> {
+    fetch_cell_value(state, schema, table, primary_key, column, max_bytes).await
 }
 
 #[tauri::command]

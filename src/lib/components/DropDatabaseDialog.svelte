@@ -34,7 +34,7 @@
 
 {#snippet extra()}
   <div class="px-5 py-3.5">
-    <label for="drop-db-confirm" class="mb-2 block text-ui-2xs text-muted-foreground/70">
+    <label for="drop-db-confirm" class="mb-2 block text-ui-2xs text-muted-foreground">
       Type <span class="font-mono text-foreground">{name}</span> to confirm
     </label>
     <input
@@ -44,7 +44,7 @@
       autocomplete="off"
       spellcheck="false"
       class={cn(
-        'h-8 w-full rounded-lg border-2 bg-muted/[0.4] px-3 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:ring-0',
+        'h-8 w-full rounded-lg border-2 bg-muted/[0.4] px-3 font-mono text-ui-xs outline-none placeholder:text-muted-foreground focus:ring-0',
         matches ? 'border-border/50' : 'border-destructive/40',
       )}
     />
@@ -55,7 +55,7 @@
     <div class="flex items-center justify-between gap-4 px-5 py-3.5">
       <div class="min-w-0">
         <p class="text-ui-xs font-medium text-foreground">Close other sessions</p>
-        <p class="mt-0.5 text-ui-2xs text-muted-foreground/55">
+        <p class="mt-0.5 text-ui-2xs text-muted-foreground">
           {sessions ? `${sessions} session(s) connected. ` : ''}Postgres refuses the drop while anything is connected.
         </p>
       </div>
@@ -80,7 +80,7 @@
 
   <div class="h-px bg-border/25"></div>
   <div class="px-5 py-4">
-    <p class="mb-2 text-ui-3xs font-semibold tracking-[0.07em] uppercase text-muted-foreground/35">Will execute</p>
+    <p class="mb-2 text-ui-3xs font-semibold tracking-[0.07em] uppercase text-muted-foreground">Will execute</p>
     <div class="rounded-lg border border-border/20 bg-muted/[0.3] px-3.5 py-2.5">
       <code class="font-mono text-ui-xs break-all text-destructive">{sql}</code>
     </div>

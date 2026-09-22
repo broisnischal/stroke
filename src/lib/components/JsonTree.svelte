@@ -10,8 +10,14 @@
   import Copy from "@lucide/svelte/icons/copy";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import { oversizeCellInfo, formatByteSize } from "$lib/cell-value.js";
+  import { splitHighlight } from "$lib/json-search.js";
 
   /**
+   * `query` / `matchPaths` / `openPaths` come from one `searchJson` walk done by
+   * the owner, not from each node asking about its own subtree - that question
+   * is O(n) per node and O(n^2) over the document. A node only has to look
+   * itself up in two sets.
+   *
    * @type {{
    *   value: unknown,
    *   label?: string | null,
@@ -19,6 +25,11 @@
    *   defaultDepth?: number,
    *   oncopy?: (value: unknown) => void,
    *   onopen?: ((value: unknown, label: string) => void) | null,
+   *   path?: string,
+   *   query?: string,
+   *   matchPaths?: Set<string> | null,
+   *   openPaths?: Set<string> | null,
+   *   insideMatch?: boolean,
    * }}
    */
   let {
@@ -28,10 +39,29 @@
     defaultDepth = 1,
     oncopy = () => {},
     onopen = null,
+    path = "",
+    query = "",
+    matchPaths = null,
+    openPaths = null,
+    insideMatch = false,
   } = $props();
 
   const STRING_DISPLAY_LIMIT = 160;
   const CHILD_PAGE = 200;
+
+  const searching = $derived(!!query && !!matchPaths);
+  const selfMatch = $derived(searching && !!matchPaths?.has(path));
+  /** Everything under a matched node is shown whole - the match is its parent. */
+  const childrenInsideMatch = $derived(insideMatch || selfMatch);
+  /**
+   * While searching, a branch that leads to a match opens itself. Kept separate
+   * from `expanded` rather than written into it, so collapsing a branch by hand
+   * is not undone on the next keystroke, and clearing the query restores
+   * exactly the shape you had before typing.
+   */
+  const forceOpen = $derived(
+    searching && (childrenInsideMatch || !!openPaths?.has(path)),
+  );
 
   const oversize = $derived(oversizeCellInfo(value));
   const isArray = $derived(Array.isArray(value));
@@ -57,8 +87,20 @@
 
   // Only the currently-visible children (up to childLimit) are materialized, so
   // expanding a 100k-element array never builds 100k tuples at once.
+  /**
+   * While a search is running, a child is drawn only when it matches, sits on
+   * the way to a match, or lives inside one that did. Everything else stays
+   * out of the DOM, which is the whole point - a tree is the one shape you
+   * cannot scan with your eyes.
+   * @param {string} childPath
+   */
+  function childVisible(childPath) {
+    if (!searching || childrenInsideMatch) return true;
+    return !!matchPaths?.has(childPath) || !!openPaths?.has(childPath);
+  }
+
   /** @type {[string, unknown][]} */
-  const visibleEntries = $derived.by(() => {
+  const rawEntries = $derived.by(() => {
     if (isArray) {
       const arr = /** @type {unknown[]} */ (value);
       const n = Math.min(arr.length, childLimit);
@@ -80,6 +122,10 @@
     }
     return [];
   });
+
+  const visibleEntries = $derived(
+    searching ? rawEntries.filter(([k]) => childVisible(`${path}/${k}`)) : rawEntries,
+  );
 
   const summary = $derived.by(() => {
     if (isArray) return totalCount === 1 ? "1 item" : `${totalCount} items`;
@@ -129,15 +175,15 @@
     {#if isContainer}
       <button
         type="button"
-        class="mt-[3px] flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-accent/50 hover:text-foreground"
-        aria-label={expanded ? "Collapse" : "Expand"}
-        aria-expanded={expanded}
-        onclick={() => (expanded = !expanded)}
+        class="mt-[3px] flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+        aria-label={expanded || forceOpen ? "Collapse" : "Expand"}
+        aria-expanded={expanded || forceOpen}
+        onclick={() => (expanded = !(expanded || forceOpen))}
       >
         <ChevronRight
           class={[
             "size-3.5 transition-transform duration-100",
-            expanded ? "rotate-90" : "",
+            expanded || forceOpen ? "rotate-90" : "",
           ].join(" ")}
         />
       </button>
@@ -159,33 +205,40 @@
             onclick={() => {
               if (isContainer) expanded = !expanded;
             }}
-            tabindex={isContainer ? 0 : -1}>{label}</button
-          ><span class="text-muted-foreground/60">:</span>
+            tabindex={isContainer ? 0 : -1}
+            >{#if searching}{#each splitHighlight(label ?? "", query) as run, i (i)}{#if run.hit}<mark
+                    class="rounded-[2px] bg-warning/35 px-0 text-foreground">{run.t}</mark
+                  >{:else}{run.t}{/if}{/each}{:else}{label}{/if}</button
+          ><span class="text-muted-foreground">:</span>
         {/if}
 
         {#if isContainer}
           <button
             type="button"
-            class="cursor-pointer select-none bg-transparent p-0 text-left text-muted-foreground/70 hover:text-foreground"
+            class="cursor-pointer select-none bg-transparent p-0 text-left text-muted-foreground hover:text-foreground"
             onclick={() => (expanded = !expanded)}
           >
             <span class="text-muted-foreground">{isArray ? "[" : "{"}</span
-            >{#if !expanded}<span
-                class="px-1 text-ui-xs text-muted-foreground/60">{summary}</span
+            >{#if !(expanded || forceOpen)}<span
+                class="px-1 text-ui-xs text-muted-foreground">{summary}</span
               ><span class="text-muted-foreground">{isArray ? "]" : "}"}</span
               >{/if}
           </button>
         {:else}
-          <span class={["break-all", leafClass].join(" ")}>{leafText}</span>
+          <span class={["break-all", leafClass].join(" ")}
+            >{#if searching}{#each splitHighlight(leafText, query) as run, i (i)}{#if run.hit}<mark
+                    class="rounded-[2px] bg-warning/35 px-0 text-inherit">{run.t}</mark
+                  >{:else}{run.t}{/if}{/each}{:else}{leafText}{/if}</span
+          >
         {/if}
 
         <!-- Hover actions -->
         <span
-          class="invisible ml-1 inline-flex shrink-0 items-center gap-0.5 group-hover/jsonrow:visible"
+          class="opacity-0 ml-1 inline-flex shrink-0 items-center gap-0.5 group-hover/jsonrow:opacity-100"
         >
           <button
             type="button"
-            class="flex size-4.5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent/50 hover:text-foreground"
+            class="flex size-4.5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
             title="Copy value"
             onclick={() => oncopy(value)}
           >
@@ -194,7 +247,7 @@
           {#if openable}
             <button
               type="button"
-              class="flex size-4.5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent/50 hover:text-foreground"
+              class="flex size-4.5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
               title="Open in JSON viewer"
               onclick={handleOpen}
             >
@@ -204,7 +257,7 @@
         </span>
       </span>
 
-      {#if isContainer && expanded}
+      {#if isContainer && (expanded || forceOpen)}
         <!-- Indent guide sits just inside the opening bracket (ml-1.5), so it
              reads as this object's own tree rail - never colliding with the
              table's gutter separator the way a chevron-aligned line did. pl-3
@@ -218,6 +271,11 @@
               {defaultDepth}
               {oncopy}
               {onopen}
+              path={`${path}/${k}`}
+              {query}
+              {matchPaths}
+              {openPaths}
+              insideMatch={childrenInsideMatch}
             />
           {/each}
 

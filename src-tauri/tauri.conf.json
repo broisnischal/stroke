@@ -19,7 +19,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEyODEwMzlFQTA0NjgwRjkKUldUNWdFYWduZ09CRXZvdFpXNWx2V2lFSUlaaXRPV1ptdXlpNXpuU3l0QWpvLzVvTzZZdTlTdUEK",
       "endpoints": [
-        "https://github.com/broisnischal/stroke/releases/latest/download/latest.json"
+        "https://github.com/stroke-app/stroke/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

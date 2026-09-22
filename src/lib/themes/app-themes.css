@@ -159,6 +159,131 @@ html[data-theme="dark"] {
   --editor-line-highlight:    #252525;
 }
 
+/* ── Obsidian - cool near-neutral dark, teal accent ──
+   Every existing accent sits in blue (252-266), violet (295), green (155) or
+   amber (52/95); nothing used cyan, so this fills the one gap in the wheel
+   rather than adding a fifteenth blue. The base carries hue 265 at chroma 0.006
+   - present enough to read as cool, far below Slate's 0.022, so the greys stay
+   greys. Surfaces step evenly in perceived lightness and hold one hue end to
+   end; chroma rises with the step so the lighter chrome does not go flat.
+   Measured: foreground 13.2:1 and muted-foreground 6.5:1 on the WORST surface,
+   accent fill 9.2:1, button label on the fill 8.9:1. */
+html[data-theme="obsidian"] {
+  --background:               oklch(0.145 0.006 265);
+  --foreground:               oklch(0.945 0.008 265);
+  --card:                     oklch(0.186 0.007 265);
+  --card-foreground:          oklch(0.945 0.008 265);
+  --popover:                  oklch(0.186 0.007 265);
+  --popover-foreground:       oklch(0.945 0.008 265);
+  --primary:                  oklch(0.745 0.118 195);
+  --primary-foreground:       oklch(0.165 0.020 195);
+  --secondary:                oklch(0.236 0.008 265);
+  --secondary-foreground:     oklch(0.900 0.008 265);
+  --muted:                    oklch(0.236 0.008 265);
+  --muted-foreground:         oklch(0.730 0.012 265);
+  --accent:                   oklch(0.262 0.009 265);
+  --accent-foreground:        oklch(0.960 0.008 265);
+  --destructive:              oklch(0.65 0.20 25);
+  --border:                   oklch(0.292 0.010 265);
+  --input:                    oklch(0.308 0.010 265);
+  --ring:                     oklch(0.745 0.118 195);
+  --sidebar:                  oklch(0.115 0.006 265);
+  --sidebar-foreground:       oklch(0.900 0.008 265);
+  --sidebar-accent:           oklch(0.228 0.008 265);
+  --sidebar-accent-foreground: oklch(0.975 0.008 265);
+  --sidebar-border:           oklch(0.268 0.010 265);
+  --panel:                    oklch(0.163 0.006 265);
+  --table-grid:               oklch(0.300 0.010 265);
+  --link:                     oklch(0.775 0.100 205);
+  --link-hover:               oklch(0.855 0.085 205);
+  --editor-surface:           oklch(0.158 0.006 265);
+  --editor-line-highlight:    oklch(0.205 0.007 265);
+}
+
+/* ── Clay - warm off-white light, terracotta accent ──
+   Parchment is the only other warm light and it pairs a warm cream with a BLUE
+   accent, so warm-on-warm was missing. Base hue 75 at chroma 0.008 reads as
+   paper rather than as cream; the accent sits at hue 42, within 35 degrees of
+   the surface hue, which is what keeps it feeling like one material instead of
+   a blue sticker on beige. Card stops at L 0.995 rather than pure white - an end
+   stop that carries no hue cannot belong to a ramp.
+   Measured: foreground 13.6:1 and muted-foreground 5.8:1 on the WORST surface,
+   accent fill 5.8:1, button label on the fill 6.1:1. */
+html[data-theme="clay"] {
+  --background:               oklch(0.972 0.008 75);
+  --foreground:               oklch(0.225 0.022 58);
+  --card:                     oklch(0.995 0.004 75);
+  --card-foreground:          oklch(0.225 0.022 58);
+  --popover:                  oklch(0.995 0.004 75);
+  --popover-foreground:       oklch(0.225 0.022 58);
+  --primary:                  oklch(0.505 0.140 42);
+  --primary-foreground:       oklch(0.990 0.005 60);
+  --secondary:                oklch(0.944 0.011 75);
+  --secondary-foreground:     oklch(0.280 0.022 58);
+  --muted:                    oklch(0.944 0.011 75);
+  --muted-foreground:         oklch(0.455 0.020 60);
+  --accent:                   oklch(0.922 0.014 72);
+  --accent-foreground:        oklch(0.200 0.022 58);
+  --destructive:              oklch(0.52 0.20 25);
+  --border:                   oklch(0.878 0.016 70);
+  --input:                    oklch(0.895 0.015 70);
+  --ring:                     oklch(0.505 0.140 42);
+  --sidebar:                  oklch(0.951 0.010 75);
+  --sidebar-foreground:       oklch(0.250 0.022 58);
+  --sidebar-accent:           oklch(0.915 0.015 72);
+  --sidebar-accent-foreground: oklch(0.190 0.022 58);
+  --sidebar-border:           oklch(0.890 0.015 70);
+  --panel:                    oklch(0.983 0.007 75);
+  --table-grid:               oklch(0.885 0.015 70);
+  --link:                     oklch(0.480 0.135 40);
+  --link-hover:               oklch(0.395 0.118 38);
+  --editor-surface:           oklch(0.985 0.006 75);
+  --editor-line-highlight:    oklch(0.948 0.011 75);
+}
+
+/* ── Hotdog Stand ────────────────────────────────────────────────────────────
+   The Windows 3.1 joke, mustard on ketchup - but a joke you can read.
+   The faithful version (#ff0000 behind #ffff00) measures 2.2:1, which made a
+   4,775-row grid genuinely unusable rather than funny: the punchline lands in
+   the first second and then you are just squinting. So the clash is kept and
+   the roles are reassigned - the reds run dark enough to carry text, the mustard
+   is the foreground, and pillarbox red becomes the ACCENT rather than the entire
+   page. Still unmistakably a hotdog; no longer a punishment.
+   Measured: foreground 9.9:1 and muted 6.6:1 on the worst surface, fill 3.5:1,
+   label on fill 4.9:1. The sidebar stays inverted, because a theme this stupid
+   should still have one flourish. */
+html[data-theme="hotdog"] {
+  --background:               #2b0707;
+  --foreground:               #ffd83d;
+  --card:                     #3d0c0c;
+  --card-foreground:          #ffd83d;
+  --popover:                  #3d0c0c;
+  --popover-foreground:       #ffd83d;
+  --primary:                  #d41710;
+  --primary-foreground:       #fff6d6;
+  --secondary:                #4a1010;
+  --secondary-foreground:     #ffd83d;
+  --muted:                    #4a1010;
+  --muted-foreground:         #e8a83c;
+  --accent:                   #581515;
+  --accent-foreground:        #ffe98a;
+  --destructive:              #ff6b5e;
+  --border:                   #6b1c1c;
+  --input:                    #7a2020;
+  --ring:                     #ffd83d;
+  --sidebar:                  #1c0404;
+  --sidebar-foreground:       #ffd83d;
+  --sidebar-accent:           #4a1010;
+  --sidebar-accent-foreground: #ffe98a;
+  --sidebar-border:           #6b1c1c;
+  --panel:                    #330909;
+  --table-grid:               #6b1c1c;
+  --link:                     #ffb02e;
+  --link-hover:               #ffd83d;
+  --editor-surface:           #2b0707;
+  --editor-line-highlight:    #3d0c0c;
+}
+
 /* ── Midnight - deep ocean navy, blue accent ── */
 html[data-theme="midnight"] {
   --background:               oklch(0.140 0.030 265);
@@ -569,4 +694,287 @@ html[data-theme="light-high-contrast"] {
   --link-hover:               oklch(0.20 0.20 264);
   --editor-surface:           #ffffff;
   --editor-line-highlight:    #e8e8e8;
+}
+
+/* ── Matte - flat matte black, greyscale throughout ──
+   Mono is pure #000 against pure white: maximum contrast, every edge hard. Matte
+   is the opposite end of the same idea. Nothing is pure. The canvas is #121212,
+   the sidebar bottoms out at #050505 rather than black, body text stops at
+   #d9d9d9 rather than white, and the nine surfaces between them step far enough
+   apart to read as separate planes without a single shadow.
+   Chroma is 0 on every token but one. There is no accent hue at all: the primary
+   fill is a light grey, the ring is a mid grey, and links are simply brighter
+   than the text around them. --destructive keeps its red because it carries
+   meaning rather than style, and dropping it would leave delete looking like
+   every other button.
+   Measured: foreground 9.7:1 and muted-foreground 5.2:1 on the worst surface,
+   fill 13.7:1 on the canvas, label on the fill 14.2:1, ring 9.4:1. The card sits
+   1.13:1 off the canvas and the sidebar 1.09:1 under it, so elevation is visible
+   on its own. */
+html[data-theme="matte"] {
+  --background:               oklch(0.182 0 0);
+  --foreground:               oklch(0.885 0 0);
+  --card:                     oklch(0.238 0 0);
+  --card-foreground:          oklch(0.885 0 0);
+  --popover:                  oklch(0.238 0 0);
+  --popover-foreground:       oklch(0.885 0 0);
+  --primary:                  oklch(0.895 0 0);
+  --primary-foreground:       oklch(0.160 0 0);
+  --secondary:                oklch(0.272 0 0);
+  --secondary-foreground:     oklch(0.855 0 0);
+  --muted:                    oklch(0.272 0 0);
+  --muted-foreground:         oklch(0.705 0 0);
+  --accent:                   oklch(0.298 0 0);
+  --accent-foreground:        oklch(0.925 0 0);
+  --destructive:              oklch(0.660 0.180 25);
+  --border:                   oklch(0.325 0 0);
+  --input:                    oklch(0.348 0 0);
+  --ring:                     oklch(0.780 0 0);
+  --sidebar:                  oklch(0.118 0 0);
+  --sidebar-foreground:       oklch(0.850 0 0);
+  --sidebar-accent:           oklch(0.262 0 0);
+  --sidebar-accent-foreground: oklch(0.940 0 0);
+  --sidebar-border:           oklch(0.305 0 0);
+  --panel:                    oklch(0.202 0 0);
+  --table-grid:               oklch(0.335 0 0);
+  --link:                     oklch(0.955 0 0);
+  --link-hover:               oklch(0.995 0 0);
+  --editor-surface:           oklch(0.190 0 0);
+  --editor-line-highlight:    oklch(0.248 0 0);
+}
+
+/* ── Claude Light - the assistant's own cream and coral ──
+   Built from Anthropic's palette rather than an impression of it: the two creams
+   (#F0EEE6 canvas, #FAF9F5 raised) and the coral at hue 45. The brand puts white
+   labels on #D97757, which measures 2.9:1 - fine on a marketing page, not on a
+   button you click four hundred times a day. So the FILL is deepened to L 0.555
+   and the original coral lives on as --link and the focus ring, where 3:1 is the
+   bar. Same colour, moved to where it can be read.
+   Measured: foreground 12.8:1 and muted-foreground 5.4:1 on the worst surface,
+   fill 4.3:1 on the canvas, label on the fill 4.8:1. */
+html[data-theme="claude-light"] {
+  --background:               oklch(0.949 0.009 92);
+  --foreground:               oklch(0.215 0.008 80);
+  --card:                     oklch(0.978 0.005 92);
+  --card-foreground:          oklch(0.215 0.008 80);
+  --popover:                  oklch(0.978 0.005 92);
+  --popover-foreground:       oklch(0.215 0.008 80);
+  --primary:                  oklch(0.555 0.130 45);
+  --primary-foreground:       oklch(0.985 0.005 90);
+  --secondary:                oklch(0.922 0.011 92);
+  --secondary-foreground:     oklch(0.270 0.008 80);
+  --muted:                    oklch(0.922 0.011 92);
+  --muted-foreground:         oklch(0.450 0.012 82);
+  --accent:                   oklch(0.900 0.014 90);
+  --accent-foreground:        oklch(0.195 0.008 80);
+  --destructive:              oklch(0.520 0.200 20);
+  --border:                   oklch(0.832 0.016 90);
+  --input:                    oklch(0.820 0.017 90);
+  --ring:                     oklch(0.555 0.130 45);
+  --sidebar:                  oklch(0.932 0.010 92);
+  --sidebar-foreground:       oklch(0.240 0.008 80);
+  --sidebar-accent:           oklch(0.895 0.014 90);
+  --sidebar-accent-foreground: oklch(0.185 0.008 80);
+  --sidebar-border:           oklch(0.840 0.016 90);
+  --panel:                    oklch(0.962 0.007 92);
+  --table-grid:               oklch(0.836 0.016 90);
+  --link:                     oklch(0.530 0.125 45);
+  --link-hover:               oklch(0.430 0.110 42);
+  --editor-surface:           oklch(0.968 0.006 92);
+  --editor-line-highlight:    oklch(0.928 0.010 92);
+}
+
+/* ── Moss Light - pale linen, jade accent ──
+   Forest is the only other green and it is a vivid emerald on a near-neutral
+   base. Moss puts the hue in the SURFACES instead (128 at chroma 0.007-0.018,
+   low enough that it reads as paper rather than as green) and answers it with a
+   deep jade at hue 158. Thirty degrees apart is enough to tell the accent from
+   the page and close enough that they stay one material.
+   Measured: foreground 13.4:1 and muted-foreground 5.7:1 on the worst surface,
+   fill 5.8:1, label on the fill 6.2:1. */
+html[data-theme="moss-light"] {
+  --background:               oklch(0.970 0.007 128);
+  --foreground:               oklch(0.215 0.020 140);
+  --card:                     oklch(0.995 0.003 128);
+  --card-foreground:          oklch(0.215 0.020 140);
+  --popover:                  oklch(0.995 0.003 128);
+  --popover-foreground:       oklch(0.215 0.020 140);
+  --primary:                  oklch(0.475 0.105 158);
+  --primary-foreground:       oklch(0.990 0.006 150);
+  --secondary:                oklch(0.940 0.010 128);
+  --secondary-foreground:     oklch(0.270 0.020 140);
+  --muted:                    oklch(0.940 0.010 128);
+  --muted-foreground:         oklch(0.450 0.018 140);
+  --accent:                   oklch(0.918 0.014 130);
+  --accent-foreground:        oklch(0.195 0.020 140);
+  --destructive:              oklch(0.520 0.200 25);
+  --border:                   oklch(0.850 0.018 128);
+  --input:                    oklch(0.838 0.019 128);
+  --ring:                     oklch(0.475 0.105 158);
+  --sidebar:                  oklch(0.948 0.010 128);
+  --sidebar-foreground:       oklch(0.240 0.020 140);
+  --sidebar-accent:           oklch(0.910 0.016 130);
+  --sidebar-accent-foreground: oklch(0.185 0.020 140);
+  --sidebar-border:           oklch(0.858 0.018 128);
+  --panel:                    oklch(0.982 0.006 128);
+  --table-grid:               oklch(0.854 0.018 128);
+  --link:                     oklch(0.455 0.100 158);
+  --link-hover:               oklch(0.375 0.088 156);
+  --editor-surface:           oklch(0.985 0.005 128);
+  --editor-line-highlight:    oklch(0.944 0.010 128);
+}
+
+/* ── Orchid Light - blush white, magenta accent ──
+   Hue 330 was the one empty lane in the palette: Iris and Rosé Pine sit at 290
+   to 300, which is violet, and a magenta at 335 reads as a different colour
+   beside either. The surfaces carry a trace of it at chroma 0.008-0.021 so the
+   accent belongs to the page instead of being stamped on it. Destructive stays
+   at 25, fifty degrees clear, so a delete never reads as the brand.
+   Measured: foreground 13.4:1 and muted-foreground 5.8:1 on the worst surface,
+   fill 6.2:1, label on the fill 6.5:1. */
+html[data-theme="orchid-light"] {
+  --background:               oklch(0.972 0.008 330);
+  --foreground:               oklch(0.220 0.026 330);
+  --card:                     oklch(0.996 0.003 330);
+  --card-foreground:          oklch(0.220 0.026 330);
+  --popover:                  oklch(0.996 0.003 330);
+  --popover-foreground:       oklch(0.220 0.026 330);
+  --primary:                  oklch(0.495 0.160 335);
+  --primary-foreground:       oklch(0.992 0.005 330);
+  --secondary:                oklch(0.944 0.011 330);
+  --secondary-foreground:     oklch(0.275 0.026 330);
+  --muted:                    oklch(0.944 0.011 330);
+  --muted-foreground:         oklch(0.452 0.024 332);
+  --accent:                   oklch(0.922 0.016 330);
+  --accent-foreground:        oklch(0.198 0.026 330);
+  --destructive:              oklch(0.520 0.200 25);
+  --border:                   oklch(0.854 0.020 330);
+  --input:                    oklch(0.842 0.021 330);
+  --ring:                     oklch(0.495 0.160 335);
+  --sidebar:                  oklch(0.950 0.011 330);
+  --sidebar-foreground:       oklch(0.245 0.026 330);
+  --sidebar-accent:           oklch(0.914 0.018 330);
+  --sidebar-accent-foreground: oklch(0.190 0.026 330);
+  --sidebar-border:           oklch(0.862 0.020 330);
+  --panel:                    oklch(0.983 0.006 330);
+  --table-grid:               oklch(0.858 0.020 330);
+  --link:                     oklch(0.475 0.152 335);
+  --link-hover:               oklch(0.390 0.132 333);
+  --editor-surface:           oklch(0.986 0.005 330);
+  --editor-line-highlight:    oklch(0.948 0.011 330);
+}
+
+/* ── Claude Dark - warm charcoal, same coral ──
+   The brand's dark greys are warm (hue 80 at chroma 0.004), which is the whole
+   difference between this and Studio Dark: a neutral near-black beside it reads
+   slightly blue. The coral lifts to L 0.720 because a dark surface needs a
+   lighter fill to carry the same weight, and the cream returns as the text.
+   Measured: foreground 12.5:1 and muted-foreground 6.1:1 on the worst surface,
+   fill 7.2:1, label on the fill 7.2:1. */
+html[data-theme="claude"] {
+  --background:               oklch(0.183 0.004 80);
+  --foreground:               oklch(0.955 0.005 92);
+  --card:                     oklch(0.222 0.004 80);
+  --card-foreground:          oklch(0.955 0.005 92);
+  --popover:                  oklch(0.222 0.004 80);
+  --popover-foreground:       oklch(0.955 0.005 92);
+  --primary:                  oklch(0.720 0.115 42);
+  --primary-foreground:       oklch(0.190 0.030 40);
+  --secondary:                oklch(0.262 0.005 80);
+  --secondary-foreground:     oklch(0.910 0.005 92);
+  --muted:                    oklch(0.262 0.005 80);
+  --muted-foreground:         oklch(0.735 0.008 85);
+  --accent:                   oklch(0.288 0.006 80);
+  --accent-foreground:        oklch(0.965 0.005 92);
+  --destructive:              oklch(0.650 0.190 20);
+  --border:                   oklch(0.320 0.006 80);
+  --input:                    oklch(0.336 0.006 80);
+  --ring:                     oklch(0.720 0.115 42);
+  --sidebar:                  oklch(0.155 0.004 80);
+  --sidebar-foreground:       oklch(0.910 0.005 92);
+  --sidebar-accent:           oklch(0.255 0.005 80);
+  --sidebar-accent-foreground: oklch(0.975 0.004 92);
+  --sidebar-border:           oklch(0.298 0.006 80);
+  --panel:                    oklch(0.200 0.004 80);
+  --table-grid:               oklch(0.328 0.006 80);
+  --link:                     oklch(0.750 0.105 45);
+  --link-hover:               oklch(0.830 0.085 48);
+  --editor-surface:           oklch(0.193 0.004 80);
+  --editor-line-highlight:    oklch(0.238 0.005 80);
+}
+
+/* ── Moss Dark - deep moss, jade accent ──
+   The light theme's ramp reversed and then re-tuned, not mirrored: chroma comes
+   down at the dark end (a saturated surface reads as a colour cast at L 0.15,
+   not as a tint) and the accent moves up to L 0.760 to hold its weight.
+   Measured: foreground 12.7:1 and muted-foreground 6.4:1 on the worst surface,
+   fill 9.5:1, label on the fill 9.2:1. */
+html[data-theme="moss"] {
+  --background:               oklch(0.152 0.010 140);
+  --foreground:               oklch(0.940 0.010 135);
+  --card:                     oklch(0.192 0.011 140);
+  --card-foreground:          oklch(0.940 0.010 135);
+  --popover:                  oklch(0.192 0.011 140);
+  --popover-foreground:       oklch(0.940 0.010 135);
+  --primary:                  oklch(0.760 0.105 155);
+  --primary-foreground:       oklch(0.175 0.030 155);
+  --secondary:                oklch(0.242 0.012 140);
+  --secondary-foreground:     oklch(0.900 0.010 135);
+  --muted:                    oklch(0.242 0.012 140);
+  --muted-foreground:         oklch(0.730 0.014 138);
+  --accent:                   oklch(0.268 0.013 140);
+  --accent-foreground:        oklch(0.958 0.010 135);
+  --destructive:              oklch(0.650 0.200 25);
+  --border:                   oklch(0.298 0.014 140);
+  --input:                    oklch(0.314 0.014 140);
+  --ring:                     oklch(0.760 0.105 155);
+  --sidebar:                  oklch(0.122 0.010 140);
+  --sidebar-foreground:       oklch(0.900 0.010 135);
+  --sidebar-accent:           oklch(0.234 0.012 140);
+  --sidebar-accent-foreground: oklch(0.975 0.008 135);
+  --sidebar-border:           oklch(0.274 0.014 140);
+  --panel:                    oklch(0.170 0.010 140);
+  --table-grid:               oklch(0.306 0.014 140);
+  --link:                     oklch(0.790 0.090 165);
+  --link-hover:               oklch(0.870 0.075 165);
+  --editor-surface:           oklch(0.164 0.010 140);
+  --editor-line-highlight:    oklch(0.212 0.011 140);
+}
+
+/* ── Orchid Dark - aubergine near-black, orchid accent ──
+   The dark end of the same ramp. The accent lands at L 0.760 rather than the
+   light theme's 0.495, because contrast responds to lightness and the hue is
+   the part that has to stay put across the pair.
+   Measured: foreground 12.7:1 and muted-foreground 6.3:1 on the worst surface,
+   fill 8.7:1, label on the fill 8.4:1. */
+html[data-theme="orchid"] {
+  --background:               oklch(0.150 0.012 325);
+  --foreground:               oklch(0.940 0.012 325);
+  --card:                     oklch(0.192 0.014 325);
+  --card-foreground:          oklch(0.940 0.012 325);
+  --popover:                  oklch(0.192 0.014 325);
+  --popover-foreground:       oklch(0.940 0.012 325);
+  --primary:                  oklch(0.760 0.120 340);
+  --primary-foreground:       oklch(0.180 0.040 340);
+  --secondary:                oklch(0.242 0.015 325);
+  --secondary-foreground:     oklch(0.900 0.012 325);
+  --muted:                    oklch(0.242 0.015 325);
+  --muted-foreground:         oklch(0.730 0.018 325);
+  --accent:                   oklch(0.268 0.017 325);
+  --accent-foreground:        oklch(0.958 0.012 325);
+  --destructive:              oklch(0.650 0.200 25);
+  --border:                   oklch(0.298 0.018 325);
+  --input:                    oklch(0.314 0.018 325);
+  --ring:                     oklch(0.760 0.120 340);
+  --sidebar:                  oklch(0.120 0.012 325);
+  --sidebar-foreground:       oklch(0.900 0.012 325);
+  --sidebar-accent:           oklch(0.234 0.015 325);
+  --sidebar-accent-foreground: oklch(0.975 0.010 325);
+  --sidebar-border:           oklch(0.274 0.018 325);
+  --panel:                    oklch(0.168 0.012 325);
+  --table-grid:               oklch(0.306 0.018 325);
+  --link:                     oklch(0.790 0.105 330);
+  --link-hover:               oklch(0.870 0.085 330);
+  --editor-surface:           oklch(0.162 0.012 325);
+  --editor-line-highlight:    oklch(0.212 0.014 325);
 }

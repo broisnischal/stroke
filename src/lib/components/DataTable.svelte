@@ -5,11 +5,13 @@
   import { zoomState } from '$lib/stores/canvas-zoom.svelte.js'
   // Zoom is driven through the app-level settings so the canvas scales together
   // with the rest of the UI (applySettings mirrors the app zoom into zoomState).
-  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight } from '$lib/stores/settings.js'
+  import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight, appNumberGrouping, appHighlightActiveRow, appGridFontSize, appImagePreview, appOpenUrlsOnClick, appRowNumbers } from '$lib/stores/settings.js'
   import { createSmoothScroll, wheelPixels } from '$lib/smooth-scroll.js'
+  import { isJsonColumnType } from '$lib/cell-expand.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
@@ -26,13 +28,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import Tag from "@lucide/svelte/icons/tag";
   import Ban from "@lucide/svelte/icons/ban";
   import Copy from "@lucide/svelte/icons/copy";
+  import MoveHorizontal from "@lucide/svelte/icons/move-horizontal";
+  import Type from "@lucide/svelte/icons/type";
   import CopyPlus from "@lucide/svelte/icons/copy-plus";
+  import ArrowUpFromLine from "@lucide/svelte/icons/arrow-up-from-line";
+  import ArrowDownFromLine from "@lucide/svelte/icons/arrow-down-from-line";
   import Pencil from "@lucide/svelte/icons/pencil";
   import CircleSlash from "@lucide/svelte/icons/circle-slash";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Braces from "@lucide/svelte/icons/braces";
   import CheckSquare from "@lucide/svelte/icons/check-square";
   import PanelRight from "@lucide/svelte/icons/panel-right";
+  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import Pin from "@lucide/svelte/icons/pin";
   import PinOff from "@lucide/svelte/icons/pin-off";
   import Table2 from "@lucide/svelte/icons/table-2";
@@ -48,9 +55,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   } from "$lib/stores/table-column-widths.js";
   import {
     clampColumnWidth,
+    columnAlignsRight,
     defaultColumnWidth,
   } from "$lib/table-column-widths.js";
   import { formatCompactCount } from "$lib/table-list.js";
+  import { keycaps } from "$lib/shortcuts.js";
   import { cn } from "$lib/utils.js";
   import { buildQuickFilter } from "$lib/quick-filter.js";
   import {
@@ -67,6 +76,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     isAutoColumn,
     insertOmitBehaviour,
     buildInsertPayload,
+    isDateTimeType,
     isDateOnlyType,
     isTimeOnlyType,
     oversizeCellInfo,
@@ -76,6 +86,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import {
     defaultInsertDraft,
     shouldUseDateTimePicker,
+    generateUuid,
+    generateCuid,
+    nowDateTimeLocal,
+    nowDateOnly,
+    nowTimeOnly,
   } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
   import InsertValuePicker from "./InsertValuePicker.svelte";
@@ -100,8 +115,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import { t } from "$lib/i18n.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
   import Dices from "@lucide/svelte/icons/dices";
+  import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
+  import Eraser from "@lucide/svelte/icons/eraser";
+  import Columns3 from "@lucide/svelte/icons/columns-3";
+  import CalendarDays from "@lucide/svelte/icons/calendar-days";
+  import Hash from "@lucide/svelte/icons/hash";
   import Clock from "@lucide/svelte/icons/clock";
   import MediaLightbox from "./MediaLightbox.svelte";
+  import CellEditorPanel from "./CellEditorPanel.svelte";
   import RowExpandViewer from "./RowExpandViewer.svelte";
   import ArrayCellEditor from "./ArrayCellEditor.svelte";
   import VectorCellViewer from "./VectorCellViewer.svelte";
@@ -109,14 +130,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import GeometryCellViewer from "./GeometryCellViewer.svelte";
   import { isGeometryType, geometrySummary } from "$lib/geometry-cell.js";
   import FkSubviewPanel from "./FkSubviewPanel.svelte";
-  // JsonCellLightbox (Monaco-based) is imported lazily at its render site below.
-  import CellQuickLook from "./CellQuickLook.svelte";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Check from "@lucide/svelte/icons/check";
   import Loader from "@lucide/svelte/icons/loader";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
   import DateTimePicker from "./DateTimePicker.svelte";
+  import SearchableMenu from "./SearchableMenu.svelte";
+  import Icon from "./Icon.svelte";
   import ColumnStatsPanel from "./ColumnStatsPanel.svelte";
   import BarChart2 from "@lucide/svelte/icons/bar-chart-2";
   import VirtualColumnsPanel from "./VirtualColumnsPanel.svelte";
@@ -217,6 +238,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     pendingEditCount = $bindable(0),
     /** Assigned by this component; the parent calls these to flush / discard staged edits. */
     applyEdits = $bindable(/** @type {() => void | Promise<void>} */ (() => {})),
+    /** Copy the staged changes as SQL instead of running them. */
+    copyEditsSql = $bindable(/** @type {() => void | Promise<void>} */ (() => {})),
     resetEdits = $bindable(/** @type {() => void} */ (() => {})),
     /** Assigned by this component; the parent (StatusBar) calls these to jump the
      *  table to the top / bottom. */
@@ -266,6 +289,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     incomingForeignKeys = [],
     /** Fetch related rows for an inline FK sub-view. Returns { columns, rows, error? }. */
     onfetchrelatedrows = /** @type {(detail: any) => Promise<{ columns: any[], rows: any[], error?: string }>} */ (async () => ({ columns: [], rows: [] })),
+    /**
+     * Load one capped cell in full. Wide columns arrive as a preview so a page
+     * of half-megabyte values stays openable; this is how the dock gets the
+     * real thing when someone asks for it. Null when the engine cannot.
+     * @type {null | ((detail: { rowIdx: number, colIdx: number }) => Promise<{ text: string, bytes: number, truncated: boolean }>)}
+     */
+    onfetchcellvalue = null,
+    /**
+     * Fetch one capped cell AND write it into the row, for the in-cell Load
+     * button. Separate from `onfetchcellvalue`, which hands the text back for
+     * the dock to show without touching the page.
+     * @type {null | ((detail: { rowIdx: number, colIdx: number }) => Promise<void>)}
+     */
+    onloadcellvalue = null,
     /** Called when the user confirms the new row draft. Receives the validated values. */
     oninsertrow = /** @type {(values: Record<string, unknown>) => Promise<void>} */ (async () => {}),
     /**
@@ -298,6 +335,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  loaded). Undefined rows render as a loading skeleton and the table reports
      *  its visible range via onvisiblerange so the parent can fetch/evict. */
     windowed = false,
+    /**
+     * Absolute index of `rows[0]` in the result set, so the row-number gutter
+     * counts from the page rather than from the screen: row 201 reads 201 on
+     * page 3, not 1. Windowed mode addresses rows absolutely already, so it
+     * passes 0.
+     */
+    rowNumberOffset = 0,
     /** Called (on change) with the currently visible row range in windowed mode. */
     onvisiblerange = /** @type {(start: number, end: number) => void} */ (() => {}),
     /** Windowed mode: what the parent's window fetcher is doing, so the grid can
@@ -316,12 +360,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      *  click) rather than roaming with the arrow keys. Lets the parent record a
      *  back/forward position for a short, deliberate move it would otherwise
      *  treat as roaming. */
-    onjump = /** @type {() => void} */ (() => {}),
     /** True when every row has been loaded in infinite scroll mode (no more pages). */
     endOfResults = false,
     /** Active row-search query (toolbar search). Matched substrings are
      *  highlighted in the drawn cell text. */
     searchQuery = '',
+    /**
+     * How that query matched, so the highlight agrees with the rows.
+     * @type {{ matchCase?: boolean, wholeWord?: boolean, regex?: boolean }}
+     */
+    searchOptions = {},
   } = $props();
 
   /**
@@ -428,53 +476,209 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let editInput = $state(null);
 
   /**
-   * @typedef {{ rowIdx: number, colIdx: number, draft: string, original: string, columnName: string, dataType: string, nullable: boolean }} QuickLookCell
-   * @type {QuickLookCell | null}
-   */
-  let quickLookCell = $state(null);
-
-  /**
    * Currently open FK sub-view (forward or reverse), or null.
    * @type {{ rowIdx:number, kind:'forward'|'reverse', label:string, data:{ loading:boolean, columns:any[], rows:any[], error:string|null } } | null}
    */
   let fkSubview = $state(null)
+
+  // ── The dock follows the cell cursor ────────────────────────────────────────
+  // Arrowing up and down a FK column left the dock showing the row it was opened
+  // on, so the preview and the cursor disagreed about which row was being read -
+  // and the only way to move it was to click another FK cell. It now re-queries
+  // the same relation for whatever row the cursor lands on. Debounced: holding
+  // the arrow key down should cost one query at the end of the run, not one per
+  // row crossed.
+  const FK_FOLLOW_DELAY = 140
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _fkFollowTimer = null
+  let _fkFollowSeq = 0
+
+  $effect(() => {
+    const target = focusedRow
+    const anchored = fkSubview?.rowIdx
+    if (anchored === undefined || target === null || target === anchored) return
+    if (rows[target] === undefined) return
+    untrack(() => {
+      if (_fkFollowTimer) clearTimeout(_fkFollowTimer)
+      _fkFollowTimer = setTimeout(() => { _fkFollowTimer = null; void followFkSubview(target) }, FK_FOLLOW_DELAY)
+    })
+  })
+
+  /**
+   * Re-point the open related-rows dock at `idx`, keeping its relation and its
+   * height. A NULL foreign key resolves to the panel's empty state rather than a
+   * query that can only come back empty.
+   * @param {number} idx
+   */
+  async function followFkSubview(idx) {
+    const sv = fkSubview
+    if (!sv || sv.rowIdx === idx || rows[idx] === undefined) return
+    const row = rows[idx] ?? []
+    const seq = ++_fkFollowSeq
+    /** @param {{ columns?: any[], rows?: any[], error?: string | null }} res */
+    const settle = (res) => {
+      // A newer move (or a close, or a different relation) owns the dock now.
+      if (seq !== _fkFollowSeq || fkSubview?.rowIdx !== idx || fkSubview?.label !== sv.label) return
+      fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
+    }
+
+    if (sv.kind === 'reverse') {
+      const rel = sv.relInfo
+      if (!rel) return
+      fkSubview = { ...sv, rowIdx: idx, data: { loading: true, columns: [], rows: [], error: null } }
+      settle(await onfetchrelatedrows({
+        kind: 'reverse', fromSchema: rel.fromSchema, fromTable: rel.fromTable,
+        fromColumns: rel.fromColumns, toColumns: rel.toColumns, row,
+      }))
+      return
+    }
+
+    const colIdx = sv.colIdx ?? -1
+    const fk = _colCache[colIdx]?.fk ?? null
+    if (!fk) return
+    const value = row[colIdx]
+    if (value === null || value === undefined) {
+      fkSubview = { ...sv, rowIdx: idx, data: { loading: false, columns: [], rows: [], error: null } }
+      return
+    }
+    fkSubview = { ...sv, rowIdx: idx, data: { loading: true, columns: [], rows: [], error: null } }
+    settle(await onfetchrelatedrows({ kind: 'forward', fk, row }))
+  }
+
+  /**
+   * Open a relationship as a view of its own - the related table, filtered to
+   * this row. The dock's "Open in sub view" button lands here too, so the
+   * gesture and the button cannot drift apart.
+   * @param {number} rowIdx @param {any} vc a `virtualRelCols` entry
+   * @param {{ newTab?: boolean }} [opts]
+   */
+  function openReverseFkFullView(rowIdx, vc, opts = {}) {
+    if (rows[rowIdx] === undefined) return
+    onfollowforeignkey({ rowIdx, colIdx: 0, reverseRel: vc, row: rows[rowIdx], newTab: opts.newTab === true })
+  }
+
+  /**
+   * The relationship cell under a canvas point, or null. `rowIdx` is -1 when the
+   * point is inside the column but not on a row (the header band, the slack under
+   * the last row) - still a hit, because the click belongs to that column either
+   * way and must not fall through to the grid behind it.
+   * @param {number} x @param {number} y
+   */
+  function vrelHitAt(x, y) {
+    if (y < HEADER_H || virtualRelCols.length === 0) return null
+    const cx = x + _scrollLeft
+    const vi = _vrelLayout.findIndex((vp) => cx >= vp.x && cx < vp.x + vp.w)
+    if (vi < 0) return null
+    const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
+    const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
+    return { vi, vc: virtualRelCols[vi], rowIdx: r?.inRowBody ? r.idx : -1 }
+  }
+
+  /**
+   * Open (or close) the related-rows dock for a relationship cell. Shared by the
+   * click path and the Enter key, so a relation opens the same way whichever
+   * one you reach it with.
+   * @param {number} rowIdx @param {any} vc a `virtualRelCols` entry
+   */
+  function toggleReverseFkSubview(rowIdx, vc) {
+    if (fkSubview?.rowIdx === rowIdx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label) {
+      fkSubview = null
+      return
+    }
+    // Opening FK sub-view: close JSON expand for the same row (mutually exclusive)
+    if (expandedRows.has(rowIdx)) { const s = new Set(expandedRows); s.delete(rowIdx); expandedRows = s }
+    // The cursor moves to the row being inspected - a real column's click does
+    // this on the way past, and the dock follows the cursor, so a relation cell
+    // that left it behind would drag the dock back.
+    focusedRow = rowIdx
+    // Park the cursor ON the relation cell, not on whatever column it was last
+    // in: it is a navigable column now, and the cell you acted on is the cell
+    // the cursor should be standing in.
+    const relNavIdx = virtualRelCols.indexOf(vc)
+    focusedCol = relNavIdx >= 0 ? visibleColumns.length + relNavIdx : (focusedCol ?? 0)
+    const row = rows[rowIdx] ?? []
+    fkSubview = { rowIdx, kind: 'reverse', label: vc.label, relInfo: vc, data: { loading: true, columns: [], rows: [], error: null } }
+    scrollRowIntoViewBesideDock(rowIdx)
+    void onfetchrelatedrows({ kind: 'reverse', fromSchema: vc.fromSchema, fromTable: vc.fromTable, fromColumns: vc.fromColumns, toColumns: vc.toColumns, row }).then(res => {
+      if (fkSubview?.rowIdx !== rowIdx || fkSubview?.label !== vc.label) return
+      fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
+    })
+  }
+
+  onDestroy(() => {
+    if (_fkFollowTimer) clearTimeout(_fkFollowTimer)
+    if (_spinRaf) cancelAnimationFrame(_spinRaf)
+  })
 
   // ── Related-rows dock (bottom panel) ────────────────────────────────────────
   // The FK sub-view renders docked below the scroll container - a fixed-height
   // drawer with its own internal scroll - instead of inline between rows (which
   // made grid scrolling fight the panel). Height is user-resizable + persisted.
   const FK_DOCK_MIN = 120, FK_DOCK_MAX = 600
-  let fkDockHeight = $state((() => {
+  /** @param {string} key @param {number} fallback */
+  function loadDockHeight(key, fallback) {
     try {
-      const n = Number(localStorage.getItem('stroke:fk-dock-height'))
+      const n = Number(localStorage.getItem(key))
       if (Number.isFinite(n) && n >= FK_DOCK_MIN && n <= FK_DOCK_MAX) return n
     } catch {}
-    return 260
-  })())
+    return fallback
+  }
+  let fkDockHeight = $state(loadDockHeight('stroke:fk-dock-height', 260))
+  /** The full-size cell editor is the second dock, and remembers its own height. */
+  let cellDockHeight = $state(loadDockHeight('stroke:cell-dock-height', 220))
+  /** rAF handle + pending height for the dock drag. */
+  let _fkDockRafId = 0
+  let _fkDockPendingH = 0
   // Active drag listeners (column resize / FK dock resize). Tracked so a mid-drag
   // unmount can remove them in onDestroy instead of leaking them on window.
   /** @type {{ move: (e: PointerEvent) => void, up: () => void } | null} */
   let _activeResizeListeners = null
   function clearActiveResizeListeners() {
+    if (_fkDockRafId) { cancelAnimationFrame(_fkDockRafId); _fkDockRafId = 0 }
     if (!_activeResizeListeners) return
     window.removeEventListener('pointermove', _activeResizeListeners.move)
     window.removeEventListener('pointerup', _activeResizeListeners.up)
     _activeResizeListeners = null
   }
 
-  /** @param {PointerEvent} e */
-  function startFkDockResize(e) {
+  /**
+   * Drag-resize a bottom dock. Both docks are flex siblings of the scroll
+   * container with the same constraints and the same reflow cost, so they share
+   * the drag rather than keeping two copies of it.
+   * @param {PointerEvent} e @param {'fk' | 'cell'} which
+   */
+  function startDockResize(e, which) {
     e.preventDefault()
     clearActiveResizeListeners()
-    const startY = e.clientY, startH = fkDockHeight
+    const startY = e.clientY, startH = which === 'fk' ? fkDockHeight : cellDockHeight
+    const storageKey = which === 'fk' ? 'stroke:fk-dock-height' : 'stroke:cell-dock-height'
+    const setH = (/** @type {number} */ h) => { if (which === 'fk') fkDockHeight = h; else cellDockHeight = h }
+    // Cleared per drag: a bare click with no movement would otherwise flush the
+    // PREVIOUS drag's height on pointerup and make the dock jump.
+    _fkDockPendingH = 0
+    // Coalesce to one height write per frame. The dock is a flex sibling of the
+    // scroll container, so every write reflows the grid, fires its ResizeObserver,
+    // resizes the canvas backing store (which clears it) and forces a full
+    // repaint. Writing that straight from pointermove ran the whole chain 120×/s
+    // on a ProMotion trackpad - several times per painted frame - which is why
+    // dragging the related-rows panel juddered and the grid flashed behind it.
     const move = (/** @type {PointerEvent} */ ev) => {
-      fkDockHeight = Math.min(FK_DOCK_MAX, Math.max(FK_DOCK_MIN, startH + (startY - ev.clientY)))
+      _fkDockPendingH = Math.min(FK_DOCK_MAX, Math.max(FK_DOCK_MIN, startH + (startY - ev.clientY)))
+      if (_fkDockRafId) return
+      _fkDockRafId = requestAnimationFrame(() => {
+        _fkDockRafId = 0
+        setH(_fkDockPendingH)
+      })
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       _activeResizeListeners = null
-      try { localStorage.setItem('stroke:fk-dock-height', String(fkDockHeight)) } catch {}
+      if (_fkDockRafId) { cancelAnimationFrame(_fkDockRafId); _fkDockRafId = 0 }
+      // Land on the last position the pointer actually reached, not on whichever
+      // frame happened to win the race with pointerup.
+      if (_fkDockPendingH) setH(_fkDockPendingH)
+      try { localStorage.setItem(storageKey, String(which === 'fk' ? fkDockHeight : cellDockHeight)) } catch {}
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -505,6 +709,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let vectorViewerColName = $state("");
   let vectorViewerType = $state("vector");
   let vectorViewerNullable = $state(false);
+  /** The cell cannot be written (read-only session, no primary key) - preview only. */
+  let vectorViewerReadOnly = $state(false);
   let vectorViewerValue = $state("");
 
   let geomViewerOpen = $state(false);
@@ -513,6 +719,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let geomViewerColName = $state("");
   let geomViewerType = $state("geometry");
   let geomViewerNullable = $state(false);
+  /** Same as the vector viewer: readable even where it is not writable. */
+  let geomViewerReadOnly = $state(false);
   let geomViewerValue = $state("");
 
   let arrayEditorOpen = $state(false);
@@ -525,7 +733,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let suppressMenuSelect = $state(false);
   /** Row indices with inline JSON detail open. Seeded from initialExpandedRows
    *  so background/snapshot panes render already-expanded (no collapse flicker). */
-  let expandedRows = $state(new Set(initialExpandedRows ?? []));
+  //  Seeded ONCE on mount: untrack() says that to the compiler, which otherwise
+  //  warns that only the initial value is captured (state_referenced_locally).
+  let expandedRows = $state(untrack(() => new Set(initialExpandedRows ?? [])));
   /** @type {Record<string, number>} */
   let columnWidths = $state({});
   /** @type {string | null} */
@@ -580,7 +790,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function extendColSelection(toColName) {
     if (!_lastHeaderClickedCol) { selectedCols = new Set([toColName]); _lastHeaderClickedCol = toColName; return }
     const startIdx = geom.cols.findIndex((c) => c.name === _lastHeaderClickedCol)
-    const endIdx   = geom.cols.findIndex((c) => c.name === toColName)
+    const endIdx = geom.cols.findIndex((c) => c.name === toColName)
     if (startIdx < 0 || endIdx < 0) return
     const [lo, hi] = [Math.min(startIdx, endIdx), Math.max(startIdx, endIdx)]
     selectedCols = new Set(geom.cols.slice(lo, hi + 1).map((c) => c.name))
@@ -593,6 +803,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let selectOnEditFocus = $state(true);
   /** Whether the enum cell-editor dropdown is open (auto-opens on edit). */
   let enumEditorOpen = $state(false);
+  /** Set by the enum menu's own onValueChange so the close that FOLLOWS a pick is
+   *  not mistaken for a dismissal. commitEdit() is async, so editingCell is still
+   *  set at the moment the menu closes and the watcher below cannot tell the two
+   *  apart without this. */
+  let _enumPicked = false;
+  // Closing the enum menu without picking cancels the edit - the contract the
+  // bits-ui Select's onOpenChange used to carry. SelectMenu exposes `open` as a
+  // binding rather than a callback, so it is watched instead.
+  $effect(() => {
+    const open = enumEditorOpen;
+    untrack(() => {
+      if (open) { _enumPicked = false; return }
+      if (_enumPicked) { _enumPicked = false; return }
+      if (editingCell) cancelEdit();
+    });
+  });
   /** Raw cell value before the current edit started (for undo tracking). */
   let lastEditOriginalValue = $state(/** @type {unknown} */ (undefined));
   /**
@@ -609,9 +835,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let isTableFocused = $state(false);
 
   /** Draft values for the pending new row, keyed by column name. null = no new row. */
-  let newRowDrafts = $state(/** @type {Record<string, string> | null} */ (null))
+  /**
+   * Rows staged for insert, oldest first, rendered as a band under the header.
+   *
+   * A list rather than one row: duplicating twice means two new rows, and
+   * filling in three related records should not be three round trips through
+   * Add → type → Insert. `null` and `[]` both mean "no band".
+   * @type {Record<string, string>[] | null}
+   */
+  let newRowDrafts = $state(/** @type {Record<string, string>[] | null} */ (null))
   /** Name of the column whose input is focused in the new row. */
   let newRowFocusCol = $state(/** @type {string | null} */ (null))
+  /** Which staged row the focused field belongs to. */
+  let newRowFocusIdx = $state(0)
 
 
   // ── Canvas zoom ────────────────────────────────────────────────────────────
@@ -640,6 +876,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   const HEADER_H = $derived(Math.round(30 * canvasZoom))
   const GUTTER_EXPAND_W = $derived(Math.round(32 * canvasZoom))
   const GUTTER_SELECT_W = $derived(Math.round(36 * canvasZoom))
+  /**
+   * Row-number gutter, sized to the widest number it will actually draw. A fixed
+   * width either wastes space on a 50-row page or clips at a million rows, and
+   * this is measured from the page's last number, not from the total.
+   */
+  const GUTTER_NUM_W = $derived(
+    $appRowNumbers
+      // 8px per digit: the numbers are drawn at the cell size now, and a mono
+      // digit is ~0.6em, so a 13px glyph needs the wider allowance or a
+      // six-figure row number clips against the first column's rule.
+      ? Math.round((String(Math.max(1, rowNumberOffset + rows.length)).length * 8 + 16) * canvasZoom)
+      : 0,
+  )
   /** @type {HTMLCanvasElement | null} */
   let canvasEl = $state(null)
   /** @type {HTMLSpanElement | null} */
@@ -669,7 +918,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
 
   /** Extra body offset for the inline insert-row slot (a DOM overlay). */
-  const insertRowOffset = $derived(newRowDrafts ? ROW_HEIGHT : 0)
+  const draftCount = $derived(newRowDrafts?.length ?? 0)
+  const insertRowOffset = $derived(draftCount * ROW_HEIGHT)
   /** Measured heights for each expanded row (rowIdx → px). Updated by ResizeObserver. */
   let expandedRowHeights = $state(/** @type {Map<number, number>} */ (new Map()))
 
@@ -720,27 +970,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   /** @type {string | null} */
   let lightboxUrl = $state(null);
 
-  /** @type {{ value: unknown, colName: string } | null} */
-  let jsonLightbox = $state(null)
-
-  /** @param {unknown} value @param {string} colName @param {MouseEvent} e */
-  function openJsonLightbox(value, colName, e) {
-    e.stopPropagation()
-    void prefetchJsonLightbox() // ensure the chunk is loading even if hover didn't warm it
-    jsonLightbox = { value, colName }
-  }
-
-  // The JSON lightbox loads Monaco lazily (kept out of startup memory). To avoid a
-  // first-open jank - importing/parsing the ~4MB Monaco chunk + creating the editor
-  // on the main thread while the canvas is mid-interaction - we warm the module the
-  // moment the pointer hovers a JSON cell, a beat before the click actually opens it.
-  let _lightboxWarmed = false
-  function prefetchJsonLightbox() {
-    if (_lightboxWarmed) return
-    _lightboxWarmed = true
-    return import('./JsonCellLightbox.svelte')
-  }
-
   /** @type {'image' | 'pdf'} */
   let lightboxType = $state("image");
 
@@ -772,6 +1001,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   );
   const menuEditable = $derived(canEditColumn(contextColIdx));
   const menuColPinned = $derived(pinnedColumns.has(menuColName));
+  /**
+   * NOT NULL column → no "Set NULL". The server would reject the write, so the
+   * item was an action that could only ever fail; it is dropped rather than
+   * disabled, because a disabled row still says "this is a thing you might do
+   * here" and on a NOT NULL column it never is.
+   */
+  const menuColNullable = $derived(columns[contextColIdx]?.nullable !== false);
   const menuCellNull = $derived(
     rows[contextRowIdx]?.[contextColIdx] === null ||
       rows[contextRowIdx]?.[contextColIdx] === undefined,
@@ -842,8 +1078,41 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // (focus/selection/scroll all re-evaluate visible cells).
   /** @type {WeakMap<object, string>} */
   const _formatCache = new WeakMap();
+  // Grouped-number formatter, rebuilt only when the setting flips. Intl is slow
+  // enough to matter when a screen of cells each formats on every frame.
+  let _groupFmt = /** @type {Intl.NumberFormat | null} */ (null)
+  function groupNumber(/** @type {number} */ n) {
+    // Integers only. A float would be rounded to Intl's default 3 decimals, and
+    // silently changing a value the user is reading off the database is worse
+    // than leaving it ungrouped. Beyond 2^53 the digits are already unreliable,
+    // and bigints arrive as strings anyway.
+    if (!Number.isSafeInteger(n)) return String(n)
+    _groupFmt ??= new Intl.NumberFormat()
+    return _groupFmt.format(n)
+  }
+  // Hot-path mirrors. `$store` compiles to a store_get() call, and formatCell and
+  // drawCell each run once per visible CELL per frame - so a store read there is
+  // thousands of calls a frame, at 120Hz. Mirrored into plain locals so the hot
+  // path reads a variable, which is what the frame context above does for
+  // $appTableAlign and the table style.
+  let _numberGroupingOn = false
+  let _imagePreviewOn = true
+  $effect(() => { _numberGroupingOn = $appNumberGrouping; _groupFmt = null; scheduleDraw() })
+  $effect(() => { void $appHighlightActiveRow; scheduleDraw() })
+  // Turning previews off must also drop what was already decoded - otherwise the
+  // thumbnails stay resident (up to 300 bitmaps) for a feature now switched off.
+  $effect(() => {
+    const on = $appImagePreview
+    _imagePreviewOn = on
+    untrack(() => { if (!on) releaseCellImages(); _redrawToken++; scheduleDraw() })
+  })
+
   function formatCell(value) {
+    // NULL stays the literal "NULL" here. drawCell swaps it for ∅ when the
+    // "Empty & NULL Markers" extension is on - that extension is the NULL
+    // display control, and a setting competing with it would be a second switch.
     if (value === null || value === undefined) return "NULL";
+    if (typeof value === "number" && _numberGroupingOn) return groupNumber(value);
     if (typeof value === "object") {
       const cached = _formatCache.get(value);
       if (cached !== undefined) return cached;
@@ -913,7 +1182,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {number} cellW
    */
   function vectorHeads(cellW) {
-    const glyph = _glyphW > 0 ? _glyphW : Math.max(6, (_fonts?.cellPx ?? 12) * 0.6);
+    const glyph = _glyphW > 0 ? _glyphW : Math.max(6, (_fonts?.cellPx ?? 13) * 0.6);
     const fits = Math.floor((cellW - CELL_PAD_X * 2) / glyph);
     // "384d · " is ~7 glyphs and each value with its separator is ~7 more.
     if (fits < 14) return 0;
@@ -1074,14 +1343,53 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => { void $appTableStyle; scheduleDraw(); });
   $effect(() => { void $appTableAlign; scheduleDraw(); });
   $effect(() => { void $appZebraRows; scheduleDraw(); });
+  // Row spacing had no redraw of its own, so changing it moved the GEOMETRY
+  // without repainting: `contentHeight` and `spacerHeight` are $derived, so the
+  // scrollbar resized immediately while the canvas kept the pixels it had drawn
+  // at the old row height. The rows only took the new size once something else
+  // happened to trigger a paint - a scroll, a hover, a click - which reads as
+  // "row spacing half works". Every other grid-appearance store has this line;
+  // this one was missed when the setting was added.
+  // `_redrawToken++` READS and WRITES `_redrawToken`, which is `$state`. Done in
+  // a tracked effect that is an infinite loop - the write re-triggers the read -
+  // and Svelte kills the view with effect_update_depth_exceeded. `untrack` is how
+  // every other writer here does it (see the zoom watcher below); the row-spacing
+  // dependency stays tracked because `$appRowSpacing` is read outside it.
+  $effect(() => {
+    void $appRowSpacing
+    untrack(() => { _redrawToken++; scheduleDraw() })
+  });
 
   // ── Search-match highlighting ──────────────────────────────────────────────
   // The toolbar search filters rows server-side (ILIKE, case-insensitive);
   // this paints where each match falls inside the visible cell text. Matching
   // runs only while a search is active, on the already-truncated display
   // string, so the scroll hot path stays free of extra work otherwise.
-  const _searchLower = $derived(String(searchQuery ?? '').trim().toLowerCase());
-  $effect(() => { void _searchLower; scheduleDraw(); });
+  /**
+   * The matcher the highlight paints with, built from the same query and the
+   * same options the rows were fetched under.
+   *
+   * It used to be `indexOf` on a lowercased haystack, which contradicted the
+   * result it was drawn on: with match-case on, a search for `aarav` returned
+   * nothing containing `Aarav` and then highlighted `Aarav` anyway, and a regex
+   * search highlighted the pattern's literal characters. Null when there is
+   * nothing to paint, which keeps the scroll path free of this entirely.
+   * @type {RegExp | null}
+   */
+  const _searchMatcher = $derived.by(() => {
+    const q = String(searchQuery ?? '').trim();
+    if (!q) return null;
+    const flags = `g${searchOptions?.matchCase ? '' : 'i'}`;
+    const body = searchOptions?.regex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = searchOptions?.wholeWord ? `\\b(?:${body})\\b` : body;
+    try {
+      return new RegExp(pattern, flags);
+    } catch {
+      // A half-typed regex is not an error here - it just has nothing to mark.
+      return null;
+    }
+  });
+  $effect(() => { void _searchMatcher; scheduleDraw(); });
 
   const MAX_CELL_MATCH_HIGHLIGHTS = 8;
   /**
@@ -1089,23 +1397,32 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {number} textX @param {number} ry @param {number} rh @param {any} c
    */
   function drawSearchHighlights(ctx, drawn, textX, ry, rh, c) {
-    const q = _searchLower;
-    const hay = drawn.toLowerCase();
-    let from = 0, n = 0;
+    const re = _searchMatcher;
+    if (!re) return;
     const hh = Math.min(rh - 4, Math.round(17 * canvasZoom));
     const hy = ry + (rh - hh) / 2;
     ctx.fillStyle = withAlpha(c.AMBER, 0.3);
-    while (n < MAX_CELL_MATCH_HIGHLIGHTS) {
-      const at = hay.indexOf(q, from);
-      if (at === -1) break;
+    // `lastIndex` survives a call on a /g/ regex, and this instance is shared by
+    // every cell on screen - resetting it per cell is what stops the second cell
+    // in a row from being searched from the first one's offset.
+    re.lastIndex = 0;
+    let n = 0;
+    /** @type {RegExpExecArray | null} */
+    let m;
+    while (n < MAX_CELL_MATCH_HIGHLIGHTS && (m = re.exec(drawn)) !== null) {
+      // A pattern that can match nothing (`a*`) would otherwise spin here.
+      if (m[0] === '') { re.lastIndex++; continue; }
+      const at = m.index;
       const x0 = textX + (at > 0 ? ctx.measureText(drawn.slice(0, at)).width : 0);
-      const mw = ctx.measureText(drawn.slice(at, at + q.length)).width;
+      const mw = ctx.measureText(m[0]).width;
       roundRect(ctx, x0 - 1, hy, mw + 2, hh, 3);
       ctx.fill();
-      from = at + q.length;
       n++;
     }
   }
+
+  /** True while a pointer press is what is moving focus into the grid. */
+  let _focusFromPointer = false
 
   function focusRow(rowIdx) {
     if (editingCell) return;
@@ -1141,12 +1458,42 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /**
+   * Bring a row into view AFTER the related-rows dock has taken its space.
+   *
+   * Scrolling in the same tick reads the pre-dock `clientHeight`, so a row near
+   * the bottom is judged "already visible" and left alone - then the dock opens
+   * over it, and the row you clicked to inspect is the one row you can no longer
+   * see. `tick()` lets the dock lay out first; `clientHeight` is then the real,
+   * shortened viewport.
+   * @param {number} rowIdx
+   */
+  function scrollRowIntoViewBesideDock(rowIdx) {
+    tick().then(() => scrollRowIntoView(rowIdx))
+  }
+
+  /**
    * Bring a column into view if it's off-screen. Pinned columns are always
    * visible, so they only ever need the highlight.
    * @param {string} name
    * @returns {boolean} false if there is no such column
    */
-  function scrollColumnIntoView(name) {
+  function scrollColumnIntoView(name, behavior = "smooth") {
+    // Relationship columns live right of the real ones, outside `geom`, so they
+    // carry their own x/w - without this the cursor could Tab onto one that is
+    // off-screen and the grid would sit still.
+    const vp = _vrelLayout.find((p) => p.hoverKey === name)
+    if (vp) {
+      if (!tableContainer) return false
+      const PAD = 28
+      const vLeft = vp.x - _scrollLeft
+      const vRight = vLeft + vp.w
+      let target = _scrollLeft
+      if (vLeft < geom.frozenWidth + PAD) target = vp.x - geom.frozenWidth - PAD
+      else if (vRight > _viewportWidth - PAD) target = vp.x + vp.w - _viewportWidth + PAD
+      target = Math.max(0, target)
+      if (Math.abs(target - _scrollLeft) > 1) tableContainer.scrollTo({ left: target, behavior })
+      return true
+    }
     const col = geom.cols.find((c) => c.name === name)
     if (!col) return false
     if (tableContainer && !col.pinned) {
@@ -1163,11 +1510,52 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       target = Math.max(0, target)
       if (Math.abs(target - _scrollLeft) > 1) {
-        tableContainer.scrollTo({ left: target, behavior: "smooth" })
+        tableContainer.scrollTo({ left: target, behavior })
       }
     }
     return true
   }
+
+  /**
+   * Did the cursor's last move come from the keyboard?
+   *
+   * Only a keyboard move should scroll. Tab and the arrow keys can walk the
+   * cursor past the edge of the viewport, so the grid has to follow it or it
+   * sits there claiming to be on a column that is off screen. A click cannot:
+   * the cell was under the pointer, so it was already visible - and scrolling
+   * it "into view" then yanked the grid sideways under the hand that had just
+   * aimed at something, which is the one case where the viewport must hold
+   * still.
+   *
+   * Deliberately not `$state`: it is read inside `untrack` and must not be a
+   * dependency of the effect it gates.
+   */
+  let _focusFromKey = false
+
+  /**
+   * The cell cursor keeps itself visible horizontally.
+   *
+   * Tab and the arrow keys moved `focusedCol` and left the scroll where it was,
+   * so tabbing right walked the cursor off the edge of the viewport and the grid
+   * just sat there - the column it claimed to be on was somewhere past the right
+   * edge. Rows already did this (`scrollRowIntoView` in the key handlers); this
+   * is the other axis, done once here rather than in each of the six handlers
+   * that can move the column.
+   *
+   * `auto`, not `smooth`: a held arrow key fires faster than a smooth scroll
+   * settles, so each press would restart an animation that never arrives.
+   * Reads are untracked - the geometry it looks at (`geom`, `_scrollLeft`) is
+   * exactly what this write changes.
+   */
+  $effect(() => {
+    const ci = focusedCol
+    if (ci === null) return
+    untrack(() => {
+      if (!_focusFromKey) return
+      const col = navigableColumns[ci]
+      if (col) scrollColumnIntoView(col.name, "auto")
+    })
+  })
 
   /**
    * Scroll a visible column into view (if it's off-screen) and briefly highlight
@@ -1201,7 +1589,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {number} rowIdx
    * @param {number} colIdx
    * @param {MouseEvent} [e]
-   * @param {{ requireModifier?: boolean }} [opts]
+   * @param {{ requireModifier?: boolean, newTab?: boolean }} [opts]
    */
   function tryFollowForeignKey(rowIdx, colIdx, e, opts = {}) {
     if (!foreignKeyForCell(rowIdx, colIdx)) return false;
@@ -1213,7 +1601,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       e.preventDefault();
       e.stopPropagation();
     }
-    onfollowforeignkey({ rowIdx, colIdx });
+    // `newTab` forces a second tab for a table that is already open, instead of
+    // activating the one that exists - the difference between "take me there"
+    // and "put it beside what I am looking at".
+    onfollowforeignkey({ rowIdx, colIdx, newTab: opts.newTab === true });
     return true;
   }
 
@@ -1251,13 +1642,28 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    *   instead of the existing value (type-to-edit behavior).
    */
   function startEdit(rowIdx, colIdx, initialChar) {
-    if (readonly) return;
     const col = columns[colIdx];
     if (!col) return;
 
     // A hidden column has no on-canvas cell, so the edit overlay can't anchor to
     // it - setting editingCell would trap keyboard nav until Esc. Bail out.
     if (hiddenColumns.has(col.name)) return;
+
+    // Vectors and geometries open their own viewers rather than an inline text
+    // box: 1,500 characters of `0.1,0.1,…` (or a 500-vertex EWKT polygon) in a
+    // one-line input is not an edit surface.
+    //
+    // They open BEFORE the edit gates, because looking at a value is not editing
+    // it. Behind the gates, a read-only session or a table with no primary key
+    // got "Cannot edit - this table has no primary key" where the embedding
+    // preview used to be, which is the preview disappearing for exactly the
+    // tables most likely to hold one. The viewer takes the same read-only flag
+    // and drops its Save.
+    focusedRow = rowIdx;
+    if (openVectorViewer(rowIdx, colIdx)) return;
+    if (openGeometryViewer(rowIdx, colIdx)) return;
+
+    if (readonly) return;
 
     if (!primaryKey.length) {
       toast.error("Cannot edit", {
@@ -1279,12 +1685,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
 
-    focusedRow = rowIdx;
-    // Vectors and geometries open their own viewers rather than an inline text
-    // box: 1,500 characters of `0.1,0.1,…` (or a 500-vertex EWKT polygon) in a
-    // one-line input is not an edit surface.
-    if (openVectorViewer(rowIdx, colIdx)) return;
-    if (openGeometryViewer(rowIdx, colIdx)) return;
     const startValue = effectiveCellValue(rowIdx, colIdx);
     const oversize = oversizeCellInfo(startValue);
     if (oversize) {
@@ -1312,82 +1712,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!editingCell) return;
     editingCell = null;
     enumEditorOpen = false;
-    tick().then(() => tableContainer?.focus({ preventScroll: true }));
-  }
-
-  /** @param {number} rowIdx @param {number} colIdx */
-  function openQuickLook(rowIdx, colIdx) {
-    // Vectors and geometries have viewers that say something; the generic
-    // preview doesn't.
-    if (openVectorViewer(rowIdx, colIdx)) return;
-    if (openGeometryViewer(rowIdx, colIdx)) return;
-    const col = columns[colIdx];
-    if (!col) return;
-    const dataType = col.dataType ?? col.data_type ?? "";
-    if (!isEditableType(dataType)) return;
-    // close any inline edit first
-    if (editingCell) cancelEdit();
-    const startValue = effectiveCellValue(rowIdx, colIdx);
-    const oversize = oversizeCellInfo(startValue);
-    if (oversize) {
-      // Only a truncated preview was loaded - the quick-look editor would
-      // silently save it back. The JSON lightbox covers read-only viewing.
-      toast.error("Value too large to edit", {
-        description: `${col.name} holds ${formatByteSize(oversize.bytes)}; edit it with a SQL UPDATE instead.`,
-      });
-      return;
-    }
-    const original = valueToEditString(startValue);
-    quickLookCell = {
-      rowIdx,
-      colIdx,
-      draft: original,
-      original,
-      isNull: startValue === null || startValue === undefined,
-      originalIsNull: startValue === null || startValue === undefined,
-      columnName: col.name,
-      dataType,
-      nullable: col.nullable ?? true,
-    };
-  }
-
-  function cancelQuickLook() {
-    quickLookCell = null;
-    tick().then(() => tableContainer?.focus({ preventScroll: true }));
-  }
-
-  async function commitQuickLook() {
-    if (!quickLookCell || saving) return;
-    const { rowIdx, colIdx, draft, isNull } = quickLookCell;
-    const col = columns[colIdx];
-    if (!col) return;
-    // No-op only when BOTH the text and the null-state are unchanged - otherwise
-    // a NULL→"" (or ""→NULL) flip would be silently dropped as a "no change".
-    if (draft === quickLookCell.original && isNull === quickLookCell.originalIsNull) {
-      quickLookCell = null;
-      tick().then(() => tableContainer?.focus({ preventScroll: true }));
-      return;
-    }
-    // NULL is explicit ("Set NULL"); otherwise an empty draft is a genuine empty
-    // string, so bypass parseCellInput's ""→null collapse for that one case.
-    /** @type {import('$lib/cell-value.js').ParseResult} */
-    let parsed;
-    if (isNull) {
-      parsed = { ok: true, value: null };
-    } else if (draft === "") {
-      parsed = { ok: true, value: "" };
-    } else {
-      parsed = parseCellInput(draft, col.dataType ?? col.data_type ?? "text", getColumnEnumValues(col));
-    }
-    if (!parsed.ok) {
-      toast.error("Invalid value", { description: parsed.message });
-      return;
-    }
-    const prevValue = effectiveCellValue(rowIdx, colIdx);
-    stageEdit(rowIdx, colIdx, parsed.value);
-    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: parsed.value }];
-    futureEdits = [];
-    quickLookCell = null;
     tick().then(() => tableContainer?.focus({ preventScroll: true }));
   }
 
@@ -1524,18 +1848,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @returns {Record<string, unknown> | null}
    */
   function pendingInsertValues() {
-    if (!newRowDrafts) return null;
-    const hasAny = Object.values(newRowDrafts).some((v) => v !== "" && v != null);
+    const staged = newRowDrafts?.[0];
+    if (!staged) return null;
+    const hasAny = Object.values(staged).some((v) => v !== "" && v != null);
     if (!hasAny) return null;
     const editableCols = columns.filter((c) => isEditableType(c.dataType ?? c.data_type ?? ""));
-    const built = buildInsertPayload(editableCols, primaryKey, newRowDrafts);
+    const built = buildInsertPayload(editableCols, primaryKey, staged);
     return built.ok ? /** @type {Record<string, unknown>} */ (built.values) : null;
   }
 
-  /** Open the DML preview for all staged changes (edits + deletes + a pending insert). */
-  function applyPendingEdits() {
+  /**
+   * The SQL for everything currently staged, in execution order.
+   *
+   * Pulled out of `applyPendingEdits` so "Copy to SQL" and "Apply" can never
+   * describe two different writes: the statements you copy are the statements
+   * that would run.
+   */
+  function pendingChangeSql() {
     const insertValues = pendingInsertValues();
-    if ((!hasPendingChanges && !insertValues) || saving) return;
     // A row staged for deletion doesn't need its cell updates written first.
     const editEntries = [...pendingEdits.values()].filter((e) => !pendingDeletes.has(e.rowIdx));
     const deleteIndices = [...pendingDeletes].sort((a, b) => a - b);
@@ -1546,6 +1876,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ...(deleteIndices.length ? buildDeleteStatements(deleteIndices, rows, dmlContext) : []),
       ...(insertValues ? buildInsertStatements(insertValues, dmlContext) : []),
     ];
+    return { insertValues, editEntries, deleteIndices, statements };
+  }
+
+  /**
+   * Put the staged changes on the clipboard as SQL and leave them staged.
+   *
+   * The way to get this SQL before was to open the preview dialog, select the
+   * text and cancel - and cancelling is one keystroke away from applying. A
+   * migration you want to paste into a review is not a write you want to run.
+   */
+  async function copyPendingChangeSql() {
+    const { statements, editEntries, deleteIndices, insertValues } = pendingChangeSql();
+    if (!statements.length) return;
+    const ok = await writeClipboard(formatSql(statements.join("\n")));
+    if (!ok) { toast.error("Could not copy to clipboard"); return; }
+    const parts = [];
+    if (editEntries.length) parts.push(`${editEntries.length} update${editEntries.length === 1 ? "" : "s"}`);
+    if (deleteIndices.length) parts.push(`${deleteIndices.length} delete${deleteIndices.length === 1 ? "" : "s"}`);
+    if (insertValues) parts.push("1 insert");
+    toast.success(`Copied ${statements.length} statement${statements.length === 1 ? "" : "s"}`, {
+      description: `${parts.join(", ")}. Your changes are still staged.`,
+    });
+  }
+
+  /** Open the DML preview for all staged changes (edits + deletes + a pending insert). */
+  function applyPendingEdits() {
+    const { insertValues, editEntries, deleteIndices, statements } = pendingChangeSql();
+    if ((!hasPendingChanges && !insertValues) || saving) return;
     const parts = [];
     if (editEntries.length) parts.push(`${editEntries.length} cell${editEntries.length === 1 ? "" : "s"} updated`);
     if (deleteIndices.length) parts.push(`${deleteIndices.length} row${deleteIndices.length === 1 ? "" : "s"} deleted`);
@@ -1689,10 +2047,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Surface staged-edit state to the parent (→ StatusBar Apply/Reset buttons).
   $effect(() => {
-    applyEdits = applyPendingEdits;
-    resetEdits = resetPendingEdits;
+    // Apply means "commit what I have staged", and a filled-in draft row is part
+    // of that - so it takes the press, and the edits take the next one.
+    //
+    // Not one atomic action on purpose: the insert goes through the DML confirm,
+    // which is a dialog the user can cancel, so awaiting it here would leave
+    // Apply hanging on a promise that never settles. One press, one commit, and
+    // the count says how much is left.
+    applyEdits = async () => {
+      if (newRowDrafts) { submitNewRow(); return; }
+      await applyPendingEdits();
+    };
+    copyEditsSql = copyPendingChangeSql;
+    resetEdits = () => {
+      if (newRowDrafts) cancelNewRow();
+      resetPendingEdits();
+    };
   });
-  $effect(() => { pendingEditCount = pendingEdits.size + pendingDeletes.size; });
+  // An open insert draft counts. It is a change you have made and not applied,
+  // which is exactly what that number means everywhere else - and without it the
+  // Apply/Reset pair stayed hidden while a filled-in row sat under the header
+  // with no way to commit it but a click on a 12px tick.
+  $effect(() => {
+    pendingEditCount = pendingEdits.size + pendingDeletes.size + draftCount;
+  });
 
   // Surface scroll-to-top / scroll-to-bottom to the parent (→ StatusBar buttons).
   $effect(() => {
@@ -1748,34 +2126,114 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     applyScroll(initialScroll);
   });
 
+  /**
+   * Open the insert draft.
+   *
+   * The draft is one band pinned under the header - that is where every field
+   * is reachable and where it stays put while you scroll. `anchorRow` does not
+   * move the band; it scrolls the table so that row sits immediately beneath it,
+   * which is what makes "insert above this row" and "insert below this one"
+   * land where the menu said they would. A table's rows have no stored order,
+   * so the position is about where you are looking, not about the data.
+   * @param {number | null} [anchorRow]
+   */
+  /**
+   * The staged cell a right-click opened the menu on, and where to draw it.
+   * @type {{ row: number, col: string, x: number, y: number } | null}
+   */
+  let draftMenu = $state(null)
+
+  /** The cell the menu was last closed over, so focus can return to it. */
+  let closedFromDraft = /** @type {{ row: number, col: string } | null} */ (null)
+
+  /** @param {MouseEvent} e @param {number} row @param {string} col */
+  function openDraftMenu(e, row, col) {
+    e.preventDefault()
+    e.stopPropagation()
+    draftMenu = { row, col, x: e.clientX, y: e.clientY }
+  }
+
+  /** What the menu can put in a staged cell, given the column's type. */
+  const draftMenuActions = $derived.by(() => {
+    /** @typedef {{ id: string, label: string, icon: any, run: () => void }} DraftAction */
+    if (!draftMenu) return /** @type {DraftAction[]} */ ([])
+    const { row, col: colName } = draftMenu
+    const col = columns.find((c) => c.name === colName)
+    const dt = String(col?.dataType ?? col?.data_type ?? '').toLowerCase()
+    const set = (/** @type {string} */ v) => setNewRowDraft(row, colName, v)
+    /** @type {DraftAction[]} */
+    const out = []
+    if (dt.includes('uuid') || dt.includes('char') || dt.includes('text')) {
+      out.push({ id: 'uuid', label: 'Generate UUID', icon: Dices, run: () => set(generateUuid()) })
+      out.push({ id: 'cuid', label: 'Generate CUID', icon: Dices, run: () => set(generateCuid()) })
+    }
+    if (isDateTimeType(dt) || shouldUseDateTimePicker(dt, colName)) {
+      out.push({ id: 'now', label: 'Now', icon: Clock, run: () => set(nowDateTimeLocal()) })
+    } else if (isDateOnlyType(dt)) {
+      out.push({ id: 'today', label: 'Today', icon: CalendarDays, run: () => set(nowDateOnly()) })
+    } else if (isTimeOnlyType(dt)) {
+      out.push({ id: 'time-now', label: 'Now', icon: Clock, run: () => set(nowTimeOnly()) })
+    }
+    if (dt.includes('int') || dt.includes('numeric') || dt.includes('decimal') || dt.includes('real') || dt.includes('double')) {
+      out.push({ id: 'zero', label: 'Zero', icon: Hash, run: () => set('0') })
+    }
+    return out
+  })
+
+  /** A row of drafts seeded the way opening the band seeds one. */
+  function blankDraft() {
+    /** @type {Record<string, string>} */
+    const drafts = {}
+    for (const col of columns) {
+      drafts[col.name] = defaultInsertDraft(col, primaryKey)
+    }
+    return drafts
+  }
+
+  function openInsertDraft(anchorRow = null) {
+    if (readonly) return
+    // Add on an open band appends: pressing it three times is three rows, not
+    // the same row reset twice.
+    newRowDrafts = [...(newRowDrafts ?? []), blankDraft()]
+    newRowFocusIdx = newRowDrafts.length - 1
+    // Focus first non-auto column (all columns, including hidden ones)
+    const first = columns.find((c) => !isAutoColumn(c, primaryKey))
+    newRowFocusCol = first?.name ?? columns[0]?.name ?? null
+    if (anchorRow === null) {
+      tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    // After the draft mounts: `insertRowOffset` is part of rowDocTop, so the
+    // target is only right once the band exists.
+    const idx = Math.min(Math.max(anchorRow, 0), Math.max(0, rows.length - 1))
+    void tick().then(() => {
+      if (!tableContainer) return
+      const top = Math.max(0, rowDocTop(idx) - HEADER_H - ROW_HEIGHT)
+      tableContainer.scrollTo({ top, behavior: 'smooth' })
+    })
+  }
+
   // Surface beginInsertRow to the parent (→ toolbar Add Row button).
   $effect(() => {
-    beginInsertRow = () => {
-      if (readonly) return;
-      /** @type {Record<string, string>} */
-      const drafts = {}
-      for (const col of columns) {
-        drafts[col.name] = defaultInsertDraft(col, primaryKey)
-      }
-      newRowDrafts = drafts
-      // Focus first non-auto column (all columns, including hidden ones)
-      const first = columns.find((c) => !isAutoColumn(c, primaryKey))
-      newRowFocusCol = first?.name ?? columns[0]?.name ?? null
-      // Scroll to top so the draft row is visible
-      tableContainer?.scrollTo({ top: 0, behavior: 'smooth' })
-    }
+    beginInsertRow = () => openInsertDraft()
   })
 
   // Surface staged-delete-of-selection to the parent (⌘⌫ / toolbar delete).
   $effect(() => {
     stageDeleteSelected = () => {
-      if (readonly || selected.size === 0) return;
+      if (readonly) return;
+      // Checked rows if there are any, otherwise the row under the cell cursor.
+      // The chord is printed on a context menu item that reads "Delete row" and
+      // acts on the row you opened it over, so requiring a checkbox first made
+      // the shortcut do nothing on exactly the row it was offered for.
+      const targets = selected.size > 0 ? [...selected] : focusedRow !== null ? [focusedRow] : [];
+      if (targets.length === 0) return;
       if (!primaryKey.length) {
         toast.error("Cannot delete", { description: "This table has no primary key." });
         return;
       }
       const next = new Set(pendingDeletes);
-      for (const ri of selected) next.add(ri);
+      for (const ri of targets) next.add(ri);
       pendingDeletes = next;
       scheduleDraw();
     }
@@ -1784,49 +2242,184 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function cancelNewRow() {
     newRowDrafts = null
     newRowFocusCol = null
+    newRowFocusIdx = 0
   }
 
-  function submitNewRow() {
-    if (!newRowDrafts || insertSaving) return
+  /**
+   * Put one staged cell's value into the same column of every staged row.
+   * With several rows in the band this is the difference between typing a
+   * tenant id five times and typing it once.
+   * @param {number} row @param {string} col
+   */
+  function fillDraftColumn(row, col) {
+    if (!newRowDrafts?.length) return
+    const v = newRowDrafts[row]?.[col] ?? ''
+    newRowDrafts = newRowDrafts.map((d) => ({ ...d, [col]: v }))
+  }
+
+  /** Drop one staged row. The last one out closes the band. @param {number} i */
+  function removeDraftRow(i) {
+    if (!newRowDrafts) return
+    const next = newRowDrafts.filter((_, j) => j !== i)
+    newRowDrafts = next.length ? next : null
+    newRowFocusIdx = Math.max(0, Math.min(newRowFocusIdx, (newRowDrafts?.length ?? 1) - 1))
+  }
+
+  /**
+   * Insert the staged rows - one of them, or all of them.
+   *
+   * All of them is what the header tick and Apply mean. One confirm covers the
+   * batch: reviewing three inserts is one list of three statements, not three
+   * dialogs.
+   * @param {number | null} [only] index of a single staged row, or null for all
+   */
+  function submitNewRow(only = null) {
+    if (!newRowDrafts?.length || insertSaving) return
     const editableCols = columns.filter(c => isEditableType(c.dataType ?? c.data_type ?? ''))
-    const built = buildInsertPayload(editableCols, primaryKey, newRowDrafts)
-    if (!built.ok) {
-      toast.error('Cannot insert row', { description: built.message })
-      return
+    /** @type {{ i: number, values: Record<string, unknown> }[]} */
+    const batch = []
+    const indices = only === null ? newRowDrafts.map((_, i) => i) : [only]
+    for (const i of indices) {
+      const drafts = newRowDrafts[i]
+      if (!drafts) continue
+      // A required column left blank is a failure the row already knows about.
+      // Sending it to find out costs a round trip and comes back as a message
+      // about a field nobody is looking at.
+      const missing = insertMissing[i] ?? []
+      if (missing.length) {
+        focusFirstMissing(i)
+        toast.error(
+          missing.length === 1
+            ? `${missing[0]} is required`
+            : `${missing.length} required fields are empty`,
+          { description: `Row ${i + 1}: ${missing.join(', ')}` },
+        )
+        return
+      }
+      const built = buildInsertPayload(editableCols, primaryKey, drafts)
+      if (!built.ok) {
+        toast.error(`Cannot insert row ${i + 1}`, { description: built.message })
+        return
+      }
+      batch.push({ i, values: /** @type {Record<string, unknown>} */ (built.values) })
     }
-    const values = /** @type {Record<string, unknown>} */ (built.values)
+    if (!batch.length) return
     requestWrite({
       kind: "insert",
-      title: "Review insert",
-      description: "A new row will be inserted.",
-      statements: buildInsertStatements(values, dmlContext),
-      confirmLabel: "Insert row",
+      title: batch.length === 1 ? "Review insert" : `Review ${batch.length} inserts`,
+      description: batch.length === 1 ? "A new row will be inserted." : `${batch.length} new rows will be inserted.`,
+      statements: batch.flatMap((b) => buildInsertStatements(b.values, dmlContext)),
+      confirmLabel: batch.length === 1 ? "Insert row" : `Insert ${batch.length} rows`,
       destructive: false,
-      run: () => executeInsertRow(values),
+      run: () => executeInsertRows(batch),
     })
   }
 
-  /** @param {Record<string, unknown>} values */
-  async function executeInsertRow(values) {
-    try {
-      await oninsertrow(values)
-      newRowDrafts = null
-      newRowFocusCol = null
-    } catch {
-      // error toast already shown by oninsertrow
+  /**
+   * Run the batch in order, and keep whatever did not land.
+   *
+   * A row that fails stays staged with everything still typed into it - losing
+   * four filled-in rows because the third one violated a constraint is not a
+   * trade worth making.
+   * @param {{ i: number, values: Record<string, unknown> }[]} batch
+   */
+  async function executeInsertRows(batch) {
+    /** @type {Set<number>} */
+    const done = new Set()
+    let failed = false
+    for (const { i, values } of batch) {
+      try {
+        await oninsertrow(values)
+        done.add(i)
+      } catch {
+        // oninsertrow has already said what went wrong.
+        failed = true
+        break
+      }
+    }
+    if (done.size) {
+      const left = (newRowDrafts ?? []).filter((_, i) => !done.has(i))
+      newRowDrafts = left.length ? left : null
+      if (!newRowDrafts) { newRowFocusCol = null; newRowFocusIdx = 0 }
+      else newRowFocusIdx = Math.min(newRowFocusIdx, newRowDrafts.length - 1)
+    }
+    if (failed && done.size) {
+      toast.info(`Inserted ${done.size} of ${batch.length}`, {
+        description: 'The rows that did not go in are still staged.',
+      })
     }
   }
 
-  /** @param {string} colName @param {string} value */
-  function setNewRowDraft(colName, value) {
-    if (!newRowDrafts) return
-    newRowDrafts = { ...newRowDrafts, [colName]: value }
+  /**
+   * The required columns still blank. The draft used to say "Required" in a
+   * placeholder and then let you press Insert anyway, so the first thing it told
+   * you about a missing value was an error from the database.
+   */
+  const insertMissing = $derived.by(() => {
+    if (!newRowDrafts?.length) return /** @type {string[][]} */ ([])
+    const required = columns.filter((c) => insertOmitBehaviour(c, primaryKey) === 'required')
+    return newRowDrafts.map((d) =>
+      required.filter((c) => !String(d?.[c.name] ?? '').trim()).map((c) => c.name),
+    )
+  })
+
+  /**
+   * Put the caret on the first column a staged row still needs.
+   *
+   * Said before the database says it: a failed insert names the column in a
+   * toast, which is the right words in the wrong place - the field it is about
+   * is on screen and nothing points at it.
+   * @param {number} rowIdx
+   */
+  function focusFirstMissing(rowIdx) {
+    const miss = insertMissing[rowIdx]?.[0]
+    if (!miss) return false
+    newRowFocusIdx = rowIdx
+    newRowFocusCol = miss
+    return true
+  }
+
+  /**
+   * Whether a draft holds anything a person put there.
+   *
+   * A fresh draft is not empty - date columns seed themselves with now, and a
+   * generated column carries its placeholder - so "has content" means it differs
+   * from what opening it would produce.
+   * @param {Record<string, string>[] | null} drafts
+   */
+  function draftHasContent(drafts) {
+    return (drafts ?? []).some((row) =>
+      columns.some((col) => {
+        const seeded = defaultInsertDraft(col, primaryKey)
+        return String(row?.[col.name] ?? '') !== String(seeded ?? '')
+      }),
+    )
+  }
+
+  /** @param {number} rowIdx @param {string} colName @param {string} value */
+  function setNewRowDraft(rowIdx, colName, value) {
+    if (!newRowDrafts?.[rowIdx]) return
+    newRowDrafts = newRowDrafts.map((d, i) => (i === rowIdx ? { ...d, [colName]: value } : d))
   }
 
   /** @param {KeyboardEvent} e */
-  function onNewRowKeydown(e) {
-    if (e.key === 'Escape') { e.preventDefault(); cancelNewRow(); return }
+  /** @param {KeyboardEvent} e @param {number} [rowIdx] the staged row the field belongs to */
+  function onNewRowKeydown(e, rowIdx = 0) {
+    // Escape drops the row you are in; the band only closes when it was the
+    // last one. Discarding four filled-in rows because you pressed Escape in
+    // the fourth is not what that key means.
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      // Mod+Escape discards the whole band; plain Escape drops this row.
+      if (e.ctrlKey || e.metaKey) cancelNewRow()
+      else removeDraftRow(rowIdx)
+      return
+    }
+    // ⌘↵ inserts everything staged - the batch is the point of stacking them.
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submitNewRow(); return }
+    // Alt+↵ adds another row below, for filling several in without reaching for
+    // the Add button between each one.
+    if (e.altKey && e.key === 'Enter') { e.preventDefault(); openInsertDraft(); return }
 
     // Tab / Enter: move right between cells (not down to the next row).
     // Shift+Tab moves left. Enter at the last cell submits.
@@ -1835,7 +2428,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // Every column takes a value now, including generated ones, so Tab must
       // be able to reach them - initial focus still skips them (see beginInsertRow),
       // because overriding a sequence is the exception rather than the flow.
-      const editableCols = columns
+      // Visible ones only: Tab cannot land on a field the band does not draw.
+      const editableCols = visibleColumns
       if (!editableCols.length) return
       const curIdx = editableCols.findIndex(c => c.name === newRowFocusCol)
       if (e.shiftKey) {
@@ -1844,7 +2438,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       } else {
         const next = curIdx + 1
         if (next >= editableCols.length) {
-          if (e.key === 'Enter') void submitNewRow()
+          if (e.key === 'Enter') void submitNewRow(rowIdx)
           else newRowFocusCol = editableCols[0].name  // Tab wraps to first
         } else {
           newRowFocusCol = editableCols[next].name
@@ -1855,13 +2449,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // Auto-focus the new-row input when focus column changes.
   $effect(() => {
+    // Only what asks for focus is a dependency. Reading the drafts here made
+    // every keystroke re-run this, and a re-run moves the caret: typing in the
+    // second staged row put the next character in the first one.
     const col = newRowFocusCol
-    if (!col || !newRowDrafts) return
-    tick().then(() => {
-      const el = /** @type {HTMLElement|null} */ (
-        document.querySelector(`[data-new-row-input="${col}"]`)
-      )
-      el?.focus()
+    const bandIdx = newRowFocusIdx
+    if (!col) return
+    untrack(() => {
+      if (!newRowDrafts?.length) return
+      tick().then(() => {
+        // Scoped to the staged row that asked for focus. A global lookup by
+        // column name lands in the first band every time, so with three rows
+        // staged the caret jumped back to the top one on every move.
+        const band = document.querySelector(`[data-new-row="${bandIdx}"]`)
+        const el = /** @type {HTMLElement|null} */ (
+          band?.querySelector(`[data-new-row-input="${col}"]`) ?? null
+        )
+        // Already there: focusing again would put the caret back at the end of
+        // whatever was just typed.
+        if (el && document.activeElement !== el) {
+          // The band is pinned to the viewport, so the browser has nothing to
+          // scroll when focus lands on a field whose column is off to the right
+          // - it would leave the caret on a cell nobody can see. Suppress its
+          // attempt and move the grid to the column instead, the same way the
+          // cell cursor does when Tab walks it past the edge.
+          el.focus({ preventScroll: true })
+          scrollColumnIntoView(col, 'auto')
+        }
+      })
     })
   })
 
@@ -1945,6 +2560,28 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (value === null || value === undefined) return 'NULL';
     const s = typeof value === 'object' ? cellJsonString(value) : String(value);
     return s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  }
+
+  /**
+   * Copy one column's values, one per line, for the rows currently loaded.
+   *
+   * Scoped to the loaded page on purpose: the grid holds what it fetched, and
+   * silently issuing a second full-table read behind a menu item labelled "copy"
+   * is not what the label promises. The toast says how many rows went.
+   * @param {string} colName
+   */
+  async function copyColumnValues(colName) {
+    const ai = _nameToActualIdx.get(colName) ?? -1
+    if (ai < 0) return
+    const idx = selected.size > 0 ? [...selected].sort((a, b) => a - b) : rows.map((_, i) => i)
+    const text = idx.map((r) => cellCopyText(r, ai)).join('\n')
+    if (await writeClipboard(text)) {
+      toast.success(`Copied ${idx.length.toLocaleString()} ${idx.length === 1 ? 'value' : 'values'}`, {
+        description: colName,
+      })
+    } else {
+      toast.error('Could not copy to clipboard')
+    }
   }
 
   async function copyColSelection() {
@@ -2096,6 +2733,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     vectorViewerType = type.replace(/\(.*$/, "").trim() || "vector";
     vectorViewerNullable = col.isNullable ?? col.is_nullable ?? true;
     vectorViewerValue = v;
+    vectorViewerReadOnly = !canEditColumn(colIdx);
     vectorViewerOpen = true;
     return true;
   }
@@ -2124,6 +2762,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     geomViewerType = type;
     geomViewerNullable = col.isNullable ?? col.is_nullable ?? true;
     geomViewerValue = v;
+    geomViewerReadOnly = !canEditColumn(colIdx);
     geomViewerOpen = true;
     return true;
   }
@@ -2139,6 +2778,192 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Open the dedicated array editor for a cell (from the context menu). */
+  // ── Full-size cell editor (Shift+Space) ───────────────────────────────────
+  let cellEditorOpen = $state(false);
+  let cellEditorRow = $state(-1);
+  let cellEditorCol = $state(-1);
+  let cellEditorName = $state("");
+  let cellEditorType = $state("");
+  let cellEditorValue = $state(/** @type {unknown} */ (null));
+  /**
+   * Cells with a fetch in flight, keyed `row:col`. A plain Set, not reactive:
+   * the canvas is what renders it, and the draw loop is already running while
+   * the spinner turns.
+   * @type {Set<string>}
+   */
+  let _loadingCells = new Set()
+  let _spinRaf = 0
+  /** Keep repainting while anything is loading, so the spinner actually spins. */
+  function tickSpinner() {
+    if (_spinRaf) return
+    const step = () => {
+      _spinRaf = 0
+      if (_loadingCells.size === 0) return
+      scheduleDraw()
+      _spinRaf = requestAnimationFrame(step)
+    }
+    _spinRaf = requestAnimationFrame(step)
+  }
+
+  /**
+   * Fetch one capped cell and put the value in the row. The grid keeps its
+   * preview for every other row: one cell being read is not a reason to pull the
+   * column back into the page.
+   * @param {number} rowIdx @param {number} colIdx
+   */
+  async function loadCellInline(rowIdx, colIdx) {
+    if (!onloadcellvalue) return
+    const key = `${rowIdx}:${colIdx}`
+    if (_loadingCells.has(key)) return
+    _loadingCells.add(key)
+    scheduleDraw()
+    tickSpinner()
+    try {
+      await onloadcellvalue({ rowIdx, colIdx })
+      // The dock is a view of a cell, so a cell that just changed under it has
+      // to be re-read. Without this the panel kept showing "not loaded" over a
+      // row that already held the value.
+      if (cellEditorOpen && !cellEditorDetached && cellEditorRow === rowIdx && cellEditorCol === colIdx) {
+        seedCellEditor(rowIdx, colIdx)
+      }
+    } catch (e) {
+      toast.error('Could not load the value', { description: String(e?.message ?? e) })
+    } finally {
+      _loadingCells.delete(key)
+      scheduleDraw()
+    }
+  }
+
+  /** Set when the dock holds a 16KB preview of a capped cell, not the value. */
+  let cellEditorOversize = $state(/** @type {{ bytes: number, dataType: string } | null} */ (null));
+  /** The loaded value hit the fetch ceiling: what is in the dock is not all of it. */
+  let cellEditorTruncated = $state(false);
+  /**
+   * True when the dock is showing a value that has no cell behind it - a node
+   * picked out of an expanded row, say. It cannot follow the cursor (there is
+   * nothing to follow) and it cannot be staged (there is nowhere to write it),
+   * so it is read-only and the follow effect leaves it alone.
+   */
+  let cellEditorDetached = $state(false);
+
+  /**
+   * Open the focused cell at full size. A 28px row is the wrong surface for a
+   * paragraph, a stack trace or a 40-line payload, and the inline editor shows
+   * one line of it.
+   * @param {number} rowIdx @param {number} colIdx
+   */
+  // Closing the dock releases what it was holding. A loaded value can be 8MB of
+  // string, and keeping it referenced after the panel is gone is 8MB retained
+  // for a panel nobody is looking at - per table, until the next one replaces it.
+  $effect(() => {
+    if (cellEditorOpen) return
+    untrack(() => {
+      if (cellEditorValue !== null) cellEditorValue = null
+      cellEditorOversize = null
+      cellEditorTruncated = false
+    })
+  })
+
+  function openCellEditor(rowIdx, colIdx) {
+    if (!seedCellEditor(rowIdx, colIdx)) return;
+    cellEditorDetached = false;
+    // One dock at a time. Both live along the bottom edge, and stacking them
+    // leaves the grid a couple of rows tall.
+    fkSubview = null;
+    cellEditorOpen = true;
+  }
+
+  /**
+   * Show a value in the dock that did not come from a cell - a node inside an
+   * expanded row. Same surface, same tree, read-only.
+   * @param {unknown} value @param {string} label
+   */
+  function openValueInDock(value, label) {
+    cellEditorOversize = null;
+    cellEditorTruncated = false;
+    cellEditorRow = -1;
+    cellEditorCol = -1;
+    cellEditorName = label || 'value';
+    cellEditorType = '';
+    cellEditorValue = value;
+    cellEditorDetached = true;
+    fkSubview = null;
+    cellEditorOpen = true;
+  }
+
+  /**
+   * Point the editor at a cell. Split out of `openCellEditor` so the cursor can
+   * move the open dock from cell to cell without re-opening it.
+   * @param {number} rowIdx @param {number} colIdx
+   * @returns {boolean} whether the cell could be read
+   */
+  function seedCellEditor(rowIdx, colIdx) {
+    const col = columns[colIdx];
+    if (!col || rowIdx < 0) return false;
+    const value = effectiveCellValue(rowIdx, colIdx);
+    // Only a preview of an oversize cell was ever loaded; editing it would write
+    // the preview back over the real value.
+    const oversize = oversizeCellInfo(value);
+    cellEditorRow = rowIdx;
+    cellEditorCol = colIdx;
+    cellEditorName = col.name ?? "value";
+    cellEditorType = String(col.dataType ?? col.data_type ?? _colCache[colIdx]?.colType ?? "");
+    cellEditorValue = oversize ? oversize.preview : value;
+    // Kept so the panel can say what it is holding - and so Stage change stays
+    // out of reach. Staging the preview would write 16KB over the 287KB that is
+    // actually in the row.
+    cellEditorOversize = oversize ? { bytes: oversize.bytes, dataType: oversize.dataType } : null;
+    cellEditorTruncated = false;
+    return true;
+  }
+
+  /**
+   * The open dock follows the cell cursor.
+   *
+   * Arrowing through the grid with the editor open used to leave it showing the
+   * cell you opened it on, so the panel and the cursor disagreed about which
+   * value you were looking at - and the only way to edit the next row was to
+   * close the panel and press Shift+Space again. Now it reads like an inspector:
+   * move the cursor, the panel follows. `untrack` around the write keeps the
+   * effect off its own output; the cell coordinates it sets are exactly what it
+   * would otherwise re-enter on.
+   */
+  $effect(() => {
+    if (!cellEditorOpen || cellEditorDetached) return;
+    const r = focusedRow;
+    const cv = focusedCol;
+    if (r === null || cv === null) return;
+    untrack(() => {
+      const ai = visToActualColIdx(cv);
+      if (ai < 0) return;
+      if (r === cellEditorRow && ai === cellEditorCol) return;
+      seedCellEditor(r, ai);
+    });
+  });
+
+  /**
+   * Swap the dock's preview for the whole value. Only the dock gets it - the
+   * grid keeps the preview, so one row being read does not put a megabyte back
+   * into the page that deliberately left it out.
+   */
+  async function loadFullCellValue() {
+    if (!onfetchcellvalue || cellEditorRow < 0 || cellEditorCol < 0) return
+    const res = await onfetchcellvalue({ rowIdx: cellEditorRow, colIdx: cellEditorCol })
+    cellEditorValue = res.text
+    cellEditorOversize = null
+    cellEditorTruncated = res.truncated === true
+  }
+
+  /** Stage the edited value - same queue, undo and Apply as an inline edit. */
+  function commitCellEditor(/** @type {string} */ next) {
+    const rowIdx = cellEditorRow, colIdx = cellEditorCol;
+    if (!canEditColumn(colIdx)) return;
+    const prevValue = effectiveCellValue(rowIdx, colIdx);
+    stageEdit(rowIdx, colIdx, next);
+    pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: prevValue, newValue: next }];
+    futureEdits = [];
+  }
+
   function openArrayEditor(rowIdx, colIdx) {
     const col = columns[colIdx];
     if (!col) return;
@@ -2162,23 +2987,49 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     futureEdits = [];
   }
 
-  /** Run an extension transform on a cell, copy the result, and show it in a
-   *  readable result card (monospace, pretty-printed, with a Copy action). */
+  /** Run an extension transform on a cell.
+   *
+   *  Slugify, UPPERCASE, Trim and the rest produce a replacement for the value,
+   *  so they are staged as an edit - identical to typing the result in, and
+   *  undoable and savable on the same path. Two cases have nothing to write
+   *  back: `informational` transforms, which report on the value rather than
+   *  replace it, and any column the grid cannot edit. Those copy the result and
+   *  show it in a readable card (monospace, pretty-printed, with a Copy action).
+   */
   async function runCellTransform(rowIdx, colIdx, transform) {
     const value = effectiveCellValue(rowIdx, colIdx);
+    let out;
     try {
-      const out = transform.run(value);
+      out = transform.run(value);
+    } catch (e) {
+      toast.error("Could not apply transform", { description: String(e?.message ?? e) });
+      return;
+    }
+
+    const editable = canEditColumn(colIdx);
+    if (!transform.informational && editable) {
+      stageEdit(rowIdx, colIdx, out);
+      pastEdits = [...pastEdits.slice(-49), { rowIdx, colIdx, oldValue: value, newValue: out }];
+      futureEdits = [];
+      toast.success(`${transform.label} · applied`, { duration: 2500 });
+      return;
+    }
+
+    try {
       await navigator.clipboard.writeText(out);
       // Pretty-print JSON output; cap the preview so the toast stays compact.
       let preview = out;
       try { preview = JSON.stringify(JSON.parse(out), null, 2); } catch { /* not JSON */ }
       const capped = preview.length > 1200 ? preview.slice(0, 1200) + "\n…" : preview;
-      toast.success(`${transform.label} · copied`, {
-        description: capped,
-        code: true,
-        duration: 8000,
-        action: { label: "Copy again", onClick: () => navigator.clipboard.writeText(out) },
-      });
+      toast.success(
+        transform.informational ? `${transform.label} · copied` : `${transform.label} · copied, column is read-only`,
+        {
+          description: capped,
+          code: true,
+          duration: 8000,
+          action: { label: "Copy again", onClick: () => navigator.clipboard.writeText(out) },
+        },
+      );
     } catch (e) {
       toast.error("Could not apply transform", { description: String(e?.message ?? e) });
     }
@@ -2232,7 +3083,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** @param {number} rowIdx */
-  async function duplicateRow(rowIdx) {
+  function duplicateRow(rowIdx) {
     if (readonly) return;
     const row = rows[rowIdx];
     if (!row) return;
@@ -2247,17 +3098,44 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         return;
       }
     }
-    const record = rowToRecord(columns, row);
-    for (const pk of primaryKey) delete record[pk];
-    try {
-      await oninsertrow(record);
-    } catch {
-      // error toast already shown by oninsertrow
-    }
+    // The copy lands in the insert draft, not in the table. Duplicating used to
+    // write immediately, which is a row in the database for one keystroke or one
+    // menu click - and no chance to change the one field that made you duplicate
+    // it in the first place. The draft is the same band the Add button opens, so
+    // it is reviewable, editable, discardable, and goes through the same
+    // confirm-and-insert path on submit.
+    /** @type {Record<string, string>} */
+    const drafts = {};
+    columns.forEach((col, i) => {
+      // A generated value and the key are the database's to assign - copying
+      // them is what would make the insert collide with the row it came from.
+      const auto = isAutoColumn(col, primaryKey) || primaryKey.includes(col.name);
+      if (auto) { drafts[col.name] = defaultInsertDraft(col, primaryKey); return; }
+      const v = row[i];
+      // A json column takes JSON TEXT, and `valueToEditString` hands back the
+      // bare value for anything that is not an object - so a json column holding
+      // the string "sdf asdf" was copied in as sdf asdf, which is not JSON, and
+      // the insert came back "answerField: Invalid JSON". Re-encode it.
+      const isJsonCol = isJsonColumnType(col.dataType ?? col.data_type ?? '');
+      if (isJsonCol && v !== null && v !== undefined) {
+        try { drafts[col.name] = JSON.stringify(v); return } catch { /* fall through */ }
+      }
+      drafts[col.name] = valueToEditString(v);
+    });
+    newRowDrafts = [...(newRowDrafts ?? []), drafts];
+    newRowFocusIdx = newRowDrafts.length - 1;
+    const firstEditable = columns.find((c) => !isAutoColumn(c, primaryKey));
+    newRowFocusCol = firstEditable?.name ?? columns[0]?.name ?? null;
+    tableContainer?.scrollTo({ top: 0, behavior: "smooth" });
+    toast.info(
+      newRowDrafts.length === 1 ? "Copied into a new row" : `${newRowDrafts.length} rows staged`,
+      { description: "Nothing is written until you submit them.", duration: 2600 },
+    );
   }
 
   /** @param {number} rowIdx @param {number} colIdx @param {'down'|'right'|'left'} action @param {boolean} [autoEdit] */
   function navigateAfterEdit(rowIdx, colIdx, action, autoEdit = false) {
+    _focusFromKey = true;
     const visColIdx = actualToVisColIdx(colIdx);
     const visLen = navigableColumns.length;
     const rowLen = rows.length;
@@ -2951,12 +3829,52 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   $effect(() => {
     canScrollHorizontally = totalContentWidth > _viewportWidth + 1
   })
-  // Insert row spans ALL columns (including hidden) so every field can be filled.
-  const insertRowTotalWidth = $derived(
-    gutterWidth + columns.reduce((acc, c) => acc + widthForColumn(c.name, c.dataType ?? c.data_type ?? ''), 0)
+  /**
+   * Where a staged-row cell sits inside the band's scrolling layer.
+   *
+   * Every x and every width in the band comes from `geom`, the same object the
+   * canvas draws from, because a second sum of the same widths drifts the
+   * moment one of the two reads something the other does not. This one used to
+   * add up the gutters and the columns by hand and left the row-number gutter
+   * out, so every staged cell sat that gutter's width to the left of the column
+   * it belonged to - which is the band and the grid sliding past each other
+   * when you drag a wide table sideways.
+   *
+   * The layer is translated by `-_scrollLeft`, so an ordinary column sits at its
+   * content x and the transform carries it. A pinned column has to undo that
+   * shift once it reaches its frozen slot: `colDrawnX` already works that out
+   * for the canvas, and adding the scroll back puts its answer in the layer's
+   * coordinates.
+   * @param {{ name: string, contentX: number, w: number, pinned: boolean }} col
+   */
+  function bandCellX(col) {
+    return col.pinned ? colDrawnX(col, geom, _scrollLeft) + _scrollLeft : col.contentX
+  }
+
+  /**
+   * Column order for the cell cursor.
+   *
+   * Relationship columns are part of it. They are cells you can act on - Enter
+   * opens the related rows in the dock, the same as a click - and leaving them
+   * out meant Tab walked to the last real column and stopped, with the one
+   * column that opens something unreachable without the mouse. They carry the
+   * same `__vrel__i` key the hover path already uses, so nothing has to guess
+   * whether a name belongs to a real column: `visToActualColIdx` returns -1 for
+   * them, which every edit path already treats as "not editable".
+   */
+  const navigableColumns = $derived(
+    virtualRelCols.length
+      // Keyed off the hover keys, not the layout: the cursor's column order has
+      // no business recomputing every time a zoom or a drag changes an x.
+      ? [...visibleColumns, ...virtualRelCols.map((_, i) => ({ name: _vrelHoverKeys[i], vrelIdx: i }))]
+      : visibleColumns,
   )
 
-  const navigableColumns = $derived(visibleColumns)
+  /** The relationship column a navigable index points at, or null for a real one. */
+  function vrelAtVisIdx(visColIdx) {
+    const idx = navigableColumns[visColIdx]?.vrelIdx
+    return idx === undefined ? null : (virtualRelCols[idx] ?? null)
+  }
 
   // ── Accessibility: focused-cell announcement ────────────────────────────────
   // The canvas grid has no per-cell DOM, so screen readers get nothing on
@@ -2966,6 +3884,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // loop and cannot affect render throughput.
   const a11yCellAnnouncement = $derived.by(() => {
     if (focusedRow === null || focusedCol === null) return ''
+    const vrel = vrelAtVisIdx(focusedCol)
+    if (vrel) return `Row ${focusedRow + 1} of ${rows.length}, related ${vrel.label}, press Enter to open`
     const ai = visToActualColIdx(focusedCol)
     if (ai < 0) return ''
     const col = columns[ai]
@@ -2978,16 +3898,23 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
   // ── Canvas geometry (single source of truth for draw + hit-test) ───────────
   const gutterWidth = $derived(
-    (showRowExpand ? GUTTER_EXPAND_W : 0) + (showSelection ? GUTTER_SELECT_W : 0),
+    (showRowExpand ? GUTTER_EXPAND_W : 0) + (showSelection ? GUTTER_SELECT_W : 0) + GUTTER_NUM_W,
   )
-  const geom = $derived(
-    computeColumnGeometry({
-      columns: visibleColumns.map((c) => ({ name: c.name, dataType: c.dataType ?? c.data_type ?? '' })),
-      widthOf: (name) => widthForColumn(name, ''),
+  const geom = $derived.by(() => {
+    const cols = visibleColumns.map((c) => ({ name: c.name, dataType: c.dataType ?? c.data_type ?? '' }))
+    // The type matters: `widthForColumn` falls back to the type's default width
+    // whenever a column has no stored width yet, which is every column for the
+    // frame between a table switch and the effect that seeds `columnWidths`.
+    // Passing '' here and the real type elsewhere made those two callers size
+    // the same column differently for that frame.
+    const typeOf = new Map(cols.map((c) => [c.name, c.dataType]))
+    return computeColumnGeometry({
+      columns: cols,
+      widthOf: (name) => widthForColumn(name, typeOf.get(name) ?? ''),
       isPinned: (name) => pinnedColumns.has(name),
       gutterWidth,
-    }),
-  )
+    })
+  })
   // FK sub-view is a zero-cost overlay - it does NOT push rows down and is NOT
   // included in rowTops. This eliminates the fkSubviewHeight→_mergedHeights→rowTops
   // reactive chain that caused lag every time the panel opened or changed height.
@@ -3049,22 +3976,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Handles hidden behind the frozen pinned region are dropped - except the
     // pinned columns' own edges, which are what defines that region.
     const occludeLeft = geom.frozenWidth
+    // A handle is centred on its column's right edge and is 10px wide, so the
+    // last column's handle lands half outside the viewport as soon as the table
+    // is scrolled to its end - and the sliver that remains sits under the
+    // vertical scrollbar. The last column could not be resized at all. Every
+    // handle is pulled far enough in to keep its whole target reachable; at 7px
+    // the grab zone still overlaps the edge it resizes.
+    const maxX = _viewportWidth - 7
+    const place = (/** @type {number} */ x) => Math.min(x, maxX)
     for (const col of geom.cols) {
       const x = colDrawnX(col, geom, _scrollLeft) + col.w
       if ((!col.pinned && x < occludeLeft - 6) || x > _viewportWidth + 6) continue
-      out.push({ name: col.name, x })
+      out.push({ name: col.name, x: place(x) })
     }
     // Virtual expr column resize handles
     for (const vc of _vexprLayout) {
       const x = vc.x + vc.w - _scrollLeft
       if (x < occludeLeft - 6 || x > _viewportWidth + 6) continue
-      out.push({ name: `__vcol__${vc.id}`, x })
+      out.push({ name: `__vcol__${vc.id}`, x: place(x) })
     }
     // Virtual rel column resize handles (right edge of each virtual col)
     for (const vp of _vrelLayout) {
       const x = vp.x + vp.w - _scrollLeft
       if (x < occludeLeft - 6 || x > _viewportWidth + 6) continue
-      out.push({ name: `__vrel__${vp.i}`, x })
+      out.push({ name: `__vrel__${vp.i}`, x: place(x) })
     }
     return out
   })
@@ -3171,11 +4106,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         isVector: isVectorType(t),
         isGeom: isGeometryType(t),
         // Right-alignment under the 'numbers' setting: quantities line up by
-        // place value, prose stays left. Booleans match /int/ on engines that
-        // spell them tinyint(1), so they are excluded before the numeric test.
-        alignRight: align === 'right' ? true
-          : align !== 'numbers' ? false
-          : !/bool/i.test(t) && _statsNumericRe.test(t),
+        // place value, prose stays left.
+        alignRight: columnAlignsRight(t, align),
       }
     })
   })
@@ -3426,7 +4358,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Per-tab expand/sub-view state preservation ───────────────────────────────
   // Expand rows and FK sub-view are saved per columnWidthsKey so switching tabs
   // restores exactly what the user had open in each table.
-  /** @type {Map<string, { expandedRows: Set<number>, fkSubview: typeof fkSubview }>} */
+  /** @type {Map<string, { expandedRows: Set<number>, fkSubview: typeof fkSubview, newRowDrafts: Record<string, string>[] | null, newRowFocusCol: string | null }>} */
   const _tabExpandCache = new Map()
   // Cap the per-tab cache: each entry can retain a whole FK sub-view's fetched
   // rows, so an unbounded map would accumulate row data for every table visited
@@ -3445,6 +4377,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         _tabExpandCache.set(_lastTabKey, {
           expandedRows: new Set(expandedRows),
           fkSubview: fkSubview,
+          // The draft belongs to the table it was opened on. One component serves
+          // every tab, so without this the Add row you started in one table was
+          // sitting in the next one you switched to, over a different set of
+          // columns.
+          //
+          // An UNTOUCHED draft is not kept. It costs a row of height, so every
+          // tab switch with one open shifted the rows under it - a layout change
+          // for something nobody had typed into yet. A draft with anything in it
+          // is work, and work is kept.
+          newRowDrafts: draftHasContent(newRowDrafts) ? newRowDrafts?.map((d) => ({ ...d })) ?? null : null,
+          newRowFocusCol: draftHasContent(newRowDrafts) ? newRowFocusCol : null,
         })
         // Evict least-recently-used entries (oldest insertion order) over the cap.
         while (_tabExpandCache.size > TAB_EXPAND_CACHE_MAX) {
@@ -3460,6 +4403,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const saved = _tabExpandCache.get(newKey)
       expandedRows = saved ? new Set(saved.expandedRows) : new Set()
       fkSubview = saved?.fkSubview ?? null
+      newRowDrafts = saved?.newRowDrafts?.length ? saved.newRowDrafts.map((d) => ({ ...d })) : null
+      newRowFocusCol = saved?.newRowFocusCol ?? null
+      newRowFocusIdx = 0
       const restored = loadPendingChanges(newKey)
       pendingEdits = restored.edits
       pendingDeletes = restored.deletes
@@ -3475,11 +4421,40 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     })
   });
 
+  /**
+   * Is this keystroke aimed at something you type into?
+   *
+   * The grid's chords are bound on the scroll container, so everything typed
+   * into anything inside it - the staged-row band, the inline cell editor, a
+   * picker's search box - reaches the grid's handlers too. ⌘A was the one that
+   * showed: it selected every row in the table while the caret sat in a draft
+   * field, where it means "select this value". By element rather than by state,
+   * so a field added later is covered without anyone remembering to come back
+   * here, and `[data-new-row]` covers the band's non-input controls as well.
+   * @param {EventTarget | null} t
+   */
+  function isFieldTarget(t) {
+    return (
+      t instanceof HTMLElement &&
+      (!!t.closest('[data-new-row]') ||
+        t.isContentEditable ||
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement)
+    )
+  }
+
   // Document-level capture so undo/redo fires even during the brief window between
   // editingCell being cleared and the container div regaining focus.
   $effect(() => {
     function onCapture(/** @type {KeyboardEvent} */ e) {
       if (!isTableFocused || editingCell) return;
+      // This listener is on `window`, so it runs before every other capture
+      // handler in the app - including the one that gives inputs their undo
+      // stack and their word deletion. Undoing a cell edit because the caret
+      // was in a staged row and you pressed ⌘Z is the grid reaching into a
+      // field it does not own, and it took the field's own ⌘Z with it.
+      if (isFieldTarget(e.target)) return;
       if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "z" || e.key === "Z")) {
         e.preventDefault();
         e.shiftKey ? void redoEdit() : void undoEdit();
@@ -3654,25 +4629,65 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    *  computed type scale + the real loaded mono font (avoids fallback tofu). */
   let _fonts = /** @type {{ cell: string, type: string, header: string, family: string, cellPx: number, typePx: number } | null} */ (null)
 
-  /** Read the real computed mono fonts for cells / datatypes off the probe. */
+  /**
+   * Canvas text sizes, in logical px at 100% zoom.
+   *
+   * The grid sizes its own text instead of reading `--fs-xs` / `--fs-3xs` off
+   * the probe, because those two numbers are produced by different formulas and
+   * drift apart as you zoom: every `--fs-*` step is rounded on its own and then
+   * nudged by the type scale's separation walk, while ROW_HEIGHT and every other
+   * canvas constant is `round(N * canvasZoom)`. The result was text that changed
+   * size relative to its own row from one rung to the next - 12px in a 28px row
+   * at 100%, but proportionally 6% smaller at 110% - which is what made zooming
+   * the grid look like the font was drifting rather than scaling.
+   *
+   * Scaling both from `canvasZoom` locks the ratio. The values are the nominal
+   * `text-ui-xs` / `text-ui-3xs` sizes from DESIGN_SYSTEM.md, which is what the
+   * canvas constants (ROW_HEIGHT, CELL_PAD_X, HEADER_H) were tuned against.
+   */
+  // The grid's two type sizes, at 100% zoom, in px.
+  //
+  // These are `text-ui-2xs` and `text-ui-3xs` resolved at the 16px root - the
+  // cell size was 12 and 10, a step below the scale, which is what made the grid
+  // read small against a sidebar rendering its rows at 15px.
+  //
+  // Quoted as plain numbers and multiplied by `canvasZoom` ON PURPOSE, rather
+  // than read off a `.text-ui-*` probe. Both the CSS scale and `canvasZoom` are
+  // pure functions of the same zoom rung, so the probe would only restate what
+  // `canvasZoom` already knows - but it would restate it from a second source,
+  // read at a different moment. That is exactly how the font and the geometry
+  // came apart: `_fonts` is a cache, the zoom watcher clears it, and whichever
+  // draw ran before `applySettings()` had written the new `--fs-*` vars to the
+  // root cached the OUTGOING rung's size. Reset from 200% and you got 25px text
+  // in a 30px row, permanently, because nothing invalidated the cache again.
+  //
+  // One source cannot disagree with itself. `13 * zoom` also tracks the real
+  // scale to within a pixel at every rung (see type-scale.js), so the fidelity
+  // the probe would have bought is a rounding step at 150% and above. */
+  // Cell size is the user's (Settings → Appearance → Grid text size); the type
+  // annotation rides 2px below it so the pair keeps its relationship at any size.
+  const GRID_CELL_PX = $derived($appGridFontSize)
+  const GRID_TYPE_PX = $derived(Math.max(7, $appGridFontSize - 2))
+
+  /** Read the real computed mono FAMILY off the probe; sizes come from the zoom. */
   function readFonts(/** @type {HTMLElement} */ probe) {
     const prevClass = probe.className
-    const measure = (/** @type {string} */ cls) => {
-      probe.className = cls
-      const cs = getComputedStyle(probe)
-      return { px: parseFloat(cs.fontSize) || 13, family: cs.fontFamily }
-    }
-    const cell = measure('font-mono text-ui-xs')
-    const type = measure('font-mono text-ui-3xs')
+    // The probe supplies the FAMILY only - that one really does have to come off
+    // the DOM, because `--font-mono` is a user setting with no numeric form.
+    probe.className = 'font-mono text-ui-xs'
+    const family = getComputedStyle(probe).fontFamily
     probe.className = prevClass
+    // Floors keep the smallest rung legible rather than sub-pixel mush.
+    const cellPx = Math.max(9, Math.round(GRID_CELL_PX * canvasZoom))
+    const typePx = Math.max(7, Math.round(GRID_TYPE_PX * canvasZoom))
     return {
-      family: cell.family,
-      cellPx: cell.px,
-      typePx: type.px,
-      cell: `${cell.px}px ${cell.family}`,
-      type: `${type.px}px ${type.family}`,
+      family,
+      cellPx,
+      typePx,
+      cell: `${cellPx}px ${family}`,
+      type: `${typePx}px ${family}`,
       // Medium-weight header name (Linear/Drizzle style).
-      header: `530 ${cell.px}px ${cell.family}`,
+      header: `530 ${cellPx}px ${family}`,
     }
   }
 
@@ -3714,6 +4729,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       _fonts = null            // discard cached font metrics - zoom may change them
       _redrawToken++
     })
+  })
+
+  // Same for the grid text size: `_fonts` holds the measured px, so changing the
+  // setting without dropping the cache would move nothing until the next theme
+  // flip or webfont load.
+  $effect(() => {
+    void $appGridFontSize
+    untrack(() => { _fonts = null; _redrawToken++ })
   })
 
   // The focused-cell highlight is painted directly on the canvas by draw(),
@@ -3791,6 +4814,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
+    // A keystroke aimed at a field is the field's. Checked first, because the
+    // chords sit above this in the function.
+    if (isFieldTarget(e.target)) return
+    // Every move from here is a keyboard move, so the cursor may scroll itself
+    // into view. Set before the branches rather than in each of them.
+    _focusFromKey = true
     // Ctrl/Cmd + / - / 0: zoom the whole app (canvas scales in lockstep).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
       if (e.key === '=' || e.key === '+') { e.preventDefault(); increaseZoom(); return }
@@ -3803,9 +4832,34 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "a" || e.key === "A")) {
       if (!editingCell) {
         e.preventDefault();
-        selected = allRowIndexSet();
+        // ⌘⇧A deselects, the way it does in every editor and image tool that
+        // has a select-all. Escape also clears a selection, but it is the key
+        // that unwinds everything else on screen too - the sub-view, a range, a
+        // column selection - so it is never the one you reach for when the only
+        // thing you want back is an empty checkbox column.
+        if (e.shiftKey) {
+          selected = new Set();
+          selectedCols = new Set();
+          _lastHeaderClickedCol = null;
+          scheduleDraw();
+        } else {
+          selected = allRowIndexSet();
+        }
       }
       return;
+    }
+
+    // Shift+Space: the focused cell, full size. Space alone stays free for the
+    // row-selection convention, and the grid has no other use for the chord.
+    if (e.key === " " && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!editingCell && focusedRow !== null && focusedCol !== null) {
+        const ai = visToActualColIdx(focusedCol);
+        if (ai >= 0) {
+          e.preventDefault();
+          openCellEditor(focusedRow, ai);
+          return;
+        }
+      }
     }
 
     // Ctrl+C (copy selection/range/cell) is handled by the document-capture
@@ -3822,30 +4876,81 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "y" || e.key === "Y")) {
       if (!editingCell) { e.preventDefault(); void redoEdit(); return; }
     }
-    // Ctrl+Enter when not editing: start edit (same as Enter / F2)
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === "Enter" && !editingCell) {
+    // ⌘/Ctrl+Enter and Shift+Enter, when not editing.
+    //
+    // On a cell that holds a foreign key they follow it: ⌘↵ navigates to the
+    // referenced row (which is what the shortcuts dialog and the cell menu have
+    // always said it does - the chord used to start an edit instead, so the one
+    // documented FK keystroke was the one that did not work), and ⇧↵ opens that
+    // target in a NEW tab, beside the row you are reading. On any other cell
+    // both start the edit ⌘↵ started before.
+    if (!editingCell && !e.altKey && e.key === "Enter" && ((e.ctrlKey || e.metaKey) || e.shiftKey)) {
       e.preventDefault();
       if (focusedRow !== null && focusedCol !== null) {
+        // A relationship column reads the chords the same way a foreign key
+        // does: ⇧↵ opens the related rows in a new tab, ⌘↵ opens them in place.
+        // Plain Enter keeps the dock preview.
+        const vrel = vrelAtVisIdx(focusedCol);
+        if (vrel) {
+          openReverseFkFullView(focusedRow, vrel, { newTab: e.shiftKey && !(e.ctrlKey || e.metaKey) });
+          return;
+        }
         const ai = visToActualColIdx(focusedCol);
-        if (ai >= 0) startEdit(focusedRow, ai);
+        if (ai >= 0) {
+          // Shift alone means the new tab; ⌘⇧↵ follows in place, like ⌘↵.
+          const newTab = e.shiftKey && !(e.ctrlKey || e.metaKey);
+          if (tryFollowForeignKey(focusedRow, ai, e, { newTab })) return;
+          startEdit(focusedRow, ai);
+        }
       } else { focusedRow = 0; focusedCol = 0; }
       return;
     }
 
-    // Shift+Space: open Quick Look editor for the focused cell
-    if (e.key === " " && e.shiftKey && !e.ctrlKey && !e.metaKey && !editingCell) {
+
+    if (editingCell) return;
+
+    // Mod+Escape clears the whole band. Escape inside a row drops that row, and
+    // with eight staged that is eight presses; this is the way out of all of it.
+    if (e.key === 'Escape' && (e.ctrlKey || e.metaKey) && newRowDrafts?.length) {
+      e.preventDefault();
+      cancelNewRow();
+      return;
+    }
+
+    // The cell menu's two quick filters, as chords. Alt+F sits beside
+    // Alt+Shift+F, which opens the filter menu: same family, one step shorter,
+    // and Alt+E is the other half of the pair. Handled before the switch so a
+    // plain `f` or `e` still reaches type-to-edit.
+    if (!editingCell && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "f" || e.key === "F" || e.key === "e" || e.key === "E")) {
       if (focusedRow !== null && focusedCol !== null) {
         const ai = visToActualColIdx(focusedCol);
-        if (ai >= 0 && canEditColumn(ai)) {
+        const col = columns[ai];
+        if (ai >= 0 && col) {
           e.preventDefault();
-          openQuickLook(focusedRow, ai);
+          onfilterbyvalue(col.name, rows[focusedRow]?.[ai], e.key === "e" || e.key === "E");
           return;
         }
       }
     }
 
-    if (editingCell) return;
-    if (newRowDrafts) return;
+    // Alt+D copies the focused row into the insert draft, beside the Alt+F /
+    // Alt+E pair - all three act on what the cursor is standing on.
+    if (!editingCell && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "d" || e.key === "D")) {
+      if (!readonly && focusedRow !== null) {
+        e.preventDefault();
+        duplicateRow(focusedRow);
+        return;
+      }
+    }
+
+    // Mod+E toggles the focused row's detail panel - the same thing the gutter
+    // chevron and the context menu's Expand do, for a hand already on the
+    // keyboard. Below the `editingCell` guard on purpose: inside the inline
+    // editor the chord belongs to the text field.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "e" || e.key === "E")) {
+      if (showRowExpand && focusedRow !== null) { e.preventDefault(); toggleRowExpand(focusedRow); }
+      return;
+    }
 
     // Experimental Vim normal-mode: intercept plain command keys (hjkl, gg/G,
     // i/x/dd/yy, …) before the default arrow / type-to-edit handling.
@@ -3926,6 +5031,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       case "F2": {
         e.preventDefault();
         if (focusedRow !== null && focusedCol !== null) {
+          // A relationship column has nothing to edit - Enter opens it, which is
+          // the only thing the cell does.
+          // Plain Enter previews the relation in the dock - a click's half of the
+          // pair. The modified chords are handled above, before this switch.
+          const vrel = vrelAtVisIdx(focusedCol);
+          if (vrel) { toggleReverseFkSubview(focusedRow, vrel); break; }
           const ai = visToActualColIdx(focusedCol);
           if (ai >= 0) startEdit(focusedRow, ai);
         } else { focusedRow = 0; focusedCol = 0; }
@@ -3935,6 +5046,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         e.preventDefault();
         // Priority: close FK sub-view → collapse cell range → clear col selection
         // → close the most-recently-expanded row → clear cell focus.
+        if (cellEditorOpen) { cellEditorOpen = false; break; }
         if (fkSubview !== null) { fkSubview = null; break; }
         if (computeCellRange()) { clearCellRange(); scheduleDraw(); break; }
         if (selectedCols.size) { selectedCols = new Set(); _lastHeaderClickedCol = null; scheduleDraw(); break; }
@@ -3943,6 +5055,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         break;
       }
       case "Delete": {
+        // A modified Delete belongs to someone else: ⌘/Ctrl+Delete deletes the
+        // row and Alt+Delete discards staged changes, both at the app level.
+        // Clearing this cell is what the UNMODIFIED key means.
+        if (e.ctrlKey || e.metaKey || e.altKey) break;
         if (focusedRow !== null && focusedCol !== null) {
           const ai = visToActualColIdx(focusedCol);
           if (ai >= 0 && canEditColumn(ai)) { e.preventDefault(); void setCellNull(focusedRow, ai); }
@@ -3950,6 +5066,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         break;
       }
       case "Backspace": {
+        // Same for a modified ⌫: ⌘/Ctrl+⌫ deletes the row, Alt+⌫ discards every
+        // staged change. Starting an edit here is what swallowed both - focus
+        // moved into an input, and the app-level handler then bowed out of it
+        // the way it bows out of any text field.
+        if (e.ctrlKey || e.metaKey || e.altKey) break;
         if (focusedRow !== null && focusedCol !== null) {
           const ai = visToActualColIdx(focusedCol);
           if (ai >= 0 && canEditColumn(ai)) {
@@ -4007,6 +5128,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Canvas drawing ─────────────────────────────────────────────────────────
   const CELL_PAD_X = $derived(Math.round(10 * canvasZoom))
   const ICON_HIT = $derived(Math.round(24 * canvasZoom))
+
+  // The geometry, type sizes and appearance flags the canvas draws with, handed
+  // to the related-rows panel so its DOM table reads as one surface with the
+  // grid above it: same row height, same text size, same rules, same zebra, same
+  // alignment. `_fonts` itself is a nulled-and-refilled draw cache, not
+  // reactive, so the panel gets the derived numbers it is built from instead.
+  const gridMetrics = $derived({
+    zoom: canvasZoom,
+    cellPx: Math.max(9, Math.round(GRID_CELL_PX * canvasZoom)),
+    typePx: Math.max(7, Math.round(GRID_TYPE_PX * canvasZoom)),
+    rowH: ROW_HEIGHT,
+    headerH: HEADER_H,
+    padX: CELL_PAD_X,
+    rowRules: _tableStyle.rows === true,
+    colRules: _tableStyle.cols === true,
+    zebra: _tableStyle.zebra === true,
+    align: $appTableAlign,
+    rowNumbers: $appRowNumbers === true,
+  })
 
   // Cached glyph advance for the active ctx.font. Every table font is monospace,
   // so text width is O(1) (charCount × advance). This replaces the per-cell
@@ -4116,17 +5256,46 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * Must stay in step with the draw pass below - this is the click target for
    * what that paints.
    */
-  function cellButtonRects(cellX, w, ry, rh, { canExpand, alignRight = false }) {
+  /** True when a cell holds the "this is N bytes" stand-in rather than a value. */
+  function isOversizeValue(v) {
+    return !!v && typeof v === 'object' && /** @type {any} */ (v).__strokeOversize === true
+  }
+
+  /**
+   * The per-cell Load control: a download arrow that becomes a spinner while the
+   * value is on its way. Drawn rather than mounted - it lives in a canvas cell,
+   * and the spinner's angle comes from the frame clock so it costs one arc.
+   * @param {CanvasRenderingContext2D} ctx @param {number} x @param {number} cy
+   * @param {boolean} busy @param {any} c
+   */
+  function drawCellLoad(ctx, x, cy, busy, c) {
+    if (!busy) {
+      drawIcon(ctx, 'download', x, cy - 7, 14, withAlpha(c.cPrimary, 0.9), 1.8)
+      return
+    }
+    const r = 6
+    ctx.save()
+    ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
+    ctx.lineWidth = 1.8
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.arc(x + 7, cy, r, c.spinAngle, c.spinAngle + Math.PI * 1.35)
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  function cellButtonRects(cellX, w, ry, rh, { alignRight = false, withLoad = false }) {
     const cy = ry + rh / 2
     const rect = (/** @type {number} */ x) => ({ x, y: ry, w: ICON_HIT, h: rh, cx: x + ICON_HIT / 2, cy })
+    // The copy button sits on the side the value is not using; Load sits
+    // immediately inboard of it, so the pair reads as one group wherever it is.
     if (alignRight) {
-      // Left-to-right: copy first (nearest the edge), then quick-look.
       const copy = rect(cellX + 4)
-      return { copy, quick: canExpand ? rect(copy.x + ICON_HIT) : null }
+      return { copy, load: withLoad ? rect(cellX + 4 + ICON_HIT) : null }
     }
     const right = cellX + w - 4  // 4px right margin
     const copy = rect(right - ICON_HIT)
-    return { copy, quick: canExpand ? rect(copy.x - ICON_HIT) : null }
+    return { copy, load: withLoad ? rect(right - ICON_HIT * 2) : null }
   }
 
   function draw() {
@@ -4148,11 +5317,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // The scroll loop opens the gate (pure vertical move, no repaint pending);
     // everything below is the geometric half of the precondition - the body must
     // be a rigid translation, which it is not when skeleton rows are animating,
-    // when an insert draft adds a band above row 0, when an expanded row makes
-    // row heights non-uniform, or when dy is fractional (reachable only on a
-    // table large enough for the scroll range to be compressed), which would land
-    // text on half-pixels and smear it. `_sawSkeleton` is still the *previous*
-    // frame's value here; it is reset a few lines down.
+    // when an insert draft adds a band above row 0, or when dy is fractional
+    // (reachable only on a table large enough for the scroll range to be
+    // compressed), which would land text on half-pixels and smear it.
+    // `_sawSkeleton` is still the *previous* frame's value here; it is reset a few
+    // lines down.
+    //
+    // An EXPANDED ROW used to disqualify a blit too, on the grounds that it makes
+    // row heights non-uniform. It does, and it does not matter: a vertical scroll
+    // is still a pure translation, and the panel's gap - which the canvas leaves
+    // as bare background - translates with everything else. The strip loop places
+    // rows by rowViewportY(), which already accounts for the expansion, and the
+    // newly exposed strip is cleared to cPanel before anything is drawn into it,
+    // so a gap landing inside it stays background. The one event that is NOT a
+    // translation, the panel's measured height changing, is tracked by the
+    // geometry effect below and forces a full frame through scheduleDraw().
+    //
+    // Keeping the guard cost a FULL repaint of every visible row on every frame
+    // for as long as any row was expanded - doubled once the display was unclamped
+    // to 120Hz. That saturates the main thread, and a saturated main thread is
+    // what shows up as the grid banding dark and the toolbar and column header
+    // stuttering: not a canvas bug, starvation.
     const dy = _blitDy
     _blitDy = 0
     const blitBodyH = Math.max(0, _viewportHeight - HEADER_H)
@@ -4170,7 +5355,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       Number.isInteger(HEADER_H * blitScale) &&
       !_sawSkeleton &&
       !newRowDrafts &&
-      expandedRows.size === 0 &&
       visibleColumns.length > 0
 
     // Rebuilt as cells paint; pumpCellImages() below uses it to fetch only what
@@ -4180,11 +5364,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // accumulate and is rebuilt by the next full frame, which the loop guarantees
     // arrives as soon as scrolling stops.
     if (!canBlit) _imgWanted.clear()
-    // Fonts are measured off the live DOM probe, so they already reflect the
-    // app zoom (.text-ui-* sizes resolve against --app-font-size). The layout
-    // constants (ROW_HEIGHT, HEADER_H, …) scale by the same canvasZoom factor,
-    // so text and geometry stay proportional with the rest of the UI. Do NOT
-    // multiply the probe fonts by canvasZoom again - that double-scales them.
+    // Font sizes and the layout constants (ROW_HEIGHT, HEADER_H, …) are both
+    // `<base px> * canvasZoom`, so text and geometry cannot land on different
+    // zoom rungs however this cache is invalidated. Do NOT re-source either one
+    // from a `.text-ui-*` probe: the CSS scale says the same thing a moment
+    // later, and the gap between the two is a bug, not a refinement.
     if (!_fonts) _fonts = readFonts(colorProbe)
     syncDisplayCaches()
     // Shimmer phase for skeleton rows, advanced from the clock so it moves at the
@@ -4372,8 +5556,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     const bodyC = {
       cFg, cText, cMuted, cGrid, cBorder, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
+      // Capped cells only draw their Load control when there is somewhere to
+      // load from, and the spinner's angle is shared by every cell in the frame.
+      oversizeCells: !!onfetchcellvalue,
+      loadingCells: _loadingCells,
+      spinAngle: (performance.now() / 1000) * Math.PI * 1.6,
       AMBER, BLUE_FG, RED, cPrimary, frozenW, tableStyle, dotSize, vSeps, firstColIdx,
       rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
+      // Checked rows, so the cell cursor can drop its side strokes on a row that
+      // is already tinted end to end.
+      selectedRows: selected,
       // Frame-constant snapshots of the reactive values the per-cell loops read.
       // Every entry below was previously read straight off the reactive graph
       // inside drawCell, i.e. once per cell per frame. A $derived read is not a
@@ -4383,11 +5575,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // change mid-frame. Read once here, then drawCell only touches this object.
       cols: geom.cols, pinnedCols, scrollLeft: _scrollLeft, viewportWidth: W,
       padX: CELL_PAD_X, iconHit: ICON_HIT, zoom: canvasZoom, fonts: _fonts,
+      highlightActiveRow: $appHighlightActiveRow,
       nameToActualIdx: _nameToActualIdx, colCache: _colCache,
       editingCell, focusedRow, hoveredRow, hoveredColName, focusColName, selectedCols,
       hasPendingEdits, pendingEdits, editedRowSet: _editedRowSet,
       colStats: _colStats, extActive: _extActive, colTransformFns: _colTransformFns,
-      searchLower: _searchLower, nullishOn: _nullishOn, rows,
+      searchMatcher: _searchMatcher, nullishOn: _nullishOn, rows,
       alignAll: $appTableAlign === 'right',
     }
 
@@ -4426,6 +5619,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       drawHeaderRow(ctx, {
         W, cPanel, cFg, cMuted, cGrid, cBorder, cMutedBg, cAccent, cPrimary, cRing,
         AMBER, AMBER_FG, BLUE_FG, RED, usedW,
+        // The header's own `#` label reads `c.fonts.type`, exactly as the row
+        // numbers under it do. Without this the row-number gutter threw
+        // `undefined is not an object` on the first frame it was drawn - the
+        // body context carried `fonts`, this one did not, and only the one
+        // branch gated on the gutter being enabled ever touched it.
+        fonts: _fonts,
       })
     }
 
@@ -4627,7 +5826,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Red diff tint for rows staged for deletion.
     if (hasPendingDeletes && pendingDeletes.has(idx)) return withAlpha(c.RED, hoveredRow === idx ? 0.2 : 0.14)
     if (selected.has(idx)) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.18 : 0.13)
-    if (focusedRow === idx) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.09 : 0.07)
+    // The focused row's tint is what tells you where the keyboard is. Off by
+    // choice for people who navigate by cell and find the full-width band noisy -
+    // the focused CELL keeps its own ring either way, so nothing becomes invisible.
+    if (focusedRow === idx && c.highlightActiveRow) return withAlpha(c.cPrimary, hoveredRow === idx ? 0.09 : 0.07)
     if (hoveredRow === idx) return withAlpha(c.cMutedBg, 0.18)
     // Zebra striping - a tint on odd rows. Below every interactive state above so
     // selection/hover/focus always win; O(1), no per-row allocation.
@@ -4702,8 +5904,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.stroke()
     }
 
-    // Row ring when focused + selected.
-    if (focusedRow === idx && isSel) {
+    // Row ring when the row is focused + checked and the keyboard is on the ROW
+    // rather than on a cell in it.
+    //
+    // It used to draw whenever the row was focused, on top of the focused cell's
+    // own outline: a 1px stroke at ry+0.5 and a 2px stroke at ry+1, one pixel
+    // apart, running the width of the row. That is what read as a broken border
+    // - two teal lines with a sliver of row between them, stepping in and out
+    // where the cell's strokes started and stopped, and doubling the rule the
+    // row above already drew. One indicator at a time: the row tint says which
+    // row, the cell outline says which cell, and the ring is for when there is
+    // no cell to point at.
+    if (focusedRow === idx && isSel && focusedCol === null) {
       ctx.strokeStyle = withAlpha(c.cPrimary, 0.45)
       ctx.lineWidth = 1
       ctx.strokeRect(0.5, ry + 0.5, c.usedW - 1, rh - 1)
@@ -4750,46 +5962,41 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (_rowBg) { ctx.fillStyle = _rowBg; ctx.fillRect(cellX, ry, cw, rh) }
       const isActive = fkSubview?.rowIdx === idx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label
       const isVHov = hoveredRow === idx && hoveredColName === _vrelHoverKeys[vi]
+      const isFocusedRel = c.focusedRow === idx && c.navName === _vrelHoverKeys[vi]
       if (!_fonts) return
 
-      // Badge: a quiet chip that is always a chip. It used to be a fully rounded
-      // capsule with no border at rest, so hovering conjured a lozenge out of
-      // what looked like plain text, and a long table name inside a full-radius
-      // pill read as a balloon. Now the shape never changes on hover - only its
-      // surface and border strength do - and the radius matches the app's
-      // rounded-md, not a capsule.
-      const badgeFontPx = Math.max(10, _fonts.cellPx - 1)
-      const bPadX = Math.round(9 * canvasZoom)
-      const bH = Math.min(Math.round(badgeFontPx * 1.9), rh - Math.round(6 * canvasZoom))
-      const bR = Math.min(Math.round(6 * canvasZoom), Math.round(bH / 2))
-      ctx.font = `500 ${badgeFontPx}px ${_fonts.family}`
+      // A relation is a link, so it draws as one: the link glyph, then the table
+      // name as plain text. It was a bordered chip on every row - and the value
+      // is the same for every row in the column, so a screenful of them was
+      // thirty identical lozenges carrying one word of information between them.
+      // The icon says "relation" once per cell; the text carries the name.
+      const relFontPx = Math.max(10, _fonts.cellPx - 1)
+      ctx.font = `500 ${relFontPx}px ${_fonts.family}`
+      const relPadX = Math.round(10 * canvasZoom)
+      const relIcon = Math.round(12 * canvasZoom)
+      const relGap = Math.round(7 * canvasZoom)
 
-      // Consistent side gutters so the chip is centered with breathing room.
-      const gutter = Math.round(12 * canvasZoom)
-      const maxLabelW = cw - gutter * 2 - bPadX * 2
-      const labelTxt = truncText(ctx, vc.label, maxLabelW)
-      const textW = textWidth(ctx, labelTxt)
-      const bW = Math.min(textW + bPadX * 2, cw - gutter * 2)
-      const bX = Math.round(cellX + (cw - bW) / 2)
-      const bY = Math.round(ry + (rh - bH) / 2)
+      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.06); ctx.fillRect(cellX, ry, cw, rh) }
+      else if (isFocusedRel) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, cw, rh) }
 
-      if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.05); ctx.fillRect(cellX, ry, cw, rh) }
+      drawIcon(
+        ctx, 'link-2',
+        cellX + relPadX, ry + (rh - relIcon) / 2, relIcon,
+        isActive ? c.cPrimary : withAlpha(c.cMuted, isVHov ? 1 : 0.8),
+        1.8,
+      )
+      const relTextX = cellX + relPadX + relIcon + relGap
+      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, isVHov ? 0.9 : 0.62)
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left'
+      ctx.fillText(truncText(ctx, vc.label, cw - (relTextX - cellX) - relPadX), relTextX, ry + rh / 2 + 0.5)
 
-      ctx.fillStyle = isActive
-        ? withAlpha(c.cPrimary, 0.12)
-        : isVHov ? withAlpha(c.cMutedBg, 0.55) : withAlpha(c.cMutedBg, 0.32)
-      roundRect(ctx, bX, bY, bW, bH, bR); ctx.fill()
-
-      // Hairline at rest too, so the chip has an edge without shouting.
-      ctx.strokeStyle = isActive
-        ? withAlpha(c.cPrimary, 0.32)
-        : isVHov ? withAlpha(c.cMuted, 0.28) : withAlpha(c.cBorder, 0.5)
-      ctx.lineWidth = 1
-      roundRect(ctx, bX + 0.5, bY + 0.5, bW - 1, bH - 1, bR); ctx.stroke()
-
-      ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, isVHov ? 0.85 : 0.7)
-      ctx.textBaseline = 'middle'; ctx.textAlign = 'center'
-      ctx.fillText(labelTxt, bX + bW / 2, ry + rh / 2 + 0.5)
+      // Same 2px inset box the cell cursor draws on a real column: one cursor,
+      // whatever kind of column it is standing on.
+      if (isFocusedRel) {
+        ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
+        ctx.lineWidth = 2
+        ctx.strokeRect(cellX + 1.5, ry + 1.5, cw - 3, rh - 3)
+      }
     }
 
     // ── Batched grid pass ───────────────────────────────────────────────────
@@ -4823,11 +6030,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (ts.dash) ctx.setLineDash(ts.dash)
       ctx.beginPath()
       if (ts.cols) {
-        for (let k = 0; k < seps.length; k++) { ctx.moveTo(seps[k], ry); ctx.lineTo(seps[k], ry + rh) }
+        // "Ticks" clips each column rule to a short mark at the row's foot - a
+        // ruler rather than a cage. The column edge is still stated exactly where
+        // it matters (against the row rule) without a full-height line per column.
+        const colTop = ts.ticks ? ry + rh - Math.min(7, rh / 3) : ry
+        for (let k = 0; k < seps.length; k++) { ctx.moveTo(seps[k], colTop); ctx.lineTo(seps[k], ry + rh) }
       }
       if (ts.rows) { ctx.moveTo(0, ry + rh - 0.5); ctx.lineTo(vw, ry + rh - 0.5) }
+      // "Double" adds a second rule 3px inside the first. Batched into the SAME
+      // path as the primary rules, so twin lines cost one stroke per row, not two.
+      if (ts.double) {
+        if (ts.cols) {
+          for (let k = 0; k < seps.length; k++) { ctx.moveTo(seps[k] - 3, ry); ctx.lineTo(seps[k] - 3, ry + rh) }
+        }
+        if (ts.rows) { ctx.moveTo(0, ry + rh - 3.5); ctx.lineTo(vw, ry + rh - 3.5) }
+      }
       ctx.stroke()
       if (ts.dash) ctx.setLineDash([]) // reset so other strokes stay solid
+
+      // Group rule: a stronger line every Nth row, so you can count down a long
+      // page without tracking a cursor across it - ledger paper's one good idea.
+      // A second stroke, but only on 1 row in N, and only for the presets that
+      // ask for it; the dash was reset above so this line is always solid.
+      if (ts.groupEvery && (idx + 1) % ts.groupEvery === 0) {
+        ctx.strokeStyle = c.cBorder
+        ctx.beginPath()
+        ctx.moveTo(0, ry + rh - 0.5)
+        ctx.lineTo(vw, ry + rh - 0.5)
+        ctx.stroke()
+      }
     }
   }
 
@@ -4913,14 +6144,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     const rowHover = c.hoveredRow === idx
     const isHover = rowHover && c.hoveredColName === col.name
-    const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !cached?.isBool
     const cy = ry + rh / 2
 
     // A per-column transform (chosen from the header menu) renders live and wins
     // over formatter directives; skipped for staged/editing cells.
     const colTf = (!staged && c.rows[idx]) ? c.colTransformFns[col.name] : undefined
     // Avatar / image thumbnail transform - draw the image itself, not text.
-    if (colTf && _IMG_TF.has(colTf.id) && !isNull && isImageUrl(value)) {
+    if (colTf && _IMG_TF.has(colTf.id) && !isNull && _imagePreviewOn && isImageUrl(value)) {
       drawCellImage(ctx, String(value), cellX, ry, w, rh, cy, colTf.id === 'avatar', c)
       return
     }
@@ -4970,7 +6200,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // left-aligned text, left of right-aligned text - so they occupy empty
     // space in both cases. Only long values, the ones that would actually
     // collide, give up room, and only while the pointer is in the cell.
-    const hoverW = isHover ? c.iconHit + (canExpand ? c.iconHit : 0) : 0
+    const hoverW = isHover ? c.iconHit : 0
     const fkW = (activeFk && rowHover) ? 20 : 0
     // The same gap on both sides. Left-aligned text used to reserve 4px on the
     // assumption that a value never reaches the right edge - but a *truncated*
@@ -5019,7 +6249,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const drawX = alignRight
         ? textX + Math.max(0, textMaxW - textWidth(ctx, drawn))
         : textX
-      if (c.searchLower && !isNull) drawSearchHighlights(ctx, drawn, drawX, ry, rh, c)
+      if (c.searchMatcher && !isNull) drawSearchHighlights(ctx, drawn, drawX, ry, rh, c)
       ctx.fillStyle = textColor
       ctx.fillText(drawn, drawX, cy + 0.5)
       if (dir?.link) {
@@ -5044,19 +6274,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // 1. Hover buttons. They go on whichever side the value is not using, so
     //    they land in empty space rather than over the text. Geometry must
     //    match cellButtonRects(), which is the click target for these.
-    if (isHover) {
+    const capped = !!c.oversizeCells && isOversizeValue(value)
+    // The key is only built when something is actually loading. Formatting one
+    // per capped cell per frame is a string allocated 60 times a second to ask a
+    // question whose answer is almost always "none of them".
+    const loadingCell = capped && c.loadingCells.size > 0 && c.loadingCells.has(`${idx}:${actualIdx}`)
+    if (isHover || loadingCell) {
       if (alignRight) {
-        let lx = cellX + 4
-        drawIcon(ctx, 'copy', lx + 5, cy - 7, 14, c.cMuted, 1.8)
-        lx += c.iconHit
-        if (canExpand) drawIcon(ctx, 'maximize-2', lx + 5, cy - 7, 14, c.cMuted, 1.8)
+        if (isHover) drawIcon(ctx, 'copy', cellX + 9, cy - 7, 14, c.cMuted, 1.8)
+        if (capped) drawCellLoad(ctx, cellX + 9 + c.iconHit, cy, loadingCell, c)
       } else {
-        drawIcon(ctx, 'copy', rx - c.iconHit + 5, cy - 7, 14, c.cMuted, 1.8)
+        if (isHover) drawIcon(ctx, 'copy', rx - c.iconHit + 5, cy - 7, 14, c.cMuted, 1.8)
         rx -= c.iconHit
-        if (canExpand) {
-          drawIcon(ctx, 'maximize-2', rx - c.iconHit + 5, cy - 7, 14, c.cMuted, 1.8)
-          rx -= c.iconHit
-        }
+        // The value is not here and this is how it arrives, so it draws whether
+        // or not the row is hovered once it is fetching.
+        if (capped) { drawCellLoad(ctx, rx - c.iconHit + 5, cy, loadingCell, c); rx -= c.iconHit }
       }
     }
 
@@ -5079,6 +6311,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // the selection indicator, and a per-cell ring on the drag-end cell reads as a
     // stray highlight inside the block.
     if (isFocusedCell && !c.rangeColNames) {
+      // The same box whether or not the row is checked. The checked row used to
+      // get top-and-bottom strokes instead, spanning the cell's full width and
+      // butting into the row ring at both ends, so the cursor changed shape and
+      // the row grew edges depending on a checkbox. The row ring now stands down
+      // while a cell is focused (see drawBodyRow), which is what those two
+      // half-measures were working around.
       ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
       ctx.lineWidth = 2
       ctx.strokeRect(cellX + 1.5, ry + 1.5, w - 3, rh - 3)
@@ -5124,6 +6362,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         { border: c.cMuted, fill: c.cPrimary, mark: c.cPanel })
       gx += GUTTER_SELECT_W
     }
+    if (GUTTER_NUM_W > 0) {
+      // Right-aligned tabular digits: a column of numbers lines up on its last
+      // digit or it reads as noise. Muted, and a shade brighter on the focused
+      // row so the eye can find where it is without a second highlight.
+      //
+      // At the CELL size, not the type-annotation size: the gutter is a column
+      // of values like any other, and two point sizes in one row read as two
+      // different tables. Only the colour says it is chrome.
+      ctx.font = c.fonts.cell
+      ctx.textAlign = 'right'
+      ctx.fillStyle = focusedRow === idx ? c.cFg : c.cMuted
+      ctx.fillText(String(rowNumberOffset + idx + 1), gx + GUTTER_NUM_W - Math.round(7 * canvasZoom), ry + rh / 2 + 0.5)
+      ctx.textAlign = 'left'
+      gx += GUTTER_NUM_W
+    }
     // (Gutter separator is batched once per row in drawBodyRow.)
   }
 
@@ -5168,6 +6421,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           { checked: allSelected, indeterminate: someSelected },
           { border: c.cMuted, fill: c.cPrimary, mark: c.cPanel })
         gx += GUTTER_SELECT_W
+      }
+      if (GUTTER_NUM_W > 0) {
+        // Right-aligned like the numbers under it, so the column has one edge,
+        // and at the header's own weight like every other column name.
+        ctx.font = c.fonts.header
+        ctx.textAlign = 'right'
+        ctx.fillStyle = c.cMuted
+        ctx.fillText('#', gx + GUTTER_NUM_W - Math.round(7 * canvasZoom), HEADER_H / 2 + 0.5)
+        ctx.textAlign = 'left'
+        gx += GUTTER_NUM_W
       }
       ctx.strokeStyle = c.cGrid
       ctx.lineWidth = 1
@@ -5225,11 +6488,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.strokeStyle = c.cGrid; ctx.lineWidth = 1
       ctx.beginPath(); ctx.moveTo(x + cw - 0.5, 0); ctx.lineTo(x + cw - 0.5, HEADER_H); ctx.stroke()
       if (!_fonts) continue
-      // Centre the header label over the centred cell badge - a left-aligned label
-      // above centred pills reads as a misaligned "gap" in the relation column.
+      // `CELL_PAD_X`, the same left edge every other column header starts at.
+      // It used to be indented to the cell TEXT below it - past the link glyph -
+      // which lined it up with its own values and out of line with every header
+      // beside it. Headers read across the row; that edge wins.
+      const hdrTextX = CELL_PAD_X
       ctx.font = _fonts.header; ctx.fillStyle = withAlpha(c.cMuted, 0.6)
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.fillText(truncText(ctx, vc.label, cw - 24), x + cw / 2, HEADER_H / 2 + 0.5)
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+      ctx.fillText(truncText(ctx, vc.label, cw - hdrTextX - 12), x + hdrTextX, HEADER_H / 2 + 0.5)
       // Resize edge affordance (matches regular column behaviour)
       if (_resizeHoverCol === vrelKey || resizingColName === vrelKey) {
         ctx.strokeStyle = withAlpha(c.cPrimary, 0.7)
@@ -5305,7 +6571,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // from both the edge and the type text.
     const SORT_ICON = 13
     const SORT_MARGIN_R = 9
-    const sortReserve = SORT_ICON + SORT_MARGIN_R + 4
+    // A pinned column says so in its own header, left of the sort glyph. The
+    // only sign before this was that the column stopped scrolling, which you
+    // find out by scrolling - and the pin state is the one column setting with
+    // no mark anywhere on the column it applies to.
+    const PIN_ICON = 11
+    const pinReserve = col.pinned ? PIN_ICON + 6 : 0
+    const sortReserve = SORT_ICON + SORT_MARGIN_R + 4 + pinReserve
     ctx.textBaseline = 'middle'
     ctx.textAlign = 'left'
 
@@ -5381,6 +6653,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.font = _fonts.type
       ctx.fillStyle = withAlpha(c.cMuted, 0.6)
       ctx.fillText(truncText(ctx, col.dataType, typeRoom), typeStartX, cy + 0.5)
+    }
+
+    // Pin glyph, just left of where the sort indicator sits.
+    if (col.pinned) {
+      drawIcon(
+        ctx, 'pin',
+        x + w - SORT_ICON - SORT_MARGIN_R - PIN_ICON - 4,
+        cy - PIN_ICON / 2,
+        PIN_ICON, withAlpha(c.cMuted, 0.75), 1.6,
+      )
     }
 
     // Sort indicator - right-aligned with a clear margin, vertically centred.
@@ -5787,6 +7069,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   function onCanvasClick(/** @type {MouseEvent} */ e) {
     if (e.button !== 0) return
+    // The cell is under the pointer, so it is on screen already: nothing here
+    // may scroll the column it lands on.
+    _focusFromKey = false
     if (_suppressNextClick) { _suppressNextClick = false; return }
     const { x, y } = canvasXY(e)
 
@@ -5803,7 +7088,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           if (!row) return
           const fn = _vcolFns[vc.fnIdx]
           const val = fn ? fn(row) : ''
-          if (looksLikeUrl(val)) {
+          if (looksLikeUrl(val) && $appOpenUrlsOnClick) {
             void import('@tauri-apps/plugin-opener').then(m => m.openUrl(val)).catch(() => {})
           } else if (val) {
             void navigator.clipboard.writeText(val).catch(() => {})
@@ -5813,33 +7098,21 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
     }
     // Check virtual relationship column clicks (right of real columns)
-    if (y >= HEADER_H && virtualRelCols.length > 0) {
-      const cx = x + _scrollLeft
-      const vi = _vrelLayout.findIndex(vp => cx >= vp.x && cx < vp.x + vp.w)
-      if (vi >= 0) {
-        {
-          const vc = virtualRelCols[vi]
-          const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
-          const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
-          if (!r?.inRowBody) return
-          const rowIdx = r.idx
-          const row = rows[rowIdx] ?? []
-          // Toggle: same cell closes
-          if (fkSubview?.rowIdx === rowIdx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label) {
-            fkSubview = null
-            return
-          }
-          // Opening FK sub-view: close JSON expand for the same row (mutually exclusive)
-          if (expandedRows.has(rowIdx)) { const s = new Set(expandedRows); s.delete(rowIdx); expandedRows = s }
-          fkSubview = { rowIdx, kind: 'reverse', label: vc.label, relInfo: vc, data: { loading: true, columns: [], rows: [], error: null } }
-          scrollRowIntoView(rowIdx)
-          void onfetchrelatedrows({ kind: 'reverse', fromSchema: vc.fromSchema, fromTable: vc.fromTable, fromColumns: vc.fromColumns, toColumns: vc.toColumns, row }).then(res => {
-            if (fkSubview?.rowIdx !== rowIdx || fkSubview?.label !== vc.label) return
-            fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
+    const relHit = vrelHitAt(x, y)
+    if (relHit) {
+      if (relHit.rowIdx >= 0) {
+        // Modifier click follows the relation, the way it does on a foreign key:
+        // ⌘/Ctrl opens the related rows as a view, ⇧ puts them in a new tab.
+        // Plain click keeps the dock preview.
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          openReverseFkFullView(relHit.rowIdx, relHit.vc, {
+            newTab: e.shiftKey && !(e.metaKey || e.ctrlKey),
           })
-          return
+        } else {
+          toggleReverseFkSubview(relHit.rowIdx, relHit.vc)
         }
       }
+      return
     }
 
     const t = hitTest(x, y)
@@ -5878,35 +7151,49 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         }
         if (editingCell) cancelEdit()
 
+        // Shift+click previews the cell in the dock - the pointer half of
+        // Shift+Space. A cell you have to squint at is the reason the dock
+        // exists, and reaching for a chord to open it is a step.
+        if (e.shiftKey) {
+          e.stopPropagation()
+          focusedRow = idx
+          const vis = actualToVisColIdx(actualIdx)
+          if (vis >= 0) focusedCol = vis
+          openCellEditor(idx, actualIdx)
+          return
+        }
+
         clearCellRange() // plain click collapses any rectangular range
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)
         if (vi >= 0) focusedCol = vi
-        // Clicking a cell is a deliberate jump, however short the distance, so it
-        // earns a back/forward entry. Arrow-key roaming deliberately does not -
-        // that is what the parent's row-gap threshold is for.
-        onjump()
         if (inspectorRow !== null) inspectorRow = idx
 
         const cached = _colCache[actualIdx]
         const value = effectiveCellValue(idx, actualIdx)
         const isNull = value === null || value === undefined
         const isJson = !isNull && typeof value === 'object'
-        const canExpand = (cached?.canEdit ?? false) && !cached?.enumValues && !isBooleanType(cached?.colType ?? '')
         // Same alignment test the draw pass uses, so the click target follows
-        // the buttons to whichever side they were painted on.
-        const { copy, quick } = cellButtonRects(
+        // the button to whichever side it was painted on.
+        const cappedCell = isOversizeValue(value)
+        const { copy, load } = cellButtonRects(
           /** @type {number} */ (t.drawnX), t.col.w, 0, ROW_HEIGHT,
-          { canExpand, alignRight: isRightAlignedColumn(actualIdx) },
+          { alignRight: isRightAlignedColumn(actualIdx), withLoad: cappedCell && !!onloadcellvalue },
         )
         const relX = x - /** @type {number} */ (t.drawnX)
+        if (load && relX >= load.x - /** @type {number} */ (t.drawnX) && relX <= load.x - /** @type {number} */ (t.drawnX) + load.w) {
+          e.stopPropagation(); void loadCellInline(idx, actualIdx); return
+        }
         if (relX >= copy.x - /** @type {number} */ (t.drawnX) && relX <= copy.x - /** @type {number} */ (t.drawnX) + copy.w) {
           void copyCellValue(idx, actualIdx); return
         }
-        if (quick && relX >= quick.x - /** @type {number} */ (t.drawnX) && relX <= quick.x - /** @type {number} */ (t.drawnX) + quick.w) {
-          openQuickLook(idx, actualIdx); return
-        }
-        if (isJson) { openJsonLightbox(value, t.col.name, e); return }
+        // A JSON cell opens in the bottom dock, tree-first. It used to open a
+        // modal that instantiated Monaco - a ~4MB chunk, its workers and a full
+        // code editor - to show what is usually a few hundred bytes of object,
+        // and the dialog then sat over the rows the value came from. The dock
+        // renders it with `JsonTree`, follows the cell cursor, and costs nothing
+        // to open.
+        if (isJson) { e.stopPropagation(); openCellEditor(idx, actualIdx); return }
 
         // Forward FK: Ctrl/Cmd = full navigation; plain click = inline sub-view
         const fk = cached?.fk ?? null
@@ -5923,7 +7210,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           // Opening FK sub-view: close JSON expand for the same row (mutually exclusive)
           if (expandedRows.has(idx)) { const s = new Set(expandedRows); s.delete(idx); expandedRows = s }
           fkSubview = { rowIdx: idx, kind: 'forward', label: fkLbl, colIdx: actualIdx, data: { loading: true, columns: [], rows: [], error: null } }
-          scrollRowIntoView(idx)
+          scrollRowIntoViewBesideDock(idx)
           void onfetchrelatedrows({ kind: 'forward', fk, row: rows[idx] ?? [] }).then(res => {
             if (fkSubview?.rowIdx !== idx || fkSubview?.label !== fkLbl) return
             fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
@@ -5937,13 +7224,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           const href = cellLinkHref(formatCell(value))
           if (href) {
             const ut = cellUrlType(href, t.col.name)
-            if (e.ctrlKey || e.metaKey || e.shiftKey) void openExternal(href)
-            else if (ut === 'image' || ut === 'pdf') { lightboxUrl = href; lightboxType = /** @type {'image'|'pdf'} */ (ut) }
-            else void openExternal(href)
+            const isMedia = ut === 'image' || ut === 'pdf'
+            // The lightbox is gated by the PREVIEW setting, not the URL setting:
+            // it opens the file inside the app, so it is a preview, not "leaving
+            // to follow a link". That split is what lets someone keep previews
+            // while refusing to hand clicks to the browser, and vice versa.
+            if (isMedia && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+              if ($appImagePreview) { lightboxUrl = href; lightboxType = /** @type {'image'|'pdf'} */ (ut); return }
+              if ($appOpenUrlsOnClick) { void openExternal(href); return }
+              tableContainer?.focus({ preventScroll: true })
+              return
+            }
+            if ($appOpenUrlsOnClick) { void openExternal(href); return }
+            tableContainer?.focus({ preventScroll: true })
             return
           }
-          // Linkifier extension → deep-link an ID to an external system.
-          if (!isNull) {
+          // Linkifier extension → deep-link an ID to an external system. Same
+          // gate: it is still a click that leaves the app.
+          if (!isNull && $appOpenUrlsOnClick) {
             const linked = linkifyValue(value, cached?.colType ?? '', t.col.name)
             if (linked) { void openExternal(linked); return }
           }
@@ -5955,7 +7253,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   function onCanvasDblClick(/** @type {MouseEvent} */ e) {
+    _focusFromKey = false
     const { x, y } = canvasXY(e)
+    // A relationship cell has no edit behind it, so the second click is free to
+    // mean what it means on a foreign key: go there. Same destination as the
+    // dock's "Open in sub view" - the related rows as a table of their own.
+    const relHit = vrelHitAt(x, y)
+    if (relHit) {
+      if (relHit.rowIdx >= 0) openReverseFkFullView(relHit.rowIdx, relHit.vc)
+      return
+    }
     const t = hitTest(x, y)
     if (t.kind !== 'cell') return
     const idx = /** @type {number} */ (t.idx)
@@ -5966,6 +7273,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   function onCanvasAuxClick(/** @type {MouseEvent} */ e) {
     if (e.button !== 1) return
+    _focusFromKey = false
     const { x, y } = canvasXY(e)
     const t = hitTest(x, y)
     if (t.kind === 'cell') tryFollowForeignKey(/** @type {number} */ (t.idx), /** @type {number} */ (t.actualIdx), e)
@@ -6055,12 +7363,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (t.kind === 'cell') {
       hoveredRow = /** @type {number} */ (t.idx)
       hoveredColName = t.col.name
-      // Hovering a JSON (object) cell → preload the lightbox/Monaco chunk so the
-      // click-to-expand is instant. Gated by the warm flag so it runs at most once.
-      if (!_lightboxWarmed) {
-        const v = effectiveCellValue(/** @type {number} */ (t.idx), /** @type {number} */ (t.actualIdx))
-        if (v !== null && v !== undefined && typeof v === 'object') void prefetchJsonLightbox()
-      }
     } else {
       hoveredRow = t.kind === 'row-expand' || t.kind === 'row-select' ? /** @type {number} */ (t.idx ?? null) : null
       hoveredColName = null
@@ -6144,6 +7446,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Clear staged-edit state in the parent so the StatusBar buttons don't linger.
     pendingEditCount = 0
     applyEdits = () => {}
+    copyEditsSql = () => {}
     resetEdits = () => {}
     scrollToTop = () => {}
     scrollToBottom = () => {}
@@ -6198,7 +7501,31 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           oncontextmenu={(e) => onCanvasContextMenu(e, bitsContextMenu)}
           onscroll={onContainerScroll}
           onkeydown={handleTableKeydown}
-          onfocusin={() => { isTableFocused = true; }}
+          onpointerdown={() => {
+            // Focus arrives from the pointer later in this same task, so the
+            // reset lands after the focusin it causes.
+            _focusFromPointer = true;
+            setTimeout(() => { _focusFromPointer = false; }, 0);
+          }}
+          onfocusin={(e) => {
+            isTableFocused = true;
+            // Tab in from the sidebar lands on the grid itself. With no cell
+            // cursor there is nothing on screen to say focus arrived at all, so
+            // the first cell takes it - the same one an arrow key would have
+            // moved to. Only when the container is the target: focus entering a
+            // cell editor or a new-row field must not reset the cursor.
+            //
+            // Not on a click, though. A click already names the cell it means,
+            // and it sets the cursor a moment later - seeding 0,0 on the way in
+            // drew the ring on the first cell for a frame and then moved it,
+            // which is the jump you see on the first click into a fresh table.
+            if (
+              e.target === tableContainer && !_focusFromPointer &&
+              focusedRow === null && rows.length && visibleColumns.length
+            ) {
+              focusedRow = 0; focusedCol = 0;
+            }
+          }}
           onfocusout={(e) => {
             if (!tableContainer?.contains(e.relatedTarget instanceof Element ? e.relatedTarget : null)) {
               isTableFocused = false;
@@ -6227,7 +7554,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <!-- Canvas: always mounted so the 2D context survives table navigation
                (each mount creates a new GPU-tracked context; keeping it alive
                across table switches eliminates the accumulation shown in DevTools). -->
-          <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible;will-change:transform">
+          <!-- 0x0 sticky anchor that pins the canvas to the top-left of the
+               scrollport. No `will-change: transform` here: the box never moves
+               under its own power, and promoting an empty sticky box to its own
+               compositor layer is what let WebKit keep painting it at a stale
+               offset while the scroll container was being RESIZED - the grid
+               appeared to slide up and down as the related-rows dock was dragged.
+               The canvas inside keeps its own will-change; that one is real. -->
+          <div style="position:sticky;top:0;left:0;width:0;height:0;z-index:1;overflow:visible">
             <canvas
               bind:this={canvasEl}
               class="block"
@@ -6238,6 +7572,256 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               onpointermove={guarded(onCanvasPointerMove)}
               onpointerleave={guarded(onCanvasPointerLeave)}
             ></canvas>
+            <!-- Inline insert-row form, inside the canvas's own sticky
+                 anchor. The staged rows have to land on the columns the canvas
+                 draws, so they take their origin from the same pinned box the
+                 canvas does rather than a second one of their own: whatever the
+                 viewport's left edge turns out to be, both are measuring from
+                 it. In the sizer instead, a sticky box has to satisfy its `left`
+                 inset and its containing block's right edge at once, and which
+                 of those wins depends on how wide the box is - which is a
+                 property of the table, not of the band. -->
+            {#if newRowDrafts?.length}
+            {#each newRowDrafts as rowDraft, di (di)}
+              <!-- `cell-fields`: the app-wide rule (app.css) that makes a field
+                   inside a grid cell flush - no border, no radius, no background
+                   of its own. Without it every draft input drew the 2px border at
+                   the 12px field radius the unlayered bare-input rule gives any
+                   input, so a row of 28px cells came out as a row of pills inside
+                   a row that already has its own rules and its own insert ring.
+                   The same fix the cell editor and the structure grid carry.
+                   -
+                   One band per staged row, stacked under the header in the order
+                   they were added. `top` is a viewport y, so the stack holds its
+                   place under the header for nothing per scroll frame, and
+                   `z-index` descends so an earlier row's ring is never drawn
+                   over by the one below it.
+                   -
+                   Horizontally the box is the viewport's width and clips; only
+                   the layer inside it moves, translated by the same
+                   `_scrollLeft` the canvas draws with. Left to native scroll it
+                   moved the instant the wheel did while the columns behind it
+                   repainted on the next frame, and the two slid past each other
+                   - the parallax you see dragging a wide table sideways. -->
+              <div
+                role="none"
+                data-new-row={di}
+                class={cn(
+                  // One ring per row drew a line between every pair of staged
+                  // rows on top of the border that was already there, which is
+                  // the doubled edge. The stack reads as a band instead: a faint
+                  // tint throughout, ordinary row rules between, and one firm
+                  // edge where it meets the data.
+                  // The pickers carry their own type scale, so the size is
+                  // pushed onto everything the band renders - a staged row has
+                  // to line up with the rows under it, and those are drawn at
+                  // the grid's own font size, not at a rung of the UI scale.
+                  'cell-fields absolute overflow-hidden [&_button]:text-[length:inherit] [&_input]:text-[length:inherit] [&_span]:text-[length:inherit]',
+                )}
+                style="top:{HEADER_H + di * ROW_HEIGHT}px; left:0; height:{ROW_HEIGHT}px; width:{_viewportWidth}px; z-index:{20 - Math.min(di, 9)}; font-size:{gridMetrics.cellPx}px"
+                onkeydown={(e) => onNewRowKeydown(e, di)}
+              >
+                <!-- The scrolling layer. The box above is pinned to the
+                     viewport and clips; this is the only thing that moves, and
+                     it moves by the same `_scrollLeft` the canvas draws with,
+                     in one transform for the whole row. Every cell inside is
+                     placed at its column's content x, so the band cannot drift
+                     away from the grid however far sideways you drag. -->
+                <div
+                  class={cn(
+                    'absolute inset-y-0 left-0 bg-panel',
+                    di === draftCount - 1
+                      ? 'border-b-2 border-success/35'
+                      : 'border-b border-border/30',
+                  )}
+                  style="width:{totalContentWidth}px; transform:translateX({-_scrollLeft}px)"
+                >
+                {#if showRowExpand}
+                  <div class="absolute inset-y-0 flex items-center justify-center border-r border-border/20 bg-primary/5" style="left:0; width:{GUTTER_EXPAND_W}px">
+                    {#if insertSaving}
+                      <Loader class="size-3 animate-spin text-muted-foreground" />
+                    {:else}
+                      <!-- The tick on the FIRST row inserts every staged row;
+                           on the rest it inserts just that one. One click for
+                           the batch is what you want after filling several in,
+                           and the row you are looking at is what you want when
+                           only one of them is ready. -->
+                      {@const missingHere = insertMissing[di] ?? []}
+                      <Check
+                        class={cn(
+                          'size-3 cursor-pointer',
+                          missingHere.length ? 'text-warning' : 'text-primary',
+                        )}
+                        onclick={() => void submitNewRow(di === 0 ? null : di)}
+                        title={missingHere.length
+                          ? `${missingHere.length} required field${missingHere.length === 1 ? '' : 's'} still empty: ${missingHere.join(', ')}`
+                          : di === 0 && draftCount > 1
+                            ? `Insert all ${draftCount} rows (⌘↵)`
+                            : 'Insert this row (⌘↵)'}
+                      />
+                    {/if}
+                  </div>
+                {/if}
+                {#if showSelection}
+                  <div class="absolute inset-y-0 flex items-center justify-center border-r border-border/20 bg-primary/5" style="left:{showRowExpand ? GUTTER_EXPAND_W : 0}px; width:{GUTTER_SELECT_W}px">
+                    <button
+                      type="button"
+                      class="inline-flex size-4 items-center justify-center rounded text-muted-foreground hover:text-destructive"
+                      onclick={() => removeDraftRow(di)}
+                      title={draftCount > 1 ? 'Discard this row' : 'Cancel'}
+                    >
+                      <X class="size-3" />
+                    </button>
+                  </div>
+                {/if}
+                <!-- The row-number gutter. Nothing to number in a row that
+                     does not exist yet, so it draws as an empty slot - but it
+                     has to BE there, because the canvas puts every column
+                     after it and the band has to agree on where the columns
+                     start. -->
+                {#if GUTTER_NUM_W > 0}
+                  <div
+                    class="absolute inset-y-0 border-r border-border/20 bg-primary/5"
+                    style="left:{(showRowExpand ? GUTTER_EXPAND_W : 0) + (showSelection ? GUTTER_SELECT_W : 0)}px; width:{GUTTER_NUM_W}px"
+                    aria-hidden="true"
+                  ></div>
+                {/if}
+                {#each visibleColumns as col, ci (col.name)}
+                  {@const gcol = geom.cols[ci]}
+                  {@const dt = col.dataType ?? col.data_type ?? ''}
+                  {@const omit = insertOmitBehaviour(col, primaryKey)}
+                  {@const isAuto = omit === 'auto'}
+                  {@const blankLabel = omit === 'default' ? 'default' : omit === 'null' ? 'NULL' : 'Required'}
+                  <!-- Only a Required blank stops the insert, so only it is
+                       worth noticing before you submit. The rest describe a
+                       value the database will supply and recede accordingly -
+                       nothing is wrong yet, so nothing is coloured as wrong. -->
+                  {@const blankClass = omit === 'required'
+                    ? 'placeholder:text-muted-foreground'
+                    : 'placeholder:italic placeholder:text-muted-foreground'}
+                  {@const enumValues = getColumnEnumValues(col)}
+                  {@const isBoolean = isBooleanType(dt)}
+                  {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
+                  {@const isDateOnly = isDateOnlyType(dt)}
+                  {@const isTimeOnly = isTimeOnlyType(dt)}
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  {#if gcol}
+                  <div
+                    class="absolute inset-y-0 flex items-center overflow-hidden border-r border-border/35 bg-success/[0.03] px-2"
+                    style="left:{bandCellX(gcol)}px; width:{gcol.w}px;{gcol.pinned ? ' z-index:1;' : ''}"
+                    oncontextmenu={(e) => openDraftMenu(e, di, col.name)}
+                  >
+                    {#if isAuto}
+                      <!-- Writable, with the generated value as the placeholder.
+                           Leaving it blank is the normal path and the label says
+                           so; typing an explicit id is legitimate (importing a
+                           row that must keep its key, backfilling a gap) and
+                           refusing it means dropping to raw SQL for a one-cell
+                           exception. Empty still omits the column entirely, so
+                           the sequence is untouched unless you overrule it. -->
+                      <KeyRound class="mr-1 size-3 shrink-0 text-muted-foreground" />
+                      <input
+                        data-new-row-input={col.name}
+                        type="text"
+                        disabled={insertSaving}
+                        placeholder={dt.toLowerCase().includes('int') || dt.toLowerCase().includes('serial')
+                          ? 'auto-increment'
+                          : 'generated'}
+                        title="The database fills this in. Type a value only to override it."
+                        class="w-full min-w-0 bg-transparent font-mono text-[length:inherit] text-foreground outline-none placeholder:italic placeholder:text-muted-foreground disabled:opacity-50"
+                        value={rowDraft[col.name] ?? ''}
+                        oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
+                        onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                      />
+                    {:else if enumValues || isBoolean}
+                      <!-- The same searchable menu the inline cell editor uses
+                           for an enum, so picking a value is one control in the
+                           app rather than two takes on it. The blank row stays
+                           first and says what leaving the field alone does -
+                           `default`, `NULL` or `Required` - which is the one
+                           thing an insert needs that an edit never does. -->
+                      {@const opts = enumValues ?? ['true', 'false']}
+                      {@const picked = rowDraft[col.name] ?? ''}
+                      <SearchableMenu
+                        items={[{ value: '', label: blankLabel }, ...opts.map((o) => ({ value: o, label: o }))]}
+                        placeholder="Search values…"
+                        contentClass="w-56"
+                        align="start"
+                        onselect={(it) => setNewRowDraft(di, col.name, it.value ?? '')}
+                      >
+                        {#snippet trigger(props)}
+                          <button
+                            {...props}
+                            data-new-row-input={col.name}
+                            type="button"
+                            disabled={insertSaving}
+                            aria-label="{col.name} value"
+                            class="flex h-full w-full min-w-0 items-center gap-1 bg-transparent text-left font-mono text-[length:inherit] outline-none disabled:opacity-50"
+                            onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                          >
+                            <span class={cn('min-w-0 flex-1 truncate', picked ? 'text-foreground' : blankClass.replace(/placeholder:/g, ''))}>
+                              {picked || blankLabel}
+                            </span>
+                            <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
+                          </button>
+                        {/snippet}
+                        {#snippet item(it)}
+                          <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                          {#if picked === it.value}
+                            <Icon name="check" class="size-3.5 shrink-0 text-primary" />
+                          {/if}
+                        {/snippet}
+                      </SearchableMenu>
+                    {:else if isDateTime || isDateOnly}
+                      <!-- The same shape the inline cell editor uses: calendar
+                           on the trailing edge, value at the grid's type size,
+                           field filling the cell. It wore the picker's default
+                           layout - icon first, its own font - so a staged row
+                           looked like a form dropped on top of the table rather
+                           than a row of it. -->
+                      <DateTimePicker
+                        colName={col.name}
+                        showTime={isDateTime}
+                        disabled={insertSaving}
+                        iconTrailing={true}
+                        class="h-full w-full min-w-0 pr-1"
+                        inputClass="text-[length:inherit]"
+                        value={rowDraft[col.name] ?? ''}
+                        onchange={(v) => setNewRowDraft(di, col.name, v)}
+                        onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                      />
+                    {:else if isTimeOnly}
+                      <input
+                        data-new-row-input={col.name}
+                        type="time"
+                        disabled={insertSaving}
+                        class="w-full bg-transparent font-mono text-[length:inherit] text-foreground outline-none disabled:opacity-50"
+                        value={rowDraft[col.name] ?? ''}
+                        oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
+                        onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                      />
+                    {:else}
+                      <input
+                        data-new-row-input={col.name}
+                        type="text"
+                        disabled={insertSaving}
+                        placeholder={blankLabel}
+                        class={cn(
+                          "w-full bg-transparent font-mono text-[length:inherit] text-foreground outline-none disabled:opacity-50",
+                          blankClass,
+                        )}
+                        value={rowDraft[col.name] ?? ''}
+                        oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
+                        onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                      />
+                    {/if}
+                  </div>
+                  {/if}
+                {/each}
+                </div>
+              </div>
+            {/each}
+            {/if}
           </div>
 
           {#if visibleColumns.length > 0}
@@ -6271,164 +7855,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               {/each}
             </div>
 
+
             <!-- Sizer: establishes the scroll range; DOM overlays are positioned
                  within it in content coordinates. -->
             <div
               class="relative"
               style="width:{resizingColName ? Math.max(totalContentWidth, _scrollLeft + _viewportWidth) : totalContentWidth}px; height:{spacerHeight}px"
             >
-              <!-- Inline insert-row form. Pinned below the header with
-                   position:sticky so the compositor holds it at viewport-y
-                   HEADER_H (zero per-frame JS), the old absolute + JS
-                   top:{HEADER_H + _physScrollTop} recomputed layout every scroll
-                   frame, which lagged the native scroll and produced the vertical
-                   jitter + ghost row. No `left` inset, so it still scrolls
-                   horizontally in lock-step with the columns via native scroll. -->
-              {#if newRowDrafts}
-                <div
-                  role="none"
-                  class="sticky z-20 flex border-b border-border/30 bg-panel ring-1 ring-inset ring-success/25"
-                  style="top:{HEADER_H}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
-                  onkeydown={onNewRowKeydown}
-                >
-                  {#if showRowExpand}
-                    <div class="flex shrink-0 items-center justify-center border-r border-border/20 bg-primary/5" style="width:{GUTTER_EXPAND_W}px">
-                      {#if insertSaving}
-                        <Loader class="size-3 animate-spin text-muted-foreground" />
-                      {:else}
-                        <Check
-                          class="size-3 cursor-pointer text-primary hover:text-primary/70"
-                          onclick={() => void submitNewRow()}
-                          title="Insert row (⌘↵)"
-                        />
-                      {/if}
-                    </div>
-                  {/if}
-                  {#if showSelection}
-                    <div class="flex shrink-0 items-center justify-center border-r border-border/20 bg-primary/5" style="width:{GUTTER_SELECT_W}px">
-                      <button
-                        type="button"
-                        class="inline-flex size-4 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive"
-                        onclick={cancelNewRow}
-                        title="Cancel"
-                      >
-                        <X class="size-3" />
-                      </button>
-                    </div>
-                  {/if}
-                  {#each columns as col (col.name)}
-                    {@const dt = col.dataType ?? col.data_type ?? ''}
-                    {@const omit = insertOmitBehaviour(col, primaryKey)}
-                    {@const isAuto = omit === 'auto'}
-                    {@const blankLabel = omit === 'default' ? 'default' : omit === 'null' ? 'NULL' : 'Required'}
-                    <!-- Only a Required blank stops the insert, so only it is
-                         worth noticing before you submit. The rest describe a
-                         value the database will supply and recede accordingly -
-                         nothing is wrong yet, so nothing is coloured as wrong. -->
-                    {@const blankClass = omit === 'required'
-                      ? 'placeholder:text-muted-foreground/60'
-                      : 'placeholder:italic placeholder:text-muted-foreground/35'}
-                    {@const enumValues = getColumnEnumValues(col)}
-                    {@const isBoolean = isBooleanType(dt)}
-                    {@const isDateTime = shouldUseDateTimePicker(dt, col.name)}
-                    {@const isDateOnly = isDateOnlyType(dt)}
-                    {@const isTimeOnly = isTimeOnlyType(dt)}
-                    {@const colWidth = widthForColumn(col.name, dt)}
-                    <div class="flex shrink-0 items-center overflow-hidden border-r border-border/20 px-2" style="width:{colWidth}px">
-                      {#if isAuto}
-                        <!-- Writable, with the generated value as the placeholder.
-                             Leaving it blank is the normal path and the label says
-                             so; typing an explicit id is legitimate (importing a
-                             row that must keep its key, backfilling a gap) and
-                             refusing it means dropping to raw SQL for a one-cell
-                             exception. Empty still omits the column entirely, so
-                             the sequence is untouched unless you overrule it. -->
-                        <KeyRound class="mr-1 size-3 shrink-0 text-muted-foreground/40" />
-                        <input
-                          data-new-row-input={col.name}
-                          type="text"
-                          disabled={insertSaving}
-                          placeholder={dt.toLowerCase().includes('int') || dt.toLowerCase().includes('serial')
-                            ? 'auto-increment'
-                            : 'generated'}
-                          title="The database fills this in. Type a value only to override it."
-                          class="w-full min-w-0 bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:italic placeholder:text-muted-foreground/35 disabled:opacity-50"
-                          value={newRowDrafts[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                          onfocus={() => (newRowFocusCol = col.name)}
-                        />
-                      {:else if enumValues}
-                        <InsertValuePicker
-                          colName={col.name}
-                          options={enumValues}
-                          value={newRowDrafts[col.name] ?? ''}
-                          emptyLabel={blankLabel}
-                          placeholder={blankLabel}
-                          placeholderClass={blankClass}
-                          disabled={insertSaving}
-                          onchange={(v) => setNewRowDraft(col.name, v)}
-                          onfocus={() => (newRowFocusCol = col.name)}
-                        />
-                      {:else if isBoolean}
-                        <InsertValuePicker
-                          colName={col.name}
-                          options={['true', 'false']}
-                          value={newRowDrafts[col.name] ?? ''}
-                          emptyLabel={blankLabel}
-                          placeholder={blankLabel}
-                          placeholderClass={blankClass}
-                          disabled={insertSaving}
-                          onchange={(v) => setNewRowDraft(col.name, v)}
-                          onfocus={() => (newRowFocusCol = col.name)}
-                        />
-                      {:else if isDateTime}
-                        <DateTimePicker
-                          colName={col.name}
-                          showTime={true}
-                          disabled={insertSaving}
-                          value={newRowDrafts[col.name] ?? ''}
-                          onchange={(v) => setNewRowDraft(col.name, v)}
-                          onfocus={() => (newRowFocusCol = col.name)}
-                        />
-                      {:else if isDateOnly}
-                        <DateTimePicker
-                          colName={col.name}
-                          showTime={false}
-                          disabled={insertSaving}
-                          value={newRowDrafts[col.name] ?? ''}
-                          onchange={(v) => setNewRowDraft(col.name, v)}
-                          onfocus={() => (newRowFocusCol = col.name)}
-                        />
-                      {:else if isTimeOnly}
-                        <input
-                          data-new-row-input={col.name}
-                          type="time"
-                          disabled={insertSaving}
-                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
-                          value={newRowDrafts[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                          onfocus={() => (newRowFocusCol = col.name)}
-                        />
-                      {:else}
-                        <input
-                          data-new-row-input={col.name}
-                          type="text"
-                          disabled={insertSaving}
-                          placeholder={blankLabel}
-                          class={cn(
-                            "w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50",
-                            blankClass,
-                          )}
-                          value={newRowDrafts[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                          onfocus={() => (newRowFocusCol = col.name)}
-                        />
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-
               <!-- JSON expand panels (independent from FK sub-view).
                    Same pin pattern as the FK sub-view: outer absolute for vertical
                    position, inner position:sticky;left:0 for the horizontal pin. This
@@ -6441,29 +7874,47 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   rowLabel={"row " + (exIdx + 1)}
                   indent={gutterWidth}
                   onclose={() => toggleRowExpand(exIdx)}
-                  onopenjson={(value, label) => {
-                    void prefetchJsonLightbox()
-                    jsonLightbox = { value, colName: label }
-                  }}
+                  onopenjson={(value, label) => openValueInDock(value, label)}
                 />
               {/snippet}
               {#each [...expandedRows] as exIdx (exIdx)}
                 {#if rows[exIdx] !== undefined}
+                  <!-- Keeping the panel out of the header band is geometry, not a
+                       clip. The panel has to sit above the canvas (the canvas paints
+                       an opaque background), so once its row scrolls up behind the
+                       header it covers the column headers, the select-all checkbox
+                       and the collapse-all chevron - all of which are canvas-painted
+                       and hit-tested by coordinate, so a DOM box on top of them
+                       swallows the click before the canvas handler ever runs.
+                       `clip-path` hid that box but did not stop it from taking the
+                       pointer, which is why the header stayed visible and went dead.
+
+                       So the box itself stops at the band: the top edge moves down by
+                       the overlap, `overflow:hidden` trims what is now outside, and a
+                       matching negative margin holds the content at its true position,
+                       so nothing appears to move.
+
+                       The trim is applied only while there is something to trim.
+                       The scroll container carries `contain:layout`, which makes it
+                       the containing block for the panel's `position:fixed` context
+                       menu, so leaving `overflow:hidden` on permanently would clip
+                       that menu.
+
+                       `trackExpandHeight` measures the inner element, whose
+                       offsetHeight is the real panel height. Measuring the trimmed
+                       box instead would feed a shrinking height into rowTops and
+                       make every row below jitter while scrolling. Only panels
+                       actually touching the band pay anything, and only while they
+                       do. -->
                   {#if _scrollScale === 1}
                     <!-- Normal table: content-space vertical (native scroll moves it,
-                         no per-frame re-render), sticky-left for the horizontal pin.
-                         clip-path keeps it out of the header band: the panel sits above
-                         the canvas (it has to - the canvas paints an opaque background),
-                         so without the clip it drew straight over the sticky column
-                         header as soon as its row scrolled up behind it. Only panels
-                         actually touching the band pay anything, and only while they do. -->
+                         no per-frame re-render), sticky-left for the horizontal pin. -->
                     {@const clipTop = Math.max(0, HEADER_H - (rowDocTop(exIdx) + ROW_HEIGHT - _scrollTop))}
-                    <div class="absolute z-10 left-0 right-0" style="top:{rowDocTop(exIdx) + ROW_HEIGHT}px">
-                      <div
-                        style="position:sticky; left:0; width:{_viewportWidth}px{clipTop > 0 ? `; clip-path: inset(${clipTop}px 0 0 0)` : ''}"
-                        use:trackExpandHeight={exIdx}
-                      >
-                        {@render expandBody(exIdx)}
+                    <div class="absolute z-10 left-0 right-0" style="top:{rowDocTop(exIdx) + ROW_HEIGHT + clipTop}px">
+                      <div style="position:sticky; left:0; width:{_viewportWidth}px{clipTop > 0 ? '; overflow:hidden' : ''}">
+                        <div style={clipTop > 0 ? `margin-top:-${clipTop}px` : ''} use:trackExpandHeight={exIdx}>
+                          {@render expandBody(exIdx)}
+                        </div>
                       </div>
                     </div>
                   {:else if rowViewportY(exIdx) > -_viewportHeight * 2 && rowViewportY(exIdx) < _viewportHeight + ROW_HEIGHT}
@@ -6475,10 +7926,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     <div style="position:sticky;top:0;left:0;width:0;height:0;overflow:visible;z-index:10">
                       <div
                         class="absolute left-0"
-                        style="top:{rowViewportY(exIdx) + ROW_HEIGHT}px; width:{_viewportWidth}px{clipTopScaled > 0 ? `; clip-path: inset(${clipTopScaled}px 0 0 0)` : ''}"
-                        use:trackExpandHeight={exIdx}
+                        style="top:{rowViewportY(exIdx) + ROW_HEIGHT + clipTopScaled}px; width:{_viewportWidth}px{clipTopScaled > 0 ? '; overflow:hidden' : ''}"
                       >
-                        {@render expandBody(exIdx)}
+                        <div style={clipTopScaled > 0 ? `margin-top:-${clipTopScaled}px` : ''} use:trackExpandHeight={exIdx}>
+                          {@render expandBody(exIdx)}
+                        </div>
                       </div>
                     </div>
                   {/if}
@@ -6512,51 +7964,91 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 {@const eDateTime = !eIsArray && !eIsJson && shouldUseDateTimePicker(eType, ecol?.name ?? '')}
                 {@const eDateOnly = !eIsArray && !eIsJson && isDateOnlyType(eType)}
                 {@const eTimeOnly = !eIsArray && !eIsJson && isTimeOnlyType(eType)}
+                <!-- The editor has to land on the glyphs it replaces. The canvas
+                     draws cell text at CELL_PAD_X and flips to flush-right per the
+                     Appearance setting; an editor that is always left-aligned at
+                     px-3 made the value jump sides and shift 2px the moment you
+                     started typing. Same padding, same alignment, no jump. -->
+                {@const eAlignRight = isRightAlignedColumn(editingCell?.colIdx ?? -1)}
+                <!-- The size the CANVAS drew this value at, not a `text-ui-*` rung.
+                     The two are different numbers: the grid's text is the user's
+                     grid text size scaled by `canvasZoom`, the UI scale is a
+                     separately-rounded ladder off the root px. The fields were on
+                     the second one, so a value grew a pixel or two and reflowed
+                     the moment you started editing it - the same jump the padding
+                     comment above describes, in the other axis, and one that
+                     showed up on every platform because nothing about it was
+                     platform-specific. -->
+                {@const eFontStyle = `font-size:${gridMetrics.cellPx}px`}
+                {@const eFieldStyle = `padding-left:${CELL_PAD_X}px;padding-right:${CELL_PAD_X}px;text-align:${eAlignRight ? 'right' : 'left'};${eFontStyle}`}
+                <!-- The date editor carries a calendar button beside its field, so
+                     it pads only the side the text is anchored to and lets the
+                     button sit on the other one. Padding both sides would push the
+                     value off the x the canvas drew it at by the button's width. -->
+                {@const ePickerStyle = eAlignRight
+                  ? `padding-right:${CELL_PAD_X}px;text-align:right;${eFontStyle}`
+                  : `padding-left:${CELL_PAD_X}px;text-align:left;${eFontStyle}`}
                 <div
                   in:fade={{ duration: 100, easing: cubicOut }}
+                  data-cell-editor
                   class="absolute z-30 box-border bg-background ring-2 ring-inset ring-primary"
                   style="top:{editOverlay.top}px; left:{editOverlay.left}px; width:{editOverlay.width}px; height:{editOverlay.height}px"
                 >
                   {#if eEnum}
-                    <!-- Themed, portaled dropdown (bits-ui), replaces the native
-                         <select>, whose OS popup was unstyled and broke on Linux/
-                         WebKitGTK. Auto-opens on edit; picking a value commits. -->
-                    <Select.Root
-                      type="single"
-                      value={editingCell?.draft ?? ''}
-                      open={enumEditorOpen}
-                      onOpenChange={(o) => {
-                        enumEditorOpen = o;
-                        // Closed without a pick (Escape / click-away) → cancel edit.
-                        if (!o && editingCell) cancelEdit();
-                      }}
-                      onValueChange={(v) => {
-                        if (!editingCell) return;
-                        editingCell.draft = v ?? '';
-                        void commitEdit();
+                    <!-- SearchableMenu directly, configured exactly like the
+                         filter-condition menu in TableToolbar - same primitive,
+                         same fixed content width, same trigger/item snippets - so
+                         the two read as one control rather than two takes on it.
+                         -
+                         NOT anchored to the cell width: a narrow column would
+                         squash the search field down to its icon. NOT font-mono
+                         either; every other menu in the app is sans, and the
+                         values are short labels, not data being compared
+                         character by character.
+                         -
+                         Picking commits; closing without a pick cancels. -->
+                    {@const enumItems = [
+                      ...(eNullable ? [{ value: '', label: 'NULL' }] : []),
+                      ...(editingCell?.original && !eEnum.includes(editingCell.original)
+                        ? [{ value: editingCell.original, label: editingCell.original }]
+                        : []),
+                      ...eEnum.map((o) => ({ value: o, label: o })),
+                    ]}
+                    <SearchableMenu
+                      bind:open={enumEditorOpen}
+                      items={enumItems}
+                      placeholder="Search values…"
+                      contentClass="w-56"
+                      align="start"
+                      onselect={(it) => {
+                        if (!editingCell) return
+                        _enumPicked = true
+                        editingCell.draft = it.value ?? ''
+                        void commitEdit()
                       }}
                     >
-                      <Select.Trigger
-                        bind:ref={editInput}
-                        aria-label="Edit {ecol?.name ?? 'cell'}"
-                        class="box-border h-full w-full min-w-0 max-w-full rounded-none border-0 bg-transparent px-3 py-0 font-mono text-ui-sm text-foreground shadow-none focus-visible:ring-0"
-                      >
-                        <span data-slot="select-value" class="truncate">
-                          {editingCell?.draft || (eNullable ? 'NULL' : 'Select…')}
-                        </span>
-                      </Select.Trigger>
-                      <Select.Content align="start" sideOffset={2} class="max-h-64 min-w-[var(--bits-select-anchor-width)] p-1">
-                        {#if eNullable}
-                          <Select.Item value="" label="NULL" class="font-mono text-ui-xs text-muted-foreground">NULL</Select.Item>
+                      {#snippet trigger(props)}
+                        <button
+                          {...props}
+                          bind:this={editInput}
+                          type="button"
+                          aria-label="Edit {ecol?.name ?? 'cell'}"
+                          class="flex h-full w-full min-w-0 items-center gap-1 text-left font-mono text-foreground outline-none"
+                          style={eFieldStyle}
+                        >
+                          <span class="min-w-0 flex-1 truncate">
+                            {editingCell?.draft || (eNullable ? 'NULL' : 'Select…')}
+                          </span>
+                          <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
+                        </button>
+                      {/snippet}
+                      {#snippet item(it)}
+                        <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                        {#if (editingCell?.draft ?? '') === it.value}
+                          <Icon name="check" class="size-3.5 shrink-0 text-primary" />
                         {/if}
-                        {#if editingCell?.original && !eEnum.includes(editingCell.original)}
-                          <Select.Item value={editingCell.original} label={editingCell.original} class="font-mono text-ui-xs">{editingCell.original}</Select.Item>
-                        {/if}
-                        {#each eEnum as option (option)}
-                          <Select.Item value={option} label={option} class="font-mono text-ui-xs">{option}</Select.Item>
-                        {/each}
-                      </Select.Content>
-                    </Select.Root>
+                      {/snippet}
+                    </SearchableMenu>
                   {:else if isBooleanType(eType)}
                     {@const isOn = editingCell?.draft === "true"}
                     {@const isNull = eNullable && editingCell?.draft !== "true" && editingCell?.draft !== "false"}
@@ -6565,7 +8057,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       bind:this={editInput}
                       disabled={saving}
                       aria-label="Toggle {ecol?.name ?? 'cell'}"
-                      class="flex h-full w-full items-center gap-2.5 px-3 font-mono text-ui-sm text-foreground outline-none"
+                      class="flex h-full w-full items-center gap-2.5 font-mono text-foreground outline-none"
+                      style={eFieldStyle}
                       onclick={async (e) => {
                         e.stopPropagation();
                         editingCell.draft = editingCell.draft === "true" ? "false" : "true";
@@ -6588,7 +8081,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       bind:this={editInput}
                       disabled={saving}
                       aria-label="Edit array {ecol?.name ?? 'cell'}"
-                      class="flex h-full w-full items-center gap-2 px-3 font-mono text-ui-xs text-foreground outline-none"
+                      class="flex h-full w-full items-center gap-2 font-mono text-foreground outline-none"
+                      style={eFieldStyle}
                       onclick={(e) => {
                         e.stopPropagation();
                         if (!editingCell) return;
@@ -6608,33 +8102,48 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                         }
                       }}
                     >
-                      <Braces class="size-3.5 shrink-0 text-muted-foreground/60" />
+                      <Braces class="size-3.5 shrink-0 text-muted-foreground" />
                       <span class="truncate">{Array.isArray(eArrVal) ? arrayDisplay(eArrVal) : (editingCell?.draft || "{}")}</span>
-                      <Maximize2 class="ml-auto size-3 shrink-0 text-muted-foreground/50" />
+                      <Maximize2 class="ml-auto size-3 shrink-0 text-muted-foreground" />
                     </button>
                   {:else if eDateTime || eDateOnly}
                     <!-- Date/timestamp cell → calendar picker bound to the draft.
                          Picking commits immediately (like the enum dropdown): a
                          click-away cancels the inline edit, so we can't defer the
                          commit without losing the pick. -->
-                    <div class="flex h-full w-full items-center px-3">
-                      <!-- `editingCell?.draft`, not `editingCell.draft`: a prop is a
-                           lazy getter, and picking a date runs onchange → commitEdit,
-                           which sets `editingCell = null` synchronously. The picker's
-                           own deriveds then re-read this getter before it unmounts, so
-                           a bare dereference throws (null is not an object). -->
-                      <DateTimePicker
-                        colName={ecol?.name}
-                        showTime={eDateTime}
-                        disabled={saving}
-                        value={editingCell?.draft ?? ''}
-                        onchange={(v) => {
-                          if (!editingCell) return;
-                          editingCell.draft = v;
-                          void commitEdit();
-                        }}
-                      />
-                    </div>
+                    <!-- `editingCell?.draft`, not `editingCell.draft`: a prop is a
+                         lazy getter, and picking a date runs onchange → commitEdit,
+                         which sets `editingCell = null` synchronously. The picker's
+                         own deriveds then re-read this getter before it unmounts, so
+                         a bare dereference throws (null is not an object).
+                         -
+                         It wears the same padding, alignment and type size as the
+                         plain text editor above, and hands its input to `editInput`
+                         and its spare keys to `handleEditKeydown`, so a timestamp
+                         commits on Enter and tabs on Tab like every other cell. -->
+                    <DateTimePicker
+                      bind:inputRef={editInput}
+                      colName={ecol?.name}
+                      showTime={eDateTime}
+                      disabled={saving}
+                      iconTrailing={!eAlignRight}
+                      class={eAlignRight ? 'h-full pl-2' : 'h-full pr-2'}
+                      inputClass="text-ui-xs"
+                      inputStyle={ePickerStyle}
+                      value={editingCell?.draft ?? ''}
+                      oninput={(v) => {
+                        // Typing only stages. Committing here would end the
+                        // edit after the first character, which is what made
+                        // the field look like it refused input.
+                        if (editingCell) editingCell.draft = v;
+                      }}
+                      onchange={(v) => {
+                        if (!editingCell) return;
+                        editingCell.draft = v;
+                        void commitEdit();
+                      }}
+                      onkeydown={handleEditKeydown}
+                    />
                   {:else if eTimeOnly}
                     <input
                       bind:this={editInput}
@@ -6642,47 +8151,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       bind:value={editingCell.draft}
                       disabled={saving}
                       aria-label="Edit {ecol?.name ?? 'cell'}"
-                      class="box-border block h-full w-full min-w-0 max-w-full border-0 bg-transparent px-3 font-mono text-ui-xs text-foreground outline-none selection:bg-primary/20"
+                      class="box-border block h-full w-full min-w-0 max-w-full border-0 bg-transparent font-mono text-foreground outline-none selection:bg-primary/20"
+                      style={eFieldStyle}
                       onclick={(e) => e.stopPropagation()}
                       onkeydown={handleEditKeydown}
                     />
-                  {:else if eIsJson}
-                    <!-- JSON/JSONB cell: inline typing (Enter/Esc commit) plus an
-                         expand affordance to the editable quick-look surface, whose
-                         commit routes through stageEdit like a plain edit. The
-                         read-only Monaco lightbox is a separate view. -->
-                    <div class="flex h-full w-full items-center">
-                      <input
-                        bind:this={editInput}
-                        bind:value={editingCell.draft}
-                        disabled={saving}
-                        aria-label="Edit {ecol?.name ?? 'cell'}"
-                        class="box-border block h-full min-w-0 flex-1 border-0 bg-transparent pl-3 pr-1 font-mono text-ui-xs text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
-                        onclick={(e) => e.stopPropagation()}
-                        onkeydown={handleEditKeydown}
-                      />
-                      <button
-                        type="button"
-                        disabled={saving}
-                        title="Open JSON editor"
-                        aria-label="Open JSON editor"
-                        class="mr-1 inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground/60 outline-none hover:bg-accent hover:text-foreground"
-                        onclick={(e) => {
-                          e.stopPropagation();
-                          if (!editingCell) return;
-                          openQuickLook(editingCell.rowIdx, editingCell.colIdx);
-                        }}
-                      >
-                        <Maximize2 class="size-3.5" />
-                      </button>
-                    </div>
                   {:else}
                     <input
                       bind:this={editInput}
                       bind:value={editingCell.draft}
                       disabled={saving}
                       aria-label="Edit {ecol?.name ?? 'cell'}"
-                      class="box-border block h-full w-full min-w-0 max-w-full overflow-x-auto border-0 bg-transparent px-3 font-mono text-ui-xs text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
+                      class="box-border block h-full w-full min-w-0 max-w-full overflow-x-auto border-0 bg-transparent font-mono text-foreground outline-none [field-sizing:fixed] selection:bg-primary/20"
+                      style={eFieldStyle}
                       onclick={(e) => e.stopPropagation()}
                       onkeydown={handleEditKeydown}
                     />
@@ -6697,7 +8178,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {#if visibleColumns.length === 0}
             <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
-                <Table2 class="size-8 text-muted-foreground/25" />
+                <Table2 class="size-8 text-muted-foreground" />
                 <p class="text-ui-sm text-muted-foreground">No columns visible</p>
               </div>
             </div>
@@ -6711,10 +8192,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
                 {#if loading}
-                  <Loader class="size-5 animate-spin text-muted-foreground/40" />
+                  <Loader class="size-5 animate-spin text-muted-foreground" />
                   <p class="text-ui-sm text-muted-foreground">Loading rows…</p>
                 {:else}
-                  <Table2 class="size-8 text-muted-foreground/25" />
+                  <Table2 class="size-8 text-muted-foreground" />
                   <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
                 {/if}
               </div>
@@ -6753,13 +8234,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       Retry
                     </button>
                   {:else}
-                    <Loader class="size-3 shrink-0 animate-spin text-muted-foreground/60" />
+                    <Loader class="size-3 shrink-0 animate-spin text-muted-foreground" />
                     <span class="text-ui-2xs text-muted-foreground">
                       Loading rows {(loadingSpan.first + 1).toLocaleString()}-{(loadingSpan.last + 1).toLocaleString()}
-                      <span class="text-muted-foreground/50">of {rows.length.toLocaleString()}</span>
+                      <span class="text-muted-foreground">of {rows.length.toLocaleString()}</span>
                     </span>
                     {#if windowStatus?.slow}
-                      <span class="text-ui-2xs text-muted-foreground/50">· slow connection</span>
+                      <span class="text-ui-2xs text-muted-foreground">· slow connection</span>
                     {/if}
                   {/if}
                 </div>
@@ -6776,8 +8257,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             >
               <div class="flex items-center justify-center py-2">
                 <div class="flex items-center gap-1.5 rounded-full border border-border/20 bg-background px-3 py-1 elevate-2-rim">
-                  <Loader class="size-3 animate-spin text-muted-foreground/50" />
-                  <span class="text-ui-2xs text-muted-foreground/50">Loading more…</span>
+                  <Loader class="size-3 animate-spin text-muted-foreground" />
+                  <span class="text-ui-2xs text-muted-foreground">Loading more…</span>
                 </div>
               </div>
             </div>
@@ -6786,7 +8267,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                  knows scrolling won't fetch more (vs. "is it still loading?"). -->
             <div style="position:relative;width:100%;pointer-events:none;z-index:5">
               <div class="flex items-center justify-center py-2.5">
-                <span class="rounded-full border border-border/15 bg-muted/20 px-3 py-1 text-ui-2xs text-muted-foreground/40">
+                <span class="rounded-full border border-border/15 bg-muted/20 px-3 py-1 text-ui-2xs text-muted-foreground">
                   End of results, {rows.length.toLocaleString()} {rows.length === 1 ? 'row' : 'rows'}
                 </span>
               </div>
@@ -6864,33 +8345,67 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {$t('menu.hideColumn')}
         </ContextMenu.Item>
         <ContextMenu.Separator />
-        <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'left'))}>
-          <ChevronLeft />
-          {$t('menu.moveLeft')}
-        </ContextMenu.Item>
-        <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'right'))}>
-          <ChevronRight />
-          {$t('menu.moveRight')}
-        </ContextMenu.Item>
-        <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'first'))}>
-          <ChevronsLeft />
-          {$t('menu.moveFirst')}
-        </ContextMenu.Item>
-        <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'last'))}>
-          <ChevronsRight />
-          {$t('menu.moveLast')}
-        </ContextMenu.Item>
-        {#if columnOrder.length > 0}
-          <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnOrder())}>
-            <RotateCcw />
-            {$t('menu.resetOrder')}
-          </ContextMenu.Item>
-        {/if}
-        <ContextMenu.Separator />
+        <!-- One "Move" entry instead of four stacked ones. Four of the menu's
+             fourteen rows were the same verb with a different adverb, which is
+             what a submenu is for - and it puts "Reset order" next to the actions
+             that change the order rather than five rows below them. -->
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger disabled={hIsFirst && hIsLast}>
+            <MoveHorizontal />
+            {$t('menu.move')}
+          </ContextMenu.SubTrigger>
+          <ContextMenu.SubContent class="min-w-44">
+            <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'left'))}>
+              <ChevronLeft />
+              {$t('menu.moveLeft')}
+            </ContextMenu.Item>
+            <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'right'))}>
+              <ChevronRight />
+              {$t('menu.moveRight')}
+            </ContextMenu.Item>
+            <ContextMenu.Item disabled={hIsFirst} onSelect={() => runMenuAction(() => moveColumn(hcol, 'first'))}>
+              <ChevronsLeft />
+              {$t('menu.moveFirst')}
+            </ContextMenu.Item>
+            <ContextMenu.Item disabled={hIsLast} onSelect={() => runMenuAction(() => moveColumn(hcol, 'last'))}>
+              <ChevronsRight />
+              {$t('menu.moveLast')}
+            </ContextMenu.Item>
+            {#if columnOrder.length > 0}
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnOrder())}>
+                <RotateCcw />
+                {$t('menu.resetOrder')}
+              </ContextMenu.Item>
+            {/if}
+          </ContextMenu.SubContent>
+        </ContextMenu.Sub>
         <ContextMenu.Item onSelect={() => runMenuAction(() => resetColumnWidth(hcol))}>
           <RotateCcw />
           {$t('menu.resetWidth')}
         </ContextMenu.Item>
+        <ContextMenu.Separator />
+        <!-- Copying a column was only possible by selecting it first; the header
+             menu is where you are already pointing at the column. -->
+        <ContextMenu.Sub>
+          <ContextMenu.SubTrigger>
+            <Copy />
+            {$t('menu.copy')}
+          </ContextMenu.SubTrigger>
+          <ContextMenu.SubContent class="min-w-48">
+            <ContextMenu.Item onSelect={() => runMenuAction(() => void copyColumnValues(hcol))}>
+              <Copy />
+              All cell values
+              <span class="ml-auto text-ui-3xs tabular-nums text-muted-foreground">
+                {(selected.size > 0 ? selected.size : rows.length).toLocaleString()}
+              </span>
+            </ContextMenu.Item>
+            <ContextMenu.Item onSelect={() => runMenuAction(() => void writeClipboard(hcol))}>
+              <Type />
+              Column name
+            </ContextMenu.Item>
+          </ContextMenu.SubContent>
+        </ContextMenu.Sub>
         {#if hasTableContext}
           <ContextMenu.Separator />
           <ContextMenu.Item onSelect={() => runMenuAction(() => { statsCol = statsCol === hcol ? null : hcol })}>
@@ -6950,7 +8465,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                 </ContextMenu.Item>
               {/each}
             {:else}
-              <div class="px-2 py-1.5 text-ui-2xs italic text-muted-foreground/50">No transforms apply to this column</div>
+              <div class="px-2 py-1.5 text-ui-2xs italic text-muted-foreground">No transforms apply to this column</div>
             {/if}
             {#if colTransforms[hcol]}
               <ContextMenu.Separator />
@@ -6964,7 +8479,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       {:else}
         <ContextMenu.Item onSelect={() => runMenuAction(() => openInInspector(contextRowIdx))}>
           <PanelRight />
-          Open
+          Open row
+        </ContextMenu.Item>
+        <!-- The cell, full size, in the bottom dock. It had a keyboard binding
+             and no way to ask for it with the pointer, which is the hand that is
+             already on a cell when you find out 28px was not enough of it. -->
+        <ContextMenu.Item onSelect={() => runMenuAction(() => openCellEditor(contextRowIdx, contextColIdx))}>
+          <PanelBottom />
+          Preview cell
+          <ContextMenu.Shortcut combo="Shift+Space" />
         </ContextMenu.Item>
         {#if menuForeignKey}
           <ContextMenu.Item
@@ -6979,8 +8502,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               )}
           >
             <ExternalLink />
-            {menuCellNull ? 'Open Tab, value is NULL' : 'Open Tab'}
-            {#if !menuCellNull}<ContextMenu.Shortcut>⌘↵</ContextMenu.Shortcut>{/if}
+            {menuCellNull ? 'Open referenced row, value is NULL' : 'Open referenced row'}
+            {#if !menuCellNull}<ContextMenu.Shortcut combo="Mod+Enter" />{/if}
+          </ContextMenu.Item>
+          <!-- The same target, in a tab of its own. The pointer needs its own way
+               to ask for that: ⇧↵ does it from the keyboard, and "already open"
+               is exactly when you want a second copy rather than a jump. -->
+          <ContextMenu.Item
+            disabled={menuCellNull}
+            onSelect={() =>
+              runMenuAction(() =>
+                onfollowforeignkey({
+                  rowIdx: contextRowIdx,
+                  colIdx: contextColIdx,
+                  newTab: true,
+                }),
+              )}
+          >
+            <ExternalLink />
+            Open in new tab
+            {#if !menuCellNull}<ContextMenu.Shortcut combo="Shift+Enter" />{/if}
           </ContextMenu.Item>
         {/if}
         <ContextMenu.Separator />
@@ -6995,7 +8536,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           >
             <Pencil />
             Edit
-            <ContextMenu.Shortcut>Enter</ContextMenu.Shortcut>
+            <ContextMenu.Shortcut combo="Enter" />
           </ContextMenu.Item>
         {/if}
         {#if menuCellIsArray && menuEditable && !readonly}
@@ -7007,7 +8548,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Item onSelect={() => runMenuAction(() => copyCellValue(contextRowIdx, contextColIdx))}>
           <Copy />
           Copy
-          <ContextMenu.Shortcut>⌘C</ContextMenu.Shortcut>
+          <ContextMenu.Shortcut combo="Mod+C" />
         </ContextMenu.Item>
         <ContextMenu.Sub>
           <ContextMenu.SubTrigger>
@@ -7064,12 +8605,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               >
                 <ListFilter />
                 {menuCellNull ? 'Is NULL' : 'By this value'}
+                <ContextMenu.Shortcut combo="Alt+F" />
               </ContextMenu.Item>
               <ContextMenu.Item
                 onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx], true))}
               >
                 <FilterX />
                 {menuCellNull ? 'Is not NULL' : 'Exclude this value'}
+                <ContextMenu.Shortcut combo="Alt+E" />
               </ContextMenu.Item>
               {#if quickFilter}
                 {#each quickFilter.groups as group, gi (gi)}
@@ -7125,13 +8668,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         {/if}
         <ContextMenu.Separator />
         {#if hasTableContext}
-          <ContextMenu.Item
-            disabled={!menuEditable || menuCellNull || readonly}
-            onSelect={() => runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
-          >
-            <CircleSlash />
-            Set NULL
-          </ContextMenu.Item>
+          {#if menuColNullable}
+            <ContextMenu.Item
+              disabled={!menuEditable || menuCellNull || readonly}
+              onSelect={() => runMenuAction(() => setCellNull(contextRowIdx, contextColIdx))}
+            >
+              <CircleSlash />
+              Set NULL
+            </ContextMenu.Item>
+          {/if}
           {#if selected.size > 1 && selected.has(contextRowIdx)}
             <ContextMenu.Item
               disabled={!menuEditable || menuCellOversize || readonly}
@@ -7147,6 +8692,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRowExpand(contextRowIdx))}>
             <Braces />
             {isRowExpanded(contextRowIdx) ? "Collapse row JSON" : "Expand"}
+            <ContextMenu.Shortcut combo="Mod+E" />
           </ContextMenu.Item>
         {/if}
         <ContextMenu.Item onSelect={() => runMenuAction(() => toggleRow(contextRowIdx))}>
@@ -7154,12 +8700,31 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {selected.has(contextRowIdx) ? "Deselect row" : "Select row"}
         </ContextMenu.Item>
         {#if hasTableContext}
+        <!-- Insert, anchored to the row you clicked. Both open the same draft
+             band under the header - "above" parks this row directly beneath it,
+             "below" parks the next one there, so the new row appears where the
+             label says. -->
+        <ContextMenu.Item
+          disabled={readonly}
+          onSelect={() => runMenuAction(() => openInsertDraft(contextRowIdx))}
+        >
+          <ArrowUpFromLine />
+          Insert row above
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          disabled={readonly}
+          onSelect={() => runMenuAction(() => openInsertDraft(contextRowIdx + 1))}
+        >
+          <ArrowDownFromLine />
+          Insert row below
+        </ContextMenu.Item>
         <ContextMenu.Item
           disabled={readonly}
           onSelect={() => runMenuAction(() => duplicateRow(contextRowIdx))}
         >
           <CopyPlus />
           Duplicate row
+          <ContextMenu.Shortcut combo="Alt+D" />
         </ContextMenu.Item>
         <ContextMenu.Separator />
         {#if pendingDeletes.has(contextRowIdx)}
@@ -7182,7 +8747,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             {selected.size > 1 && selected.has(contextRowIdx)
               ? `Delete ${formatCompactCount(selected.size)} rows`
               : "Delete row"}
-            <ContextMenu.Shortcut>⌘⌫</ContextMenu.Shortcut>
+            <ContextMenu.Shortcut combo="Mod+Backspace" />
           </ContextMenu.Item>
         {/if}
         {/if}
@@ -7205,10 +8770,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       aria-orientation="horizontal"
       aria-label="Resize related rows panel"
       class="absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize"
-      onpointerdown={startFkDockResize}
+      onpointerdown={(e) => startDockResize(e, 'fk')}
     ></div>
     <FkSubviewPanel
       data={fkSubview.data}
+      metrics={gridMetrics}
       fkLabel={fkSubview.label}
       sourceHint={`row ${fkIdx + 1}`}
       onclose={() => { fkSubview = null }}
@@ -7217,12 +8783,46 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (!sv) return
         if (sv.kind === 'reverse' && sv.relInfo) {
           // Reverse FK: navigate to fromTable with filter
-          onfollowforeignkey({ rowIdx: fkIdx, colIdx: 0, reverseRel: sv.relInfo, row: rows[fkIdx] })
+          openReverseFkFullView(fkIdx, sv.relInfo)
         } else {
           // Forward FK: navigate to referenced table via normal FK nav
           onfollowforeignkey({ rowIdx: fkIdx, colIdx: sv.colIdx ?? 0 })
         }
       }}
+    />
+  </div>
+{/if}
+
+<!-- Full-size cell editor, the second dock. Same place, same chrome and same
+     resize as the related-rows panel above - it used to be a centred modal,
+     which covered the rows the value came from and took the window for one
+     field. Mutually exclusive with that panel (see openCellEditor). -->
+{#if cellEditorOpen}
+  <div
+    class="relative z-10 flex shrink-0 flex-col border-t border-border/60 bg-background"
+    style="height:{cellDockHeight}px"
+  >
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize cell editor panel"
+      class="absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize"
+      onpointerdown={(e) => startDockResize(e, 'cell')}
+    ></div>
+    <CellEditorPanel
+      bind:open={cellEditorOpen}
+      colName={cellEditorName}
+      colType={cellEditorType}
+      value={cellEditorValue}
+      sourceHint={cellEditorRow >= 0 ? `row ${cellEditorRow + 1}` : ''}
+      detached={cellEditorDetached}
+      readOnly={readonly || cellEditorDetached || !!cellEditorOversize || !canEditColumn(cellEditorCol)}
+      oversize={cellEditorOversize}
+      truncatedLoad={cellEditorTruncated}
+      onloadfull={onfetchcellvalue && cellEditorRow >= 0 ? loadFullCellValue : null}
+
+      oncommit={commitCellEditor}
     />
   </div>
 {/if}
@@ -7248,6 +8848,101 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     onclose={() => { vcolPanelOpen = false }}
   />
 {/if}
+
+<!-- Right-click on a staged cell.
+     One menu for the whole band, not one `ContextMenu.Root` per cell: the band
+     is a grid, so per-cell roots would mount and tear down a menu per column on
+     every keystroke. This is the same `DropdownMenu` every other menu in the app
+     uses - so it dismisses, traps focus and reads the same - anchored to a
+     zero-size box parked at the pointer instead of to a trigger button. -->
+<DropdownMenu.Root
+  open={draftMenu !== null}
+  onOpenChange={(open) => {
+    if (open) return
+    // `onCloseAutoFocus` fires after `draftMenu` is cleared, so stash where the
+    // caret has to go back to before letting go of it.
+    closedFromDraft = draftMenu
+    draftMenu = null
+  }}
+>
+  <DropdownMenu.Trigger
+    aria-hidden="true"
+    tabindex={-1}
+    class="pointer-events-none fixed size-0 opacity-0"
+    style="left:{draftMenu?.x ?? 0}px; top:{draftMenu?.y ?? 0}px"
+  />
+  <DropdownMenu.Content
+    align="start"
+    sideOffset={0}
+    class="min-w-48"
+    onCloseAutoFocus={(e) => {
+      // The anchor is a zero-size box parked at the pointer, so letting the menu
+      // hand focus back to it would strand the caret on nothing. Send it to the
+      // staged field the menu was opened over instead.
+      e.preventDefault()
+      const m = closedFromDraft
+      closedFromDraft = null
+      if (!m) return
+      const band = document.querySelector(`[data-new-row="${m.row}"]`)
+      const el = /** @type {HTMLElement|null} */ (
+        band?.querySelector(`[data-new-row-input="${m.col}"]`) ?? null
+      )
+      el?.focus({ preventScroll: true })
+    }}
+  >
+    {#if draftMenu}
+      {@const menuActions = draftMenuActions}
+      {#each menuActions as action (action.id)}
+        <DropdownMenu.Item onSelect={() => action.run()}>
+          <action.icon />
+          {action.label}
+        </DropdownMenu.Item>
+      {/each}
+      {#if menuActions.length}
+        <DropdownMenu.Separator />
+      {/if}
+      <DropdownMenu.Item
+        onSelect={() => {
+          const v = newRowDrafts?.[draftMenu?.row ?? 0]?.[draftMenu?.col ?? ''] ?? ''
+          void navigator.clipboard?.writeText(v)
+        }}
+      >
+        <Copy />
+        Copy value
+      </DropdownMenu.Item>
+      <DropdownMenu.Item
+        onSelect={async () => {
+          const m = draftMenu
+          if (!m) return
+          try { setNewRowDraft(m.row, m.col, await navigator.clipboard.readText()) } catch { /* no clipboard */ }
+        }}
+      >
+        <ClipboardPaste />
+        Paste
+      </DropdownMenu.Item>
+      {#if draftCount > 1}
+        <DropdownMenu.Item
+          onSelect={() => { if (draftMenu) fillDraftColumn(draftMenu.row, draftMenu.col) }}
+        >
+          <Columns3 />
+          <span data-slot="menu-label">Fill this column in all {draftCount} rows</span>
+        </DropdownMenu.Item>
+      {/if}
+      <DropdownMenu.Separator />
+      <DropdownMenu.Item
+        onSelect={() => {
+          const m = draftMenu
+          if (!m) return
+          const col = columns.find((c) => c.name === m.col)
+          setNewRowDraft(m.row, m.col, col ? defaultInsertDraft(col, primaryKey) : '')
+        }}
+      >
+        <Eraser />
+        Clear
+      </DropdownMenu.Item>
+    {/if}
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 </div>
 
 <Dialog.Root bind:open={tagDialogOpen}>
@@ -7263,11 +8958,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       maxlength="24"
       spellcheck="false"
       placeholder="e.g. PII, money, deprecated"
-      class="h-9 w-full rounded-lg border-2 border-border bg-background px-3 text-ui-sm text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+      class= "field-surface h-9 w-full bg-background px-3 text-ui-sm text-foreground outline-none transition-[border-color,box-shadow]"
       onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmTag(); } else if (e.key === 'Escape') { e.preventDefault(); tagDialogOpen = false; } }}
     />
     <Dialog.Footer class="gap-2 sm:justify-end">
-      <button type="button" class="inline-flex h-8 items-center rounded-lg border border-border/60 px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-muted" onclick={() => (tagDialogOpen = false)}>Cancel</button>
+      <button type= "field-surface button"class="inline-flex h-8 items-center px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-muted"onclick={() => (tagDialogOpen = false)}>Cancel</button>
       <button type="button" class="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90" onclick={confirmTag}>Save</button>
     </Dialog.Footer>
   </Dialog.Content>
@@ -7281,23 +8976,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }}
 />
 
-<!-- Lazy: only loads Monaco the first time a JSON cell is expanded, keeping the
-     editor out of the startup bundle/memory for plain table browsing. -->
-{#if jsonLightbox}
-  {#await import('./JsonCellLightbox.svelte') then { default: JsonCellLightbox }}
-    <JsonCellLightbox
-      data={jsonLightbox}
-      onclose={() => { jsonLightbox = null }}
-    />
-  {/await}
-{/if}
-
 <VectorCellViewer
   bind:open={vectorViewerOpen}
   column={vectorViewerColName}
   dataType={vectorViewerType}
   nullable={vectorViewerNullable}
-  readOnly={readonly}
+  readOnly={vectorViewerReadOnly}
   value={vectorViewerValue}
   onsave={commitVectorViewer}
 />
@@ -7307,7 +8991,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   column={geomViewerColName}
   dataType={geomViewerType}
   nullable={geomViewerNullable}
-  readOnly={readonly}
+  readOnly={geomViewerReadOnly}
   value={geomViewerValue}
   onsave={commitGeometryViewer}
 />
@@ -7320,13 +9004,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   onsave={commitArrayEditor}
 />
 
-<CellQuickLook
-  bind:cell={quickLookCell}
-  {saving}
-  oncancel={cancelQuickLook}
-  onsave={commitQuickLook}
-/>
-
 <!-- DML preview / confirm: shown before any edit, insert, or delete is applied. -->
 <Dialog.Root
   open={dmlPreview !== null}
@@ -7336,13 +9013,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     {#if dmlPreview}
       <Dialog.Header class="gap-1">
         <Dialog.Title class="text-ui-sm">{dmlPreview.title}</Dialog.Title>
-        <Dialog.Description class="text-ui-xs text-muted-foreground/70">
+        <Dialog.Description class="text-ui-xs text-muted-foreground">
           {dmlPreview.description}
         </Dialog.Description>
       </Dialog.Header>
 
       <div class="flex items-center justify-between gap-2">
-        <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/50">
+        <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">
           SQL to run{dmlPreview.statements.length > 1 ? ` · ${dmlPreview.statements.length} statements` : ''}
         </span>
         {#if dmlWasEdited}
@@ -7350,7 +9027,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             type="button"
             onclick={() => { dmlEditedSql = dmlOriginalSql }}
             disabled={dmlPreviewRunning}
-            class="inline-flex items-center gap-1 text-ui-2xs text-muted-foreground/60 transition-transform duration-100 ease-out hover:text-foreground active:scale-[0.97] disabled:opacity-50"
+            class="inline-flex items-center gap-1 text-ui-2xs text-muted-foreground transition-transform duration-100 ease-out hover:text-foreground active:scale-[0.97] disabled:opacity-50"
             title="Discard your edits and restore the generated SQL"
           >
             <RotateCcw class="size-3" />
@@ -7371,7 +9048,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       </div>
 
       {#if dmlWasEdited}
-        <p class="text-ui-2xs text-warning/80">
+        <p class="text-ui-2xs text-warning">
           You edited the SQL, Apply will run it exactly as written.
         </p>
       {/if}

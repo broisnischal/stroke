@@ -4,22 +4,87 @@ import {
   DEFAULT_THEME_ID,
   isDarkTheme,
   THEME_IDS,
+  CYCLE_THEME_IDS,
   normalizeThemeId,
+  getThemeDefinition,
 } from '$lib/themes/registry.js'
 import { zoomState, ZOOM_MIN, ZOOM_MAX } from '$lib/stores/canvas-zoom.svelte.js'
 import { detectOs } from '$lib/platform.js'
+import {
+  UI_TYPE_SCALE,
+  TYPE_SCALE_REF,
+  rootPxFor,
+  ROOT_BASE_PX,
+  ZOOM_STEPS,
+  buildTypeScale,
+} from '$lib/type-scale.js'
 import { SQL_FORMAT_DEFAULTS, normalizeSqlFormat, setSqlFormatOptions } from '$lib/sql-format-options.js'
 
 const STORAGE_KEY = 'stroke:settings'
+
+/**
+ * Whether the OS should own scrolling, when the user has expressed no preference.
+ *
+ * Eased scrolling is ours: wheel deltas are accumulated and `scrollTop` is walked
+ * toward the target one frame at a time. That is a real improvement over a
+ * discrete mouse wheel, which otherwise jumps a fixed notch with no motion at all.
+ *
+ * It is the wrong thing on macOS. The OS has ALREADY applied momentum and rubber
+ * banding to a trackpad's deltas by the time they reach us, so easing them again
+ * is a second filter on top of a filter: every gesture trails its fingers by the
+ * length of our ease, which is exactly what "the scrolling feels laggy" describes.
+ * It also costs a non-passive wheel listener, which puts the main thread in front
+ * of every tick on the one platform whose compositor did not need it.
+ *
+ * So: OS-owned on macOS, eased elsewhere. Either way Settings → Appearance →
+ * Native scrolling is the override, and an explicit choice always wins over this.
+ */
+export function defaultNativeScroll() {
+  return detectOs() === 'macos'
+}
+
+/** One-shot marker for the migration in `loadSettings` (see there for why). */
+const SCROLL_DEFAULT_KEY = 'stroke:scroll-default-v2'
+const scrollDefaultApplied = () => {
+  try { return localStorage.getItem(SCROLL_DEFAULT_KEY) === '1' } catch { return true }
+}
+const markScrollDefaultApplied = () => {
+  try { localStorage.setItem(SCROLL_DEFAULT_KEY, '1') } catch {}
+}
+
+/**
+ * One-shot marker for the monospace-default migration in `loadSettings`.
+ *
+ * A stored blob from before this change carries `font: "geist"` - which is
+ * indistinguishable from someone having chosen Geist on purpose - so the switch
+ * cannot be inferred from the value. It runs once per install: the first load
+ * after the update rewrites a font nobody changed, sets this key, and never
+ * touches the setting again.
+ */
+const FONT_DEFAULT_KEY = 'stroke:font-default-mono'
+const fontDefaultApplied = () => {
+  try { return localStorage.getItem(FONT_DEFAULT_KEY) === '1' } catch { return true }
+}
+const markFontDefaultApplied = () => {
+  try { localStorage.setItem(FONT_DEFAULT_KEY, '1') } catch {}
+}
 
 /** @typedef {import('$lib/themes/registry.js').ThemeId} ThemeId */
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, zebraRows: boolean, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, lazyWideColumns: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, motion: MotionId, zebraRows: boolean, showRowNumbers: boolean, showMenuBar: boolean, numberGrouping: boolean, imagePreview: boolean, openUrlsOnClick: boolean, highlightActiveRow: boolean, gridFontSize: number, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
 
-/** UI zoom scale (font + layout). 1 = 100%. */
-export const ZOOM_STEPS = [0.8, 0.85, 0.9, 0.95, 1, 1.05, 1.1, 1.15, 1.25, 1.5]
+/**
+ * UI type scale in design pixels: `[step, font-size, line-height?]`, matching
+ * DESIGN_SYSTEM.md §4. applySettings() rounds each step to a whole pixel for the
+ * active base size and zoom, then publishes it as `--fs-<step>` / `--lh-<step>`;
+ * app.css's `.text-ui-*` classes read those vars. The rounding lives here rather
+ * than in a CSS calc so a non-14px base can never push a step off the pixel grid.
+ * The `15` step exists only to back the legacy `text-[15px]` compatibility class.
+ */
+
+export { ZOOM_STEPS }
 const DEFAULT_ZOOM = 1
 
 /**
@@ -87,8 +152,20 @@ export const FONT_PRESETS = {
     mono: '"Source Code Pro Variable", ui-monospace, monospace',
   },
 }
-/** @type {FontId} */
-export const DEFAULT_FONT = 'geist'
+/**
+ * The app is monospace by default.
+ *
+ * Everything this tool shows is data - identifiers, values, SQL, types - and a
+ * proportional UI font next to a monospace grid meant two type systems on every
+ * screen. `mono` sets the same JetBrains Mono for `--font-sans` and
+ * `--font-mono`, so the chrome and the data finally agree.
+ *
+ * Existing installs move with it exactly once, through FONT_DEFAULT_KEY below:
+ * an update should land the new look, and someone who has since picked their
+ * own font should keep it.
+ * @type {FontId}
+ */
+export const DEFAULT_FONT = 'mono'
 /** @returns {FontId} */
 function normalizeFont(/** @type {unknown} */ id) {
   return FONT_PRESETS[/** @type {FontId} */ (id)] ? /** @type {FontId} */ (id) : DEFAULT_FONT
@@ -124,17 +201,28 @@ export const ICON_SETS = {
   hugeicons: { label: 'Hugeicons', description: 'Rounded, expressive premium set' },
   phosphor:  { label: 'Phosphor',  description: 'Friendly, geometric open set' },
 }
-/** @type {IconSetId} */
-export const DEFAULT_ICON_SET = 'lucide'
+/**
+ * Hugeicons is the app's look. Lucide remains the safety net rather than the
+ * default: `Icon.svelte` falls back to it per NAME, so the two glyphs this
+ * registry has not mapped yet still render - switching the default can add
+ * coverage gaps over time but never holes.
+ *
+ * Only new installs land here. `iconSet` is persisted, so anyone who has already
+ * run the app keeps whatever is in their settings until they change it.
+ * @type {IconSetId}
+ */
+export const DEFAULT_ICON_SET = 'hugeicons'
 /** @returns {IconSetId} */
 function normalizeIconSet(/** @type {unknown} */ id) {
   return ICON_SETS[/** @type {IconSetId} */ (id)] ? /** @type {IconSetId} */ (id) : DEFAULT_ICON_SET
 }
 
 /**
- * @typedef {'lines'|'dotted'|'dots'|'minimal'|'bordered'|'striped'|'dashed'|'columns'} TableStyleId
+ * @typedef {'lines'|'double'|'hairline'|'none'|'ledger'|'graph'|'bands'|'ticks'
+ *   |'dotted'|'dots'|'minimal'|'bordered'|'striped'|'dashed'|'columns'} TableStyleId
  * @typedef {{ label: string, description: string,
- *   rows: boolean, cols: boolean, dash: number[]|null, dots: boolean, strong?: boolean, zebra?: boolean }} TableStyleDef
+ *   rows: boolean, cols: boolean, dash: number[]|null, dots: boolean, strong?: boolean, zebra?: boolean,
+ *   double?: boolean, ticks?: boolean, groupEvery?: number }} TableStyleDef
  */
 
 /**
@@ -148,6 +236,16 @@ function normalizeIconSet(/** @type {unknown} */ id) {
  */
 export const TABLE_STYLES = {
   lines:    { label: 'Lines',    description: 'Solid grid lines (classic)',        rows: true,  cols: true,  dash: null,   dots: false },
+  double:   { label: 'Double',   description: 'Twin rules - a ledger/print feel',  rows: true,  cols: true,  dash: null,   dots: false, double: true },
+  hairline: { label: 'Hairline', description: 'The finest dash - barely there',    rows: true,  cols: true,  dash: [1, 5], dots: false },
+  none:     { label: 'None',     description: 'No rules at all - text only',       rows: false, cols: false, dash: null,   dots: false },
+  // `groupEvery` draws a stronger rule every Nth row. Paired with rows:true it is
+  // ruled paper; with rows:false it is the only horizontal line on screen, which
+  // is the quietest way to keep a long page countable.
+  ledger:   { label: 'Ledger',   description: 'Row rules, heavier every 5th',     rows: true,  cols: false, dash: null,   dots: false, groupEvery: 5 },
+  graph:    { label: 'Graph',    description: 'Fine grid, heavier every 5th row', rows: true,  cols: true,  dash: null,   dots: false, groupEvery: 5 },
+  bands:    { label: 'Bands',    description: 'One rule every 5 rows, nothing else', rows: false, cols: false, dash: null, dots: false, groupEvery: 5 },
+  ticks:    { label: 'Ticks',    description: 'Row rules with short column ticks', rows: true,  cols: true,  dash: null,   dots: false, ticks: true },
   bordered: { label: 'Bordered', description: 'Bold high-contrast grid lines',     rows: true,  cols: true,  dash: null,   dots: false, strong: true },
   striped:  { label: 'Striped',  description: 'Alternating even/odd row shading',  rows: true,  cols: false, dash: null,   dots: false, zebra: true },
   dotted:   { label: 'Dotted',   description: 'Fine dotted grid, softer feel',     rows: true,  cols: true,  dash: [1, 3], dots: false },
@@ -168,10 +266,71 @@ export const DEFAULT_TABLE_STYLE = 'lines'
  * @type {Record<RowSpacingId, { label: string, height: number }>}
  */
 export const ROW_SPACINGS = {
-  compact: { label: 'Compact', height: 20 },
-  standard: { label: 'Standard', height: 24 },
-  relaxed: { label: 'Relaxed', height: 32 },
+  // 19px is the floor that still clears a 13px glyph's descenders. Below it the
+  // text starts touching the rule beneath it, which reads as a rendering fault
+  // rather than as density.
+  dense: { label: 'Dense', height: 19 },
+  compact: { label: 'Compact', height: 22 },
+  standard: { label: 'Standard', height: 28 },
+  relaxed: { label: 'Relaxed', height: 36 },
+  // Headroom for the top of the grid-text-size range: an 18px value needs a row
+  // taller than `relaxed` before it stops feeling cramped.
+  spacious: { label: 'Spacious', height: 44 },
 }
+/**
+ * How much motion the interface is allowed.
+ *
+ * `system` follows `prefers-reduced-motion`, which is the right default and what
+ * the app did before. The override exists because the OS setting is one switch
+ * for every app on the machine: somebody who wants animation in their window
+ * manager but not in a tool they stare at all day had no way to say so, and
+ * somebody on a locked-down machine could not turn it back on.
+ * @typedef {'system' | 'reduced' | 'full'} MotionId
+ * @type {Record<MotionId, { label: string, description: string }>}
+ */
+export const MOTION_MODES = {
+  system:  { label: 'System',  description: 'Follow the OS reduced-motion setting' },
+  reduced: { label: 'Reduced', description: 'Transitions and animations off' },
+  full:    { label: 'Full',    description: 'Always animate, whatever the OS says' },
+}
+/** @type {MotionId} */
+export const DEFAULT_MOTION = 'system'
+export const MOTION_IDS = /** @type {MotionId[]} */ (Object.keys(MOTION_MODES))
+/** @param {unknown} id @returns {MotionId} */
+function normalizeMotion(id) {
+  return MOTION_MODES[/** @type {MotionId} */ (id)] ? /** @type {MotionId} */ (id) : DEFAULT_MOTION
+}
+
+// NULL rendering deliberately does NOT live here. The "Empty & NULL Markers"
+// extension already owns it - DataTable draws ∅ instead of NULL when that
+// extension is on (see `c.nullishOn`) - and SettingsDialog already surfaces that
+// toggle for discoverability. A second control here would be two switches for
+// one behaviour, which is the trap that comment in SettingsDialog calls out.
+
+// Boolean rendering deliberately does NOT live here either. The "Boolean Glyphs"
+// extension owns it, and it wins by construction: per-cell formatters run AFTER
+// formatCell and replace its output, so a setting here would silently do nothing
+// whenever that extension was on. Surfaced in SettingsDialog as a toggle instead,
+// exactly like the NULL markers above.
+
+/**
+ * Grid text size in px at 100% zoom. The canvas multiplies by the zoom rung, so
+ * this is the base, not the rendered size.
+ *
+ * Bounded rather than free: below 10 the monospace glyphs stop resolving on the
+ * pixel grid, and above 18 the fixed row heights in ROW_SPACINGS clip the
+ * descenders. Anyone wanting more than this wants the app zoom.
+ */
+export const GRID_FONT_MIN = 10
+export const GRID_FONT_MAX = 18
+export const DEFAULT_GRID_FONT_SIZE = 13
+/** @param {unknown} n */
+function normalizeGridFontSize(n) {
+  const v = Math.round(Number(n))
+  if (!Number.isFinite(v)) return DEFAULT_GRID_FONT_SIZE
+  return Math.min(GRID_FONT_MAX, Math.max(GRID_FONT_MIN, v))
+}
+
 /** @type {RowSpacingId} */
 export const DEFAULT_ROW_SPACING = 'standard'
 export const ROW_SPACING_IDS = /** @type {RowSpacingId[]} */ (Object.keys(ROW_SPACINGS))
@@ -303,13 +462,10 @@ export const DEFAULT_SETTINGS = {
   // structure scannable down the left edge, and one embedding value can run to
   // tens of thousands of characters - wrapped, it buries every row around it.
   jsonWordWrap: false,
-  // Off by default, i.e. the grid and the sidebar scroll with the app's own eased
-  // scrolling. Turning it on hands both back to the OS - which is what you want
-  // if your system already does momentum/inertia scrolling well, or if you drive
-  // the app through a trackpad or a screen reader whose behaviour we shouldn't
-  // second-guess.
-  nativeScroll: false,
+  // Platform default, not a fixed one - see `defaultNativeScroll()`.
+  nativeScroll: defaultNativeScroll(),
   rowSpacing: DEFAULT_ROW_SPACING,
+  motion: DEFAULT_MOTION,
   // SQL formatter preferences. Defaults live with the formatter (format-sql.js)
   // so there is one source for what a valid option set is.
   sqlFormat: { ...SQL_FORMAT_DEFAULTS },
@@ -317,6 +473,13 @@ export const DEFAULT_SETTINGS = {
   // shade alternate rows as part of their look, and this turns the same shading
   // on for any of the others without changing the separators you picked.
   zebraRows: false,
+  showRowNumbers: false,
+  showMenuBar: true,
+  numberGrouping: false,
+  imagePreview: true,
+  openUrlsOnClick: true,
+  highlightActiveRow: true,
+  gridFontSize: DEFAULT_GRID_FONT_SIZE,
   // Off by default: every executed statement is already in Query History, and
   // saving each one would bury the handful you deliberately kept. On, a run that
   // succeeded is filed under Saved Queries too, deduplicated by its SQL.
@@ -326,6 +489,11 @@ export const DEFAULT_SETTINGS = {
   // or anything about a connection. See src/lib/telemetry.js.
   telemetry: true,
   liveModeEnabled: false,
+  // On by default. A column averaging half a megabyte a row is fetched as a
+  // size, and its value is loaded per cell on demand - the difference between a
+  // table opening in a second and in eleven. Off restores the old behaviour:
+  // every value on the page, whatever it costs.
+  lazyWideColumns: true,
   nullSortOrder: DEFAULT_NULL_SORT,
   agentChatFontSize: DEFAULT_AGENT_CHAT_FONT,
   agentCodeFontSize: DEFAULT_AGENT_CODE_FONT,
@@ -345,6 +513,8 @@ export const appFont = writable(/** @type {FontId} */ (DEFAULT_FONT))
 
 /** Reactive app icon style (synced by applySettings). */
 export const appIconStyle = writable(/** @type {IconStyleId} */ (DEFAULT_ICON_STYLE))
+/** Reactive motion preference. */
+export const appMotion = writable(/** @type {MotionId} */ (DEFAULT_MOTION))
 
 /** Reactive app icon set / family (synced by applySettings). */
 export const appIconSet = writable(/** @type {IconSetId} */ (DEFAULT_ICON_SET))
@@ -377,6 +547,20 @@ export const appRowSpacing = writable(/** @type {RowSpacingId} */ (DEFAULT_ROW_S
 
 /** Reactive: shade alternate grid rows regardless of the style preset. */
 export const appZebraRows = writable(false)
+/** Row-number gutter in the data grid. Off by default: it is a reading aid, not
+ *  data, and it costs horizontal space on every table. */
+export const appRowNumbers = writable(false)
+/** File/Edit/View/Tools/Help in the title bar. On by default; off gives the
+ *  window title bar back to the drag region and the tab strip. */
+export const appMenuBar = writable(true)
+/** Grid value rendering - read by the canvas renderer on every paint. */
+export const appNumberGrouping = writable(false)
+/** Fetch and draw thumbnails for image-URL cells. Off also stops the FETCH. */
+export const appImagePreview = writable(true)
+/** Whether a click on a URL cell leaves the app to open it. */
+export const appOpenUrlsOnClick = writable(true)
+export const appHighlightActiveRow = writable(true)
+export const appGridFontSize = writable(DEFAULT_GRID_FONT_SIZE)
 
 /** Reactive: file every successful run under Saved Queries as well as History. */
 export const appAutoSaveQueries = writable(false)
@@ -410,6 +594,11 @@ const LAST_LIGHT_KEY = 'stroke:last-light-theme'
 
 /** @param {ThemeId} id */
 function saveLastForMode(id) {
+  // A hidden theme is never remembered. The easter egg is a dark theme, so
+  // wearing it once made it the theme ⌘M returned to every time you toggled back
+  // to dark - you would have to escape it twice. You can still switch INTO it
+  // from Appearance and toggle away from it; it just is not what "dark" means.
+  if (getThemeDefinition(id)?.hidden) return
   try {
     if (isDarkTheme(id)) localStorage.setItem(LAST_DARK_KEY, id)
     else                  localStorage.setItem(LAST_LIGHT_KEY, id)
@@ -465,29 +654,20 @@ function systemPreferredTheme() {
   return DEFAULT_THEME_ID
 }
 
-/**
- * Windows renders the UI a touch small at 100% (higher default DPI handling than
- * macOS), so new installs there default to 125%. Other platforms keep 100%.
- * First-launch only - the user's saved zoom always wins afterwards.
- * @returns {number}
- */
-function defaultZoomForPlatform() {
-  try {
-    if (detectOs() === 'windows' && ZOOM_STEPS.includes(1.25)) return 1.25
-  } catch {}
-  return DEFAULT_ZOOM
-}
-
 /** @returns {AppSettings} */
 export function loadSettings() {
   if (_settingsCache) return { ..._settingsCache }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
+      markScrollDefaultApplied()
+      markFontDefaultApplied()
       _settingsCache = {
         ...DEFAULT_SETTINGS,
         theme: systemPreferredTheme(),
-        zoom: defaultZoomForPlatform(),
+        // 100% is already the comfortable size on every platform (see
+        // ROOT_BASE_PX in type-scale.js), so nobody starts off-rung.
+        zoom: DEFAULT_ZOOM,
       }
       return { ..._settingsCache }
     }
@@ -510,7 +690,14 @@ export function loadSettings() {
     const launchAtLogin = parsed.launchAtLogin === true
     const autoReconnectOnStartup = parsed.autoReconnectOnStartup !== false
     const previewDmlBeforeApply = parsed.previewDmlBeforeApply !== false
-    const font = normalizeFont(parsed.font)
+    let font = normalizeFont(parsed.font)
+    if (!fontDefaultApplied()) {
+      // Only the OLD default is rewritten. Any other value is a choice, and the
+      // whole point of the marker is that this cannot run twice - so someone who
+      // sets Geist after the update keeps it.
+      if (font === 'geist') font = DEFAULT_FONT
+      markFontDefaultApplied()
+    }
     const iconStyle = normalizeIconStyle(parsed.iconStyle)
     const iconSet = normalizeIconSet(parsed.iconSet)
     const tableStyle = normalizeTableStyle(parsed.tableStyle)
@@ -529,12 +716,34 @@ export function loadSettings() {
     const telemetry = parsed.telemetry !== false
     const cmdkAiEnabled = parsed.cmdkAiEnabled === true
     const jsonWordWrap = parsed.jsonWordWrap === true
-    const nativeScroll = parsed.nativeScroll === true
+    // `saveSettings` writes the whole object, so an existing install has the OLD
+    // default (`false`) stored as if it were a choice - there is no way to tell
+    // "the user picked eased" from "eased is what shipped". The marker below is
+    // what distinguishes them: it is stamped the first time this build resolves
+    // the setting, so the platform default is applied exactly once, and anything
+    // the user picks after that is a real choice and is left alone.
+    let nativeScroll = typeof parsed.nativeScroll === 'boolean' ? parsed.nativeScroll : defaultNativeScroll()
+    if (!scrollDefaultApplied()) {
+      nativeScroll = defaultNativeScroll()
+      markScrollDefaultApplied()
+    }
     const rowSpacing = normalizeRowSpacing(parsed.rowSpacing)
+    const motion = normalizeMotion(parsed.motion)
     const sqlFormat = normalizeSqlFormat(parsed.sqlFormat)
     const zebraRows = parsed.zebraRows === true
+    const showRowNumbers = parsed.showRowNumbers === true
+    const showMenuBar = parsed.showMenuBar !== false
+    const numberGrouping = parsed.numberGrouping === true
+    // Both default ON - this is what the grid already did - so an absent key must
+    // read as true, not false.
+    const imagePreview = parsed.imagePreview !== false
+    const openUrlsOnClick = parsed.openUrlsOnClick !== false
+    // Defaults true, so an absent key must not read as false.
+    const highlightActiveRow = parsed.highlightActiveRow !== false
+    const gridFontSize = normalizeGridFontSize(parsed.gridFontSize)
     const autoSaveQueries = parsed.autoSaveQueries === true
     const liveModeEnabled = parsed.liveModeEnabled === true
+    const lazyWideColumns = parsed.lazyWideColumns !== false
     const nullSortOrder = NULL_SORT_IDS.includes(parsed.nullSortOrder) ? parsed.nullSortOrder : DEFAULT_NULL_SORT
     const agentChatFontSize = migrateAgentFont(parsed.agentChatFontSize, LEGACY_AGENT_CHAT_FONT, DEFAULT_AGENT_CHAT_FONT)
     const agentCodeFontSize = migrateAgentFont(parsed.agentCodeFontSize, LEGACY_AGENT_CODE_FONT, DEFAULT_AGENT_CODE_FONT)
@@ -542,7 +751,7 @@ export function loadSettings() {
     const agentShowQueryCards = parsed.agentShowQueryCards !== false
     const agentWebAccess = parsed.agentWebAccess === true
     const tableTextAlign = TABLE_ALIGN_IDS.includes(parsed.tableTextAlign) ? parsed.tableTextAlign : DEFAULT_TABLE_ALIGN
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, zebraRows, autoSaveQueries, sqlFormat }
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, lazyWideColumns, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, motion, zebraRows, showRowNumbers, showMenuBar, numberGrouping, imagePreview, openUrlsOnClick, highlightActiveRow, gridFontSize, autoSaveQueries, sqlFormat }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -574,6 +783,12 @@ function setStyleVar(el, prop, value) {
 }
 /** @param {HTMLElement} el @param {string} name @param {string} value */
 function setAttr(el, name, value) {
+  // null removes the attribute: "follow the system" has to be the ABSENCE of an
+  // override, not a third value CSS would have to know about.
+  if (value === null) {
+    if (el.hasAttribute(name)) el.removeAttribute(name)
+    return
+  }
   if (el.getAttribute(name) !== value) el.setAttribute(name, value)
 }
 /** @param {import('svelte/store').Writable<any>} store @param {any} value */
@@ -595,19 +810,36 @@ export function applySettings(settings) {
   setMode(dark ? 'dark' : 'light')
   setStore(appThemeId, theme)
   setStore(isCurrentThemeDark, dark)
-  // Linux/WebKitGTK at 1x DPI: 14px strokes are too thin for reliable readability.
-  // Bump the base from 14 → 15px so the zoom ladder scales from a legible root.
-  // The canvas table reads --app-font-size, so it scales with zoom automatically.
-  const basePx = root.dataset.os === 'linux' ? 15 : 14
+  const rootPx = rootPxFor(zoom)
+
+  // Every type step is rounded to a whole pixel against that root. Resolving the
+  // scale in CSS as `calc(N / 14 * 1rem)` only landed on whole pixels when the
+  // root happened to be 14px; anywhere else a 13px caption came out fractional
+  // and WebKit rasterised it off the pixel grid, which is what made UI text look
+  // soft. The canvas table reads --app-font-size, so it follows automatically.
+  const scale = buildTypeScale(rootPx)
   setStyleVar(root, '--app-zoom', String(zoom))
-  setStyleVar(root, '--app-font-size', `${Math.round(basePx * zoom)}px`)
+  setStyleVar(root, '--app-font-size', `${rootPx}px`)
+  // The ratio the UI actually renders at, which is the rounded root over the
+  // base - not `zoom`, which is the rung's nominal label and can sit a few
+  // tenths of a pixel away from it. Draggable panel widths are stored as px at
+  // 100% and multiplied by this, so a sidebar grows with the text inside it
+  // instead of clipping its own labels at the high rungs.
+  const appScale = rootPx / ROOT_BASE_PX
+  setStyleVar(root, '--app-scale', String(appScale))
+  for (const [step, size] of scale) setStyleVar(root, `--fs-${step}`, `${size}px`)
+  for (const [step, , leading] of UI_TYPE_SCALE) {
+    if (!leading) continue
+    const lh = Math.max(1, Math.round((leading * rootPx) / TYPE_SCALE_REF))
+    setStyleVar(root, `--lh-${step}`, `${lh}px`)
+  }
 
   // Monaco editors read --editor-font-size / --editor-line-height directly (Monaco
   // takes pixel values, not CSS units, so it can't inherit --app-font-size). Scale
   // them off the same base + zoom so the editor grows in lockstep with the UI.
   // The appZoom subscription in monaco-env.js pushes these to live editor instances.
-  setStyleVar(root, '--editor-font-size', `${Math.round(basePx * zoom)}px`)
-  setStyleVar(root, '--editor-line-height', `${Math.round(basePx * 1.5 * zoom)}px`)
+  setStyleVar(root, '--editor-font-size', `${rootPx}px`)
+  setStyleVar(root, '--editor-line-height', `${Math.round(rootPx * 1.5)}px`)
   setStore(appZoom, zoom)
 
   // Font family - overrides the stylesheet :root defaults inline (inline style
@@ -628,6 +860,12 @@ export function applySettings(settings) {
 
   // Icon weight - a single [data-icon-style] attribute drives the global Lucide
   // stroke-width rule in app.css. No per-icon or per-component changes needed.
+  // Motion preference. `system` leaves the attribute off so only the media
+  // query in app.css decides; the other two override it in either direction.
+  const motion = normalizeMotion(settings.motion)
+  setAttr(root, 'data-motion', motion === 'system' ? null : motion)
+  setStore(appMotion, motion)
+
   const iconStyle = normalizeIconStyle(settings.iconStyle)
   setAttr(root, 'data-icon-style', iconStyle)
   setStore(appIconStyle, iconStyle)
@@ -648,6 +886,13 @@ export function applySettings(settings) {
   // Push formatter prefs into the shared option holder that format-sql.js reads.
   setSqlFormatOptions(settings.sqlFormat)
   setStore(appZebraRows, settings.zebraRows === true)
+  setStore(appRowNumbers, settings.showRowNumbers === true)
+  setStore(appMenuBar, settings.showMenuBar !== false)
+  setStore(appNumberGrouping, settings.numberGrouping === true)
+  setStore(appImagePreview, settings.imagePreview !== false)
+  setStore(appOpenUrlsOnClick, settings.openUrlsOnClick !== false)
+  setStore(appHighlightActiveRow, settings.highlightActiveRow !== false)
+  setStore(appGridFontSize, normalizeGridFontSize(settings.gridFontSize))
   setStore(appAutoSaveQueries, settings.autoSaveQueries === true)
   setStore(appLiveMode, settings.liveModeEnabled === true)
   setStore(appAgentQueryCards, settings.agentShowQueryCards !== false)
@@ -667,7 +912,15 @@ export function applySettings(settings) {
   // Drop the legacy per-table key - it drifted from settings.zoom and made only
   // the grid look huge/blurry while the sidebar stayed at normal scale.
   try { localStorage.removeItem('stroke:canvas-zoom') } catch {}
-  const canvasZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom))
+  // `appScale`, NOT `zoom`. The canvas takes its FONTS from a DOM probe, which
+  // resolves against --app-font-size, i.e. the rounded root over the base. Its
+  // GEOMETRY (row height, padding, icons) scales by this number. Feeding it the
+  // rung's nominal label instead made the two disagree wherever rounding moved
+  // the root off the label: at the 90% rung the root is 14px, so text rendered
+  // at 87.5% inside rows that shrank to 90%, and at 110% text grew 12.5% inside
+  // rows that grew 10% - text gaining on its row in BOTH directions, which is
+  // what made zooming look asymmetric.
+  const canvasZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, appScale))
   if (zoomState.value !== canvasZoom) zoomState.value = canvasZoom
   // Webview page-zoom reset is an IPC round-trip - only needed when zoom changed
   // (or on the first apply, to undo any stale native zoom from a prior session).
@@ -723,6 +976,24 @@ function handleZoomKeydown(e) {
 }
 
 /**
+ * Surfaces that do their own zooming.
+ *
+ * The blockers below run in the CAPTURE phase and call
+ * `stopImmediatePropagation()`, so anything inside the app that wants to zoom
+ * its own content never sees the event at all - it cannot opt out from its own
+ * handler, because its handler does not run. `.mermaid-canvas` was named here
+ * for exactly that reason; `[data-zoom-surface]` is the same escape hatch
+ * without a component's class name in a store (the media lightbox needs it for
+ * Ctrl+scroll and for trackpad pinch, which is what made zooming an image
+ * preview do nothing at all).
+ * @param {Event} e
+ */
+function ownsItsZoom(e) {
+  const t = /** @type {Element | null} */ (e.target)
+  return !!t?.closest?.('[data-zoom-surface], .mermaid-canvas')
+}
+
+/**
  * Block every Ctrl/Cmd + scroll zoom path. Zoom is keyboard-only (Cmd +/-/0).
  * macOS trackpad pinch arrives as ctrl+wheel near column resize handles and
  * page-zooms the webview (devicePixelRatio drift → canvas looks huge/blurry
@@ -732,8 +1003,7 @@ function handleZoomKeydown(e) {
 function blockNativeScrollZoom(e) {
   const we = /** @type {WheelEvent} */ (e)
   if (!(we.ctrlKey || we.metaKey)) return
-  // Let mermaid diagrams handle their own Ctrl+scroll zoom.
-  if (/** @type {Element} */ (e.target)?.closest?.('.mermaid-canvas')) return
+  if (ownsItsZoom(e)) return
   e.preventDefault()
   e.stopImmediatePropagation()
   resetWebviewZoom()
@@ -744,7 +1014,7 @@ function blockNativeScrollZoom(e) {
  * @param {Event} e
  */
 function handleZoomGesture(e) {
-  if (/** @type {Element} */ (e.target)?.closest?.('.mermaid-canvas')) return
+  if (ownsItsZoom(e)) return
   e.preventDefault()
   e.stopImmediatePropagation()
   resetWebviewZoom()
@@ -797,6 +1067,12 @@ export function decreaseZoom() {
 }
 
 export function resetZoom() {
+  // Also clear any webview zoom. That is a second, independent scale (WKWebView
+  // pinch magnification, or Tauri's page-zoom polyfill) which the app never sets
+  // on purpose but can drift into. Resetting only the app zoom left the window
+  // still magnified with no way back, and Cmd+0 is the one gesture that has to
+  // always mean "put it back".
+  resetWebviewZoom()
   return updateSettings({ zoom: DEFAULT_ZOOM })
 }
 
@@ -804,7 +1080,12 @@ export function resetZoom() {
 export function cycleTheme() {
   const current = loadSettings()
   const dark = isDarkTheme(current.theme)
-  const sameMode = THEME_IDS.filter(id => isDarkTheme(id) === dark)
+  // `CYCLE_THEME_IDS`, not every theme: the hidden one is an easter egg, and
+  // cycling used to deal it out like any other. Standing on it still works -
+  // `indexOf` returns -1 and the next step lands on the first real theme, which
+  // is the way out.
+  const sameMode = CYCLE_THEME_IDS.filter(id => isDarkTheme(id) === dark)
+  if (!sameMode.length) return current
   const idx = sameMode.indexOf(current.theme)
   const next = sameMode[(idx + 1) % sameMode.length]
   return updateSettings({ theme: next })

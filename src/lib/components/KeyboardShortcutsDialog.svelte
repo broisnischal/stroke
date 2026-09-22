@@ -14,6 +14,7 @@
   import X from "@lucide/svelte/icons/x";
 
   import { SHORTCUT_GROUPS, keycaps, comboText, IS_MAC } from "$lib/shortcuts.js";
+  import Kbd from "./Kbd.svelte";
 
   let { open = $bindable(false) } = $props();
 
@@ -101,8 +102,14 @@
 {#if open}
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- Inset below the title bar and above the status bar, like the connection
+       manager. Covering the window chrome took the menu bar, the window controls
+       and the drag region with it - so the one dialog that exists to teach you
+       the app's keys hid the app while you read them, and left nothing to drag
+       the window by. -->
   <div
-    class="fixed inset-0 z-50 flex flex-col bg-background"
+    style="top: var(--app-titlebar-h, 38px); bottom: var(--app-statusbar-h, 0px);"
+    class="fixed inset-x-0 z-50 flex flex-col bg-background"
     role="document"
     tabindex="-1"
     onkeydown={handleGlobalKey}
@@ -111,11 +118,11 @@
     <div class="flex shrink-0 items-center gap-4 border-b border-border/40 px-5 py-3">
       <div class="flex items-center gap-3 min-w-0 flex-1">
         <div class="flex size-7 shrink-0 items-center justify-center rounded-md border border-border/50 bg-muted/60">
-          <Keyboard class="size-3.5 text-muted-foreground/70" />
+          <Keyboard class="size-3.5 text-muted-foreground" />
         </div>
         <div>
           <h1 class="text-ui-sm font-semibold tracking-tight">Keyboard Shortcuts</h1>
-          <p class="text-ui-2xs text-muted-foreground/50 leading-none mt-0.5">
+          <p class="text-ui-2xs text-muted-foreground leading-none mt-0.5">
             {mod} on {isMac ? "macOS" : "Windows/Linux"} · {mod}F to search
           </p>
         </div>
@@ -123,18 +130,18 @@
 
       <!-- Search -->
       <div class="relative w-52 shrink-0">
-        <Search class="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground/35" />
+        <Search class="pointer-events-none absolute top-1/2 left-2.5 size-3 -translate-y-1/2 text-muted-foreground" />
         <input
           bind:this={searchEl}
           type="text"
           placeholder="Search shortcuts…"
           bind:value={query}
-          class="h-7 w-full rounded-lg border-2 border-border bg-muted/25 pl-7 pr-3 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/30 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:bg-muted/50 transition-colors"
+          class= "field-surface h-7 w-full bg-muted/25 pl-7 pr-3 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground focus:bg-muted/50 transition-colors"
         />
         {#if query}
           <button
             type="button"
-            class="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground/35 hover:text-muted-foreground transition-colors"
+            class="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-muted-foreground transition-colors"
             onclick={() => (query = "")}
           >
             <X class="size-3" />
@@ -144,7 +151,7 @@
 
       <button
         type="button"
-        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         onclick={() => (open = false)}
         aria-label="Close"
         title="Close (Esc)"
@@ -175,13 +182,13 @@
               <Icon
                 class={cn(
                   "size-3.5 shrink-0 transition-colors",
-                  active ? "text-foreground/80" : "text-muted-foreground/50 group-hover:text-muted-foreground/70",
+                  active ? "text-foreground/80" : "text-muted-foreground group-hover:text-muted-foreground",
                 )}
               />
               {group.label}
               <span class={cn(
                 "ml-auto text-ui-3xs tabular-nums transition-colors",
-                active ? "text-muted-foreground/70" : "text-muted-foreground/30 group-hover:text-muted-foreground/50",
+                active ? "text-muted-foreground" : "text-muted-foreground group-hover:text-muted-foreground",
               )}>
                 {group.shortcuts.length}
               </span>
@@ -195,9 +202,9 @@
         {#if displayGroups.length === 0}
           <div class="flex flex-col items-center gap-3 py-20 text-center">
             <div class="flex size-10 items-center justify-center rounded-full border border-border/30 bg-muted/30">
-              <Search class="size-4 text-muted-foreground/30" />
+              <Search class="size-4 text-muted-foreground" />
             </div>
-            <p class="text-ui-sm text-muted-foreground/50">No shortcuts match <span class="text-foreground/60">"{query}"</span></p>
+            <p class="text-ui-sm text-muted-foreground">No shortcuts match <span class="text-foreground/60">"{query}"</span></p>
           </div>
         {:else}
           <div class={cn(isSearching ? "divide-y divide-border/30" : "")}>
@@ -207,8 +214,8 @@
 
                 {#if isSearching}
                   <div class="mb-4 flex items-center gap-2">
-                    <Icon class="size-3.5 text-muted-foreground/40" />
-                    <span class="text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground/40">
+                    <Icon class="size-3.5 text-muted-foreground" />
+                    <span class="text-ui-2xs font-semibold uppercase tracking-widest text-muted-foreground">
                       {group.label}
                     </span>
                   </div>
@@ -227,14 +234,10 @@
                         {shortcut.desc}
                       </span>
 
-                      <span class="flex shrink-0 items-center gap-1">
-                        {#each caps as key, ki (ki)}
-                          <kbd>{key}</kbd>
-                          {#if ki < caps.length - 1}
-                            <span class="text-ui-3xs text-muted-foreground/20 select-none">+</span>
-                          {/if}
-                        {/each}
-                      </span>
+                      <!-- No `+` between the caps: the separator was as wide as
+                           the caps at this size, and three chips in a row already
+                           read as one chord. -->
+                      <Kbd keys={caps} size="md" class="gap-1" />
                     </li>
                   {/each}
                 </ul>

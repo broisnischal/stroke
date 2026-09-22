@@ -52,6 +52,29 @@ export function currentDatabaseKey(conn) {
 }
 
 /**
+ * Drop entries that repeat a key.
+ *
+ * Two databases cannot share a name, so a duplicate here is always a decoding
+ * fault upstream - and one that used to crash the whole sidebar: the list is
+ * rendered by a keyed `{#each}`, and Svelte throws `each_key_duplicate` rather
+ * than render two rows with one key. MySQL's `SHOW DATABASES` typed its column
+ * as VARBINARY, so every name decoded to the placeholder `"[18 bytes]"` and the
+ * panel died on the second row. The decoder is fixed; this keeps a switcher
+ * that merely looks wrong from taking the panel with it.
+ * @template {{ key: string }} T
+ * @param {T[]} entries
+ * @returns {T[]}
+ */
+function dedupeByKey(entries) {
+  const seen = new Set()
+  return entries.filter((e) => {
+    if (seen.has(e.key)) return false
+    seen.add(e.key)
+    return true
+  })
+}
+
+/**
  * Databases reachable from this connection, sorted by name. Returns [] rather
  * than throwing: a switcher that cannot list is an empty switcher, not a broken
  * screen, and the caller has no better recovery than showing nothing.
@@ -70,12 +93,12 @@ export async function listDatabases(conn) {
       const result = await executeSql(
         `SELECT datname FROM pg_catalog.pg_database WHERE datistemplate = false ORDER BY datname`,
       )
-      return (result?.rows ?? []).map((r) => ({ key: String(r[0]), label: String(r[0]) }))
+      return dedupeByKey((result?.rows ?? []).map((r) => ({ key: String(r[0]), label: String(r[0]) })))
     }
     if (kind === 'mysql') {
       // pg_catalog does not exist here - MySQL/MariaDB list through SHOW.
       const result = await executeSql('SHOW DATABASES')
-      return sortByLabel((result?.rows ?? []).map((r) => ({ key: String(r[0]), label: String(r[0]) })))
+      return sortByLabel(dedupeByKey((result?.rows ?? []).map((r) => ({ key: String(r[0]), label: String(r[0]) }))))
     }
     if (kind === 'd1' && conn.accountId) {
       // OAuth D1 connections keep the token in the Cloudflare token store rather

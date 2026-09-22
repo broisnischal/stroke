@@ -232,6 +232,21 @@ pub struct TableRows {
     /// When a COUNT(*) is also run, the row SELECT and the COUNT are joined with
     /// a newline (row SELECT first).
     pub sql: String,
+    /// Columns this page fetched as a preview rather than as a value, with the
+    /// average size that earned them the treatment. Empty on every ordinary
+    /// table. The UI says so out loud - a column quietly showing `287 KB`
+    /// instead of its contents is a bug report waiting to happen.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub preview_columns: Vec<PreviewColumn>,
+}
+
+/// A column fetched as a preview, and why.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewColumn {
+    pub name: String,
+    /// Average bytes per value, from `pg_stats`.
+    pub avg_bytes: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -247,7 +262,7 @@ pub struct SqlResult {
     pub sql: String,
 }
 
-fn pg_type_label(type_name: &str) -> String {
+pub(crate) fn pg_type_label(type_name: &str) -> String {
     let name = type_name;
     match name {
         "VARCHAR" | "CHAR" | "BPCHAR" => {
@@ -328,7 +343,20 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
         "BOOL" => try_get!(bool),
         "INT2" => try_get!(i16),
         "INT4" => try_get!(i32),
-        "INT8" | "OID" => try_get!(i64),
+        "INT8" => try_get!(i64),
+        // `oid` is an unsigned 32-bit id, and sqlx decodes it only through its
+        // own `Oid` newtype - `try_get::<i64>` here always failed, so every oid
+        // cell fell through the whole chain to the raw-bytes path and printed as
+        // mojibake or a hex preview. Unwrapped to a plain number so it sorts and
+        // right-aligns like the id it is.
+        "OID" => {
+            if let Ok(v) = row.try_get::<Option<sqlx::postgres::types::Oid>, _>(idx) {
+                return match v {
+                    Some(oid) => json!(oid.0),
+                    None => Value::Null,
+                };
+            }
+        }
         "FLOAT4" => try_get!(f32),
         "FLOAT8" => try_get!(f64),
         "NUMERIC" => try_get_string!(Decimal),
@@ -340,10 +368,15 @@ pub(crate) fn cell_to_json(row: &sqlx::postgres::PgRow, idx: usize) -> Value {
         _ => {}
     }
 
-    // Known text types skip the scalar chain entirely: every arm below would
-    // fail (allocating its error) before the raw-bytes branch decodes them.
-    let known_text = matches!(type_name, "TEXT" | "VARCHAR" | "BPCHAR" | "CHAR" | "NAME");
-    if !known_text {
+    // Types the scalar chain cannot decode skip it entirely: every arm below
+    // would fail (allocating its error) before something further down handles
+    // them. Text types are read from raw bytes; the xid/lsn family is decoded by
+    // pg_ext_types, which the chain would only delay.
+    let skips_scalar_chain = matches!(
+        type_name,
+        "TEXT" | "VARCHAR" | "BPCHAR" | "CHAR" | "NAME" | "XID" | "XID8" | "PG_LSN"
+    );
+    if !skips_scalar_chain {
         try_get!(bool);
         try_get!(i16);
         try_get!(i32);
@@ -640,7 +673,7 @@ fn pg_datetime_cast(data_type: &str) -> Option<&'static str> {
 }
 
 #[derive(Debug, Clone)]
-struct PgColumnMeta {
+pub(crate) struct PgColumnMeta {
     data_type: String,
     udt_schema: Option<String>,
     udt_name: Option<String>,
@@ -700,7 +733,7 @@ impl PgColumnMeta {
         Ok(format!(r#""{column}" = $1"#))
     }
 
-    fn insert_value_sql(&self, bind_idx: u32) -> Result<String, String> {
+    pub(crate) fn insert_value_sql(&self, bind_idx: u32) -> Result<String, String> {
         if self.data_type.eq_ignore_ascii_case("USER-DEFINED") {
             let udt_name = self
                 .udt_name
@@ -731,11 +764,11 @@ pub struct InsertRowResult {
     pub row: Vec<Value>,
 }
 
-struct PgInsertColumnMeta {
-    name: String,
-    data_type: String,
-    optional_when_omitted: bool,
-    pg: PgColumnMeta,
+pub(crate) struct PgInsertColumnMeta {
+    pub(crate) name: String,
+    pub(crate) data_type: String,
+    pub(crate) optional_when_omitted: bool,
+    pub(crate) pg: PgColumnMeta,
 }
 
 fn pg_column_optional_when_omitted(
@@ -757,11 +790,11 @@ fn pg_column_optional_when_omitted(
     nullable
 }
 
-fn is_bytea_type(data_type: &str) -> bool {
+pub(crate) fn is_bytea_type(data_type: &str) -> bool {
     normalize_pg_type(data_type).contains("bytea")
 }
 
-fn validate_typed_value(data_type: &str, value: &Value) -> Result<(), String> {
+pub(crate) fn validate_typed_value(data_type: &str, value: &Value) -> Result<(), String> {
     let t = normalize_pg_type(data_type);
 
     match value {
@@ -905,9 +938,43 @@ fn is_missing_binary_output(err: &str) -> bool {
     err.contains("no binary output function available for type")
 }
 
-/// The columns of a table whose types have no binary output function, in
-/// attribute order. Only consulted after a fetch has already failed with
-/// `is_missing_binary_output`, so an ordinary table never pays for it.
+/// Postgres types whose binary form a cell cannot render, though the server
+/// will happily send it.
+///
+/// The OID-alias family is the whole list. `typsend` for `regproc` is
+/// `regprocsend`, so the fetch succeeds and hands over four big-endian bytes -
+/// which is not text, is not a type the extension decoder models, and so came
+/// out of `cell_to_json` as a hex preview. `pg_aggregate.aggfnoid` read
+/// `\x00000aba` where psql shows `array_agg_transfn`; that name only exists in
+/// the type's *text* output, which is why these are cast rather than decoded.
+pub(crate) const PG_TEXT_ONLY_TYPES: &[&str] = &[
+    "regproc",
+    "regprocedure",
+    "regoper",
+    "regoperator",
+    "regclass",
+    "regcollation",
+    "regtype",
+    "regrole",
+    "regnamespace",
+    "regconfig",
+    "regdictionary",
+];
+
+/// True when a result column's type is one of those - matched on the type name
+/// the driver reports, which is upper-case for types sqlx models and the raw
+/// `typname` for the rest.
+fn pg_type_is_text_only(type_name: &str) -> bool {
+    let lower = type_name.to_ascii_lowercase();
+    PG_TEXT_ONLY_TYPES.contains(&lower.as_str())
+}
+
+/// The columns of a table that have to be read as text, in attribute order.
+///
+/// Two kinds: a type with no binary output function at all, and a type whose
+/// binary output a cell cannot render (`PG_TEXT_ONLY_TYPES`). Cheap to ask for
+/// and only asked when a fetch has already failed, or has already come back
+/// with one of those types in it - an ordinary table never pays for it.
 async fn fetch_text_only_columns(
     pool: &sqlx::PgPool,
     schema: &str,
@@ -923,16 +990,32 @@ async fn fetch_text_only_columns(
         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
         JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
         LEFT JOIN pg_catalog.pg_type b ON b.oid = t.typbasetype
+        -- An array's element type, and that element's base type when it is a
+        -- domain. `_aclitem` has `array_send`, so its own typsend is not 0 and
+        -- the column looked binary-safe - but array_send calls the element's
+        -- send function, and aclitem has none. `pg_class.relacl` is that
+        -- column, and it failed the whole SELECT: "no binary output function
+        -- available for type aclitem", on a table with 30 readable columns.
+        LEFT JOIN pg_catalog.pg_type e
+               ON e.oid = NULLIF(t.typelem, 0) AND t.typcategory = 'A'
+        LEFT JOIN pg_catalog.pg_type eb ON eb.oid = NULLIF(e.typbasetype, 0)
         WHERE n.nspname = $1 AND c.relname = $2
           AND a.attnum > 0 AND NOT a.attisdropped
-          -- typsend = 0 renders as '-': no binary send function. A domain
-          -- inherits its base type's, hence the COALESCE.
-          AND COALESCE(NULLIF(t.typsend, 0), b.typsend, 0) = 0
+          AND (
+            -- typsend = 0 renders as '-': no binary send function. A domain
+            -- inherits its base type's, hence the COALESCE.
+            COALESCE(NULLIF(t.typsend, 0), b.typsend, 0) = 0
+            OR (e.oid IS NOT NULL AND COALESCE(NULLIF(e.typsend, 0), eb.typsend, 0) = 0)
+            -- Sends fine, reads as bytes: the OID-alias family.
+            OR t.typname = ANY($3)
+            OR (e.oid IS NOT NULL AND e.typname = ANY($3))
+          )
         ORDER BY a.attnum
         "#,
     )
     .bind(schema)
     .bind(table)
+    .bind(PG_TEXT_ONLY_TYPES)
     .fetch_all(pool)
     .await
     .map_err(|e| format!("Failed to inspect column types: {e}"))?;
@@ -992,17 +1075,27 @@ async fn text_safe_projection(
     Ok(Some((parts.join(", "), text_only)))
 }
 
-/// Which of `names` are types with no binary output function. Used to decide
-/// what a hand-written query needs cast; asked only after one has already failed.
+/// Which of `names` a hand-written query needs cast to text: no binary output
+/// function, an array whose element has none, or one of the OID aliases whose
+/// binary form a cell cannot render. Same three rules as
+/// `fetch_text_only_columns`, asked by type name rather than by column.
 async fn types_without_binary_output(pool: &sqlx::PgPool, names: &[String]) -> Vec<String> {
     if names.is_empty() {
         return Vec::new();
     }
     sqlx::query_scalar::<_, String>(
-        "SELECT typname::text FROM pg_catalog.pg_type
-         WHERE typname = ANY($1) AND COALESCE(NULLIF(typsend, 0), 0) = 0",
+        "SELECT t.typname::text
+         FROM pg_catalog.pg_type t
+         LEFT JOIN pg_catalog.pg_type e
+                ON e.oid = NULLIF(t.typelem, 0) AND t.typcategory = 'A'
+         WHERE t.typname = ANY($1)
+           AND (COALESCE(NULLIF(t.typsend, 0), 0) = 0
+                OR (e.oid IS NOT NULL AND COALESCE(NULLIF(e.typsend, 0), 0) = 0)
+                OR t.typname = ANY($2)
+                OR (e.oid IS NOT NULL AND e.typname = ANY($2)))",
     )
     .bind(names)
+    .bind(PG_TEXT_ONLY_TYPES)
     .fetch_all(pool)
     .await
     .unwrap_or_default()
@@ -1123,6 +1216,43 @@ fn is_date_only(s: &str) -> bool {
         && b[8..10].iter().all(u8::is_ascii_digit)
 }
 
+/// Whether `v` can be parsed as the type `cast` names.
+///
+/// A filter value is typed by the user, so "asdf" on a uuid column is routine,
+/// not exceptional - but the comparison binds it as `$1::uuid` and Postgres
+/// rejects the whole statement, so the grid showed "invalid input syntax for
+/// type uuid" where it should have shown an empty table. A value that cannot be
+/// parsed also cannot equal any row, which is a *result*, not an error: callers
+/// below turn a `false` here into a constant condition and the query returns
+/// zero rows.
+///
+/// Deliberately permissive about shape, strict only about what Postgres itself
+/// would refuse. Timestamps are left to the server: the accepted grammar is far
+/// wider than anything worth reimplementing here, and a malformed one is rare
+/// enough that erroring is acceptable.
+fn value_parses_as(cast: &str, v: &str) -> bool {
+    let t = v.trim();
+    match cast {
+        "::bigint" => t.parse::<i64>().is_ok(),
+        "::float8" => t.parse::<f64>().is_ok(),
+        "::numeric" => {
+            !t.is_empty()
+                && t.parse::<f64>().is_ok()
+        }
+        "::boolean" => matches!(
+            t.to_ascii_lowercase().as_str(),
+            "t" | "f" | "true" | "false" | "y" | "n" | "yes" | "no" | "on" | "off" | "1" | "0"
+        ),
+        "::uuid" => {
+            // 32 hex digits, with or without the four dashes, optionally braced.
+            let core = t.trim_start_matches('{').trim_end_matches('}');
+            let hex: Vec<char> = core.chars().filter(|c| *c != '-').collect();
+            hex.len() == 32 && hex.iter().all(|c| c.is_ascii_hexdigit())
+        }
+        _ => true,
+    }
+}
+
 fn build_filter_condition(
     builder: &mut QueryBuilder,
     column: &str,
@@ -1133,6 +1263,17 @@ fn build_filter_condition(
 ) -> Result<(), String> {
     let col = quoted_column(column)?;
     let cast = pg_param_cast(data_type);
+    // A value the column's type cannot represent matches nothing, so say that in
+    // SQL rather than letting the cast blow up the statement. `neq` inverts: a
+    // value no row can hold is distinct from every row, so every row matches.
+    if matches!(op, "eq" | "neq" | "gt" | "gte" | "lt" | "lte") {
+        let v = value.unwrap_or("");
+        if !cast.is_empty() && !value_parses_as(cast, v) {
+            let cond = if op == "neq" { "TRUE" } else { "FALSE" };
+            builder.push_condition(cond.to_string(), conjunct);
+            return Ok(());
+        }
+    }
     // A bare date on a timestamp column means "the whole day", handled per-op
     // below (half-open [date, date+1) ranges). Pure `date`/`time` columns and
     // values that carry a time-of-day keep exact comparison.
@@ -1305,29 +1446,42 @@ fn build_any_column_condition(
     Ok(())
 }
 
+/// `search_case_sensitive` picks the OPERATOR, rather than being folded into
+/// the pattern.
+///
+/// The frontend used to express "match case" for Postgres by prefixing the
+/// regex with the ARE option `(?c)` and leaving the operator as `~*`, so the
+/// flag never reached this function at all - Postgres was the one engine whose
+/// case-sensitive substring search was impossible to express (it always
+/// `ILIKE`d), and a pattern-level option is a silent no-op the moment anything
+/// prepends to the pattern. `~` vs `~*` and `LIKE` vs `ILIKE` say the same
+/// thing in a way the query plan and a log line both show.
 pub(super) fn build_where(
     columns: &[String],
     search: Option<&str>,
     search_is_regex: bool,
+    search_case_sensitive: bool,
     filters: &[RowFilter],
 ) -> Result<WhereClause, String> {
     let mut builder = QueryBuilder::new();
 
     if let Some(term) = search.map(str::trim).filter(|s| !s.is_empty()) {
         if search_is_regex {
+            let op = if search_case_sensitive { "~" } else { "~*" };
             let pattern = builder.push_bind(term.to_string());
             let parts: Vec<String> = columns
                 .iter()
-                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ~* {pattern}")))
+                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text {op} {pattern}")))
                 .collect();
             if !parts.is_empty() {
                 builder.push_condition(format!("({})", parts.join(" OR ")), None);
             }
         } else {
+            let op = if search_case_sensitive { "LIKE" } else { "ILIKE" };
             let pattern = builder.push_bind(format!("%{}%", escape_ilike_pattern(term)));
             let parts: Vec<String> = columns
                 .iter()
-                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text ILIKE {pattern} ESCAPE '\\'")))
+                .filter_map(|c| quoted_column(c).ok().map(|col| format!("{col}::text {op} {pattern} ESCAPE '\\'")))
                 .collect();
             if !parts.is_empty() {
                 builder.push_condition(format!("({})", parts.join(" OR ")), None);
@@ -1484,6 +1638,10 @@ pub async fn get_table_rows(
     // NULLS LAST default). Applied on the dialects that support explicit null
     // placement (Postgres, SQLite, D1/libSQL, MySQL); ignored by ClickHouse/etc.
     nulls_order: Option<String>,
+    // When false, wide columns are fetched whole - the behaviour before they
+    // were measured, kept behind a setting for anyone who wants every value on
+    // the page whatever it costs.
+    preview_wide: bool,
 ) -> Result<TableRows, String> {
     if limit > MAX_PAGE_LIMIT {
         return Err(format!("Limit {limit} exceeds the maximum of {MAX_PAGE_LIMIT} rows per page"));
@@ -1514,7 +1672,7 @@ pub async fn get_table_rows(
         }
         ActiveConnection::Clickhouse(cfg) => {
             return super::clickhouse::get_table_rows(
-                &cfg, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
+                &cfg, &schema, &table, limit, offset, search, sort_column, sort_direction, filters, include_meta,
             ).await;
         }
         ActiveConnection::Redis(cfg) => {
@@ -1548,7 +1706,7 @@ pub async fn get_table_rows(
     } else {
         vec![]
     };
-    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, &filters)?;
+    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, search_case_sensitive, &filters)?;
     let order_by = build_order_by(
         &table_columns,
         sort_column.as_deref(),
@@ -1625,7 +1783,33 @@ pub async fn get_table_rows(
             order_by
         );
     }
-    let mut data_sql = format!("SELECT * {data_tail}");
+    // ── Wide columns ship as a preview, not a value ─────────────────────────
+    // A `jsonb` column holding an uploaded file averages half a megabyte a row,
+    // and `SELECT *` over a 200-row page moves ~100MB of it for a grid that can
+    // draw forty characters. `pg_stats` already knows which columns are like
+    // that, so those come back as the oversize sentinel (or, under the cap, as
+    // the value itself) and the bytes never leave the server. Nothing wide =>
+    // no rewrite, and the plain `SELECT *` path is untouched.
+    // A fetch that re-reads the catalog re-reads this too: `include_meta` is the
+    // app's own signal that it does not trust what it holds about this table, and
+    // a projection is built from a column list. Row data is never cached anywhere
+    // in this path - every page is a fresh query - but a stale SELECT LIST would
+    // drop a new column, which looks exactly like stale data to whoever is
+    // looking at it.
+    if include_meta {
+        super::wide_columns::invalidate(&pool, &schema, &table);
+    }
+    let (mut wide_projection, wide) = if preview_wide {
+        super::wide_columns::page_projection(&pool, &schema, &table).await
+    } else {
+        // The setting is off: fetch every column whole, however wide it is.
+        (None, Vec::new())
+    };
+    let wide_names: Vec<String> = wide.iter().map(|w| w.name.clone()).collect();
+    let mut data_sql = match &wide_projection {
+        Some(list) => format!("SELECT {list} {data_tail}"),
+        None => format!("SELECT * {data_tail}"),
+    };
     let data_query = bind_page(&data_sql, &where_clause.binds, keyset_bind.as_ref(), limit, offset);
 
     // Kick the catalog-metadata queries (enums/nullable/pk/fk) off NOW so they run
@@ -1704,6 +1888,19 @@ pub async fn get_table_rows(
         Ok(rows) => rows,
         Err(err) => {
             let msg = err.to_string();
+            // A column the projection names is gone - dropped or renamed since it
+            // was built. Rebuild the page from `SELECT *` rather than showing an
+            // error where the table should be, and drop the cached decision so
+            // the next page builds a current one.
+            if wide_projection.is_some() && (msg.contains("does not exist") || msg.contains("42703")) {
+                super::wide_columns::invalidate(&pool, &schema, &table);
+                wide_projection = None;
+                data_sql = format!("SELECT * {data_tail}");
+                bind_page(&data_sql, &where_clause.binds, keyset_bind.as_ref(), limit, offset)
+                    .fetch_all(&pool)
+                    .await
+                    .map_err(|e| format!("Failed to fetch rows: {e}"))?
+            } else {
             if !is_missing_binary_output(&msg) {
                 return Err(format!("Failed to fetch rows: {msg}"));
             }
@@ -1718,6 +1915,42 @@ pub async fn get_table_rows(
                 }
                 None => return Err(format!("Failed to fetch rows: {msg}")),
             }
+            }
+        }
+    };
+
+    // The other half of the same problem, and the half that does not announce
+    // itself: an OID-alias column sends fine, so the page above succeeded and
+    // every one of its cells is four bytes of hex. Detected from the types the
+    // server just reported rather than from a catalog query, so a table without
+    // one of these columns never asks anything extra - and re-read once, with
+    // those columns cast, because the name is only in the text output.
+    let rows = if !text_only.is_empty()
+        || !rows
+            .first()
+            .map(|r| r.columns().iter().any(|c| pg_type_is_text_only(c.type_info().name())))
+            .unwrap_or(false)
+    {
+        rows
+    } else {
+        match text_safe_projection(&pool, &schema, &table).await {
+            Ok(Some((projection, cols))) => {
+                let retry_sql = format!("SELECT {projection} {data_tail}");
+                match bind_page(&retry_sql, &where_clause.binds, keyset_bind.as_ref(), limit, offset)
+                    .fetch_all(&pool)
+                    .await
+                {
+                    Ok(retried) => {
+                        text_only = cols;
+                        data_sql = retry_sql;
+                        retried
+                    }
+                    // The hex is wrong but it is not nothing; a failed retry
+                    // must not turn a readable page into an error.
+                    Err(_) => rows,
+                }
+            }
+            _ => rows,
         }
     };
 
@@ -1760,6 +1993,15 @@ pub async fn get_table_rows(
             .collect()
     };
 
+    // A stand-in column is a `CASE … END`, so the result set reports it as
+    // `jsonb` whatever the column really is. Put the declared type back, or a
+    // wide `text` column would arrive claiming to hold JSON.
+    for w in &wide {
+        if let Some(info) = columns.iter_mut().find(|c| c.name == w.name) {
+            info.data_type = pg_type_label(&w.type_name);
+        }
+    }
+
     // A re-read page reports its cast columns as `text`. Restore the real type
     // names so the header, the type filters and the cell viewers still see a
     // `raster`/`box2d` column rather than a string one.
@@ -1774,6 +2016,23 @@ pub async fn get_table_rows(
         .iter()
         .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
         .collect();
+    if wide_projection.is_some() {
+        // A stand-in wraps a small value so the CASE can return one type for
+        // both branches; unwrap it here so nothing downstream knows.
+        let wide_idx: Vec<usize> = columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| wide_names.iter().any(|n| n == &c.name))
+            .map(|(i, _)| i)
+            .collect();
+        for row in data.iter_mut() {
+            for &i in &wide_idx {
+                if let Some(v) = row.get_mut(i) {
+                    *v = super::wide_columns::unwrap_inline(std::mem::replace(v, Value::Null));
+                }
+            }
+        }
+    }
     // Backward keyset page was fetched in reverse order - flip it back to the
     // table's display order.
     if keyset_reverse {
@@ -1811,6 +2070,15 @@ pub async fn get_table_rows(
         primary_key,
         foreign_keys,
         sql,
+        // Only what this page actually rewrote - a table with wide columns that
+        // were all hidden or filtered out of the projection reports none.
+        preview_columns: if wide_projection.is_some() {
+            wide.iter()
+                .map(|w| PreviewColumn { name: w.name.clone(), avg_bytes: w.avg_width })
+                .collect()
+        } else {
+            Vec::new()
+        },
     })
 }
 
@@ -1826,6 +2094,9 @@ pub async fn count_table_rows(
     table: String,
     search: Option<String>,
     search_is_regex: bool,
+    // Must mirror the rows query, or the pager counts a different predicate
+    // than the one on screen.
+    search_case_sensitive: bool,
     filters: Option<Vec<RowFilter>>,
 ) -> Result<i64, String> {
     match require_conn(&state)? {
@@ -1843,7 +2114,7 @@ pub async fn count_table_rows(
     } else {
         vec![]
     };
-    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, &filters)?;
+    let where_clause = build_where(&table_columns, search.as_deref(), search_is_regex, search_case_sensitive, &filters)?;
     let table_ref = format!(r#""{schema}"."{table}""#);
 
     const ESTIMATE_THRESHOLD: i64 = 100_000;
@@ -2029,6 +2300,84 @@ pub async fn update_table_cell(
     Ok(())
 }
 
+/// Load the per-column metadata an INSERT needs: declared type, whether the
+/// column can be omitted, and the cast a literal needs to reach that type.
+/// Returns the columns in ordinal order alongside the lookup table.
+///
+/// Shared by the single-row insert and the bulk importer so the two agree on
+/// what a column will accept.
+pub(crate) async fn pg_insert_meta(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    table: &str,
+) -> Result<(Vec<String>, HashMap<String, PgInsertColumnMeta>), String> {
+    validate_ident(schema)?;
+    validate_ident(table)?;
+
+    let meta_rows = sqlx::query(
+        r#"
+        SELECT
+            a.attname::text,
+            CASE WHEN t.typtype IN ('e','c','d') THEN 'USER-DEFINED' ELSE t.typname::text END,
+            NOT a.attnotnull,
+            pg_get_expr(ad.adbin, ad.adrelid),
+            a.attidentity IN ('a', 'd'),
+            tn.nspname::text,
+            t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
+        LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum
+        "#,
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("Failed to load column metadata: {e}"))?;
+
+    if meta_rows.is_empty() {
+        return Err(format!("Table not found: {schema}.{table}"));
+    }
+
+    let mut column_order: Vec<String> = Vec::new();
+    let mut insert_meta: HashMap<String, PgInsertColumnMeta> = HashMap::new();
+
+    for row in &meta_rows {
+        let name: String = row
+            .try_get(0)
+            .map_err(|e| format!("Invalid column name: {e}"))?;
+        let data_type: String = row.try_get(1).unwrap_or_else(|_| "text".into());
+        let is_nullable = row.try_get::<bool, _>(2).unwrap_or(true);
+        let column_default: Option<String> = row.try_get(3).ok();
+        let is_identity = row.try_get::<bool, _>(4).unwrap_or(false);
+        let optional =
+            pg_column_optional_when_omitted(is_nullable, column_default.as_deref(), is_identity, &data_type);
+
+        column_order.push(name.clone());
+        insert_meta.insert(
+            name.clone(),
+            PgInsertColumnMeta {
+                name,
+                data_type: data_type.clone(),
+                optional_when_omitted: optional,
+                pg: PgColumnMeta {
+                    data_type,
+                    udt_schema: row.try_get(5).ok(),
+                    udt_name: row.try_get(6).ok(),
+                },
+            },
+        );
+    }
+
+    Ok((column_order, insert_meta))
+}
+
 pub async fn insert_table_row(
     state: State<'_, DbState>,
     schema: String,
@@ -2074,69 +2423,7 @@ pub async fn insert_table_row(
     }
 
     let pool = require_pool(&state)?;
-    validate_ident(&schema)?;
-    validate_ident(&table)?;
-
-    let meta_rows = sqlx::query(
-        r#"
-        SELECT
-            a.attname::text,
-            CASE WHEN t.typtype IN ('e','c','d') THEN 'USER-DEFINED' ELSE t.typname::text END,
-            NOT a.attnotnull,
-            pg_get_expr(ad.adbin, ad.adrelid),
-            a.attidentity IN ('a', 'd'),
-            tn.nspname::text,
-            t.typname::text
-        FROM pg_catalog.pg_attribute a
-        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
-        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
-        JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
-        LEFT JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
-        WHERE n.nspname = $1 AND c.relname = $2
-          AND a.attnum > 0 AND NOT a.attisdropped
-        ORDER BY a.attnum
-        "#,
-    )
-    .bind(&schema)
-    .bind(&table)
-    .fetch_all(&pool)
-    .await
-    .map_err(|e| format!("Failed to load column metadata: {e}"))?;
-
-    if meta_rows.is_empty() {
-        return Err(format!("Table not found: {schema}.{table}"));
-    }
-
-    let mut column_order: Vec<String> = Vec::new();
-    let mut insert_meta: HashMap<String, PgInsertColumnMeta> = HashMap::new();
-
-    for row in &meta_rows {
-        let name: String = row
-            .try_get(0)
-            .map_err(|e| format!("Invalid column name: {e}"))?;
-        let data_type: String = row.try_get(1).unwrap_or_else(|_| "text".into());
-        let is_nullable = row.try_get::<bool, _>(2).unwrap_or(true);
-        let column_default: Option<String> = row.try_get(3).ok();
-        let is_identity = row.try_get::<bool, _>(4).unwrap_or(false);
-        let optional =
-            pg_column_optional_when_omitted(is_nullable, column_default.as_deref(), is_identity, &data_type);
-
-        column_order.push(name.clone());
-        insert_meta.insert(
-            name.clone(),
-            PgInsertColumnMeta {
-                name,
-                data_type: data_type.clone(),
-                optional_when_omitted: optional,
-                pg: PgColumnMeta {
-                    data_type,
-                    udt_schema: row.try_get(5).ok(),
-                    udt_name: row.try_get(6).ok(),
-                },
-            },
-        );
-    }
+    let (column_order, insert_meta) = pg_insert_meta(&pool, &schema, &table).await?;
 
     let mut col_names: Vec<String> = values.keys().cloned().collect();
     col_names.sort();
@@ -2375,7 +2662,7 @@ WHERE {match_cols}"#,
     Ok(result.rows_affected())
 }
 
-fn bind_typed_value<'a>(
+pub(crate) fn bind_typed_value<'a>(
     q: sqlx::query::Query<'a, sqlx::Postgres, sqlx::postgres::PgArguments>,
     data_type: &str,
     value: &Value,
@@ -2444,7 +2731,7 @@ fn bind_typed_value<'a>(
     }
 }
 
-fn is_row_returning_sql(sql: &str) -> bool {
+pub(crate) fn is_row_returning_sql(sql: &str) -> bool {
     let head = super::sql_util::statement_head(sql);
     matches!(
         head.as_str(),
@@ -2586,7 +2873,7 @@ pub async fn execute_sql_on_conn(
 const EXECUTE_SQL_MAX_ROWS: usize = 1_000_000_000;
 /// Statement timeout for ad-hoc queries (milliseconds). Generous enough for
 /// heavier scans (e.g. tables with large TOASTed JSON columns) to finish.
-const EXECUTE_SQL_TIMEOUT_MS: i64 = 60_000;
+pub(crate) const EXECUTE_SQL_TIMEOUT_MS: i64 = 60_000;
 
 async fn execute_sql_pg(
     pool: &sqlx::PgPool,
@@ -2788,7 +3075,7 @@ fn sql_fragment_is_meaningful(s: &str) -> bool {
 /// inside quoted strings (`'…'` with `''`/`\'` escapes, `"…"`, backticks),
 /// line/block comments, or Postgres dollar-quoted bodies (`$$…$$`, `$tag$…$tag$`).
 /// Comment-only fragments are dropped. Mirrors `src/lib/sql-statements.js`.
-fn split_sql_statements(sql: &str) -> Vec<String> {
+pub(crate) fn split_sql_statements(sql: &str) -> Vec<String> {
     let b = sql.as_bytes();
     let n = b.len();
     let mut out: Vec<String> = Vec::new();
@@ -3217,6 +3504,8 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
         primary_key,
         foreign_keys,
         sql: format!("{rows_sql}\n{count_sql}"),
+        // Remote SQLite (D1 / libSQL) ships whole values.
+        preview_columns: Vec::new(),
     })
 }
 
@@ -3398,6 +3687,147 @@ pub struct ColumnStats {
     pub min: Option<Value>,
     pub max: Option<Value>,
     pub avg: Option<f64>,
+}
+
+/// One cell's full value, fetched on demand.
+///
+/// `bytes` is what the column actually holds; `text` is what fits under the
+/// caller's ceiling. A browse page never carries a value this size - wide
+/// columns arrive as a preview (see `wide_columns`) - so this is the one path
+/// that can produce the whole thing, and it only runs when someone asks for it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CellValueResult {
+    pub text: String,
+    pub bytes: i64,
+    /// The value was longer than the ceiling and `text` stops early.
+    pub truncated: bool,
+}
+
+/// Hard ceiling on a single fetched value, whatever the caller asks for. Past
+/// this, a webview is not the right place to read it.
+const CELL_FETCH_HARD_MAX: i64 = 64 * 1024 * 1024;
+/// What the dock asks for when it does not say.
+///
+/// Generous on purpose. The stored size is not the size of the text: a jsonb
+/// holding a file as an array of byte integers is about 2.2x larger as text than
+/// on disk, so a row that `pg_column_size` calls 8.4MB arrives as 18.1MB of
+/// JSON. A 4MB default cut that at exactly 4,194,304 characters and the pane
+/// reported the result as invalid JSON, which is true and useless.
+const CELL_FETCH_DEFAULT_MAX: i64 = 32 * 1024 * 1024;
+
+pub async fn fetch_cell_value(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    primary_key: HashMap<String, Value>,
+    column: String,
+    max_bytes: Option<i64>,
+) -> Result<CellValueResult, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(_) => {}
+        _ => {
+            return Err(
+                "Loading a capped value is only available on PostgreSQL so far. Read it with a SQL query instead."
+                    .into(),
+            )
+        }
+    }
+    let pool = require_pool(&state)?;
+    validate_ident(&schema)?;
+    validate_ident(&table)?;
+    validate_ident(&column)?;
+
+    if primary_key.is_empty() {
+        return Err("Cannot load this value: the table has no primary key to address the row by".into());
+    }
+    let pk_columns = fetch_primary_key(&pool, &schema, &table).await?;
+    if pk_columns.is_empty() {
+        return Err("Cannot load this value: the table has no primary key to address the row by".into());
+    }
+
+    // Types for the primary-key columns, so each one binds as itself rather than
+    // as text - a `uuid = $1::text` predicate cannot use the primary key index,
+    // which on a large table turns a point lookup into a sequential scan.
+    let meta_rows = sqlx::query(
+        r#"
+        SELECT
+            a.attname::text,
+            CASE WHEN t.typtype IN ('e','c','d') THEN 'USER-DEFINED' ELSE t.typname::text END,
+            tn.nspname::text,
+            t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
+        "#,
+    )
+    .bind(&schema)
+    .bind(&table)
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| format!("Failed to load column metadata: {e}"))?;
+
+    let mut column_meta: HashMap<String, PgColumnMeta> = HashMap::new();
+    for row in &meta_rows {
+        if let Ok(name) = row.try_get::<String, _>(0) {
+            column_meta.insert(
+                name,
+                PgColumnMeta {
+                    data_type: row.try_get(1).unwrap_or_default(),
+                    udt_schema: row.try_get(2).ok(),
+                    udt_name: row.try_get(3).ok(),
+                },
+            );
+        }
+    }
+    if !column_meta.contains_key(&column) {
+        return Err(format!("Unknown column: {column}"));
+    }
+
+    let ceiling = max_bytes
+        .unwrap_or(CELL_FETCH_DEFAULT_MAX)
+        .clamp(1024, CELL_FETCH_HARD_MAX);
+
+    let mut where_parts = Vec::new();
+    for (i, pk_col) in pk_columns.iter().enumerate() {
+        validate_ident(pk_col)?;
+        where_parts.push(format!(r#""{pk_col}" = ${}"#, i + 2));
+    }
+    // `octet_length(col::text)`, not `pg_column_size`: the caller is about to
+    // render text, and the compressed on-disk size of a jsonb says little about
+    // how long that text is. Truncation is decided here too, in the same units
+    // `left` cuts in, rather than inferred from the string that comes back.
+    let sql = format!(
+        r#"SELECT octet_length("{column}"::text)::bigint, left("{column}"::text, $1), length("{column}"::text) > $1 FROM "{schema}"."{table}" WHERE {} LIMIT 1"#,
+        where_parts.join(" AND ")
+    );
+
+    let mut q = sqlx::query(&sql).bind(ceiling as i32);
+    for pk_col in &pk_columns {
+        let pk_val = primary_key
+            .get(pk_col)
+            .ok_or_else(|| format!("Missing primary key column: {pk_col}"))?;
+        let pk_meta = column_meta
+            .get(pk_col)
+            .ok_or_else(|| format!("Missing primary key metadata: {pk_col}"))?;
+        q = bind_typed_value(q, &pk_meta.data_type, pk_val)?;
+    }
+
+    let row = q
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| format!("Failed to load the value: {e}"))?
+        .ok_or_else(|| "That row is no longer in the table".to_string())?;
+
+    let bytes: i64 = row.try_get(0).unwrap_or(0);
+    let text: String = row.try_get::<Option<String>, _>(1).ok().flatten().unwrap_or_default();
+    let truncated: bool = row.try_get::<Option<bool>, _>(2).ok().flatten().unwrap_or(false);
+
+    Ok(CellValueResult { text, bytes, truncated })
 }
 
 pub async fn get_column_stats(

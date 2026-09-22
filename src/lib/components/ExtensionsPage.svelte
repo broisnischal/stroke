@@ -2,6 +2,9 @@
   import { untrack } from "svelte";
   import { cn } from "$lib/utils.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import SearchableMenu from "./SearchableMenu.svelte";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Check from "@lucide/svelte/icons/check";
   import { EXTENSIONS } from "$lib/plugins/registry.js";
   import {
     pluginState,
@@ -9,8 +12,9 @@
     setPluginEnabled,
     setPluginConfig,
   } from "$lib/stores/plugins.js";
-  import { TIMEZONE_OPTIONS } from "$lib/plugins/extensions/better-time.js";
+  import { TIMEZONE_OPTIONS, PRECISION_OPTIONS, timeZoneOffsetLabel } from "$lib/plugins/extensions/better-time.js";
   import { CURRENCIES } from "$lib/plugins/extensions/money-format.js";
+  import { BOOLEAN_STYLES } from "$lib/plugins/extensions/boolean-glyph.js";
   import { DEFAULT_RULES } from "$lib/plugins/extensions/linkify.js";
   import Clock from "@lucide/svelte/icons/clock";
   import Hash from "@lucide/svelte/icons/hash";
@@ -28,6 +32,9 @@
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import Link2 from "@lucide/svelte/icons/link-2";
   import BarChart3 from "@lucide/svelte/icons/bar-chart-3";
+  import Thermometer from "@lucide/svelte/icons/thermometer";
+  import CircleSlash from "@lucide/svelte/icons/circle-slash";
+  import Dices from "@lucide/svelte/icons/dices";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
@@ -67,6 +74,12 @@
     "cell-transforms": Wand2,
     "saved-views": Bookmark,
     "find-replace": Replace,
+    // Without these three the grid drew the generic block icon for Freshness
+    // Heat, Empty & NULL Markers and Data Generator - three different tools
+    // wearing the "unknown extension" mark.
+    freshness: Thermometer,
+    "nullish-values": CircleSlash,
+    "data-gen": Dices,
   };
 
   const SECTIONS = [
@@ -125,6 +138,67 @@
     } catch (e) {
       toast.error(`Could not remove ${p.name}`, { description: String(e) });
     }
+  }
+
+  /**
+   * What each formatter is shown working on.
+   *
+   * The detail page described an extension and then asked you to go and open a
+   * table to find out what it does. These are the values the extension is for,
+   * run through the extension's own `format()` with the settings currently set,
+   * so the preview below answers "what will my data look like" without leaving
+   * the page - and moves the moment a setting is changed.
+   *
+   * `type` is what the formatter's `appliesTo()` is given, so each sample has to
+   * carry the column type it would really arrive with.
+   * @type {Record<string, { type: string, values: unknown[] }>}
+   */
+  const PREVIEW_SAMPLES = {
+    "better-time": {
+      type: "timestamptz",
+      values: [
+        new Date(Date.now() - 45 * 1000).toISOString().replace("T", " ").replace("Z", "+00"),
+        new Date(Date.now() - 3 * 3600 * 1000).toISOString().replace("T", " ").replace("Z", "+00"),
+        "2024-01-15 10:30:00.492+00",
+        "1999-12-31 23:59:59+00",
+      ],
+    },
+    "number-format": { type: "int8", values: [1234000, 987, -45600, 0.5] },
+    "money-format": { type: "numeric", values: [1999, 250000, -3450, 0] },
+    "duration-format": { type: "int4", values: [45, 3725, 86400, 950400] },
+    "boolean-glyph": { type: "bool", values: [true, false, null] },
+    "mask-sensitive": { type: "text", values: ["ada@example.com", "+1 415 555 0132", "4242 4242 4242 4242"] },
+    "linkify": { type: "text", values: ["https://stroke.sh/docs", "ada@example.com", "not a link"] },
+    "color-swatch": { type: "text", values: ["#3b82f6", "rgb(34 197 94)", "#f59e0b"] },
+    "status-badge": { type: "text", values: ["active", "pending", "failed", "archived"] },
+    "nullish-values": { type: "text", values: [null, "", "  "] },
+    "smart-text": { type: "text", values: ["  padded  ", "MIXED Case Text", "a-very-long-slug-that-keeps-going-and-going"] },
+    "freshness": { type: "timestamptz", values: [new Date(Date.now() - 120 * 1000).toISOString(), "2024-01-15 10:30:00+00"] },
+    "heatmap": { type: "int4", values: [12, 480, 1290] },
+    "validators": { type: "text", values: ["ada@example.com", "not-an-email", "550e8400-e29b-41d4-a716-446655440000"] },
+  };
+
+  /**
+   * Run one sample through an extension, exactly as the grid does.
+   * @param {any} ext @param {unknown} value @param {string} type
+   */
+  function previewOf(ext, value, type) {
+    if (typeof ext?.format !== "function") return null;
+    try {
+      if (typeof ext.appliesTo === "function" && !ext.appliesTo(type)) return null;
+      return ext.format(value, type, cfg(ext.id, ext.defaultConfig ?? {})) ?? null;
+    } catch {
+      // A formatter that throws on a sample is a bug in the formatter, not a
+      // reason to take the page down with it.
+      return null;
+    }
+  }
+
+  /** `NULL` and an empty string have to be distinguishable in the raw column. */
+  function rawText(/** @type {unknown} */ v) {
+    if (v === null || v === undefined) return "NULL";
+    if (v === "") return "''";
+    return String(v);
   }
 
   const CONFIGURABLE = new Set([
@@ -219,7 +293,7 @@
   const selTrigger =
     "h-7 w-[12rem] justify-between gap-2 border-border/70 bg-background px-2.5 text-ui-xs font-normal shadow-none";
   const ruleInput =
-    "h-7 min-w-0 rounded-lg border-2 border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15";
+"field-surface h-7 min-w-0 bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none";
 </script>
 
 <!-- Compact Linear/Resend-style toggle -->
@@ -237,16 +311,22 @@
       // Inset rim defines the pill edge on dark surfaces; inner shadow gives the
       // trough depth so the knob reads as sitting *in* the track, not on it.
       "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07),inset_0_1px_2px_rgba(0,0,0,0.2)]",
-      // Emerald = the app's "extension enabled" signal (matches the card icon
-      // tint); bg-primary is near-white on Studio themes and swallowed the knob.
-      on ? "bg-success" : "bg-muted-foreground/25 hover:bg-muted-foreground/35",
+      // The theme's own accent, not `success`. Green is this app's word for "that
+      // operation worked"; twenty switches, twenty icons and a count badge all
+      // wearing it made the page read as a status board and left the theme's
+      // accent unused on the one page built entirely out of on/off. The knob
+      // swaps to `primary-foreground`, which is the token guaranteed to contrast
+      // with `primary` - that pairing is what the near-white Studio accent broke
+      // when the knob was hard-coded white.
+      on ? "bg-primary" : "bg-muted-foreground/25 hover:bg-muted-foreground/35",
     )}
   >
     <span
       class={cn(
         // iOS-style press feedback: the knob stretches along the travel axis
         // while staying anchored to its end of the track.
-        "pointer-events-none block h-3.5 w-3.5 rounded-full bg-white",
+        "pointer-events-none block h-3.5 w-3.5 rounded-full",
+        on ? "bg-primary-foreground" : "bg-white",
         "shadow-[0_1px_2px_rgba(0,0,0,0.28),0_0_1px_rgba(0,0,0,0.16)]",
         "transition-[translate,width] duration-[180ms] ease-[cubic-bezier(0.23,1,0.32,1)]",
         "group-active/toggle:w-4",
@@ -260,7 +340,7 @@
   <div class="flex items-center justify-between gap-4 py-2.5">
     <div class="flex min-w-0 flex-col">
       <span class="text-ui-sm text-foreground">{label}</span>
-      {#if hint}<span class="mt-0.5 text-ui-2xs text-muted-foreground/70">{hint}</span>{/if}
+      {#if hint}<span class="mt-0.5 text-ui-2xs text-muted-foreground">{hint}</span>{/if}
     </div>
     {@render control()}
   </div>
@@ -268,13 +348,17 @@
 
 <!-- Group label + hairline-bordered list -->
 {#snippet sectionLabel(text)}
-  <h3 class="mb-2 px-0.5 text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/50">{text}</h3>
+  <h3 class="mb-2 px-0.5 text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">{text}</h3>
 {/snippet}
 
 <div class="app-scroll min-h-0 flex-1 overflow-y-auto bg-background">
   {#if !selected}
     <!-- ── Grid overview ─────────────────────────────────────────────────── -->
-    <div class="mx-auto w-full max-w-[52rem] px-8 py-8">
+    <!-- 72rem, not 52. At 52 a 1,600px window spent 380px of empty gutter on
+         each side to show three cards per row; the column now earns the space and
+         the grid resolves to four or five. `mx-auto` + equal `px` is what keeps
+         the two gutters identical at every width. -->
+    <div class="mx-auto w-full max-w-[72rem] px-8 py-8">
       <div class="flex items-center gap-2.5">
         <span class="grid size-6 shrink-0 place-items-center rounded-md border border-border/60 bg-muted/40 text-muted-foreground">
           <Blocks class="size-3.5" />
@@ -284,7 +368,7 @@
           class="ml-auto flex shrink-0 items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-ui-3xs font-medium tabular-nums text-muted-foreground"
           title="{enabledCount} of {EXTENSIONS.length} extensions enabled"
         >
-          {#if enabledCount > 0}<span class="size-1.5 rounded-full bg-success"></span>{/if}
+          {#if enabledCount > 0}<span class="size-1.5 rounded-full bg-primary"></span>{/if}
           {enabledCount} on
         </span>
       </div>
@@ -296,13 +380,13 @@
            Plugins loaded off disk. Each runs in its own Worker with the network
            globals removed, so a broken one stops formatting and nothing else. -->
       <div class="mt-7 flex items-center gap-2">
-        <h3 class="px-0.5 text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/50">Installed</h3>
+        <h3 class="px-0.5 text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Installed</h3>
         {#if $externalPlugins.length > 0}
-          <span class="text-ui-3xs tabular-nums text-muted-foreground/40">{$externalPlugins.length}</span>
+          <span class="text-ui-2xs tabular-nums text-muted-foreground">{$externalPlugins.length}</span>
         {/if}
         <button
           type="button"
-          class="ml-auto inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/60 bg-card px-2.5 text-ui-2xs font-medium text-foreground/80 transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground disabled:opacity-50"
+          class="field-surface ml-auto inline-flex h-7 shrink-0 items-center gap-1.5 bg-card px-3 text-ui-2xs font-medium text-foreground transition-colors hover:bg-accent/40 disabled:opacity-50"
           onclick={installPlugin}
           disabled={installing}
         >
@@ -311,7 +395,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
+          class="field-surface inline-flex size-7 shrink-0 items-center justify-center bg-card text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
           title="Rescan the plugins folder"
           aria-label="Rescan the plugins folder"
           onclick={() => void refreshExternalPlugins()}
@@ -323,7 +407,7 @@
       {#if $externalPlugins.length === 0}
         <div class="mt-2.5 rounded-lg border border-dashed border-border/60 bg-card/40 px-4 py-3.5">
           <p class="text-ui-xs text-foreground/80">Nothing installed yet.</p>
-          <p class="mt-1 text-ui-2xs leading-relaxed text-muted-foreground/70">
+          <p class="mt-1 text-ui-2xs leading-relaxed text-muted-foreground">
             A plugin is a folder holding a <code class="font-mono">manifest.json</code> and one
             <code class="font-mono">.js</code> file. Install one above, or drop the folder in
             {#if pluginsDir}<code class="font-mono text-muted-foreground">{pluginsDir}</code>{:else}the app's plugins folder{/if}
@@ -331,25 +415,27 @@
           </p>
         </div>
       {:else}
-        <div class="mt-2.5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div class="mt-2.5 grid grid-cols-[repeat(auto-fill,minmax(13.5rem,1fr))] gap-2">
           {#each $externalPlugins as p (p.id)}
             {@const on = pluginEnabledIn($pluginState, pluginKey(p.id))}
             {@const err = $externalPluginErrors[p.id] ?? ""}
-            <div class="group relative flex h-full flex-col gap-2.5 rounded-lg border border-border/60 bg-card p-3">
-              <Blocks class={cn("size-4 shrink-0", on && p.loadable ? "text-success" : "text-muted-foreground")} />
-              <span class="flex min-w-0 flex-col">
-                <span class="truncate text-ui-xs font-medium leading-tight text-foreground/85" title={p.description || p.name}>{p.name}</span>
-                <span class="mt-0.5 truncate text-ui-3xs text-muted-foreground/60">
-                  {p.version ? `v${p.version}` : p.id}{p.author ? ` · ${p.author}` : ""}
+            <div class="group relative flex h-full flex-col gap-2 rounded-lg border border-border/60 bg-card py-2 pl-2.5 pr-12">
+              <div class="flex min-w-0 items-center gap-2.5">
+                <Blocks class={cn("size-4 shrink-0", on && p.loadable ? "text-foreground" : "text-muted-foreground")} />
+                <span class="flex min-w-0 flex-1 flex-col">
+                  <span class="truncate text-ui-xs font-medium leading-tight text-foreground" title={p.description || p.name}>{p.name}</span>
+                  <span class="truncate text-ui-2xs leading-tight text-muted-foreground">
+                    {p.version ? `v${p.version}` : p.id}{p.author ? ` · ${p.author}` : ""}
+                  </span>
                 </span>
-              </span>
+              </div>
               {#if p.error || err}
-                <p class="text-ui-3xs leading-snug text-destructive/80">{p.error || err}</p>
+                <p class="text-ui-2xs leading-snug text-destructive">{p.error || err}</p>
               {/if}
-              <div class="mt-auto flex items-center gap-1 pt-0.5">
+              <div class="mt-auto flex items-center gap-1">
                 <button
                   type="button"
-                  class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground"
+                  class="hit-area inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
                   title="Reload from disk"
                   aria-label="Reload {p.name}"
                   onclick={() => void reloadPlugin(p)}
@@ -358,7 +444,7 @@
                 </button>
                 <button
                   type="button"
-                  class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-destructive"
+                  class="hit-area inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:text-destructive"
                   title="Remove, deleting its folder"
                   aria-label="Remove {p.name}"
                   onclick={() => void removePlugin(p)}
@@ -366,16 +452,16 @@
                   <Trash2 class="size-3" />
                 </button>
                 {#if p.permissions.length > 0}
-                  <span class="ml-auto truncate text-ui-3xs text-muted-foreground/35" title="Permissions: {p.permissions.join(', ')}">
+                  <span class="ml-auto truncate text-ui-2xs text-muted-foreground" title="Permissions: {p.permissions.join(', ')}">
                     {p.permissions.length} permission{p.permissions.length === 1 ? "" : "s"}
                   </span>
                 {/if}
               </div>
-              <div class="absolute right-3 top-3">
+              <div class="absolute right-3 top-2.5 flex h-[18px] items-center">
                 {#if p.loadable}
                   {@render toggle(on, () => void setExternalEnabled(p.id, !on), `Toggle ${p.name}`)}
                 {:else}
-                  <span class="rounded bg-destructive/10 px-1.5 py-0.5 text-ui-3xs font-medium text-destructive">Broken</span>
+                  <span class="rounded bg-destructive/10 px-1.5 py-0.5 text-ui-2xs font-medium text-destructive">Broken</span>
                 {/if}
               </div>
             </div>
@@ -385,28 +471,36 @@
 
       {#each SECTIONS as section (section.title)}
         {@const items = EXTENSIONS.filter((e) => section.kinds.includes(e.kind))}
-        <h3 class="mb-2.5 mt-7 px-0.5 text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/50">{section.title}</h3>
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <h3 class="mb-2.5 mt-7 px-0.5 text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">{section.title}</h3>
+        <!-- Columns come from the width, not from three hand-picked breakpoints:
+             at 2/3/4 fixed columns the last row stretched its cards to twice the
+             width of the row above whenever the count did not divide evenly.
+             Cards are rows now - icon, name, kind, switch on one line - because
+             the tile had the icon on its own line and a 30px hole in the middle,
+             which is what made a 20-item grid read as unfinished. -->
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(13.5rem,1fr))] gap-2">
           {#each items as ext (ext.id)}
-            {@const Icon = ICONS[ext.id]}
+            {@const Icon = ICONS[ext.id] ?? Blocks}
             {@const on = isOn(ext.id)}
             <div class="relative">
               <button
                 type="button"
                 onclick={() => (selectedId = ext.id)}
-                class="group relative flex h-full w-full flex-col gap-2.5 rounded-lg border border-border/60 bg-card p-3 text-left transition-[border-color,background-color] hover:border-border hover:bg-accent/40"
+                title="{ext.name} - {KIND_LABEL[ext.kind] ?? 'Extension'}"
+                class="group flex h-full w-full items-center gap-2.5 rounded-lg border border-border/60 bg-card py-2 pl-2.5 pr-12 text-left transition-[border-color,background-color] hover:border-border hover:bg-accent/40"
               >
-                {#if Icon}
-                  <Icon class={cn("size-4 shrink-0 transition-colors", on ? "text-success" : "text-muted-foreground group-hover:text-foreground")} />
-                {/if}
-                <span class="flex min-w-0 flex-col">
-                  <span class="truncate text-ui-xs font-medium leading-tight text-foreground/85 transition-colors group-hover:text-foreground">{ext.name}</span>
-                  <span class="mt-0.5 truncate text-ui-3xs text-muted-foreground/60">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
+                <Icon class={cn("size-4 shrink-0 transition-colors", on ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")} />
+                <span class="flex min-w-0 flex-1 flex-col">
+                  <span class="truncate text-ui-xs font-medium leading-tight text-foreground">{ext.name}</span>
+                  <span class="truncate text-ui-2xs leading-tight text-muted-foreground">{KIND_LABEL[ext.kind] ?? "Extension"}</span>
                 </span>
               </button>
-              <!-- Toggle overlays the card so it isn't a nested button -->
-              <div class="absolute right-3 top-3">
-                {@render toggle(on, () => setPluginEnabled(ext.id, !on), `Toggle ${ext.name}`)}
+              <!-- Layered over the card so it is not a button inside a button.
+                   `pr-12` above is what keeps the label clear of it. -->
+              <div class="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+                <span class="pointer-events-auto">
+                  {@render toggle(on, () => setPluginEnabled(ext.id, !on), `Toggle ${ext.name}`)}
+                </span>
               </div>
             </div>
           {/each}
@@ -418,7 +512,12 @@
     {#key selected.id}
       {@const Icon = ICONS[selected.id]}
       {@const on = isOn(selected.id)}
-      <div class="mx-auto w-full max-w-[42rem] px-8 py-6">
+      <!-- Same outer column as the overview, with the content left-aligned
+           inside it rather than centred on its own: a 42rem block centred in a
+           wide window starts hundreds of pixels right of the grid you just came
+           from, so going into an extension moved the whole page sideways. -->
+      <div class="mx-auto w-full max-w-[72rem] px-8 py-6">
+      <div class="w-full max-w-[42rem]">
         <button
           type="button"
           class="-ml-1.5 mb-4 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-ui-xs text-muted-foreground transition-[background-color,color] hover:bg-muted/50 hover:text-foreground"
@@ -427,16 +526,19 @@
           <ArrowLeft class="size-3.5" />
           All extensions
         </button>
-        <!-- Header card, the icon tile carries the on/off state (emerald when
-             enabled), so the card and toggle stay quiet. One signal, not four. -->
-        <div class="rounded-lg border border-border/60 bg-card/40 p-4">
+        <!-- No card. The page is already a panel and this is its heading, so a
+             bordered, tinted box around the title drew a frame that says nothing;
+             the icon tile carries the on/off state and the rule underneath does
+             the separating. -->
+        <div class="border-b border-border/50 pb-4">
           <div class="flex items-start gap-3.5">
-            <span
-              class={cn(
-                "grid size-10 shrink-0 place-items-center rounded-lg border transition-colors",
-                on ? "border-success/30 bg-success/10 text-success" : "border-border/60 bg-muted/40 text-muted-foreground",
-              )}
-            >
+            <!-- One surface, whatever the state. The tile used to turn into a
+                 blue-washed, blue-bordered, blue-iconed square when the
+                 extension was on - three carriers of one bit, in the accent
+                 colour that everywhere else in the app means "interactive",
+                 sitting next to the toggle that already says on or off. The
+                 icon is an identifier, not a status light. -->
+            <span class="grid size-10 shrink-0 place-items-center rounded-lg border border-border/60 bg-muted/30 text-foreground/70">
               {#if Icon}<Icon class="size-5" />{/if}
             </span>
             <div class="min-w-0 flex-1 pt-0.5">
@@ -455,11 +557,82 @@
             <ol class="space-y-2">
               {#each USAGE_BY_ID[selected.id] ?? USAGE[selected.kind] as step, i (i)}
                 <li class="flex items-start gap-2.5">
-                  <span class="mt-px grid size-4 shrink-0 place-items-center rounded-full border border-border/60 text-ui-3xs font-semibold text-muted-foreground/70">{i + 1}</span>
+                  <span class="mt-px grid size-4 shrink-0 place-items-center rounded-full border border-border/60 text-ui-3xs font-semibold text-muted-foreground">{i + 1}</span>
                   <span class="text-ui-xs leading-relaxed text-foreground/75">{step}</span>
                 </li>
               {/each}
             </ol>
+          </div>
+        {/if}
+
+        <!-- Before → after, as the grid would draw it -->
+        {#if PREVIEW_SAMPLES[selected.id] && typeof selected.format === "function"}
+          {@const sample = PREVIEW_SAMPLES[selected.id]}
+          <div class="mt-7">
+            {@render sectionLabel("Before & after")}
+            <!-- A real two-column table at the grid's own metrics - mono, 28px
+                 rows, hairline rules - because the question this answers is
+                 "what will my column look like", and a prose example in a
+                 different typeface cannot answer it. It re-renders from the
+                 settings below, so a zone or a precision change shows up here
+                 before you go and open a table. -->
+            <div class="overflow-hidden rounded-lg border border-border/50">
+              <table class="w-full table-fixed border-collapse font-mono text-ui-2xs">
+                <thead>
+                  <tr class="bg-muted/25 text-left">
+                    <th class="w-1/2 border-b border-border/50 px-3 py-1.5 font-[530] text-muted-foreground">Stored value</th>
+                    <th class="w-1/2 border-b border-border/50 px-3 py-1.5 font-[530] text-muted-foreground">Rendered</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each sample.values as v, i (i)}
+                    {@const out = previewOf(selected, v, sample.type)}
+                    <tr>
+                      <td
+                        class={cn(
+                          "h-7 overflow-hidden px-3 align-middle text-ellipsis whitespace-nowrap text-muted-foreground",
+                          i > 0 && "border-t border-border/25",
+                          (v === null || v === undefined) && "italic",
+                        )}
+                        title={rawText(v)}
+                      >{rawText(v)}</td>
+                      <td
+                        class={cn(
+                          "h-7 overflow-hidden px-3 align-middle text-ellipsis whitespace-nowrap text-foreground",
+                          i > 0 && "border-t border-border/25",
+                        )}
+                        title={out?.title ?? out?.display ?? ""}
+                      >
+                        {#if !out}
+                          <span class="text-muted-foreground/60">—</span>
+                        {:else}
+                          <span class="flex min-w-0 items-center gap-1.5">
+                            <!-- The three non-text shapes a formatter can return,
+                                 drawn the way the canvas draws them. -->
+                            {#if out.swatch}
+                              <span class="size-3 shrink-0 rounded-[3px] border border-border/60" style="background:{out.swatch}"></span>
+                            {:else if out.dot}
+                              <span class="size-2 shrink-0 rounded-full" style="background:{out.dot}"></span>
+                            {/if}
+                            {#if out.badge}
+                              <span
+                                class="shrink-0 rounded-full px-2 py-px text-ui-3xs"
+                                style="background:{out.badge.bg ?? 'transparent'};color:{out.badge.fg ?? 'inherit'}"
+                              >{out.display}</span>
+                            {:else if out.display}
+                              <span class="min-w-0 truncate">{out.display}</span>
+                            {/if}
+                          </span>
+                        {/if}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+            <p class="mt-1.5 px-0.5 text-ui-3xs text-muted-foreground">
+              Sample <span class="font-mono">{sample.type}</span> values · the stored value is never changed
+            </p>
           </div>
         {/if}
 
@@ -472,8 +645,8 @@
               {#each list as it, i (it.id)}
                 <li class="flex items-center gap-3 px-3 py-2 {i > 0 ? 'border-t border-border/40' : ''}">
                   <span class="min-w-0 shrink-0 text-ui-sm text-foreground/85">{it.label}</span>
-                  {#if it.hint}<span class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground/55">{it.hint}</span>{:else}<span class="flex-1"></span>{/if}
-                  <span class="shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-ui-3xs text-muted-foreground/50">{selected.kind === "generators" ? "Insert" : "Copy"}</span>
+                  {#if it.hint}<span class="min-w-0 flex-1 truncate text-ui-2xs text-muted-foreground">{it.hint}</span>{:else}<span class="flex-1"></span>{/if}
+                  <span class="shrink-0 rounded border border-border/50 px-1.5 py-0.5 text-ui-3xs text-muted-foreground">{selected.kind === "generators" ? "Insert" : "Copy"}</span>
                 </li>
               {/each}
             </ul>
@@ -487,17 +660,54 @@
             <div class="rounded-lg border border-border/50 px-3.5 [&>*]:border-border/40 [&>*+*]:border-t">
               {#if selected.id === "better-time"}
                 {@const c = cfg(selected.id, { mode: "absolute", timeZone: "local" })}
+                <!-- Searchable, because the list is now every zone the platform
+                     knows - four hundred of them. A scroll-only dropdown is fine
+                     for nine cities and useless for four hundred, which is what
+                     made a zone that was there look like a zone that was not. -->
                 {#snippet tzControl()}
-                  <Select.Root type="single" value={c.timeZone} onValueChange={(v) => v && setPluginConfig(selected.id, { timeZone: v })}>
-                    <Select.Trigger size="sm" class={selTrigger} aria-label="Timezone"><span class="truncate">{tzLabel(selected.id)}</span></Select.Trigger>
-                    <Select.Content class="z-[120] max-h-[18rem] min-w-[12rem] p-1" sideOffset={6}>
-                      {#each TIMEZONE_OPTIONS as tz (tz.value)}<Select.Item value={tz.value} label={tz.label} class="py-1.5 pl-2 text-ui-xs">{tz.label}</Select.Item>{/each}
+                  <SearchableMenu
+                    items={TIMEZONE_OPTIONS}
+                    placeholder="Search city or country…"
+                    contentClass="z-[120] w-[20rem]"
+                    align="end"
+                    onselect={(it) => setPluginConfig(selected.id, { timeZone: it.value })}
+                  >
+                    {#snippet trigger(props)}
+                      <button {...props} type="button" class={cn(selTrigger, "inline-flex items-center gap-1.5 border")} aria-label="Timezone">
+                        <span class="min-w-0 flex-1 truncate text-left">{tzLabel(selected.id)}</span>
+                        <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">{timeZoneOffsetLabel(c.timeZone ?? "local")}</span>
+                        <ChevronDown class="size-3 shrink-0 text-muted-foreground" />
+                      </button>
+                    {/snippet}
+                    {#snippet item(it)}
+                      <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                      {#if it.country && it.country !== it.label}
+                        <span class="shrink-0 truncate text-ui-3xs text-muted-foreground">{it.country}</span>
+                      {/if}
+                      <span class="ml-1 shrink-0 font-mono text-ui-3xs text-muted-foreground/80">{timeZoneOffsetLabel(it.value)}</span>
+                      {#if it.value === (c.timeZone ?? "local")}<Check class="size-3.5 shrink-0 text-primary" />{/if}
+                    {/snippet}
+                  </SearchableMenu>
+                {/snippet}
+                {#snippet relControl()}{@render toggle(c.mode === "relative", () => setPluginConfig(selected.id, { mode: c.mode === "relative" ? "absolute" : "relative" }), "Toggle relative time")}{/snippet}
+                {#snippet precisionControl()}
+                  <Select.Root type="single" value={c.precision ?? "seconds"} onValueChange={(v) => v && setPluginConfig(selected.id, { precision: v })}>
+                    <Select.Trigger size="sm" class={selTrigger} aria-label="Time precision">
+                      <span class="truncate">{PRECISION_OPTIONS.find((o) => o.value === (c.precision ?? "seconds"))?.label ?? "Seconds"}</span>
+                    </Select.Trigger>
+                    <Select.Content class="z-[120] min-w-[10rem] p-1" sideOffset={6}>
+                      {#each PRECISION_OPTIONS as o (o.value)}<Select.Item value={o.value} label={o.label} class="py-1.5 pl-2 text-ui-xs">{o.label}</Select.Item>{/each}
                     </Select.Content>
                   </Select.Root>
                 {/snippet}
-                {#snippet relControl()}{@render toggle(c.mode === "relative", () => setPluginConfig(selected.id, { mode: c.mode === "relative" ? "absolute" : "relative" }), "Toggle relative time")}{/snippet}
-                {@render settingRow("Timezone", "Render timestamps in this zone", tzControl)}
+                <!-- The row reads "24-hour clock", so ON is `hour12: false`. -->
+                {#snippet hour12Control()}{@render toggle(c.hour12 !== true, () => setPluginConfig(selected.id, { hour12: c.hour12 !== true }), "Toggle 24-hour clock")}{/snippet}
+                {#snippet zoneNameControl()}{@render toggle(c.showZone === true, () => setPluginConfig(selected.id, { showZone: !(c.showZone === true) }), "Toggle timezone suffix")}{/snippet}
+                {@render settingRow("Timezone", `Render timestamps in this zone · ${timeZoneOffsetLabel(c.timeZone ?? "local")}`, tzControl)}
                 {@render settingRow("Relative time", 'Show "3 hours ago" instead of a date', relControl)}
+                {@render settingRow("Precision", "How much of the time to print - milliseconds matter when rows are ordered by it", precisionControl)}
+                {@render settingRow("24-hour clock", "14:30 rather than 2:30 PM", hour12Control)}
+                {@render settingRow("Show timezone", "Append the zone, so a value cannot be read in the wrong one", zoneNameControl)}
               {:else if selected.id === "number-format"}
                 {@const c = cfg(selected.id, { mode: "thousands" })}
                 {#snippet ctl()}{@render toggle(c.mode === "compact", () => setPluginConfig(selected.id, { mode: c.mode === "compact" ? "thousands" : "compact" }), "Toggle compact")}{/snippet}
@@ -528,8 +738,17 @@
                 {@render settingRow("Source unit", "How the stored number is interpreted", ctl)}
               {:else if selected.id === "boolean-glyph"}
                 {@const c = cfg(selected.id, { style: "dot" })}
-                {#snippet ctl()}{@render toggle(c.style === "check", () => setPluginConfig(selected.id, { style: c.style === "check" ? "dot" : "check" }), "Toggle glyph style")}{/snippet}
-                {@render settingRow("Use ✓ / ✗", "Instead of a colored dot", ctl)}
+                {#snippet ctl()}
+                  <Select.Root type="single" value={c.style} onValueChange={(v) => v && setPluginConfig(selected.id, { style: v })}>
+                    <Select.Trigger size="sm" class={selTrigger} aria-label="Boolean style">
+                      <span class="truncate">{BOOLEAN_STYLES.find((s) => s.value === c.style)?.label ?? "Dot + text"}</span>
+                    </Select.Trigger>
+                    <Select.Content class="z-[120] max-h-[18rem] min-w-[10rem] p-1" sideOffset={6}>
+                      {#each BOOLEAN_STYLES as st (st.value)}<Select.Item value={st.value} label={st.label} class="py-1.5 pl-2 text-ui-xs">{st.label}</Select.Item>{/each}
+                    </Select.Content>
+                  </Select.Root>
+                {/snippet}
+                {@render settingRow("Style", "How true and false are drawn", ctl)}
               {:else if selected.id === "mask-sensitive"}
                 {@const c = cfg(selected.id, { revealOnHover: true })}
                 {#snippet ctl()}{@render toggle(c.revealOnHover !== false, () => setPluginConfig(selected.id, { revealOnHover: c.revealOnHover === false }), "Toggle reveal on hover")}{/snippet}
@@ -547,7 +766,7 @@
                 {@render settingRow("Palette", "Color scale for the value gradient", ctl)}
               {:else if selected.id === "linkify"}
                 <div class="py-3">
-                  <p class="text-ui-xs leading-relaxed text-muted-foreground/80">
+                  <p class="text-ui-xs leading-relaxed text-muted-foreground">
                     When a cell matches a <span class="font-mono text-foreground/80">pattern</span> (regex), clicking it opens the
                     <span class="font-mono text-foreground/80">template</span>. Use <span class="font-mono text-foreground/80">{"{value}"}</span> for the cell value.
                   </p>
@@ -570,6 +789,7 @@
             </div>
           </div>
         {/if}
+      </div>
       </div>
     {/key}
   {/if}

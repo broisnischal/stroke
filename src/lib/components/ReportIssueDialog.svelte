@@ -74,7 +74,7 @@
     },
   ];
 
-  const GITHUB_REPO = "broisnischal/stroke";
+  const GITHUB_REPO = "stroke-app/stroke";
 
   const systemInfo = $derived(
     `**App version:** ${appVersion}\n**Platform:** ${platform || "unknown"}\n**Reported via:** in-app`,
@@ -118,15 +118,15 @@
     setTimeout(() => (copied = false), 2000);
   }
 
-  const lbl = "mb-1.5 block text-ui-2xs font-medium text-muted-foreground/55";
+  const lbl = "mb-1.5 block text-ui-2xs font-medium text-muted-foreground";
   const tinp =
-    "w-full rounded-lg border-2 border-border bg-muted/15 px-2.5 py-2 text-ui-sm text-foreground placeholder:text-muted-foreground/25 placeholder:font-normal focus-visible:border-border/50 focus-visible:outline-none resize-none transition-colors";
+    "field-surface w-full bg-transparent px-2.5 py-2 text-ui-sm text-foreground placeholder:text-muted-foreground placeholder:font-normal outline-none resize-none transition-colors";
 </script>
 
 <Dialog.Root bind:open>
   <Dialog.Content
     showCloseButton={false}
-    class="flex w-[min(480px,calc(100vw-2rem))] flex-col gap-0 overflow-hidden rounded-xl border border-border/25 bg-background p-0 shadow-2xl shadow-black/50"
+    class="@container/ri flex w-[min(34rem,calc(100vw-2rem))] flex-col gap-0 overflow-hidden rounded-xl border border-border/25 bg-background p-0 shadow-2xl shadow-black/50"
   >
     <!-- Header -->
     <div
@@ -134,12 +134,12 @@
     >
       <div class="flex items-center gap-2">
         <p class="text-ui-sm font-semibold text-foreground">Report an issue</p>
-        <span class="font-mono text-ui-3xs text-muted-foreground/30"
+        <span class="font-mono text-ui-3xs text-muted-foreground"
           >v{appVersion}</span
         >
       </div>
       <Dialog.Close
-        class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/25 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none"
+        class="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none"
       >
         <X class="size-3.5" />
       </Dialog.Close>
@@ -149,16 +149,16 @@
       <!-- Type -->
       <div>
         <p class={lbl}>Type</p>
-        <div class="flex gap-1.5">
+        <div class="grid grid-cols-1 gap-1.5 @sm/ri:grid-cols-3">
           {#each TYPES as t (t.id)}
             <button
               type="button"
               onclick={() => (issueType = t.id)}
               class={cn(
-                "inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border px-1 text-ui-2xs font-medium transition-colors",
+                "field-surface inline-flex h-8 min-w-0 items-center justify-center gap-1.5 px-2 text-ui-2xs font-medium transition-colors",
                 issueType === t.id
-                  ? "border-border/50 bg-muted/60 text-foreground"
-                  : "border-border/20 text-muted-foreground/35 hover:border-border/30 hover:bg-muted/20 hover:text-muted-foreground/70",
+                  ? "bg-muted/60 text-foreground"
+                  : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
               )}
             >
               <t.Icon class="size-3 shrink-0" />
@@ -199,11 +199,9 @@
       </div>
 
       <!-- System info -->
-      <div
-        class="flex items-center gap-1.5 rounded-md bg-muted/20 px-2.5 py-1.5"
-      >
-        <span class="text-ui-3xs text-muted-foreground/35">Auto-included:</span>
-        <span class="font-mono text-ui-3xs text-muted-foreground/45"
+      <div class="flex flex-col gap-0.5 rounded-md bg-muted/20 px-2.5 py-2">
+        <span class="text-ui-2xs text-muted-foreground">Auto-included</span>
+        <span class="font-mono text-ui-2xs text-foreground"
           >v{appVersion} · {platform || "unknown"}{details
             ? " · error details"
             : ""}</span
@@ -218,7 +216,7 @@
       <button
         type="button"
         onclick={copyReport}
-        class="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-ui-2xs text-muted-foreground/40 transition-colors hover:bg-muted/30 hover:text-foreground"
+        class="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-field)] px-3 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
       >
         {#if copied}
           <Check class="size-3 text-success" />
@@ -240,7 +238,7 @@
               window.open(`https://github.com/${GITHUB_REPO}/issues`, "_blank");
             }
           }}
-          class="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border/25 px-3 text-ui-2xs text-muted-foreground/50 transition-colors hover:bg-muted/30 hover:text-foreground"
+          class= "field-surface inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap px-3 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
         >
           <svg
             class="size-3 shrink-0"

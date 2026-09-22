@@ -33,26 +33,26 @@
   }
 
   // ── Editors ───────────────────────────────────────────────────────────────
-  /** @type {HTMLElement | null} */  let inputContainer  = $state(null)
+  /** @type {HTMLElement | null} */  let inputContainer = $state(null)
   /** @type {HTMLElement | null} */  let resultContainer = $state(null)
-  /** @type {monaco.editor.IStandaloneCodeEditor | null} */  let inputEditor  = null
+  /** @type {monaco.editor.IStandaloneCodeEditor | null} */  let inputEditor = null
   /** @type {monaco.editor.IStandaloneCodeEditor | null} */  let resultEditor = null
   let editorsReady = $state(false)
 
   // ── Raw JSON: split into "immediate" (for header) + "debounced" (for parse).
   //    JSON.parse() on every keystroke for large documents is the main CPU hog.
-  let rawJson          = $state('')   // updated immediately - drives header
+  let rawJson = $state('')   // updated immediately - drives header
   let rawJsonDebounced = $state('')   // updated 250ms after typing stops
   /** @type {ReturnType<typeof setTimeout> | null} */
   let parseDebounceTimer = null
 
   // ── JSONPath ──────────────────────────────────────────────────────────────
-  let jsonPath    = $state('')
+  let jsonPath = $state('')
   let pathFocused = $state(false)
-  let activeIdx   = $state(-1)
+  let activeIdx = $state(-1)
   /** @type {HTMLInputElement | null} */
   let pathInput = $state(null)
-  let copied      = $state(false)
+  let copied = $state(false)
   let copiedInput = $state(false)
   /** @type {ReturnType<typeof setTimeout> | null} */
   let copiedTimer = null
@@ -219,7 +219,16 @@
     overviewRulerLanes: 0,
     hideCursorInOverviewRuler: true,
     overviewRulerBorder: false,
-    smoothScrolling: false,  // smoothScrolling has a small CPU cost on every scroll event
+    // On by default now: this view is read by scrolling, and the animated
+    // offset is what makes a wheel notch land somewhere you can follow. The CPU
+    // cost it was turned off for is per scroll EVENT, not per frame, and it buys
+    // back more than it costs on a 120Hz panel where an unsmoothed notch jumps
+    // several lines between frames.
+    smoothScrolling: true,
+    // A wheel notch moves a predictable number of lines, and holding Alt gives a
+    // 5x jump for crossing a large document - Monaco's own fast-scroll gesture.
+    mouseWheelScrollSensitivity: 1,
+    fastScrollSensitivity: 5,
     renderLineHighlight: /** @type {'none'} */ ('none'),
     contextmenu: true,
     selectionHighlight: false,
@@ -309,42 +318,49 @@
   // Wrap is an app setting: a change made in Settings, or from any other JSON
   // view, reflows this editor too rather than leaving it on whatever it was
   // created with.
-  $effect(() => { editor?.updateOptions({ wordWrap: $appJsonWordWrap ? 'on' : 'off' }) })
+  // Both editors, not `editor` - this page has two (input and output) and no
+  // variable by that name, so the effect threw on mount and took the whole view
+  // down with it. Pre-dates the rename that split them.
+  $effect(() => {
+    const wordWrap = $appJsonWordWrap ? 'on' : 'off'
+    inputEditor?.updateOptions({ wordWrap })
+    resultEditor?.updateOptions({ wordWrap })
+  })
 </script>
 
 <div bind:this={pageEl} class="flex min-h-0 flex-1 flex-col overflow-hidden">
 
   <!-- ── Input panel header ────────────────────────────────────────────── -->
   <div class="studio-chrome flex h-8 shrink-0 items-center gap-2 border-b border-border bg-panel px-3" data-studio-chrome>
-    <Braces class="size-3.5 shrink-0 text-muted-foreground/50" />
+    <Braces class="size-3.5 shrink-0 text-muted-foreground" />
     <span class="font-mono text-ui-xs font-medium text-foreground/70">JSON Input</span>
 
     {#if inputSummary === 'invalid JSON'}
-      <span class="font-mono text-ui-2xs text-destructive/70">invalid JSON</span>
+      <span class="font-mono text-ui-2xs text-destructive">invalid JSON</span>
     {:else if inputSummary}
-      <span class="font-mono text-ui-2xs text-muted-foreground/45">{inputSummary}</span>
+      <span class="font-mono text-ui-2xs text-muted-foreground">{inputSummary}</span>
     {:else}
-      <span class="font-mono text-ui-2xs text-muted-foreground/30">paste or type JSON here</span>
+      <span class="font-mono text-ui-2xs text-muted-foreground">paste or type JSON here</span>
     {/if}
 
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
       {#if parsedJson !== null}
         <JsonWrapToggle />
         <button type="button"
-          class="inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-ui-2xs text-muted-foreground/55 transition-colors hover:bg-muted hover:text-foreground"
+          class="inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           onclick={formatJson}
-        ><Wand2 class="size-2.5" />Format</button>
+        ><Wand2 class="size-3" />Format</button>
       {/if}
       {#if rawJson.trim()}
         <button type="button"
-          class="inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-ui-2xs text-muted-foreground/55 transition-colors hover:bg-muted hover:text-foreground"
+          class="inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           onclick={handleCopyInput}
         >
-          {#if copiedInput}<CheckCheck class="size-2.5 text-success" />{:else}<Copy class="size-2.5" />{/if}
+          {#if copiedInput}<CheckCheck class="size-3 text-success" />{:else}<Copy class="size-3" />{/if}
           Copy
         </button>
         <button type="button"
-          class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/35 transition-colors hover:bg-destructive/10 hover:text-destructive"
+          class="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
           onclick={clearInput}
         ><Trash2 class="size-3" /></button>
       {/if}
@@ -356,7 +372,7 @@
     <div bind:this={inputContainer} class="absolute inset-0 h-full w-full"></div>
     {#if !rawJson.trim()}
       <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <p class="font-mono text-ui-sm text-muted-foreground/25">Paste or type JSON here</p>
+        <p class="font-mono text-ui-sm text-muted-foreground">Paste or type JSON here</p>
       </div>
     {/if}
   </div>
@@ -371,13 +387,13 @@
 
   <!-- ── JSONPath bar ──────────────────────────────────────────────────── -->
   <div class="studio-chrome relative flex h-8 shrink-0 items-center gap-1.5 border-b border-border bg-panel px-3" data-studio-chrome>
-    <span class="select-none font-mono text-ui-xs text-muted-foreground/45">$</span>
+    <span class="select-none font-mono text-ui-xs text-muted-foreground">$</span>
     <input
       bind:this={pathInput}
       type="text"
       bind:value={jsonPath}
       placeholder=".field  ·  [0]  ·  [*].name  ·  ..key  ·  [?(@.x > 0)]"
-      class="min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/25 focus:outline-none"
+      class="no-focus-ring min-w-0 flex-1 bg-transparent font-mono text-ui-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
       spellcheck="false"
       autocomplete="off"
       onfocus={() => { pathFocused = true }}
@@ -386,9 +402,9 @@
     />
 
     {#if pathResult && !pathResult.ok}
-      <span class="shrink-0 font-mono text-ui-2xs text-destructive/70">{pathResult.error}</span>
+      <span class="shrink-0 font-mono text-ui-2xs text-destructive">{pathResult.error}</span>
     {:else if pathResult?.ok}
-      <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground/45">{describeResult(pathResult.value)}</span>
+      <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground">{describeResult(pathResult.value)}</span>
     {/if}
 
     <!-- Minimal VSCode-style suggestion list -->
@@ -404,14 +420,14 @@
 
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
       <button type="button"
-        class="inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-ui-2xs transition-colors {resultJson ? 'text-muted-foreground/55 hover:bg-muted hover:text-foreground' : 'cursor-default text-muted-foreground/20'}"
+        class="inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-ui-2xs transition-colors {resultJson ? 'text-muted-foreground hover:bg-muted hover:text-foreground' : 'cursor-default text-muted-foreground'}"
         disabled={!resultJson}
         onclick={handleCopyResult}
       >
         {#if copied}
-          <CheckCheck class="size-2.5 text-success" />Copied
+          <CheckCheck class="size-3 text-success" />Copied
         {:else}
-          <Copy class="size-2.5" />Copy result
+          <Copy class="size-3" />Copy result
         {/if}
       </button>
     </div>
@@ -423,22 +439,22 @@
 
     {#if !rawJson.trim()}
       <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <p class="font-mono text-ui-xs text-muted-foreground/25">Paste JSON above, then query it here</p>
+        <p class="font-mono text-ui-xs text-muted-foreground">Paste JSON above, then query it here</p>
       </div>
     {:else if parsedJson === null}
       <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <p class="font-mono text-ui-xs text-destructive/40">Fix JSON errors to run queries</p>
+        <p class="font-mono text-ui-xs text-destructive">Fix JSON errors to run queries</p>
       </div>
     {:else if !jsonPath.trim() || jsonPath.trim() === '$'}
       <div class="pointer-events-none absolute inset-0 flex items-center justify-center text-center">
         <div class="space-y-1">
-          <p class="font-mono text-ui-xs text-muted-foreground/30">Enter a JSONPath expression above</p>
-          <p class="font-mono text-ui-2xs text-muted-foreground/20">[*].id · .name · ..email · [?(@.active)]</p>
+          <p class="font-mono text-ui-xs text-muted-foreground">Enter a JSONPath expression above</p>
+          <p class="font-mono text-ui-2xs text-muted-foreground">[*].id · .name · ..email · [?(@.active)]</p>
         </div>
       </div>
     {:else if pathResult && !pathResult.ok}
       <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <p class="font-mono text-ui-xs text-destructive/40">{pathResult.error}</p>
+        <p class="font-mono text-ui-xs text-destructive">{pathResult.error}</p>
       </div>
     {/if}
   </div>

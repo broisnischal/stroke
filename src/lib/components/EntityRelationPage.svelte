@@ -63,10 +63,10 @@
   ]
 
   // ── Config ────────────────────────────────────────────────────────────────
-  const NODE_W    = 268
-  const ROW_H     = 28
-  const HDR_H     = 42
-  const PAD_B     = 10
+  const NODE_W = 268
+  const ROW_H = 28
+  const HDR_H = 42
+  const PAD_B = 10
   const WARN_MANY = 60
   /**
    * Above this many tables the whole-schema diagram waits to be asked for.
@@ -84,15 +84,15 @@
   let erd = $state(null)
 
   // ── State ─────────────────────────────────────────────────────────────────
-  let loading       = $state(false)
-  let error         = $state('')
-  let search        = $state('')
-  let searchEl      = $state(/** @type {HTMLInputElement | null} */ (null))
-  let activeSchema  = $state(untrack(() => schema))
-  let schemaOpen    = $state(false)
-  let settingsOpen  = $state(false)
-  let exporting     = $state(false)
-  let settings      = $state(loadErdSettings())
+  let loading = $state(false)
+  let error = $state('')
+  let search = $state('')
+  let searchEl = $state(/** @type {HTMLInputElement | null} */ (null))
+  let activeSchema = $state(untrack(() => schema))
+  let schemaOpen = $state(false)
+  let settingsOpen = $state(false)
+  let exporting = $state(false)
+  let settings = $state(loadErdSettings())
   /** Big schemas open filtered to FK-connected tables - session only, not persisted. */
   let autoConnected = $state(false)
   const connectedOnly = $derived(settings.connectedOnly || autoConnected)
@@ -125,17 +125,17 @@
    * Always replaced, never mutated, so the reads stay reactive.
    * @type {Set<string>}
    */
-  let picked      = $state(new Set())
+  let picked = $state(new Set())
   /** Bumped on every pick change - the layout key can't diff a Set cheaply. */
   let pickVersion = $state(0)
-  let pickerOpen  = $state(false)
-  let pickQuery   = $state('')
+  let pickerOpen = $state(false)
+  let pickQuery = $state('')
   /** Set once the user asks for a schema too big to draw unprompted. */
-  let drawAll     = $state(false)
+  let drawAll = $state(false)
   /** Table count the diagram is holding back on, 0 when it is drawing. */
-  let gatedCount  = $state(0)
+  let gatedCount = $state(0)
   /** Every foreign key in the schema, filter-independent. @type {any[]} */
-  let allRels     = $state(/** @type {any[]} */ ([]))
+  let allRels = $state(/** @type {any[]} */ ([]))
   /** @type {string|null} */
   let selectedTable = $state(null)
   /** @type {Map<string, TableMeta>} */
@@ -144,7 +144,7 @@
   // draws from, so a proxy here reaches the per-row hot path no matter what the
   // node array is. Both writers below mutate and then replace the Map, which is
   // what makes reactivity fire either way.
-  let tableMeta     = $state.raw(new Map())
+  let tableMeta = $state.raw(new Map())
 
   // Raw, not deep-reactive. These arrays are the canvas renderer's hot data: it
   // reads n.position, n.data.columns[i].name and friends for every card and every
@@ -208,7 +208,7 @@
     // A table on both sides is drawn once, on the parent side.
     for (const id of parents) children.delete(id)
 
-    const focusH  = hOf(focusNode)
+    const focusH = hOf(focusNode)
     const focusMid = focusH / 2
     /** @type {Map<string, {x:number,y:number}>} */
     const placed = new Map([[focus, { x: 0, y: 0 }]])
@@ -254,7 +254,7 @@
 
     const byName = (/** @type {any} */ a, /** @type {any} */ b) => a.id.localeCompare(b.id)
     let right = ns.filter(n => parents.has(n.id)).sort(byName)
-    let left  = ns.filter(n => children.has(n.id)).sort(byName)
+    let left = ns.filter(n => children.has(n.id)).sort(byName)
     // Keep the focused table literally in the middle: when every neighbour points
     // the same way, split them across both sides instead of stacking one wing.
     if (!left.length && right.length > 3) {
@@ -446,11 +446,11 @@
     const linked = new Set()
     for (const e of es) { linked.add(e.source); linked.add(e.target) }
 
-    const conn    = ns.filter(n => linked.has(n.id))
+    const conn = ns.filter(n => linked.has(n.id))
     const orphans = ns.filter(n => !linked.has(n.id))
 
     let laidConn = []
-    let bottomY  = 0
+    let bottomY = 0
 
     if (conn.length) {
       // One layout per connected component, packed onto shelves.
@@ -540,9 +540,9 @@
     for (const t of all) {
       for (const col of t.columns) {
         if (!col.foreignKey) continue
-        const parts    = col.foreignKey.split('.')
+        const parts = col.foreignKey.split('.')
         const refTable = parts.length >= 3 ? parts[1] : parts[0]
-        const refCol   = parts.length >= 3 ? parts[2] : parts[1]
+        const refCol = parts.length >= 3 ? parts[2] : parts[1]
         if (!tableMeta.has(refTable)) continue
         // Cardinality straight off the schema: the FK side is "many" unless that
         // column is itself unique or the PK (then it's one-to-one), and a nullable
@@ -700,16 +700,16 @@
 
   // ── Load ──────────────────────────────────────────────────────────────────
   async function load() {
-    loading     = true
-    error       = ''
-    tableMeta   = new Map()
-    nodes       = []
-    edges       = []
+    loading = true
+    error = ''
+    tableMeta = new Map()
+    nodes = []
+    edges = []
     // A filter belongs to the schema it was picked in.
-    picked      = new Set()
-    pickQuery   = ''
-    drawAll     = false
-    gatedCount  = 0
+    picked = new Set()
+    pickQuery = ''
+    drawAll = false
+    gatedCount = 0
     _posCache.clear()
 
     try {
@@ -896,8 +896,8 @@
   }
 
   const selMeta = $derived(selectedTable ? (tableMeta.get(selectedTable) ?? null) : null)
-  const selFks  = $derived(selMeta?.columns.filter(c => c.foreignKey) ?? [])
-  const refBy   = $derived(
+  const selFks = $derived(selMeta?.columns.filter(c => c.foreignKey) ?? [])
+  const refBy = $derived(
     selectedTable
       ? [...tableMeta.values()].filter(t =>
           t.name !== selectedTable &&
@@ -1140,7 +1140,7 @@
         const tyY = cy + ROW_H / 2 + 4
         o.push(`<text x="${nx+12}" y="${tyY}" font-size="10" font-family="${FONT}" fill="${nc}">${xesc(col.name)}</text>`)
         if (isPk || isFk) {
-          const b  = isPk ? 'pk' : 'fk'
+          const b = isPk ? 'pk' : 'fk'
           const tc = isPk ? c.pk : c.fk
           o.push(`<rect x="${nx+NODE_W-42}" y="${cy+5}" width="18" height="13" rx="2" fill="${tc}" fill-opacity="0.15"/>`)
           o.push(`<text x="${nx+NODE_W-33}" y="${cy+15}" font-size="7.5" font-weight="700" font-family="${FONT}" fill="${tc}" text-anchor="middle">${b}</text>`)
@@ -1272,7 +1272,7 @@
 }} />
 
 {#snippet segmented(/** @type {{value:string,label:string,hint?:string}[]} */ items, /** @type {string} */ current, /** @type {(v:string)=>void} */ pick)}
-  <div class="inline-flex h-7 shrink-0 items-center rounded-lg border border-border/50 bg-muted/25 p-0.5">
+<div class= "field-surface inline-flex h-7 shrink-0 items-center bg-muted/25 p-0.5">
     {#each items as it (it.value)}
       <button
         type="button"
@@ -1294,7 +1294,7 @@
   <div class="flex items-center justify-between gap-3 px-3 py-2">
     <div class="min-w-0">
       <p class="text-ui-sm text-foreground">{label}</p>
-      <p class="mt-0.5 text-ui-2xs leading-snug text-muted-foreground/70">{desc}</p>
+      <p class="mt-0.5 text-ui-2xs leading-snug text-muted-foreground">{desc}</p>
     </div>
     <button
       type="button" role="switch" aria-checked={checked} aria-label={label}
@@ -1317,10 +1317,10 @@
     {#if schemas.length > 1}
       <Popover bind:open={schemaOpen}>
         <PopoverTrigger
-          class="ml-1 flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-input bg-input/30 px-2.5 text-ui-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none data-[state=open]:bg-accent"
+        class= "field-surface ml-1 flex h-7 shrink-0 items-center gap-1.5 bg-input/30 px-2.5 text-ui-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none data-[state=open]:bg-accent"
         >
           {activeSchema}
-          <ChevronDown class="size-3 shrink-0 text-muted-foreground/60" />
+          <ChevronDown class="size-3 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
         <PopoverContent class="max-h-72 w-44 overflow-y-auto p-1" align="start">
           {#each schemas as s (s)}
@@ -1335,16 +1335,16 @@
     {/if}
 
     <div class="relative flex min-w-0 shrink items-center">
-      <Search class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground/50" />
+      <Search class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
       <input
         type="text"
         bind:this={searchEl}
         bind:value={search}
         placeholder="Search tables…"
-        class="h-7 w-40 min-w-0 rounded-lg border-2 border-border bg-input/30 pl-7 pr-6 text-ui-sm outline-none placeholder:text-muted-foreground/45 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+        class= "field-surface h-7 w-40 min-w-0 bg-input/30 pl-7 pr-6 text-ui-sm outline-none placeholder:text-muted-foreground"
       />
       {#if search}
-        <button type="button" onclick={() => (search = '')} class="absolute right-2 text-muted-foreground/50 hover:text-foreground">
+        <button type="button" onclick={() => (search = '')} class="absolute right-2 text-muted-foreground hover:text-foreground">
           <X class="size-3" />
         </button>
       {/if}
@@ -1369,7 +1369,7 @@
       <PopoverContent class="w-72 p-0" align="start">
         <div class="border-b border-border/40 p-2">
           <div class="relative flex items-center">
-            <Search class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground/50" />
+            <Search class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
             <!-- svelte-ignore a11y_autofocus -->
             <input
               type="text"
@@ -1379,7 +1379,7 @@
               onkeydown={(e) => {
                 if (e.key === 'Enter' && pickerRows.length) { togglePicked(pickerRows[0].name); e.preventDefault() }
               }}
-              class="h-7 w-full rounded-md border border-input bg-input/30 pl-7 pr-2 text-ui-sm outline-none placeholder:text-muted-foreground/45 focus:border-ring/55"
+              class= "field-surface h-7 w-full bg-input/30 pl-7 pr-2 text-ui-sm outline-none placeholder:text-muted-foreground focus:border-ring/55"
             />
           </div>
         </div>
@@ -1398,14 +1398,14 @@
               class="inline-flex h-6 items-center rounded-md px-2 text-ui-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
             >{act.label}</button>
           {/each}
-          <span class="ml-auto pr-1 font-mono text-ui-3xs tabular-nums text-muted-foreground/50">
+          <span class="ml-auto pr-1 font-mono text-ui-3xs tabular-nums text-muted-foreground">
             {picked.size || tableMeta.size}/{tableMeta.size}
           </span>
         </div>
 
         <div class="max-h-72 overflow-y-auto py-1">
           {#if !picked.size}
-            <p class="px-3 pb-1 pt-0.5 text-ui-3xs leading-snug text-muted-foreground/55">
+            <p class="px-3 pb-1 pt-0.5 text-ui-3xs leading-snug text-muted-foreground">
               No filter - every table the scope allows is on the diagram. Tick one to narrow it.
             </p>
           {/if}
@@ -1424,33 +1424,33 @@
                   )}
                 >
                   {#if on}
-                    <Check class="size-2.5" />
+                    <Check class="size-3" />
                   {:else if !picked.size}
                     <span class="size-1 rounded-full bg-muted-foreground/40"></span>
                   {/if}
                 </span>
                 <span class={cn(
                   'min-w-0 flex-1 truncate font-mono text-ui-2xs',
-                  picked.size && !on ? 'text-muted-foreground/45' : 'text-foreground/85',
+                  picked.size && !on ? 'text-muted-foreground' : 'text-foreground/85',
                 )}>{row.name}</span>
               </button>
               {#if row.fks}
-                <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground/40" title="{row.fks} foreign keys">{row.fks} fk</span>
+                <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground" title="{row.fks} foreign keys">{row.fks} fk</span>
               {/if}
               <button
                 type="button"
                 title="Show only {row.name} and what it links to"
                 onclick={() => isolate(row.name)}
-                class="shrink-0 rounded px-1 text-ui-3xs text-muted-foreground/40 transition-colors hover:text-foreground"
+                class="shrink-0 rounded px-1 text-ui-3xs text-muted-foreground transition-colors hover:text-foreground"
               >only</button>
             </div>
           {/each}
           {#if pickerRows.length > PICKER_ROWS}
-            <p class="px-3 py-1.5 text-ui-3xs text-muted-foreground/50">
+            <p class="px-3 py-1.5 text-ui-3xs text-muted-foreground">
               {pickerRows.length - PICKER_ROWS} more - narrow the search to reach them.
             </p>
           {:else if !pickerRows.length}
-            <p class="px-3 py-1.5 text-ui-3xs text-muted-foreground/50">No table matches “{pickQuery}”.</p>
+            <p class="px-3 py-1.5 text-ui-3xs text-muted-foreground">No table matches “{pickQuery}”.</p>
           {/if}
         </div>
       </PopoverContent>
@@ -1460,7 +1460,7 @@
       <!-- Scope: what the diagram covers, relative to the table it was opened for.
            Icons only - the table's name is already in the tab and on its card. -->
       <div class="ml-0.5 flex shrink-0 items-center gap-1">
-        <div class="inline-flex h-7 shrink-0 items-center rounded-lg border border-border/50 bg-muted/25 p-0.5">
+        <div class= "field-surface inline-flex h-7 shrink-0 items-center bg-muted/25 p-0.5">
           {#each SCOPES as s (s.id)}
             <button
               type="button"
@@ -1472,7 +1472,7 @@
                 'inline-flex size-6 items-center justify-center rounded-[6px] transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.97]',
                 scope === s.id
                   ? 'bg-background text-foreground ring-1 ring-inset ring-border/70'
-                  : 'text-muted-foreground/70 hover:text-foreground',
+                  : 'text-muted-foreground hover:text-foreground',
               )}
             >
               {#if s.id === 'self'}<Square class="size-3.5" />
@@ -1484,7 +1484,7 @@
         {#if onclearfocus}
           <button
             type="button"
-            class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-[background-color,color,transform] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97]"
+            class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-[background-color,color,transform] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97]"
             title="Clear focus on {focusTable}"
             onclick={onclearfocus}
           ><X class="size-3" /></button>
@@ -1494,7 +1494,7 @@
 
     <div class="ml-auto flex shrink-0 items-center gap-1.5">
       {#if tableMeta.size > 0 && !loading}
-        <span class="whitespace-nowrap pr-1 font-mono text-ui-2xs tabular-nums text-muted-foreground/55">
+        <span class="whitespace-nowrap pr-1 font-mono text-ui-2xs tabular-nums text-muted-foreground">
           {nodes.length}/{tableMeta.size} tables · {fkCount} fk
         </span>
         {#if picked.size}
@@ -1522,7 +1522,7 @@
         </PopoverTrigger>
         <PopoverContent class="w-72 py-1" align="end">
           <div class="px-3 pb-1.5 pt-2">
-            <p class="text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/45">Cards</p>
+            <p class="text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">Cards</p>
           </div>
           <div class="flex items-center justify-between gap-3 px-3 pb-2">
             <span class="text-ui-sm text-foreground">Columns</span>
@@ -1536,7 +1536,7 @@
 
           <div class="mt-1 border-t border-border/40"></div>
           <div class="px-3 pb-1.5 pt-2">
-            <p class="text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/45">Layout</p>
+            <p class="text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">Layout</p>
           </div>
           <div class="flex items-center justify-between gap-3 px-3 pb-2">
             <span class="text-ui-sm text-foreground">Spacing</span>
@@ -1558,7 +1558,7 @@
             )}
           </div>
           {#if view.routing === 'smart' && !routeHints.size && nodes.length > MAX_ROUTED_NODES}
-            <p class="px-3 pb-2 text-ui-2xs leading-snug text-muted-foreground/70">
+            <p class="px-3 pb-2 text-ui-2xs leading-snug text-muted-foreground">
               Drawing direct lines: routing is capped at {MAX_ROUTED_NODES} tables and this view has {nodes.length}.
             </p>
           {/if}
@@ -1623,8 +1623,8 @@
   <div class="relative min-h-0 min-w-0 flex-1">
     {#if loading && tableMeta.size === 0}
       <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background">
-        <Loader class="size-6 animate-spin text-muted-foreground/30" />
-        <p class="font-mono text-ui-xs text-muted-foreground/50">Loading schema structure…</p>
+        <Loader class="size-6 animate-spin text-muted-foreground" />
+        <p class="font-mono text-ui-xs text-muted-foreground">Loading schema structure…</p>
       </div>
 
     {:else if error}
@@ -1655,11 +1655,11 @@
              diagram waits for a filter, or for an explicit go-ahead. -->
         <div class="absolute inset-0 flex items-center justify-center bg-background p-6">
           <div class="max-w-sm rounded-xl border border-border/60 bg-panel p-5 text-center elevate-2-rim">
-            <Network class="mx-auto size-5 text-muted-foreground/40" />
+            <Network class="mx-auto size-5 text-muted-foreground" />
             <p class="mt-2.5 text-ui-sm font-medium text-foreground">
               {gatedCount} tables in <span class="font-mono">{activeSchema}</span>
             </p>
-            <p class="mt-1.5 text-ui-xs leading-relaxed text-muted-foreground/75">
+            <p class="mt-1.5 text-ui-xs leading-relaxed text-muted-foreground">
               A diagram this wide takes seconds to lay out and is hard to read once it lands.
               Pick the tables worth seeing, or draw the whole schema anyway.
             </p>
@@ -1675,7 +1675,7 @@
               <button
                 type="button"
                 onclick={() => (drawAll = true)}
-                class="inline-flex h-8 items-center rounded-md border border-border/60 bg-input/20 px-3 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                class= "field-surface inline-flex h-8 items-center bg-input/20 px-3 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >Draw all {gatedCount}</button>
             </div>
           </div>
@@ -1684,7 +1684,7 @@
 
       {#if tableMeta.size === 0 && !loading}
         <div class="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
-          <div class="rounded-lg border border-border/50 bg-panel px-4 py-3 font-mono text-ui-xs text-muted-foreground/60">
+          <div class="rounded-lg border border-border/50 bg-panel px-4 py-3 font-mono text-ui-xs text-muted-foreground">
             No tables found in <span class="text-foreground/70">{activeSchema}</span>
           </div>
         </div>
@@ -1693,7 +1693,7 @@
       <!-- ── Legend ───────────────────────────────────────────────────────── -->
       {#if nodes.length > 0}
         <div class="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-          <div class="flex h-6 items-center gap-2.5 rounded-full border border-border/40 bg-panel/75 px-2.5 text-ui-3xs text-muted-foreground/60 backdrop-blur-sm">
+          <div class="flex h-6 items-center gap-2.5 rounded-full border border-border/40 bg-panel/75 px-2.5 text-ui-3xs text-muted-foreground backdrop-blur-sm">
             <span class="flex items-center gap-1"><span class="size-1.5 rounded-full" style="background:{ink.pk}"></span>PK</span>
             <span class="flex items-center gap-1"><span class="size-1.5 rounded-full" style="background:{ink.fk}"></span>FK</span>
             <span class="h-2.5 w-px bg-border/60"></span>
@@ -1733,7 +1733,7 @@
         <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-semibold text-foreground">{selMeta.name}</span>
         <button
           type="button"
-          class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-[background-color,color,transform] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97]"
+          class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-[background-color,color,transform] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97]"
           title="Copy CREATE statement"
           onclick={() => void copyDdl(selMeta.name)}
         >
@@ -1745,15 +1745,15 @@
         </button>
         <button
           type="button"
-          class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-[background-color,color,transform] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97]"
+          class="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-[background-color,color,transform] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97]"
           title="Close inspector"
           onclick={() => (selectedTable = null)}
         ><X class="size-3.5" /></button>
       </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto">
-        <p class="px-3 pt-2.5 pb-1 text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground/45">
-          Columns <span class="font-normal tabular-nums text-muted-foreground/35">{selMeta.columns.length}</span>
+        <p class="px-3 pt-2.5 pb-1 text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          Columns <span class="font-normal tabular-nums text-muted-foreground">{selMeta.columns.length}</span>
         </p>
         {#each selMeta.columns as col (col.name)}
           {@const isPk = selMeta.pkCols.has(col.name)}
@@ -1763,12 +1763,12 @@
             {:else if isFk}<Link class="size-3 shrink-0" style="color:{ink.fk}" />
             {:else}<span class="size-3 shrink-0"></span>{/if}
             <span class="min-w-0 flex-1 truncate font-mono text-ui-2xs {isPk ? 'font-medium text-foreground' : 'text-foreground/75'}">{col.name}</span>
-            <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/45">{col.dataType}</span>
+            <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">{col.dataType}</span>
           </div>
         {/each}
 
         {#if selFks.length > 0}
-          <p class="mt-2 border-t border-border/40 px-3 pt-2.5 pb-1 text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground/45">References</p>
+          <p class="mt-2 border-t border-border/40 px-3 pt-2.5 pb-1 text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">References</p>
           {#each selFks as fk (fk.name)}
             {@const ref = fk.foreignKey?.split('.') ?? []}
             <button
@@ -1776,23 +1776,23 @@
               class="flex w-full items-baseline gap-1.5 px-3 py-1 text-left transition-colors hover:bg-accent/60"
               onclick={() => { selectedTable = ref[1] ?? null }}
             >
-              <span class="min-w-0 truncate font-mono text-ui-2xs text-muted-foreground/70">{fk.name}</span>
-              <span class="shrink-0 text-ui-3xs text-muted-foreground/30">→</span>
+              <span class="min-w-0 truncate font-mono text-ui-2xs text-muted-foreground">{fk.name}</span>
+              <span class="shrink-0 text-ui-3xs text-muted-foreground">→</span>
               <span class="min-w-0 truncate font-mono text-ui-2xs text-foreground/80">{ref[1]}.{ref[2]}</span>
             </button>
           {/each}
         {/if}
 
         {#if refBy.length > 0}
-          <p class="mt-2 border-t border-border/40 px-3 pt-2.5 pb-1 text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground/45">Referenced by</p>
+          <p class="mt-2 border-t border-border/40 px-3 pt-2.5 pb-1 text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Referenced by</p>
           {#each refBy as t (t.name)}
             <button
               type="button"
               class="flex w-full items-center gap-1.5 px-3 py-1 text-left transition-colors hover:bg-accent/60"
               onclick={() => { selectedTable = t.name }}
             >
-              <span class="shrink-0 text-ui-3xs text-muted-foreground/30">←</span>
-              <span class="min-w-0 truncate font-mono text-ui-2xs text-muted-foreground/75">{t.name}</span>
+              <span class="shrink-0 text-ui-3xs text-muted-foreground">←</span>
+              <span class="min-w-0 truncate font-mono text-ui-2xs text-muted-foreground">{t.name}</span>
             </button>
           {/each}
         {/if}
@@ -1801,7 +1801,7 @@
       <div class="flex shrink-0 items-center gap-1.5 border-t border-border/60 p-2">
         <button
           type="button"
-          class="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-border/60 bg-input/20 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-accent active:scale-[0.99]"
+          class= "field-surface inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 bg-input/20 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-accent active:scale-[0.99]"
           onclick={() => openTable(selMeta.name)}
         >Open table</button>
         <button

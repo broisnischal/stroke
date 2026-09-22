@@ -1,4 +1,5 @@
 <script>
+  import Kbd from './Kbd.svelte'
   import { startTelemetry, stopTelemetry } from "$lib/telemetry.js";
   import Minus from "@lucide/svelte/icons/minus";
   import Plus from "@lucide/svelte/icons/plus";
@@ -9,6 +10,8 @@
   import SearchableMenu from "$lib/components/SearchableMenu.svelte";
   import SelectMenu from "$lib/components/SelectMenu.svelte";
   import { getThemeDefinition, themesByGroup } from "$lib/themes/registry.js";
+  import { sidebarSideStore, setSidebarSide } from "$lib/stores/layout.js";
+  import { pluginState, isPluginEnabled, setPluginEnabled } from "$lib/stores/plugins.js";
   import { t, locale, LOCALES, setLocale } from "$lib/i18n.js";
   import { licenseStatus } from "$lib/stores/license.js";
   import {
@@ -26,6 +29,10 @@
     TABLE_STYLES,
     TABLE_ALIGN_OPTIONS,
     ROW_SPACINGS,
+    GRID_FONT_MIN,
+    GRID_FONT_MAX,
+    DEFAULT_GRID_FONT_SIZE,
+    MOTION_MODES,
     DEFAULT_MAX_QUERY_HISTORY,
     DEFAULT_CONNECT_TIMEOUT_MS,
     DEFAULT_SOCKET_TIMEOUT_MS,
@@ -34,6 +41,7 @@
     AGENT_FONT_SIZES,
     THINKING_STYLES,
   } from "$lib/stores/settings.js";
+  import { PAGE_SIZE_OPTIONS, loadDefaultPageSize, saveDefaultPageSize } from '$lib/table-query.js';
   import {
     SQL_CASE_OPTIONS,
     SQL_FORMAT_FIELDS,
@@ -223,6 +231,36 @@
   }
 
   const rowSpacingEntries = Object.entries(ROW_SPACINGS);
+  // Rows-per-page is owned by table-query.js, not by this settings blob - the
+  // grid's own page-size dropdown writes it. Mirrored into local state so the
+  // row re-renders after a write, since there is no store to subscribe to.
+  let defaultPageSize = $state(loadDefaultPageSize());
+  const pageSizeItems = PAGE_SIZE_OPTIONS
+    .filter((n) => n > 0 && n <= 1_000)
+    .map((n) => ({ value: String(n), label: `${n} rows`, keywords: [String(n)] }));
+  const motionEntries = Object.entries(MOTION_MODES);
+  // NULL rendering is already an extension ("Empty & NULL Markers"), and a
+  // second implementation in Settings would be two switches for one behaviour.
+  // What was missing is discoverability: nobody goes looking in Extensions for
+  // how NULL is drawn. Same extension, surfaced where people look for it.
+  const NULLISH_ID = 'nullish-values';
+  const nullishOn = $derived.by(() => { void $pluginState; return isPluginEnabled(NULLISH_ID); });
+  // Same story as NULL: "Boolean Glyphs" is a per-cell formatter, and formatters
+  // run after the grid's own value formatting and replace it. A boolean-display
+  // setting beside this toggle would be dead whenever the extension was on.
+  const BOOL_GLYPH_ID = 'boolean-glyph';
+  const boolGlyphOn = $derived.by(() => { void $pluginState; return isPluginEnabled(BOOL_GLYPH_ID); });
+
+  const sidebarSideItems = [
+    { value: 'left', label: 'Left' },
+    { value: 'right', label: 'Right' },
+  ];
+
+  /** @param {string | undefined} id */
+  function setMotion(id) {
+    if (!id || id === settings.motion) return;
+    settings = updateSettings({ motion: /** @type {any} */ (id) });
+  }
 
   /** @param {string | undefined} id */
   function setRowSpacing(id) {
@@ -232,6 +270,45 @@
 
   function toggleZebraRows() {
     settings = updateSettings({ zebraRows: !settings.zebraRows });
+  }
+
+  function toggleRowNumbers() {
+    settings = updateSettings({ showRowNumbers: !settings.showRowNumbers });
+  }
+
+  function toggleMenuBar() {
+    settings = updateSettings({ showMenuBar: !settings.showMenuBar });
+  }
+
+  function toggleNumberGrouping() {
+    settings = updateSettings({ numberGrouping: !settings.numberGrouping });
+  }
+
+  function toggleImagePreview() {
+    settings = updateSettings({ imagePreview: !settings.imagePreview });
+  }
+
+  function toggleOpenUrls() {
+    settings = updateSettings({ openUrlsOnClick: !settings.openUrlsOnClick });
+  }
+
+  function toggleHighlightActiveRow() {
+    settings = updateSettings({ highlightActiveRow: !settings.highlightActiveRow });
+  }
+
+  /** @param {number} px */
+  function setGridFontSize(px) {
+    const next = Math.min(GRID_FONT_MAX, Math.max(GRID_FONT_MIN, Math.round(px)));
+    if (next === settings.gridFontSize) return;
+    settings = updateSettings({ gridFontSize: next });
+  }
+
+  /** @param {string | undefined} v */
+  function setDefaultPageSize(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n === defaultPageSize) return;
+    saveDefaultPageSize(n);
+    defaultPageSize = loadDefaultPageSize();
   }
 
   function toggleAutoSaveQueries() {
@@ -265,6 +342,10 @@
 
   function toggleLiveMode() {
     settings = updateSettings({ liveModeEnabled: !settings.liveModeEnabled });
+  }
+
+  function toggleLazyWideColumns() {
+    settings = updateSettings({ lazyWideColumns: !settings.lazyWideColumns });
   }
 
   // ── Database (query & connection) numeric/text settings ──────────────────
@@ -413,11 +494,11 @@
       <!-- ── Left: search + category nav ─────────────────────────── -->
       <aside class="flex min-h-0 flex-col gap-3 border-r border-border/40 bg-muted/[0.015] p-3">
         <div class="relative">
-          <Icon name="search" class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/45" />
+          <Icon name="search" class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             bind:value={query}
             placeholder="Search settings…"
-            class="h-8 w-full rounded-lg border-2 border-border bg-background pl-8 pr-2.5 text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class= "field-surface h-8 w-full bg-transparent pl-8 pr-2.5 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
           />
         </div>
         <nav class="flex flex-col gap-0.5">
@@ -481,7 +562,7 @@
 <!-- ── Content snippets ──────────────────────────────────────────── -->
 {#snippet secLabel(/** @type {string} */ text)}
   {#if !searching}
-    <p class="mt-8 mb-1 text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/45 first:mt-0">{text}</p>
+    <p class="mt-8 mb-1 text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground first:mt-0">{text}</p>
     <div class="mb-1 border-b border-border/40"></div>
   {/if}
 {/snippet}
@@ -529,7 +610,7 @@
       'inline-flex size-8 shrink-0 items-center justify-center rounded-lg border transition-[background-color,color,border-color,opacity] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.96]',
       dirty
         ? 'border-border/60 text-muted-foreground hover:bg-muted hover:text-foreground'
-        : 'cursor-default border-transparent text-muted-foreground/20',
+        : 'cursor-default border-transparent text-muted-foreground',
     )}
   >
     <RotateCcw class="size-3.5" />
@@ -554,7 +635,7 @@
             unit ? 'pr-11' : 'pr-2.5',
           )}
         />
-        {#if unit}<span class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ui-3xs text-muted-foreground/50">{unit}</span>{/if}
+        {#if unit}<span class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-ui-2xs text-muted-foreground">{unit}</span>{/if}
       </div>
       {@render resetBtn(key, def, settings[key] !== def)}
     </div>
@@ -573,7 +654,7 @@
         value={settings[key]}
         aria-label={label}
         onchange={(e) => setText(/** @type {any} */ (key), e.currentTarget.value, def)}
-        class="h-8 w-48 rounded-lg border-2 border-border bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow] focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+        class= "field-surface h-8 w-48 bg-background px-2.5 font-mono text-ui-xs text-foreground outline-none transition-[border-color,box-shadow]"
       />
       {@render resetBtn(key, def, settings[key] !== def)}
     </div>
@@ -854,6 +935,9 @@
   {#if show('Live mode', 'Experimental, auto-refresh the active table when its data changes')}
     {@render switchRow('Live mode (experimental)', 'Experimental, show the Live auto-refresh toggle in the status bar. Off by default.', settings.liveModeEnabled, toggleLiveMode)}
   {/if}
+  {#if show('Load large values on demand', 'Fetch a column that averages megabytes as a size, and load a cell when you open it')}
+    {@render switchRow('Load large values on demand', 'A column averaging half a megabyte a row arrives as its size, and the value loads when you open the cell. Off fetches every value with the page, which is what it did before, and what makes such a table take ten seconds to open. PostgreSQL.', settings.lazyWideColumns, toggleLazyWideColumns)}
+  {/if}
   {#if show($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'))}
     {@render switchRow($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'), settings.mcpAutoStart, toggleMcpAutoStart)}
   {/if}
@@ -1083,12 +1167,154 @@
       />
     </div>
   {/if}
+  {#if show('Grid text size', 'Font size of the data grid, independent of the app zoom')}
+    <div class="flex items-center justify-between gap-4 py-2">
+      <div class="min-w-0 flex-1">
+        <p class="text-ui-sm font-medium text-foreground">Grid text size</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Size of the values in the data grid at 100% zoom. Separate from the app zoom, so the grid can run denser or larger than the rest of the interface without changing it.
+        </p>
+      </div>
+      <div class="flex shrink-0 items-center gap-1">
+        <Button variant="outline" size="icon" class="size-7" aria-label="Smaller grid text"
+          disabled={settings.gridFontSize <= GRID_FONT_MIN}
+          onclick={() => setGridFontSize(settings.gridFontSize - 1)}>−</Button>
+        <!-- The reading doubles as the reset. A separate "Reset" control for one
+             number is more chrome than the number itself; clicking the value you
+             are trying to change back is where the pointer already is. Title and
+             aria-label carry what it does, since the glyph cannot. -->
+        <button
+          type="button"
+          class="hit-area w-12 rounded text-center font-mono text-ui-xs tabular-nums text-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-100 disabled:hover:bg-transparent"
+          disabled={settings.gridFontSize === DEFAULT_GRID_FONT_SIZE}
+          title={settings.gridFontSize === DEFAULT_GRID_FONT_SIZE ? 'Default size' : `Reset to ${DEFAULT_GRID_FONT_SIZE}px`}
+          aria-label={settings.gridFontSize === DEFAULT_GRID_FONT_SIZE ? 'Grid text size, default' : `Reset grid text size to ${DEFAULT_GRID_FONT_SIZE} pixels`}
+          onclick={() => setGridFontSize(DEFAULT_GRID_FONT_SIZE)}
+        >{settings.gridFontSize}px</button>
+        <Button variant="outline" size="icon" class="size-7" aria-label="Larger grid text"
+          disabled={settings.gridFontSize >= GRID_FONT_MAX}
+          onclick={() => setGridFontSize(settings.gridFontSize + 1)}>+</Button>
+      </div>
+    </div>
+  {/if}
+  {#if show('Boolean glyphs', 'Show a coloured dot or check for boolean columns')}
+    {@render switchRow(
+      'Boolean glyphs',
+      'Draw boolean columns as a coloured dot or ✓ / ✗ instead of the raw true / false text, so a column of them reads at a glance. This is the Boolean Glyphs extension - the same switch, and its dot-or-check choice, live in Extensions.',
+      boolGlyphOn,
+      () => setPluginEnabled(BOOL_GLYPH_ID, !boolGlyphOn),
+    )}
+  {/if}
+  {#if show('Group large numbers', 'Thousands separators on integers in the grid')}
+    {@render switchRow(
+      'Group large numbers',
+      'Show integers with thousands separators, so 162957 reads as 162,957. Applies to whole numbers only - decimals are left exactly as the database returned them rather than being rounded to fit a format.',
+      settings.numberGrouping,
+      toggleNumberGrouping,
+    )}
+  {/if}
+  {#if show('Image previews', 'Show thumbnails for image URLs in the grid')}
+    {@render switchRow(
+      'Image previews',
+      'Draw a thumbnail for cells holding an image URL, and open the full image in a lightbox when one is clicked. Turning this off stops the images being downloaded at all, not just drawn - useful on a metered connection, or when a table of URLs should stay text.',
+      settings.imagePreview,
+      toggleImagePreview,
+    )}
+  {/if}
+  {#if show('Open links on click', 'Clicking a URL cell opens it in your browser')}
+    {@render switchRow(
+      'Open links on click',
+      'Click a cell holding a URL to open it in your browser. With this off a click just selects the cell, so a table full of links can be read and copied without one stray click leaving the app.',
+      settings.openUrlsOnClick,
+      toggleOpenUrls,
+    )}
+  {/if}
+  {#if show('Highlight the active row', 'Tint the row the keyboard is on')}
+    {@render switchRow(
+      'Highlight the active row',
+      'Tint the full width of the row holding the focused cell. Turn it off if you navigate cell by cell and find the band distracting - the focused cell keeps its own outline either way.',
+      settings.highlightActiveRow,
+      toggleHighlightActiveRow,
+    )}
+  {/if}
+  {#if show('Rows per page', 'How many rows a newly opened table fetches')}
+    <div class="flex items-center justify-between gap-4 py-2">
+      <div class="min-w-0 flex-1">
+        <p class="text-ui-sm font-medium text-foreground">Rows per page</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          How many rows a newly opened table fetches. The page-size control in the grid toolbar changes the same value, and applies to the table already open.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="Rows per page"
+        value={String(defaultPageSize)}
+        onValueChange={setDefaultPageSize}
+        items={pageSizeItems}
+      />
+    </div>
+  {/if}
+  {#if show('Empty and NULL markers', 'Tell NULL, empty string and whitespace-only cells apart')}
+    {@render switchRow(
+      'Empty and NULL markers',
+      'Draw NULL as ∅, an empty string as "", and a whitespace-only value as ·····, so three things that all look blank stop looking the same. This is the Empty & NULL Markers extension - the same switch lives in Extensions.',
+      nullishOn,
+      () => setPluginEnabled(NULLISH_ID, !nullishOn),
+    )}
+  {/if}
+  {#if show('Sidebar position', 'Which side of the window the sidebar sits on')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">Sidebar position</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Which side of the window the tables sidebar sits on. Also on its own right-click menu.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="Sidebar position"
+        value={$sidebarSideStore}
+        onValueChange={(v) => { if (v === 'left' || v === 'right') setSidebarSide(v) }}
+        items={sidebarSideItems.map((i) => ({ ...i, keywords: [i.label] }))}
+      />
+    </div>
+  {/if}
+  {#if show('Motion', 'How much the interface animates')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">Motion</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          System follows your OS reduced-motion setting. Override it when you want animation in your window manager but not in a tool you stare at all day, or when the machine's setting isn't yours to change. A loading spinner keeps turning either way.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="Motion"
+        value={settings.motion}
+        onValueChange={setMotion}
+        items={motionEntries.map(([id, m]) => ({ value: id, label: m.label, keywords: [m.label, m.description] }))}
+      />
+    </div>
+  {/if}
   {#if show('Alternating row colors', 'Shade every other grid row')}
     {@render switchRow(
       'Alternating row colors',
       'Shade every other row so a long row stays readable across the full width. The Striped and Dots grid styles already do this as part of their look.',
       settings.zebraRows,
       toggleZebraRows,
+    )}
+  {/if}
+  {#if show('Menu bar', 'File, Edit, View, Tools and Help in the title bar')}
+    {@render switchRow(
+      'Menu bar',
+      'Show File, Edit, View, Tools and Help in the title bar. Everything in it is also in the command palette (⌘K) and on a shortcut; turning it off gives the space back to the window drag region.',
+      settings.showMenuBar,
+      toggleMenuBar,
+    )}
+  {/if}
+  {#if show('Row numbers', 'Number every grid row in the gutter')}
+    {@render switchRow(
+      'Row numbers',
+      'Number each row in the gutter, counting from the first row of the page rather than from the first row on screen - so row 201 reads 201 on page 3, not 1. Off by default: it is a reading aid, not data, and it takes width from every table.',
+      settings.showRowNumbers,
+      toggleRowNumbers,
     )}
   {/if}
   {#if show('Cell alignment', 'Which side grid cell text sits on')}
@@ -1166,27 +1392,32 @@
         <p class="text-ui-sm font-medium text-foreground">{$t('settings.website')}</p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">{$t('settings.website.desc')}</p>
       </div>
-      <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-muted active:scale-[0.98]">
+        <a href= "field-surface https://stroke.click"target="_blank"rel="noopener noreferrer"class="inline-flex h-8 shrink-0 items-center gap-1.5 bg-background px-3 text-ui-xs font-medium text-foreground transition-[background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-muted active:scale-[0.98]">
         stroke.click <Icon name="external-link" class="size-3.5" />
       </a>
     </div>
   {/if}
 
   {#if !searching}
-    <p class="mt-8 mb-1 text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground/45">{$t('settings.sec.keyboard')}</p>
+    <p class="mt-8 mb-1 text-ui-2xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">{$t('settings.sec.keyboard')}</p>
     <div class="mb-3 border-b border-border/40"></div>
     <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-      {@render shortcut('⌘M', $t('settings.kbd.cycleTheme'))}
-      {@render shortcut('⌘⇧M', $t('settings.kbd.prevTheme'))}
-      {@render shortcut('⌘+ / ⌘−', $t('settings.kbd.zoom'))}
-      {@render shortcut('⌘0', $t('settings.kbd.resetZoom'))}
+      {@render shortcut('Mod+M', $t('settings.kbd.cycleTheme'))}
+      {@render shortcut('Mod+Shift+M', $t('settings.kbd.prevTheme'))}
+      {@render shortcut('Mod+Plus', $t('settings.kbd.zoom'))}
+      {@render shortcut('Mod+Minus', $t('settings.kbd.zoom'))}
+      {@render shortcut('Mod+0', $t('settings.kbd.resetZoom'))}
     </div>
   {/if}
 {/snippet}
 
-{#snippet shortcut(/** @type {string} */ keys, /** @type {string} */ action)}
+<!-- One combo in `createHotkey` grammar, printed as keycaps by <Kbd> - the same
+     caps the menus and the shortcuts dialog draw. It used to take a glyph string
+     and set it in a single bordered box, so `⌘⇧M` was one cap reading "⌘⇧M" and
+     the ⌘ was hardcoded for every platform. -->
+{#snippet shortcut(/** @type {string} */ combo, /** @type {string} */ action)}
   <span class="flex items-center gap-1.5 text-ui-2xs text-muted-foreground">
-    <kbd class="rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-ui-3xs leading-4 text-foreground/70">{keys}</kbd>
+    <Kbd {combo} />
     {action}
   </span>
 {/snippet}

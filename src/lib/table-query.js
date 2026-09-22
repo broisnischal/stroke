@@ -19,6 +19,13 @@ export function readRowsResponse(data) {
     rows: data.rows ?? [],
     total: Number(data.total ?? 0),
     queryMs: Number(data.queryMs ?? data.query_ms ?? 0),
+    // Columns this page fetched as a preview instead of a value. Empty on every
+    // ordinary table; when it is not, the toolbar says so - a column quietly
+    // showing "369 KB" where its contents should be is a bug report waiting to
+    // happen.
+    previewColumns: (data.previewColumns ?? data.preview_columns ?? []).map(
+      (/** @type {any} */ c) => ({ name: String(c.name ?? ''), avgBytes: Number(c.avgBytes ?? c.avg_bytes ?? 0) }),
+    ),
   }
 }
 

@@ -112,7 +112,7 @@
           >
             md source
           </span>
-          <span class="text-ui-3xs text-muted-foreground/30">Esc or ⌘↵ to preview</span>
+          <span class="text-ui-3xs text-muted-foreground">Esc or ⌘↵ to preview</span>
         </div>
         <textarea
           bind:this={textareaEl}
@@ -120,7 +120,7 @@
           oninput={onInput}
           onkeydown={onKeydown}
           onblur={onBlur}
-          class="flex-1 resize-none bg-transparent px-6 py-4 font-mono text-ui-sm leading-relaxed text-muted-foreground/85 outline-none placeholder:text-muted-foreground/25"
+          class="flex-1 resize-none bg-transparent px-6 py-4 font-mono text-ui-sm leading-relaxed text-muted-foreground outline-none placeholder:text-muted-foreground"
           placeholder="Write markdown here…"
           spellcheck="false"
         ></textarea>
@@ -132,7 +132,7 @@
           class="flex h-7 shrink-0 items-center gap-2 border-b border-border/20 px-6"
         >
           <span
-            class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/40"
+            class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground"
           >preview</span>
         </div>
         <div class="flex-1 overflow-auto px-6 py-4">
@@ -141,7 +141,7 @@
               {@html previewHtml}
             </div>
           {:else}
-            <span class="text-ui-sm italic text-muted-foreground/25">Preview will appear here…</span>
+            <span class="text-ui-sm italic text-muted-foreground">Preview will appear here…</span>
           {/if}
         </div>
       </div>
@@ -155,19 +155,19 @@
         <button
           onclick={onmoveup}
           disabled={!canmoveup}
-          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
+          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
           title="Move up"
         >↑</button>
         <button
           onclick={onmovedown}
           disabled={!canmovedown}
-          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/40 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
+          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
           title="Move down"
         >↓</button>
         <button
           onclick={onremove}
           disabled={!canremove}
-          class="rounded p-0.5 text-muted-foreground/30 hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-20"
+          class="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-20"
           title="Delete cell"
         >
           <Trash2 class="size-3" />
@@ -189,7 +189,7 @@
           {@html previewHtml}
         </div>
       {:else}
-        <span class="text-ui-sm italic text-muted-foreground/25">Click to add markdown…</span>
+        <span class="text-ui-sm italic text-muted-foreground">Click to add markdown…</span>
       {/if}
 
       <!-- Hover actions -->
@@ -199,19 +199,19 @@
         <button
           onclick={(e) => { e.stopPropagation(); onmoveup?.() }}
           disabled={!canmoveup}
-          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/50 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
+          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
           title="Move up"
         >↑</button>
         <button
           onclick={(e) => { e.stopPropagation(); onmovedown?.() }}
           disabled={!canmovedown}
-          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/50 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
+          class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-20"
           title="Move down"
         >↓</button>
         <button
           onclick={(e) => { e.stopPropagation(); onremove?.() }}
           disabled={!canremove}
-          class="rounded p-0.5 text-muted-foreground/40 hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-20"
+          class="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-20"
           title="Delete cell"
         >
           <Trash2 class="size-3" />

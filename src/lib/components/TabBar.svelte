@@ -40,6 +40,8 @@
     /** Reset a table tab's view state - search, filters, sort, hidden columns, view mode. */
     onresettable = /** @param {string} _id */ (_id) => {},
     onreopenclosed = () => {},
+    /** Open a fresh query editor - the `+` at the end of the strip. */
+    onnewsql = () => {},
     /** Whether the closed-tab stack has anything to reopen. */
     canreopenclosed = false,
     onpintoggle = /** @param {string} _id */ (_id) => {},
@@ -158,11 +160,11 @@
                 title={tabDisplayTitle(tab)}
                 class={cn(
                   'flex min-w-0 flex-1 items-center gap-1.5 pl-3 pr-1 text-left text-ui-2xs font-medium leading-none transition-colors duration-100',
-                  active ? 'text-foreground' : 'text-muted-foreground/50 hover:text-muted-foreground/80',
+                  active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
                 )}
                 onclick={() => { if (_suppressTabClick) { _suppressTabClick = false; return } onselect(tab.id) }}
               >
-                <Icon name={tabIconName} class={cn('size-3 shrink-0', active ? 'opacity-70' : 'opacity-35')} />
+                <Icon name={tabIconName} class={cn('size-3.5 shrink-0', active ? 'opacity-100' : 'opacity-70')} />
                 <span class="truncate">{tabDisplayTitle(tab)}</span>
               </button>
 
@@ -171,38 +173,36 @@
                 <button
                   type="button"
                   class={cn(
-                    'mr-1.5 inline-flex size-[18px] shrink-0 self-center items-center justify-center rounded transition-all duration-100',
-                    'text-muted-foreground/60 hover:bg-muted hover:text-foreground',
-                    active ? 'opacity-70 hover:opacity-100' : 'opacity-40 group-hover/tab:opacity-70',
+                    'hit-area mr-1.5 inline-flex size-[18px] shrink-0 self-center items-center justify-center rounded transition-opacity duration-100',
+                    'text-muted-foreground hover:bg-muted hover:text-foreground',
+                    active ? 'opacity-100' : 'opacity-70 group-hover/tab:opacity-100',
                   )}
                   title={$t('tabs.unpin')}
                   aria-label={$t('tabs.unpin')}
                   onclick={(e) => { e.stopPropagation(); onpintoggle(tab.id) }}
                 >
-                  <Icon name="pin" class="size-2.5 rotate-45" />
+                  <Icon name="pin" class="size-3 rotate-45" />
                 </button>
               {:else}
                 <!-- Close button -->
                 <button
                   type="button"
                   class={cn(
-                    'mr-1.5 inline-flex size-[18px] shrink-0 self-center items-center justify-center rounded transition-all duration-100',
-                    'text-muted-foreground/50 hover:bg-muted hover:text-foreground',
-                    active
-                      ? 'opacity-50 hover:opacity-100'
-                      : 'opacity-0 group-hover/tab:opacity-50 group-hover/tab:hover:opacity-100',
+                    'hit-area mr-1.5 inline-flex size-[18px] shrink-0 self-center items-center justify-center rounded transition-opacity duration-100',
+                    'text-muted-foreground hover:bg-muted hover:text-foreground',
+                    active ? 'opacity-100' : 'opacity-0 group-hover/tab:opacity-100',
                   )}
                   title={$t('tabs.close')}
                   aria-label={$t('tabs.close')}
                   onclick={(e) => { e.stopPropagation(); onclose(tab.id) }}
                 >
-                  <Icon name="x" class="size-2.5" />
+                  <Icon name="x" class="size-3" />
                 </button>
               {/if}
 
               <!-- Separator: hidden adjacent to any active tab -->
               {#if !active && !nextActive}
-                <span class="pointer-events-none absolute inset-y-[25%] right-0 w-px bg-border/30"></span>
+                <span class="pointer-events-none absolute inset-y-[25%] right-0 w-px bg-field-border/50"></span>
               {/if}
             </div>
           {/snippet}
@@ -237,6 +237,7 @@
           <ContextMenu.Item onSelect={() => onclose(tab.id)}>
             <Icon name="x" class="size-3.5" />
             Close Tab
+            <ContextMenu.Shortcut combo="Mod+W" />
           </ContextMenu.Item>
           <ContextMenu.Item disabled={!hasOtherClosable} onSelect={() => oncloseothers(tab.id)}>
             <Icon name="circle-slash" class="size-3.5" />
@@ -260,15 +261,27 @@
           <ContextMenu.Item disabled={!canreopenclosed} onSelect={onreopenclosed}>
             <Icon name="history" class="size-3.5" />
             Reopen last tab
-            <ContextMenu.Shortcut>⌘⇧T</ContextMenu.Shortcut>
+            <ContextMenu.Shortcut combo="Mod+Shift+T" />
           </ContextMenu.Item>
           <ContextMenu.Separator />
           <ContextMenu.Item variant="destructive" onSelect={oncloseall}>
             <Icon name="trash-2" class="size-3.5" />
             Close All Tabs
+            <ContextMenu.Shortcut combo="Mod+Shift+W" />
           </ContextMenu.Item>
         </ContextMenu.Content>
       </ContextMenu.Root>
     {/each}
   </div>
+  <!-- Outside the scroller on purpose: a `+` that scrolls away with the tabs is
+       a `+` you cannot find once the strip is full. -->
+  <button
+    type="button"
+    class="hit-area inline-flex w-8 shrink-0 items-center justify-center self-stretch text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
+    title="New query editor"
+    aria-label="New query editor"
+    onclick={onnewsql}
+  >
+    <Icon name="plus" class="size-3.5" />
+  </button>
 </header>

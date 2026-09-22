@@ -1,8 +1,5 @@
 <script>
   import Icon from "./Icon.svelte";
-  import CaseSensitive from "@lucide/svelte/icons/case-sensitive";
-  import WholeWord from "@lucide/svelte/icons/whole-word";
-  import Regex from "@lucide/svelte/icons/regex";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import Check from "@lucide/svelte/icons/check";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
@@ -14,6 +11,20 @@
   import { getColumnEnumValues } from "$lib/cell-value.js";
   import { slotRoll } from "$lib/actions/slot-text.js";
   import { cn } from "$lib/utils.js";
+  import { IS_MAC, keycaps } from "$lib/shortcuts.js";
+  import Kbd from "./Kbd.svelte";
+  /** Tooltip keycaps. A control that has a shortcut should say so where the
+   *  pointer already is - the shortcuts dialog is where you look when you do not
+   *  know a key exists, not when you are already on the button. */
+  const KEY = {
+    search: IS_MAC ? "⌘F" : "Ctrl+F",
+    filter: IS_MAC ? "⌥⇧F" : "Alt+Shift+F",
+    sort: IS_MAC ? "⌥⇧S" : "Alt+Shift+S",
+    columns: IS_MAC ? "⌥⇧C" : "Alt+Shift+C",
+    reset: IS_MAC ? "⌥⇧R" : "Alt+Shift+R",
+    addRow: IS_MAC ? "⌥N" : "Alt+N",
+  };
+  import { GAME_WORD, CLEAR_WORD, isMagic } from '$lib/games/easter-eggs.js'
   import {
     FILTER_OPS,
     BOOL_FILTER_OPS,
@@ -30,6 +41,7 @@
   import { onDestroy, untrack } from "svelte";
   import { formatCompactCount } from "$lib/table-list.js";
   import { describeTableView } from "$lib/stores/table-views.js";
+  import { searchOptionHotkey, SEARCH_OPTION_KEYS } from "$lib/search-options.js";
 
   /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
   /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
@@ -37,6 +49,15 @@
 
   let {
     queryMs = 0,
+    /**
+     * Columns this page fetched as a preview instead of a value, with the
+     * average size that earned them the treatment. Empty on every ordinary
+     * table - when it is not, the chip below says so, because a column showing
+     * "369 KB" where its contents should be needs to be explained once rather
+     * than reported as a bug.
+     * @type {{ name: string, avgBytes: number }[]}
+     */
+    previewColumns = [],
     page = 1,
     pageSize = 50,
     total = 0,
@@ -69,6 +90,7 @@
     ondeleteselected = () => {},
     /** @type {(format: 'csv' | 'json' | 'sql' | 'tsv' | 'md' | 'jsonl') => void | Promise<void>} */
     onexport = () => {},
+    onimport = () => {},
     /** Diagram exports, offered alongside the row formats while the ERD view is open. */
     /** @type {(kind: 'png' | 'copy-png' | 'svg' | 'mermaid') => void | Promise<void>} */
     onexportdiagram = () => {},
@@ -77,6 +99,7 @@
     onexportchart = () => {},
     onaddrow = () => {},
     onopeninsql = () => {},
+    onmagicword = /** @type {(w: 'golf' | 'crash') => void} */ (() => {}),
     /** @type {Set<string>} */
     hiddenColumns = new Set(),
     /** @type {(next: Set<string>) => void} */
@@ -143,29 +166,75 @@
   } = $props();
 
   const ALL_SEARCH_OPTS = /** @type {const} */ ([
-    { key: "matchCase", icon: CaseSensitive, title: "Match case" },
-    { key: "wholeWord", icon: WholeWord, title: "Match whole word" },
-    { key: "regex", icon: Regex, title: "Use regular expression" },
+    { key: "matchCase", cap: "Aa", title: `Match case (${SEARCH_OPTION_KEYS.matchCase})` },
+    { key: "wholeWord", cap: "ab", title: `Match whole word (${SEARCH_OPTION_KEYS.wholeWord})` },
+    { key: "regex", cap: ".*", title: `Use a regular expression (${SEARCH_OPTION_KEYS.regex})` },
   ]);
+
+  /**
+   * Alt+C / Alt+W / Alt+R from inside the search field, the chords every editor's
+   * find widget answers to. Options the engine cannot honor are not bound - a
+   * chord that silently does nothing is worse than no chord.
+   * @param {KeyboardEvent} e
+   */
+  /** @param {number} n */
+  function fmtBytes(n) {
+    if (n < 1024) return `${Math.round(n)} B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  function onSearchKeydown(e) {
+    // Escape empties the box. It is what the key means in every search field
+    // there is, and reaching for the ✕ with a hand already on the keyboard is
+    // the kind of small friction that adds up over a day.
+    if (e.key === "Escape" && localSearch) {
+      e.preventDefault();
+      e.stopPropagation();
+      clearSearch();
+      return;
+    }
+    const opt = searchOptionHotkey(e);
+    if (!opt || !searchOptionsSupport[opt]) return;
+    e.preventDefault();
+    onsearchoptionschange({ ...searchOptions, [opt]: !searchOptions[opt] });
+  }
   // Only the options this engine can honor (SQLite/D1 → match-case only, etc.).
   const SEARCH_OPTS = $derived(
     ALL_SEARCH_OPTS.filter((o) => searchOptionsSupport[o.key]),
   );
 
   let searchFocused = $state(false);
-  let searchOptsOpen = $state(false);
-  const searchOptsActive = $derived(
-    SEARCH_OPTS.some((o) => searchOptions[o.key]),
+  /**
+   * Whether to print the ⌘F keycaps inside the field.
+   *
+   * Only while it is empty and unfocused: once there is a query the clear ✕
+   * takes that corner, and once the field has focus the shortcut that puts it
+   * there has nothing left to say. It is a hint, not a label - `pointer-events-
+   * none` so a click through it still lands in the field.
+   */
+  const searchHintCaps = $derived(keycaps('Mod+F'));
+  const searchHint = $derived(
+    tableViewMode !== 'structure' && !searchFocused && !localSearch && columns.length > 0,
   );
-  // The options button lives next to the clear (✕); the toggles themselves live
-  // in its popover, so the input stays clean. Shown only where the engine can
-  // honor the options (e.g. Postgres regex path) and not in structure view.
+  /**
+   * The toggles sit in the field's trailing corner, and only once there is
+   * something to match.
+   *
+   * On an empty field they shared that corner with the ⌘F hint and the
+   * placeholder, so three controls and two labels fought over 90px and the word
+   * "Search…" ran under a keycap. They modify a query; with no query there is
+   * nothing for them to modify.
+   */
   const showSearchOpts = $derived(
-    searchOptionsSupported && tableViewMode !== "structure",
+    searchOptionsSupported &&
+      tableViewMode !== "structure" &&
+      SEARCH_OPTS.length > 0 &&
+      localSearch.trim() !== "",
   );
   // Keep the field expanded while focused, typing, or adjusting options.
   const searchExpanded = $derived(
-    searchFocused || searchOptsOpen || localSearch.trim() !== "",
+    searchFocused || localSearch.trim() !== "",
   );
 
   let viewsMenuOpen = $state(false);
@@ -335,8 +404,11 @@
     return Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   });
 
+  // `rounded-lg`, which resolves to the same 10px as `--radius-field`: app.css asks
+  // fields, dropdown triggers and buttons to share one corner, and `rounded-md` (8px)
+  // left every toolbar button 2px squarer than the field it sits next to.
   const iconBtn =
-    "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
+    "inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
 
   // ── Filter row chrome ──────────────────────────────────────────────────────
   // One border, one surface, one hover for every control in a filter row. Column,
@@ -344,10 +416,10 @@
   // as one sentence was drawn as three unrelated boxes. `dark:` is repeated on the
   // surface because the Input primitive sets its own dark background.
   const fCtl =
-    "h-7 rounded-md border border-border/60 bg-background dark:bg-background text-ui-sm font-normal text-foreground shadow-none outline-none transition-[color,background-color,border-color,box-shadow]";
+    "field-surface h-7 bg-transparent text-ui-sm font-normal text-foreground outline-none transition-[color,background-color]";
   const fTrigger = cn(
     fCtl,
-    "inline-flex items-center gap-1 px-2.5 hover:border-border hover:bg-muted/40 focus-visible:border-ring/60 focus-visible:ring-2 focus-visible:ring-ring/15 data-[state=open]:border-ring/60 data-[state=open]:bg-muted/40",
+    "inline-flex items-center gap-1 px-2.5 hover:bg-muted/40 data-[state=open]:bg-muted/40 focus-visible:border-ring data-[state=open]:border-ring",
   );
   // Capped, not free-running: a value field stretched across the whole toolbar is
   // an empty box the width of the window, and it dwarfs the two controls that say
@@ -568,6 +640,23 @@
 
   /** @param {string} value */
   function handleSearchInput(value) {
+    // The hidden game. Exact whole-value match so a real search that happens to
+    // contain the word never fires, and handled before the debounce so the
+    // filter is never actually run with it.
+    // Muscle memory from a shell: type `clear`, get an empty box. Costs nothing
+    // to honour and it is what your fingers meant.
+    if (isMagic(value, CLEAR_WORD)) {
+      clearSearch();
+      return;
+    }
+    if (isMagic(value, GAME_WORD)) {
+      localSearch = "";
+      if (searchDebounce) clearTimeout(searchDebounce);
+      searchDebounce = null;
+      onsearchchange("");
+      onmagicword("golf");
+      return;
+    }
     localSearch = value;
     if (searchDebounce) clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => {
@@ -665,7 +754,10 @@
         // field is the most shrinkable thing here; it gives way first, down to
         // a floor where the icon and a word of text still fit.
         "relative flex h-7 min-w-[7.5rem] shrink items-center transition-[width] duration-200",
-        searchExpanded ? "w-72" : "w-52",
+        // Wider at both sizes: the trailing corner now holds three toggles and a
+        // clear ✕ while you type, and 13rem left the query itself two words of
+        // room. Still `shrink`, so a narrow pane takes it back first.
+        searchExpanded ? "w-80" : "w-64",
       )}
       role="search"
       onfocusin={() => (searchFocused = true)}
@@ -674,13 +766,13 @@
         if (!e.currentTarget.contains(next)) searchFocused = false;
       }}
     >
-      <Icon name="search" class="pointer-events-none absolute left-2 size-3.5 text-muted-foreground" />
+      <Icon name="search" class="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground" />
       {#if tableViewMode === "structure"}
         <input
           bind:this={structureSearchEl}
           type="text"
           aria-label="Search column"
-          class="h-7 w-full min-w-0 rounded-lg border-2 border-border bg-input/30 pl-7 pr-7 font-mono text-ui-sm focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
+          class="field-surface h-7 w-full min-w-0 bg-transparent pl-8 pr-7 font-mono text-ui-sm outline-none"
           placeholder="Search column…"
           value={structureSearch}
           oninput={(e) =>
@@ -694,70 +786,73 @@
           type="text"
           role="searchbox"
           aria-label="Search all columns"
+          title="Search every column ({KEY.search})"
           class={cn(
-            "no-focus-ring h-7 w-full min-w-0 rounded-lg border-2 border-border bg-input/30 pl-7 text-ui-sm shadow-none transition-colors hover:border-foreground/30 focus-visible:border-ring/55 focus-visible:bg-input/50",
-            showSearchOpts ? "pr-14" : "pr-7",
-            localSearch.trim() && "border-ring/50 bg-input/50",
+            // No radius of its own: `.field-surface` supplies `--radius-field`, the
+            // one corner app.css says fields, triggers and buttons all share. It was
+            // `rounded-full!` - the only two pills in the component library, both of
+            // them here - which made the search box visibly rounder than the filter
+            // button sitting beside it. That is the exact failure the token's own
+            // comment warns about, and it also made the segmented control below
+            // ("they fit the field's own corner") fit nothing.
+            // `border-ring!` still needs its `!` to beat the unlayered bare-input
+            // frame rule in app.css; the radius no longer has anything to beat.
+            "field-surface h-7 w-full min-w-0 bg-transparent pl-8 text-ui-sm outline-none",
+            // Right padding is whatever the cluster in that corner occupies:
+            // options trigger, keycaps, both, or neither.
+            // hint (⌘F) and the toggles never coexist: the hint is for an empty
+            // field, the toggles for a filled one.
+            searchHint ? "pr-12" : showSearchOpts ? "pr-[7.5rem]" : "pr-7",
+            localSearch.trim() && "border-ring!",
           )}
           placeholder="Search…"
           value={localSearch}
           disabled={columns.length === 0}
           oninput={(e) => handleSearchInput(e.currentTarget.value)}
+          onkeydown={onSearchKeydown}
         />
       {/if}
-      <!-- Right-side cluster: search options popover + clear (✕) -->
+      <!-- Right-side cluster: keycap hint + search options popover + clear (✕) -->
       <div class="absolute inset-y-0 right-1 flex items-center gap-0.5">
+        {#if searchHint}
+          <Kbd keys={searchHintCaps} class="pointer-events-none" aria-hidden="true" />
+        {/if}
         {#if showSearchOpts}
-          <Popover bind:open={searchOptsOpen}>
-            <PopoverTrigger
-              type="button"
-              title="Search options"
-              aria-label="Search options"
-              class={cn(
-                "relative inline-flex size-5 items-center justify-center rounded-md transition-[background-color,color] duration-150 ease-out",
-                searchOptsActive || searchOptsOpen
-                  ? "bg-primary/15 text-primary"
-                  : "text-muted-foreground/50 hover:bg-muted/70 hover:text-foreground",
-              )}
-            >
-              <SlidersHorizontal class="size-3.5 shrink-0" />
-              {#if searchOptsActive}
-                <span
-                  class="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-primary ring-1 ring-background"
-                ></span>
-              {/if}
-            </PopoverTrigger>
-            <PopoverContent align="end" sideOffset={6} class="min-w-52 p-1">
-              {#each SEARCH_OPTS as opt (opt.key)}
-                {@const active = searchOptions[opt.key]}
-                <button
-                  type="button"
-                  aria-pressed={active}
-                  class={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm transition-colors",
-                    active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-                    "hover:bg-accent",
-                  )}
-                  onclick={() =>
-                    onsearchoptionschange({ ...searchOptions, [opt.key]: !active })}
-                >
-                  <opt.icon
-                    class={cn("size-4 shrink-0", active ? "text-primary" : "text-muted-foreground")}
-                  />
-                  <span class="min-w-0 flex-1 truncate text-left">{opt.title}</span>
-                  {#if active}
-                    <Check class="size-3.5 shrink-0 text-primary" />
-                  {/if}
-                </button>
-              {/each}
-            </PopoverContent>
-          </Popover>
+          <!-- A segmented control, not a popover list.
+               Three toggles behind a slider icon meant two clicks to reach a
+               state you could not see, and a popover that covered the results
+               it was about to change. `Aa`, `.*` and `ab` are what every
+               editor's find widget prints, they fit the field's own corner, and
+               each one's state is visible without opening anything. -->
+          <!-- `rounded-sm` (6px), not `rounded-md`: this sits 4px inside the field's
+               10px corner, and concentric means inner = outer - inset. -->
+          <div class="flex shrink-0 items-center overflow-hidden rounded-sm border border-border/50 bg-input/40">
+            {#each SEARCH_OPTS as opt, i (opt.key)}
+              {@const active = searchOptions[opt.key]}
+              <button
+                type="button"
+                aria-pressed={active}
+                aria-label={opt.title}
+                aria-keyshortcuts={SEARCH_OPTION_KEYS[opt.key]}
+                title={opt.title}
+                class={cn(
+                  "inline-flex h-5 items-center justify-center px-1.5 font-mono text-ui-3xs transition-colors",
+                  i > 0 && "border-l border-border/40",
+                  active
+                    ? "bg-primary/15 text-foreground"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                )}
+                onclick={() => onsearchoptionschange({ ...searchOptions, [opt.key]: !active })}
+              >{opt.cap}</button>
+            {/each}
+          </div>
         {/if}
         {#if localSearch}
           <button
             type="button"
-            class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/50 transition-[background-color,color] duration-150 ease-out hover:bg-muted/70 hover:text-foreground"
-            aria-label="Clear search"
+            class="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground transition-[background-color,color] duration-150 ease-out hover:bg-muted/70 hover:text-foreground"
+            aria-label="Clear search (Escape, or {IS_MAC ? '⌥X' : 'Alt+X'})"
+            title="Clear search (Esc)"
             onclick={clearSearch}
           >
             <Icon name="x" class="size-3" />
@@ -791,10 +886,10 @@
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="start" class="min-w-64 p-0 text-ui-sm">
             <div class="flex items-center border-b border-border/50 px-3 py-1.5">
-              <span class="text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground/55">Saved views</span>
+              <span class="text-ui-2xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Saved views</span>
               <button
                 type="button"
-                class="ml-auto rounded px-1.5 py-0.5 text-ui-2xs text-muted-foreground/60 transition-[background-color,color] hover:bg-accent hover:text-foreground"
+                class="ml-auto rounded px-1.5 py-0.5 text-ui-2xs text-muted-foreground transition-[background-color,color] hover:bg-accent hover:text-foreground"
                 title="Back to the unfiltered default"
                 onclick={() => { onresetview(); viewsMenuOpen = false; }}
               >
@@ -802,7 +897,7 @@
               </button>
             </div>
             {#if savedViews.length === 0}
-              <p class="px-3 py-3 text-center text-ui-xs leading-relaxed text-muted-foreground/50">
+              <p class="px-3 py-3 text-center text-ui-xs leading-relaxed text-muted-foreground">
                 Set up filters, sort or hidden columns, then save the combination as a view.
               </p>
             {:else}
@@ -821,11 +916,11 @@
                       title={active ? 'Applied, click to reset to default' : 'Apply view'}
                       onclick={() => { active ? onresetview() : onapplyview(v); viewsMenuOpen = false; }}
                     >
-                      <Icon name="bookmark" class={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground/50')} />
+                      <Icon name="bookmark" class={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
                       <span class="flex min-w-0 flex-1 flex-col">
                         <span class={cn('truncate text-ui-xs', active ? 'font-medium text-foreground' : 'text-foreground/85')}>{v.name}</span>
                         {#if describeTableView(v)}
-                          <span class="truncate text-ui-3xs leading-tight text-muted-foreground/45">{describeTableView(v)}</span>
+                          <span class="truncate text-ui-3xs leading-tight text-muted-foreground">{describeTableView(v)}</span>
                         {/if}
                       </span>
                       {#if active}
@@ -834,7 +929,7 @@
                     </button>
                     <button
                       type="button"
-                      class="mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded text-transparent transition-colors hover:!text-destructive group-hover/view:text-muted-foreground/50"
+                      class="mr-1 inline-flex size-5 shrink-0 items-center justify-center rounded text-transparent transition-colors hover:!text-destructive group-hover/view:text-muted-foreground"
                       title="Delete view"
                       onclick={() => ondeleteview(v.id)}
                     >
@@ -849,7 +944,7 @@
                 type="text"
                 placeholder="Save current as…"
                 bind:value={viewNameDraft}
-                class="h-7 w-full min-w-0 flex-1 rounded-md border border-transparent bg-input/30 px-2 text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/35 hover:border-border/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
+                class= "field-surface h-7 w-full min-w-0 flex-1 bg-transparent px-2 text-ui-xs text-foreground outline-none placeholder:text-muted-foreground"
                 onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitSaveView(); } }}
               />
               <button
@@ -874,7 +969,7 @@
           filterCount > 0 ? "gap-1 !w-auto px-2" : "",
           (filterCount > 0 || filterBarOpen) && "bg-accent text-foreground",
         )}
-        title="Filter rows"
+        title="Filter rows ({KEY.filter})"
         disabled={loading || columns.length === 0}
         onclick={() => {
           if (filterBarOpen) filterBarOpen = false;
@@ -899,7 +994,7 @@
           <button
             {...props}
             class={cn(iconBtn, "shrink-0 @max-[420px]/tb:hidden", (rowSort?.column || sortMenuOpen) && "bg-accent text-foreground")}
-            title={sortLabel}
+            title="{sortLabel} ({KEY.sort})"
             disabled={loading || columns.length === 0}
           >
             <Icon name="arrow-up-down" class="size-3.5" />
@@ -919,7 +1014,7 @@
         {#snippet item(it)}
           {#if it.dir === "asc"}<Icon name="arrow-up" class="size-3.5 text-muted-foreground" />{:else}<Icon name="arrow-down" class="size-3.5 text-muted-foreground" />{/if}
           <span class="min-w-0 flex-1 truncate">{it.label}</span>
-          <span class="shrink-0 text-ui-3xs text-muted-foreground/60">{it.dir === "asc" ? "Asc" : "Desc"}</span>
+          <span class="shrink-0 text-ui-3xs text-muted-foreground">{it.dir === "asc" ? "Asc" : "Desc"}</span>
           {#if it.active}<span class="shrink-0 text-primary">✓</span>{/if}
         {/snippet}
       </SearchableMenu>
@@ -937,7 +1032,7 @@
           <button
             {...props}
             class={cn(iconBtn, "shrink-0 @max-[460px]/tb:hidden", hiddenCount > 0 ? "gap-1 w-auto px-2" : "", (hiddenCount > 0 || columnsMenuOpen) && "bg-accent text-foreground")}
-            title="Show / hide columns"
+            title="Show / hide columns ({KEY.columns})"
             aria-label="Show or hide columns"
             disabled={loading || columns.length === 0}
           >
@@ -963,15 +1058,15 @@
           {#if it.hidden}
             <Icon name="eye-off" class="size-3.5 text-muted-foreground" />
           {:else if it.kind === "vrel"}
-            <Icon name="link-2" class="size-3.5 text-primary/60" />
+            <Icon name="link-2" class="size-3.5 text-primary" />
           {:else if it.kind === "vexpr"}
-            <Icon name="eye" class="size-3.5 text-primary/60" />
+            <Icon name="eye" class="size-3.5 text-primary" />
           {:else}
             <Icon name="eye" class="size-3.5" />
           {/if}
           <span class={cn("min-w-0 flex-1 truncate", it.hidden && "text-muted-foreground")}>{it.label}</span>
-          {#if it.kind === "vrel"}<span class="shrink-0 text-ui-3xs text-muted-foreground/40">rel</span>{/if}
-          {#if it.kind === "vexpr"}<span class="shrink-0 text-ui-3xs text-primary/40">expr</span>{/if}
+          {#if it.kind === "vrel"}<span class="shrink-0 text-ui-3xs text-muted-foreground">rel</span>{/if}
+          {#if it.kind === "vexpr"}<span class="shrink-0 text-ui-3xs text-primary">expr</span>{/if}
         {/snippet}
       </SearchableMenu>
 
@@ -1004,40 +1099,16 @@
         {/snippet}
       </SearchableMenu>
 
-      <!-- Virtual columns button -->
-      <button
-        type="button"
-        class={cn(
-          "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30 @max-[560px]/tb:hidden",
-          virtualColCount > 0 && "bg-accent/50 text-foreground"
-        )}
-        title="Virtual columns"
-        disabled={loading || columns.length === 0}
-        onclick={onopenvirtualcols}
-      >
-        <Icon name="function-square" class="size-3.5 shrink-0" />
-        {#if virtualColCount > 0}
-          <span class="tabular-nums text-ui-2xs font-medium text-primary">{virtualColCount}</span>
-        {/if}
-      </button>
-
-      <!-- Open in SQL editor, opens a new query tab pre-filled with the current view's SELECT -->
-      <button
-        type="button"
-        class="inline-flex h-7 shrink-0 items-center justify-center rounded-md px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30 @max-[520px]/tb:hidden"
-        title="Open in SQL editor, new query with current filters & sort"
-        disabled={loading || columns.length === 0}
-        onclick={onopeninsql}
-      >
-        <Icon name="terminal" class="size-3.5 shrink-0" />
-      </button>
+      <!-- Virtual columns and open-in-SQL moved into the ⋯ menu below: both are
+           once-a-session actions and neither earned a permanent slot on a bar
+           you scan every time you open a table. -->
 
       <!-- Reset everything, only appears when something is non-default -->
       {#if canResetView}
         <button
           type="button"
           class={cn(iconBtn, "shrink-0")}
-          title="Reset view: clear search, filters, sort, hidden columns and view mode"
+          title="Reset view: clear search, filters, sort, hidden columns and view mode ({KEY.reset})"
           disabled={loading}
           onclick={onresetview}
         >
@@ -1052,9 +1123,9 @@
       <!-- Add row -->
       <button
         type="button"
-        class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border/60 px-2 text-ui-sm text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+        class= "field-surface inline-flex h-7 shrink-0 items-center gap-1 px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
         disabled={loading || columns.length === 0 || readonly}
-        title={readonly ? "Read-only mode" : "Insert row (Add)"}
+        title={readonly ? "Read-only mode" : `Stage a new row (${KEY.addRow}), again for another`}
         onclick={onaddrow}
       >
         <Icon name="plus" class="size-3.5 shrink-0" />
@@ -1065,6 +1136,22 @@
     <!-- Spacer -->
     <div class="flex-1"></div>
 
+    {#if previewColumns.length && tableViewMode !== "structure"}
+      <!-- What the page did NOT fetch, and why. One chip, no dialog: it is a
+           fact about this table, not a decision anyone has to make. -->
+      <span
+        class="flex shrink-0 items-center gap-1 rounded-[4px] border border-border/50 bg-muted/30 px-1.5 py-px font-mono text-ui-3xs text-muted-foreground @max-[760px]/tb:hidden"
+        title={`Fetched as previews, not values: ${previewColumns
+          .map((c) => `${c.name} (~${fmtBytes(c.avgBytes)}/row)`)
+          .join(', ')}.\n\nA page of these would move ${fmtBytes(
+          previewColumns.reduce((n, c) => n + c.avgBytes, 0) * Math.max(1, to - from + 1),
+        )}. Open a cell (Shift+Space) and press Load to read one in full.`}
+      >
+        <Icon name="eye-off" class="size-3 shrink-0" />
+        {previewColumns.length === 1 ? previewColumns[0].name : `${previewColumns.length} columns`} previewed
+      </span>
+    {/if}
+
     {#if tableViewMode !== "structure"}
       {#if infiniteScroll}
         {#if total > 0 || counting}
@@ -1073,7 +1160,7 @@
             title="{to.toLocaleString('en-US')} of {counting ? 'counting…' : total.toLocaleString('en-US') + ' rows'} loaded{queryMs > 0 ? ` · ${queryMs}ms` : ''}"
           >
             <span class="text-foreground/65">{to.toLocaleString("en-US")}</span>
-            <span class="text-muted-foreground/40">of {counting ? "…" : total.toLocaleString("en-US")} loaded</span>
+            <span class="text-muted-foreground">of {counting ? "…" : total.toLocaleString("en-US")} loaded</span>
           </span>
         {/if}
       {:else}
@@ -1084,9 +1171,9 @@
           >
             <span class="text-foreground/65">{from.toLocaleString("en-US")}-{to.toLocaleString("en-US")}</span>
             {#if live && !counting}
-              <span class="text-muted-foreground/40">of <span class="inline-block tabular-nums" use:slotRoll={total.toLocaleString("en-US")}></span></span>
+              <span class="text-muted-foreground">of <span class="inline-block tabular-nums" use:slotRoll={total.toLocaleString("en-US")}></span></span>
             {:else}
-              <span class="text-muted-foreground/40">of {counting ? "…" : total.toLocaleString("en-US")}</span>
+              <span class="text-muted-foreground">of {counting ? "…" : total.toLocaleString("en-US")}</span>
             {/if}
           </span>
         {/if}
@@ -1117,7 +1204,7 @@
         {#if keysetMode}
           <!-- Cursor pagination: no random page-jump (that's offset's job), just
                a position readout + prev/next. -->
-          <span class="shrink-0 px-1 font-mono text-ui-xs tabular-nums text-muted-foreground/70" title="Cursor pagination, page {page}">
+          <span class="shrink-0 px-1 font-mono text-ui-xs tabular-nums text-muted-foreground" title="Cursor pagination, page {page}">
             Page {page}
           </span>
 
@@ -1157,7 +1244,7 @@
           </Select.Root>
 
           <span
-            class="shrink-0 text-ui-xs text-muted-foreground/50 tabular-nums @max-[500px]/tb:hidden"
+            class="shrink-0 text-ui-xs text-muted-foreground tabular-nums @max-[500px]/tb:hidden"
             title={counting ? "counting…" : pageCount.toLocaleString("en-US")}
           >of {counting ? "…" : formatCompactCount(pageCount)}</span>
 
@@ -1216,7 +1303,7 @@
               title={autoRefreshMs > 0 ? `Auto-refresh: every ${autoRefreshLabel}` : "Auto-refresh: off"}
               aria-label="Auto-refresh interval"
             >
-              <Icon name="chevron-down" class="size-2.5" />
+              <Icon name="chevron-down" class="size-3" />
             </button>
           {/snippet}
         </DropdownMenu.Trigger>
@@ -1224,7 +1311,7 @@
           <!-- GroupHeading needs a Group parent: bits-ui reads the group context from
                it, and rendering one bare throws "Menu.Group not found". -->
           <DropdownMenu.Group>
-            <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
+            <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground">
               Auto-refresh
             </DropdownMenu.GroupHeading>
             {#each AUTO_REFRESH_OPTIONS as opt (opt.ms)}
@@ -1305,7 +1392,7 @@
           <div class="flex gap-1.5">
             <button
               type="button"
-              class="inline-flex flex-1 h-7 items-center justify-center rounded-md border border-border text-ui-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+              class= "field-surface inline-flex flex-1 h-7 items-center justify-center text-ui-sm text-muted-foreground hover:bg-accent hover:text-foreground"
               onclick={() => { limitOffsetOpen = false; limitError = ""; }}
             >Cancel</button>
             <button
@@ -1346,7 +1433,7 @@
       >
         <Icon name="more-horizontal" class="size-3.5" />
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" class="min-w-56 text-ui-sm [&_[data-slot=dropdown-menu-item]]:whitespace-nowrap [&_[data-slot=dropdown-menu-radio-item]]:whitespace-nowrap">
+      <DropdownMenu.Content align="end" class="min-w-56 [&_[data-slot=dropdown-menu-item]]:whitespace-nowrap [&_[data-slot=dropdown-menu-radio-item]]:whitespace-nowrap">
         {#if structureAllowed}
           <DropdownMenu.Item onSelect={ontogglestructure}>
             <Icon name="layout-list" class="size-3.5" />
@@ -1373,9 +1460,21 @@
             <DropdownMenu.Item disabled={total === 0 || readonly || !hasPrimaryKey} onSelect={onfindreplace}>
               <Icon name="replace" class="size-3.5" />
               Find & replace…
+              <DropdownMenu.Shortcut combo={IS_MAC ? "Mod+Alt+F" : "Mod+H"} />
             </DropdownMenu.Item>
-            <DropdownMenu.Separator />
           {/if}
+          <DropdownMenu.Item disabled={loading || columns.length === 0} onSelect={onopenvirtualcols}>
+            <Icon name="function-square" class="size-3.5" />
+            Virtual columns…
+            {#if virtualColCount > 0}
+              <span class="ml-auto font-mono text-ui-2xs tabular-nums text-primary">{virtualColCount}</span>
+            {/if}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item disabled={loading || columns.length === 0} onSelect={onopeninsql}>
+            <Icon name="terminal" class="size-3.5" />
+            Open in SQL editor
+          </DropdownMenu.Item>
+          <DropdownMenu.Separator />
           <DropdownMenu.Item onSelect={oninfinitescrolltoggle}>
             <Icon name="infinity" class="size-3.5" />
             Infinite scroll
@@ -1399,7 +1498,7 @@
                    from it, and rendering one bare throws "Menu.Group not found". -->
               {#if dataViewMode === 'erd'}
                 <DropdownMenu.Group>
-                  <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
+                  <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground">
                     Diagram
                   </DropdownMenu.GroupHeading>
                   {#each DIAGRAM_FORMATS as fmt (fmt.id)}
@@ -1413,7 +1512,7 @@
               {/if}
               {#if dataViewMode === 'chart'}
                 <DropdownMenu.Group>
-                  <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
+                  <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground">
                     Chart
                   </DropdownMenu.GroupHeading>
                   {#each CHART_FORMATS as fmt (fmt.id)}
@@ -1427,7 +1526,7 @@
               {/if}
               <DropdownMenu.Group>
                 {#if dataViewMode === 'erd' || dataViewMode === 'chart'}
-                  <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
+                  <DropdownMenu.GroupHeading class="text-ui-2xs font-medium uppercase tracking-[0.06em] text-muted-foreground">
                     Rows
                   </DropdownMenu.GroupHeading>
                 {/if}
@@ -1440,6 +1539,10 @@
               </DropdownMenu.Group>
             </DropdownMenu.SubContent>
           </DropdownMenu.Sub>
+          <DropdownMenu.Item disabled={readonly} onSelect={() => onimport()}>
+            <Icon name="file-up" class="size-3.5" />
+            Import data…
+          </DropdownMenu.Item>
           <DropdownMenu.Separator />
           <DropdownMenu.Item
             variant="destructive"
@@ -1463,7 +1566,7 @@
           >
             <Icon name="trash-2" />
             {deleteConfirmPending ? "Click again to confirm" : deleteLabel}
-            <DropdownMenu.Shortcut>⌘⌫</DropdownMenu.Shortcut>
+            <DropdownMenu.Shortcut combo="Mod+Backspace" />
           </DropdownMenu.Item>
         {/if}
       </DropdownMenu.Content>
@@ -1483,7 +1586,7 @@
         >
           <button
             type="button"
-            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 transition-[color,background-color,transform] hover:bg-destructive/10 hover:text-destructive active:scale-[0.94]"
+            class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,transform] hover:bg-destructive/10 hover:text-destructive active:scale-[0.94]"
             aria-label="Remove filter"
             onclick={() => removeFilter(filter.id)}
           >
@@ -1491,13 +1594,13 @@
           </button>
           {#if i === 0}
             <span
-              class="inline-flex h-7 w-12 shrink-0 select-none items-center justify-center font-mono text-ui-2xs uppercase tracking-wide text-muted-foreground/45"
+              class="inline-flex h-7 w-12 shrink-0 select-none items-center justify-center font-mono text-ui-2xs uppercase tracking-wide text-muted-foreground"
               >where</span
             >
           {:else}
             <button
               type="button"
-              class="inline-flex h-7 w-12 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background dark:bg-background font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/80 transition-[color,background-color,border-color] hover:border-border hover:bg-muted/40 hover:text-foreground"
+              class= "field-surface inline-flex h-7 w-12 shrink-0 items-center justify-center bg-background dark:bg-background font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground transition-[color,background-color,border-color] hover: hover:bg-muted/40 hover:text-foreground"
               title="Toggle AND / OR"
               onclick={() =>
                 patchFilter(filter.id, {
@@ -1518,7 +1621,7 @@
                 {...props}
                 type="button"
                 class={cn(fTrigger, "w-36 shrink-0")}
-                title="Column"
+                aria-label="Filter column"
               >
                 <span class="min-w-0 flex-1 truncate text-left">
                   {filter.column === ANY_COLUMN ? "Any column" : filter.column || "Column"}
@@ -1528,7 +1631,7 @@
             {/snippet}
             {#snippet item(it)}
               <span class="min-w-0 flex-1 truncate">{it.label}</span>
-              {#if filter.column === it.value}<span class="shrink-0 text-primary">✓</span>{/if}
+              {#if filter.column === it.value}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
             {/snippet}
           </SearchableMenu>
           <SearchableMenu
@@ -1542,7 +1645,7 @@
                 {...props}
                 type="button"
                 class={cn(fTrigger, "w-32 shrink-0")}
-                title="Condition"
+                aria-label="Filter condition"
               >
                 <span class="min-w-0 flex-1 truncate text-left">{filterOpLabel(filter.op)}</span>
                 <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
@@ -1603,7 +1706,7 @@
                     type="button"
                     class={cn(fTrigger, "min-w-[9rem] max-w-[22rem] flex-1")}
                     data-filter-value
-                    title="Value"
+                    aria-label="Filter value"
                   >
                     <span class={cn("min-w-0 flex-1 truncate text-left font-mono", !filter.value && "font-sans text-muted-foreground")}>
                       {filter.value || "Select value…"}
@@ -1636,6 +1739,7 @@
           type="button"
           class="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-ui-sm text-muted-foreground transition-[color,background-color,transform] hover:bg-accent hover:text-foreground active:scale-[0.97]"
           onclick={addFilterAndFocus}
+          title="Add a filter condition ({KEY.filter} opens this bar)"
         >
           <Icon name="plus" class="size-3.5" />
           Add filter
@@ -1646,6 +1750,7 @@
             type="button"
             class="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-ui-sm text-muted-foreground transition-[color,background-color,transform] hover:bg-accent hover:text-foreground active:scale-[0.97]"
             onclick={clearFilters}
+            title="Remove every filter condition ({KEY.reset} also clears search, sort and hidden columns)"
           >
             Clear filters
           </button>

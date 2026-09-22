@@ -10,8 +10,26 @@
   import Search from '@lucide/svelte/icons/search'
   import X from '@lucide/svelte/icons/x'
 
-  /** @type {{ active?: boolean, connectionType?: string | null }} */
-  let { active = false, connectionType = null } = $props()
+  /**
+   * @type {{
+   *   active?: boolean,
+   *   connectionType?: string | null,
+   *   onopen?: (args: { schema: string, name: string }) => void,
+   * }}
+   */
+  let {
+    active = false,
+    connectionType = null,
+    onopen = () => {},
+    /** Assigned here; the shell calls it for ⌘F. */
+    focusSearch = $bindable(/** @type {() => void} */ (() => {})),
+  } = $props()
+
+  /** @type {HTMLInputElement | null} */
+  let searchEl = $state(null)
+  $effect(() => {
+    focusSearch = () => { searchEl?.focus(); searchEl?.select() }
+  })
 
   /** @typedef {'tables' | 'views' | 'functions' | 'triggers'} SubTab */
 
@@ -356,7 +374,7 @@
         type="button"
         class={cn(
           'relative flex h-8 items-center gap-1.5 px-3 text-ui-xs transition-colors',
-          activeSub === tab.id ? 'font-medium text-foreground' : 'text-muted-foreground/60 hover:text-foreground',
+          activeSub === tab.id ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
         )}
         onclick={() => { activeSub = tab.id; objQuery = '' }}
       >
@@ -370,7 +388,7 @@
     <div class="flex-1"></div>
     <button
       type="button"
-      class="mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/50 transition-colors hover:text-foreground"
+      class="mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
       title="Refresh (⌘R)"
       onclick={refresh}
     >
@@ -395,17 +413,27 @@
     </span>
     {#if currentSupported && totalCount > 0}
       <div class="relative flex h-7 w-64 items-center">
-        <Search class="pointer-events-none absolute left-2.5 size-3.5 shrink-0 text-muted-foreground/50" />
+        <Search class="pointer-events-none absolute left-2.5 size-3.5 shrink-0 text-muted-foreground" />
         <input
+          bind:this={searchEl}
           type="text"
+          role="searchbox"
+          aria-label="Search {activeSub}"
+          autocomplete="off"
+          spellcheck="false"
           bind:value={objQuery}
           placeholder="Search {activeSub}…"
-          class="h-7 w-full rounded-md border border-transparent bg-accent/40 pl-8 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/50 transition-colors focus:border-border focus:bg-input/30 focus:outline-none"
+          onkeydown={(e) => {
+            // Escape clears the filter rather than closing anything: the list
+            // behind it is the page, and there is nothing to close.
+            if (e.key === 'Escape' && objQuery) { e.preventDefault(); e.stopPropagation(); objQuery = '' }
+          }}
+          class="field-surface h-7 w-full border-transparent bg-accent/40 pl-8 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground transition-colors focus:bg-input/30 focus:outline-none"
         />
         {#if objQuery}
           <button
             type="button"
-            class="absolute right-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted/70 hover:text-foreground"
+            class="absolute right-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
             aria-label="Clear search"
             onclick={() => (objQuery = '')}
           >
@@ -420,7 +448,7 @@
   <div class="app-scroll min-h-0 flex-1 overflow-auto [will-change:transform]">
     {#if !currentSupported}
       <div class="flex h-full flex-col items-center justify-center gap-3 py-20 text-center">
-        <Boxes class="size-10 text-muted-foreground/20" />
+        <Boxes class="size-10 text-muted-foreground" />
         <p class="font-mono text-ui text-muted-foreground">
           {TABS.find((t) => t.id === activeSub)?.label} overview isn't available for {engineLabel} yet
         </p>
@@ -440,7 +468,7 @@
     {:else if rows.length === 0}
       {@const EmptyIcon = emptyIcon}
       <div class="flex h-full flex-col items-center justify-center gap-3 py-20 text-center">
-        <EmptyIcon class="size-10 text-muted-foreground/20" />
+        <EmptyIcon class="size-10 text-muted-foreground" />
         <p class="font-mono text-ui text-muted-foreground">No {activeSub} found</p>
       </div>
     {:else}
@@ -453,7 +481,7 @@
         </colgroup>
         <thead class="studio-chrome sticky top-0 z-10 bg-panel text-left">
           <tr class="border-b border-border/50">
-            <th class="px-3 py-2 font-mono font-normal text-muted-foreground/50">#</th>
+            <th class="px-3 py-2 font-mono font-normal text-muted-foreground">#</th>
             {#each columns as col (col)}
               <th class="whitespace-nowrap px-3 py-2 font-mono font-normal text-muted-foreground">{col}</th>
             {/each}
@@ -461,8 +489,17 @@
         </thead>
         <tbody>
           {#each rows as row, i (i)}
-            <tr class="obj-row border-b border-border/30 hover:bg-accent/25">
-              <td class="px-3 py-1.5 font-mono tabular-nums text-muted-foreground/40">{i + 1}</td>
+            <!-- Tables and views open as a data tab; a function or a trigger has
+                 no grid to open, so those rows stay inert rather than pretending
+                 to be a link. -->
+            {@const openable = (activeSub === 'tables' || activeSub === 'views') && !!row.name}
+            <tr
+              class={cn('obj-row border-b border-border/30 hover:bg-accent/25', openable && 'cursor-pointer')}
+              onclick={openable
+                ? () => onopen({ schema: String(row.schema ?? ''), name: String(row.name) })
+                : undefined}
+            >
+              <td class="px-3 py-1.5 font-mono tabular-nums text-muted-foreground">{i + 1}</td>
               {#each columns as col (col)}
                 {@const isSize = BYTE_COLS.has(col)}
                 {@const isNum = NUM_COLS.has(col) || isSize}
@@ -471,11 +508,22 @@
                     'max-w-[22rem] truncate px-3 py-1.5 font-mono',
                     col === 'name' ? 'font-medium text-foreground'
                     : isNum ? 'tabular-nums text-foreground/80'
-                    : 'text-muted-foreground/80',
+                    : 'text-muted-foreground',
                   )}
-                  title={fmt(col, row[col])}
+                  title={col === 'name' && openable ? `Open ${fmt(col, row[col])}` : fmt(col, row[col])}
                 >
-                  {fmt(col, row[col])}
+                  {#if col === 'name' && openable}
+                    <!-- The row takes the click for the pointer; this button is
+                         what the keyboard and a screen reader get, so the action
+                         is not mouse-only. -->
+                    <button
+                      type="button"
+                      class="max-w-full truncate text-left underline-offset-2 hover:underline focus-visible:underline"
+                      onclick={(e) => { e.stopPropagation(); onopen({ schema: String(row.schema ?? ''), name: String(row.name) }) }}
+                    >{fmt(col, row[col])}</button>
+                  {:else}
+                    {fmt(col, row[col])}
+                  {/if}
                 </td>
               {/each}
             </tr>

@@ -1,0 +1,47 @@
+/**
+ * Which schemas are the engine's own, rather than the user's data.
+ *
+ * The backend returns them all - `pg_catalog` and `information_schema` are real,
+ * browsable schemas, and a client that hides the catalog outright cannot answer
+ * "what does the server think this table looks like" without dropping to SQL.
+ * What they are not is where anyone keeps their tables, so the picker hides them
+ * until asked. One list, used by the picker and by anything else that has to
+ * make the same call.
+ */
+const SYSTEM_SCHEMAS = new Set([
+  // Postgres / CockroachDB
+  'pg_catalog',
+  'pg_toast',
+  'crdb_internal',
+  // Cross-engine (SQL standard)
+  'information_schema',
+  // MySQL / MariaDB
+  'mysql',
+  'performance_schema',
+  'sys',
+  // SQL Server
+  'guest',
+  // ClickHouse
+  'system',
+])
+
+/** @param {string} name */
+export function isSystemSchema(name) {
+  const n = String(name ?? '').toLowerCase()
+  if (!n) return false
+  if (SYSTEM_SCHEMAS.has(n)) return true
+  // Per-session and per-relation storage: generated names, nothing to browse.
+  return n.startsWith('pg_temp_') || n.startsWith('pg_toast_')
+}
+
+/**
+ * Split a schema list into the user's and the engine's, keeping the order the
+ * server returned within each.
+ * @param {string[]} schemas
+ */
+export function splitSchemas(schemas) {
+  /** @type {string[]} */ const user = []
+  /** @type {string[]} */ const system = []
+  for (const s of schemas ?? []) (isSystemSchema(s) ? system : user).push(s)
+  return { user, system }
+}

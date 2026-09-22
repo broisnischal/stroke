@@ -17,13 +17,13 @@
 	data-slot="context-menu-radio-item"
 	data-inset={inset}
 	class={cn(
-		"focus:bg-accent focus:text-foreground gap-1.5 rounded-md py-1 pr-8 pl-2 text-ui-xs data-inset:pl-7 [&_svg:not([class*='size-'])]:size-3.5 relative flex min-w-0 cursor-default items-center outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-40 [&>[data-slot=menu-label]]:min-w-0 [&>[data-slot=menu-label]]:truncate [&_svg]:pointer-events-none [&_svg]:shrink-0",
+		"focus:bg-accent focus:text-foreground gap-1.5 rounded-sm py-1 pr-7 pl-1.5 text-ui-2xs data-inset:pl-7 [&_svg:not([class*='size-'])]:size-3.5 relative flex min-w-0 cursor-default items-center outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-40 [&>[data-slot=menu-label]]:min-w-0 [&>[data-slot=menu-label]]:truncate [&_svg]:pointer-events-none [&_svg]:shrink-0",
 		className
 	)}
 	{...restProps}
 >
 	{#snippet children({ checked })}
-		<span class="absolute right-2 pointer-events-none">
+		<span class="pointer-events-none absolute right-1.5">
 			{#if checked}
 				<CheckIcon  />
 			{/if}

@@ -41,7 +41,7 @@
   function handleRangeChange(range) {
     if (!range) return;
     const newFrom = fmt(range.start);
-    const newTo   = fmt(range.end);
+    const newTo = fmt(range.end);
     onchange(newFrom, newTo);
     if (newFrom && newTo) open = false;
   }
@@ -50,11 +50,11 @@
 <Popover bind:open>
   <PopoverTrigger
     class={cn(
-      "inline-flex h-7 items-center gap-1.5 rounded-md border border-input bg-input/30 px-2 text-ui-sm text-foreground transition-colors hover:bg-accent focus:outline-none min-w-[14rem]",
+"field-surface inline-flex h-7 items-center gap-1.5 bg-input/30 px-2 text-ui-sm text-foreground transition-colors hover:bg-accent focus:outline-none min-w-[14rem]",
       !from && "text-muted-foreground"
     )}
   >
-    <CalendarIcon class="size-3 shrink-0 text-muted-foreground/60" />
+    <CalendarIcon class="size-3 shrink-0 text-muted-foreground" />
     {label}
   </PopoverTrigger>
   <PopoverContent class="w-auto p-0" align="start">

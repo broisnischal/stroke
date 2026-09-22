@@ -35,7 +35,7 @@
   })
 
   const sql = $derived.by(() => {
-    const n   = name.trim() || 'sequence_name'
+    const n = name.trim() || 'sequence_name'
     const inc = increment.trim() || '1'
     const start = startValue.trim() || '1'
     return `CREATE SEQUENCE "${schema}"."${n}"
@@ -65,25 +65,25 @@
     } finally { saving = false; confirmOpen = false }
   }
 
-  const lbl = 'mb-1.5 block text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground/50'
-  const inp = 'h-8 w-full rounded-lg border-2 border-border bg-muted/[0.4] px-3 font-mono text-ui-xs outline-none placeholder:text-muted-foreground/30 focus:border-border/50 focus:ring-0 [appearance:none] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+  const lbl = 'mb-1.5 block text-ui-3xs font-semibold uppercase tracking-[0.07em] text-muted-foreground'
+  const inp = 'h-8 w-full rounded-lg border-2 border-border bg-muted/[0.4] px-3 font-mono text-ui-xs outline-none placeholder:text-muted-foreground focus:border-border/50 focus:ring-0 [appearance:none] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
 </script>
 
 <Dialog.Root bind:open onOpenChange={(v) => { if (!v) reset() }}>
   <Dialog.Portal>
     <Dialog.Overlay />
-    <Dialog.Content showCloseButton={false} class="w-[min(480px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
+    <Dialog.Content showCloseButton={false} class="w-[min(30rem,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0">
 
       <!-- Header -->
       <div class="flex items-start gap-3.5 border-b border-border/25 px-5 pt-5 pb-4">
         <div class="mt-px flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50">
-          <Hash class="size-3.5 text-muted-foreground/70" />
+          <Hash class="size-3.5 text-muted-foreground" />
         </div>
         <div class="min-w-0 flex-1">
           <Dialog.Title class="text-ui-sm font-semibold text-foreground">Create Sequence</Dialog.Title>
-          <p class="mt-0.5 text-ui-2xs text-muted-foreground/60">Auto-incrementing counter in <span class="font-mono">{schema}</span></p>
+          <p class="mt-0.5 text-ui-2xs text-muted-foreground">Auto-incrementing counter in <span class="font-mono">{schema}</span></p>
         </div>
-        <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
+        <Dialog.Close class="inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none" />
       </div>
 
       <div class="app-scroll max-h-[72vh] overflow-y-auto">
@@ -102,7 +102,7 @@
                   <button type="button"
                     class="flex flex-1 items-center justify-center rounded-md px-1.5 py-1.5 font-mono text-ui-3xs font-medium transition-all {dataType === t
                       ? 'bg-background text-foreground ring-1 ring-border/30'
-                      : 'text-muted-foreground/50 hover:text-foreground'}"
+                      : 'text-muted-foreground hover:text-foreground'}"
                     onclick={() => (dataType = t)}>{t}</button>
                 {/each}
               </div>
@@ -144,14 +144,14 @@
             </span>
             <div>
               <p class="text-ui-xs font-medium text-foreground">Cycle</p>
-              <p class="mt-0.5 text-ui-2xs text-muted-foreground/55">Restart from minimum when max is reached</p>
+              <p class="mt-0.5 text-ui-2xs text-muted-foreground">Restart from minimum when max is reached</p>
             </div>
           </button>
 
           <!-- SQL preview -->
           <div>
             <p class="{lbl} mb-2">SQL preview</p>
-            <pre class="overflow-x-auto rounded-lg border border-border/20 bg-muted/[0.15] px-4 py-3 font-mono text-ui-2xs leading-relaxed text-muted-foreground/70 whitespace-pre">{sql}</pre>
+            <pre class="overflow-x-auto rounded-lg border border-border/20 bg-muted/[0.15] px-4 py-3 font-mono text-ui-2xs leading-relaxed text-muted-foreground whitespace-pre">{sql}</pre>
           </div>
 
         </div>
@@ -160,7 +160,7 @@
       <!-- Footer -->
       <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
         <button type="button"
-          class="inline-flex h-8 items-center rounded-lg px-3.5 text-ui-sm text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="inline-flex h-8 items-center rounded-lg px-3.5 text-ui-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={() => { reset(); open = false }}>Cancel</button>
         <button type="button"
           class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-foreground px-4 text-ui-sm font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-40"

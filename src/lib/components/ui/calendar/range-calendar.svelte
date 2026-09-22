@@ -74,7 +74,7 @@
                         "data-selection-end:!bg-primary data-selection-end:!text-primary-foreground data-selection-end:rounded-r-full data-selection-end:rounded-l-none",
                         // Today marker (ring instead of bg so it doesn't fight the range tint)
                         "data-today:ring-1 data-today:ring-inset data-today:ring-border/60 data-today:font-medium",
-                        "data-outside-month:text-muted-foreground/25 data-outside-month:pointer-events-none data-outside-month:!bg-transparent",
+                        "data-outside-month:text-muted-foreground data-outside-month:pointer-events-none data-outside-month:!bg-transparent",
                         "data-disabled:pointer-events-none data-disabled:opacity-30"
                       )}
                     />

@@ -16,7 +16,18 @@ pub const OAUTH: OAuthConfig = OAuthConfig {
     client_id: "neonctl",
     auth_url: "https://oauth2.neon.tech/oauth2/auth",
     token_url: "https://oauth2.neon.tech/oauth2/token",
-    scopes: "openid offline offline_access urn:neoncloud:projects:read urn:neoncloud:projects:create urn:neoncloud:orgs:read",
+    // `projects:update` is not optional, and it is not about writing anything.
+    // Neon's scope table maps `projects:read` to Viewer and `projects:update`
+    // ("Modify Projects") to Editor, and reading `/connection_uri` hands back the
+    // role's password - so Neon gates it behind Editor. Without this scope the
+    // whole flow works right up to the last call and then fails with
+    // "Editor access is required to read project credentials", which reads like a
+    // permissions problem on the user's account rather than a missing scope on
+    // ours. Neon's own documented example request asks for `update` too.
+    //
+    // Adding a scope does not upgrade a token that was already issued: anyone
+    // signed in before this must disconnect and authorize again.
+    scopes: "openid offline offline_access urn:neoncloud:projects:read urn:neoncloud:projects:create urn:neoncloud:projects:update urn:neoncloud:orgs:read",
 };
 
 const API: &str = "https://console.neon.tech/api/v2";

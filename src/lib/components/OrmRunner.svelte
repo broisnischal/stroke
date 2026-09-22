@@ -574,7 +574,7 @@
     <!-- ORM mode -->
     <div class="flex h-7 shrink-0 items-center gap-2">
       <Code2
-        class="size-3.5 shrink-0 text-muted-foreground/60"
+        class="size-3.5 shrink-0 text-muted-foreground"
         aria-hidden="true"
       />
       <div
@@ -645,7 +645,7 @@
     <div class="h-4 w-px shrink-0 bg-border/80" aria-hidden="true"></div>
 
     <div
-      class="inline-flex h-7 items-center rounded-md border border-border/50 bg-muted/20 p-0.5"
+    class= "field-surface inline-flex h-7 items-center bg-muted/20 p-0.5"
       role="group"
       aria-label="Copy actions"
     >
@@ -711,7 +711,7 @@
     {#if $appVimMode}
       <div
         bind:this={vimStatusEl}
-        class="absolute inset-x-0 bottom-0 z-10 border-t border-border/40 bg-panel/95 px-3 py-0.5 font-mono text-ui-2xs leading-5 text-muted-foreground/70"
+        class="absolute inset-x-0 bottom-0 z-10 border-t border-border/40 bg-panel/95 px-3 py-0.5 font-mono text-ui-2xs leading-5 text-muted-foreground"
       ></div>
     {/if}
   </div>
@@ -771,21 +771,21 @@
     >
       <ChevronDown
         class={cn(
-          "size-3 shrink-0 text-muted-foreground/50 transition-transform duration-150",
+          "size-3 shrink-0 text-muted-foreground transition-transform duration-150",
           !sqlPreviewOpen && "-rotate-90",
         )}
       />
       <span
-        class="font-mono text-ui-2xs font-medium tracking-wide text-muted-foreground/70 uppercase"
+        class="font-mono text-ui-2xs font-medium tracking-wide text-muted-foreground uppercase"
         >Generated SQL</span
       >
       {#if generatedSql && !sqlPreviewOpen}
         <span
-          class="ml-2 min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground/40"
+          class="ml-2 min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground"
           >{generatedSql}</span
         >
       {:else if !generatedSql && !parseError}
-        <span class="ml-2 font-mono text-ui-2xs text-muted-foreground/30"
+        <span class="ml-2 font-mono text-ui-2xs text-muted-foreground"
           >type a query to preview</span
         >
       {/if}
@@ -860,11 +860,11 @@
       <div
         class="flex h-full flex-col items-center justify-center gap-2 text-center"
       >
-        <Play class="size-6 text-muted-foreground/20" />
-        <p class="font-mono text-ui-sm text-muted-foreground/50">
+        <Play class="size-6 text-muted-foreground" />
+        <p class="font-mono text-ui-sm text-muted-foreground">
           Run a query to see results
         </p>
-        <p class="font-mono text-ui-xs text-muted-foreground/30">
+        <p class="font-mono text-ui-xs text-muted-foreground">
           {mode === "drizzle"
             ? `db.select().from(users).limit(10)`
             : `prisma.users.findMany({ take: 10 })`}

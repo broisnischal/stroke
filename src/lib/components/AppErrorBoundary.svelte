@@ -55,14 +55,14 @@
         <button
           type="button"
           onclick={() => location.reload()}
-          class="inline-flex h-8 items-center rounded-lg border border-border/60 px-3 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          class= "field-surface inline-flex h-8 items-center px-3 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
         >
           Reload app
         </button>
         <button
           type="button"
           onclick={() => openReport(error)}
-          class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/60 px-3 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          class= "field-surface inline-flex h-8 items-center gap-1.5 px-3 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
         >
           <Bug class="size-3.5" /> Report issue
         </button>

@@ -3,6 +3,8 @@ use serde::Serialize;
 use sqlx::{MySqlPool, PgPool, Row};
 use tauri::State;
 
+use super::mysql::{my_int, my_text, my_text_named};
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TableInfo {
@@ -253,11 +255,20 @@ pub async fn table_row_counts(
 
 async fn list_schemas_pg(pool: &PgPool) -> Result<Vec<String>, String> {
     let rows = sqlx::query(
+        // `pg_catalog` and `information_schema` are returned: they are real,
+        // browsable schemas, and a client that hides the catalog cannot answer
+        // "what does pg think this table looks like" without dropping to SQL. The
+        // UI filters them out of the picker by default and offers a toggle -
+        // that is a display choice, not something to decide in the query.
+        //
+        // Toast and temp namespaces stay excluded. They are per-session,
+        // per-relation storage with generated names; there is nothing there to
+        // browse, and on a busy server they would outnumber the real schemas.
         r#"SELECT n.nspname::text FROM pg_catalog.pg_namespace n
-           WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')
+           WHERE n.nspname <> 'pg_toast'
              AND n.nspname NOT LIKE 'pg_temp_%'
              AND n.nspname NOT LIKE 'pg_toast_%'
-           ORDER BY n.nspname"#,
+           ORDER BY (n.nspname IN ('pg_catalog','information_schema')), n.nspname"#,
     )
     .fetch_all(pool)
     .await
@@ -605,7 +616,7 @@ async fn list_schemas_mysql(pool: &MySqlPool) -> Result<Vec<String>, String> {
         .fetch_one(pool)
         .await
         .map_err(|e| format!("Failed to get database: {e}"))?;
-    let db: Option<String> = row.try_get(0).unwrap_or(None);
+    let db: Option<String> = my_text(&row, 0);
     Ok(vec![db.unwrap_or_else(|| "default".to_string())])
 }
 
@@ -648,14 +659,14 @@ async fn list_tables_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<TableIn
     let mut tables: Vec<TableInfo> = rows
         .iter()
         .filter_map(|r| {
-            let name: String = r.try_get(0).ok()?;
-            let ty: String = r.try_get(1).unwrap_or_else(|_| "BASE TABLE".to_string());
-            // TABLE_ROWS is BIGINT UNSIGNED. COALESCE makes it non-nullable so
-            // decode as u64 directly; Option<u64> can silently fail on non-null columns.
-            // For InnoDB this is only an estimate and is frequently 0 (or far off)
-            // until ANALYZE TABLE runs - so a 0 estimate is treated as unknown (-1)
-            // and resolved with an exact COUNT(*) below.
-            let est: i64 = r.try_get::<u64, _>(2).unwrap_or(0) as i64;
+            let name: String = my_text(r, 0)?;
+            let ty: String = my_text(r, 1).unwrap_or_else(|| "BASE TABLE".to_string());
+            // TABLE_ROWS is declared BIGINT UNSIGNED, but `COALESCE(TABLE_ROWS, 0)`
+            // comes back as decimal(21,0) - so a u64 decode failed and every
+            // table read 0. For InnoDB it is an estimate anyway, and frequently
+            // 0 (or far off) until ANALYZE TABLE runs, so a 0 is treated as
+            // unknown (-1) and resolved with an exact COUNT(*) below.
+            let est: i64 = my_int(r, 2).unwrap_or(0);
             let kind = if ty == "VIEW" { "view" } else { "table" }.to_string();
             let row_count = if est > 0 { est } else { -1 };
             Some(TableInfo { name, kind, row_count, rls_enabled: None })
@@ -693,10 +704,10 @@ async fn list_indexes_mysql(pool: &MySqlPool, schema: &str) -> Result<Vec<IndexI
     Ok(rows
         .iter()
         .filter_map(|r| {
-            let name: String = r.try_get(0).ok()?;
-            let table_name: String = r.try_get(1).ok()?;
-            let columns: String = r.try_get::<Option<String>, _>(2).ok().flatten().unwrap_or_default();
-            let index_type: String = r.try_get::<Option<String>, _>(3).ok().flatten().unwrap_or_else(|| "BTREE".to_string());
+            let name: String = my_text(r, 0)?;
+            let table_name: String = my_text(r, 1)?;
+            let columns: String = my_text(r, 2).unwrap_or_default();
+            let index_type: String = my_text(r, 3).unwrap_or_else(|| "BTREE".to_string());
             let non_unique: i64 = r.try_get::<Option<i64>, _>(4).ok().flatten().unwrap_or(1);
             let is_primary_i: i64 = r.try_get::<Option<i64>, _>(5).ok().flatten().unwrap_or(0);
             Some(IndexInfo {
@@ -884,10 +895,10 @@ async fn list_triggers_mysql(pool: &sqlx::MySqlPool, schema: &str) -> Result<Vec
         .iter()
         .filter_map(|r| {
             Some(TriggerInfo {
-                name:          r.try_get::<String, _>("name").ok()?,
-                table_name:    r.try_get::<String, _>("table_name").unwrap_or_default(),
-                timing:        r.try_get::<String, _>("timing").unwrap_or_else(|_| "AFTER".to_string()),
-                events:        r.try_get::<String, _>("events").unwrap_or_default(),
+                name:          my_text_named(r, "name")?,
+                table_name:    my_text_named(r, "table_name").unwrap_or_default(),
+                timing:        my_text_named(r, "timing").unwrap_or_else(|| "AFTER".to_string()),
+                events:        my_text_named(r, "events").unwrap_or_default(),
                 function_name: String::new(),
                 enabled:       true,
             })
@@ -997,7 +1008,7 @@ pub async fn list_schemas(state: State<'_, DbState>) -> Result<Vec<String>, Stri
     match require_conn(&state)? {
         ActiveConnection::Postgres(pool) => list_schemas_pg(&pool).await,
         ActiveConnection::Mysql(pool) => list_schemas_mysql(&pool).await,
-        ActiveConnection::Clickhouse(cfg) => Ok(vec![cfg.database.clone()]),
+        ActiveConnection::Clickhouse(cfg) => super::clickhouse::list_schemas(&cfg).await,
         ActiveConnection::Redis(_) => Ok(vec![]),
         ActiveConnection::Mssql(h) => super::mssql::list_schemas(&h).await,
         ActiveConnection::Sqlite(_) | ActiveConnection::D1(_) | ActiveConnection::LibSql(_) | ActiveConnection::Duckdb(_) => Ok(vec!["main".to_string()]),
@@ -1014,7 +1025,7 @@ pub async fn list_tables(state: State<'_, DbState>, schema: String) -> Result<Ve
         ActiveConnection::Sqlite(pool) => list_tables_sqlite(&pool).await,
         ActiveConnection::D1(cfg) => list_tables_d1(&cfg).await,
         ActiveConnection::LibSql(cfg) => list_tables_libsql(&cfg).await,
-        ActiveConnection::Clickhouse(cfg) => super::clickhouse::list_tables(&cfg).await,
+        ActiveConnection::Clickhouse(cfg) => super::clickhouse::list_tables(&cfg, &schema).await,
         ActiveConnection::Redis(cfg) => super::redis::list_tables(&cfg).await,
         ActiveConnection::Duckdb(h) => super::duckdb::list_tables(&h).await,
         ActiveConnection::Mssql(h) => super::mssql::list_tables(&h, &schema).await,
@@ -1093,9 +1104,11 @@ async fn list_functions_mysql(pool: &sqlx::MySqlPool, schema: &str) -> Result<Ve
 
     rows.iter()
         .map(|row| {
-            let name: String = row.try_get("name").map_err(|e| e.to_string())?;
-            let return_type: Option<String> = row.try_get("return_type").map_err(|e| e.to_string())?;
-            let routine_type: String = row.try_get("routine_type").map_err(|e| e.to_string())?;
+            // `map_err(...)?` here, so this one did not fail quietly: every
+            // MySQL routine list came back as "mismatched types ... VARBINARY".
+            let name = my_text_named(row, "name").ok_or("Routine has no name")?;
+            let return_type = my_text_named(row, "return_type");
+            let routine_type = my_text_named(row, "routine_type").unwrap_or_else(|| "FUNCTION".to_string());
             Ok(FunctionInfo {
                 signature: format!("{name}()"),
                 name,
@@ -1221,7 +1234,7 @@ pub async fn get_table_column_structure(
             get_column_structure_libsql(&cfg, &table).await
         }
         ActiveConnection::Clickhouse(cfg) => {
-            super::clickhouse::get_column_structure(&cfg, &table).await
+            super::clickhouse::get_column_structure(&cfg, &schema, &table).await
         }
         ActiveConnection::Redis(cfg) => {
             super::redis::get_column_structure(&cfg, &table).await
@@ -1322,20 +1335,20 @@ async fn get_column_structure_mysql(
 
     let mut fk_map: HashMap<String, (String, String)> = Default::default();
     for row in &fk_rows {
-        let col: String = row.try_get(0).unwrap_or_default();
-        let ref_schema: String = row.try_get(1).unwrap_or_default();
-        let ref_table: String = row.try_get(2).unwrap_or_default();
-        let ref_col: String = row.try_get(3).unwrap_or_default();
-        let constraint: String = row.try_get(4).unwrap_or_default();
+        let col: String = my_text(row, 0).unwrap_or_default();
+        let ref_schema: String = my_text(row, 1).unwrap_or_default();
+        let ref_table: String = my_text(row, 2).unwrap_or_default();
+        let ref_col: String = my_text(row, 3).unwrap_or_default();
+        let constraint: String = my_text(row, 4).unwrap_or_default();
         fk_map.insert(col, (format!("{ref_schema}.{ref_table}.{ref_col}"), constraint));
     }
 
     Ok(col_rows.iter().filter_map(|r| {
         let ordinal: i32 = r.try_get::<u32, _>(0).unwrap_or(0) as i32;
-        let name: String = r.try_get(1).ok()?;
-        let data_type: String = r.try_get::<String, _>(2).unwrap_or_default().to_lowercase();
-        let is_nullable_str: String = r.try_get(3).unwrap_or_else(|_| "YES".to_string());
-        let column_default: Option<String> = r.try_get::<Option<String>, _>(4).ok().flatten();
+        let name: String = my_text(r, 1)?;
+        let data_type: String = my_text(r, 2).unwrap_or_default().to_lowercase();
+        let is_nullable_str: String = my_text(r, 3).unwrap_or_else(|| "YES".to_string());
+        let column_default: Option<String> = my_text(r, 4);
         let (foreign_key, fk_constraint_name) = fk_map
             .get(&name)
             .map(|(fk, cn)| (Some(fk.clone()), Some(cn.clone())))
@@ -1662,22 +1675,22 @@ async fn schema_column_structure_mysql(
 
     let mut fk_map: HashMap<(String, String), (String, String)> = Default::default();
     for row in &fk_rows {
-        let table: String = row.try_get(0).unwrap_or_default();
-        let col: String = row.try_get(1).unwrap_or_default();
-        let ref_schema: String = row.try_get(2).unwrap_or_default();
-        let ref_table: String = row.try_get(3).unwrap_or_default();
-        let ref_col: String = row.try_get(4).unwrap_or_default();
-        let constraint: String = row.try_get(5).unwrap_or_default();
+        let table: String = my_text(row, 0).unwrap_or_default();
+        let col: String = my_text(row, 1).unwrap_or_default();
+        let ref_schema: String = my_text(row, 2).unwrap_or_default();
+        let ref_table: String = my_text(row, 3).unwrap_or_default();
+        let ref_col: String = my_text(row, 4).unwrap_or_default();
+        let constraint: String = my_text(row, 5).unwrap_or_default();
         fk_map.insert((table, col), (format!("{ref_schema}.{ref_table}.{ref_col}"), constraint));
     }
 
     Ok(group_by_table(col_rows.iter().map(|r| {
-        let table: String = r.try_get(0).unwrap_or_default();
+        let table: String = my_text(r, 0).unwrap_or_default();
         let ordinal: u32 = r.try_get(1).unwrap_or(0);
-        let name: String = r.try_get(2).unwrap_or_default();
-        let data_type: String = r.try_get(3).unwrap_or_default();
-        let nullable: String = r.try_get(4).unwrap_or_default();
-        let column_default: Option<String> = r.try_get(5).ok().flatten();
+        let name: String = my_text(r, 2).unwrap_or_default();
+        let data_type: String = my_text(r, 3).unwrap_or_default();
+        let nullable: String = my_text(r, 4).unwrap_or_default();
+        let column_default: Option<String> = my_text(r, 5);
         let fk = fk_map.get(&(table.clone(), name.clone()));
         (table, ColumnStructureRow {
             ordinal_position: ordinal as i32,
@@ -1763,11 +1776,11 @@ async fn get_incoming_fks_mysql(pool: &MySqlPool, schema: &str, table: &str) -> 
 
     let mut map: std::collections::BTreeMap<(String, String, String), (Vec<String>, Vec<String>)> = Default::default();
     for r in &rows {
-        let fs: String = r.try_get(0).unwrap_or_default();
-        let ft: String = r.try_get(1).unwrap_or_default();
-        let fc: String = r.try_get(2).unwrap_or_default();
-        let tc: String = r.try_get(3).unwrap_or_default();
-        let cn: String = r.try_get(4).unwrap_or_default();
+        let fs: String = my_text(r, 0).unwrap_or_default();
+        let ft: String = my_text(r, 1).unwrap_or_default();
+        let fc: String = my_text(r, 2).unwrap_or_default();
+        let tc: String = my_text(r, 3).unwrap_or_default();
+        let cn: String = my_text(r, 4).unwrap_or_default();
         let e = map.entry((fs, ft, cn)).or_default();
         e.0.push(fc); e.1.push(tc);
     }
@@ -2145,11 +2158,9 @@ async fn get_ddl_mysql(pool: &MySqlPool, schema: &str, table: &str) -> Result<St
         .fetch_one(pool)
         .await
         .map_err(|e| format!("SHOW CREATE TABLE failed: {e}"))?;
-    Ok(row
-        .try_get::<Option<String>, _>(1)
-        .ok()
-        .flatten()
-        .unwrap_or_default())
+    // SHOW CREATE TABLE's second column is binary-flagged too, so this
+    // returned the empty string and the DDL view showed nothing at all.
+    Ok(my_text(&row, 1).unwrap_or_default())
 }
 
 async fn get_ddl_d1(cfg: &super::connection::D1Config, table: &str) -> Result<String, String> {
@@ -2206,7 +2217,7 @@ pub async fn get_table_ddl(
         ActiveConnection::Sqlite(pool) => get_ddl_sqlite(&pool, &table).await,
         ActiveConnection::D1(cfg) => get_ddl_d1(&cfg, &table).await,
         ActiveConnection::LibSql(cfg) => get_ddl_libsql(&cfg, &table).await,
-        ActiveConnection::Clickhouse(cfg) => super::clickhouse::get_ddl(&cfg, &table).await,
+        ActiveConnection::Clickhouse(cfg) => super::clickhouse::get_ddl(&cfg, &schema, &table).await,
         ActiveConnection::Redis(cfg) => super::redis::get_ddl(&cfg, &table).await,
         ActiveConnection::Duckdb(h) => super::duckdb::get_ddl(&h, &table).await,
         ActiveConnection::Mssql(h) => super::mssql::get_ddl(&h, &schema, &table).await,
@@ -2231,6 +2242,7 @@ pub async fn list_schemas_on_conn(config: AnyConnectionConfig) -> Result<Vec<Str
             pool.close().await;
             result
         }
+        AnyConnectionConfig::Clickhouse(c) => super::clickhouse::list_schemas(&c).await,
         _ => Ok(vec!["main".to_string()]),
     }
 }
@@ -2264,7 +2276,7 @@ pub async fn list_tables_on_conn(
         }
         AnyConnectionConfig::D1(c) => list_tables_d1(&c).await.map(to_names),
         AnyConnectionConfig::Libsql(c) => list_tables_libsql(&c).await.map(to_names),
-        AnyConnectionConfig::Clickhouse(c) => super::clickhouse::list_tables(&c).await.map(to_names),
+        AnyConnectionConfig::Clickhouse(c) => super::clickhouse::list_tables(&c, &schema).await.map(to_names),
         AnyConnectionConfig::Redis(c) => super::redis::list_tables(&c).await.map(to_names),
         AnyConnectionConfig::Duckdb(c) => {
             let h = super::connection::open_duckdb(&c).await?;
@@ -2307,7 +2319,7 @@ pub async fn get_table_ddl_on_conn(
         }
         AnyConnectionConfig::D1(c) => get_ddl_d1(&c, &table).await,
         AnyConnectionConfig::Libsql(c) => get_ddl_libsql(&c, &table).await,
-        AnyConnectionConfig::Clickhouse(c) => super::clickhouse::get_ddl(&c, &table).await,
+        AnyConnectionConfig::Clickhouse(c) => super::clickhouse::get_ddl(&c, &schema, &table).await,
         AnyConnectionConfig::Redis(c) => super::redis::get_ddl(&c, &table).await,
         AnyConnectionConfig::Duckdb(c) => {
             let h = super::connection::open_duckdb(&c).await?;
@@ -2317,5 +2329,30 @@ pub async fn get_table_ddl_on_conn(
             let h = super::connection::open_mssql(&c).await?;
             super::mssql::get_ddl(&h, &schema, &table).await
         }
+    }
+}
+
+
+#[cfg(test)]
+mod mysql_metadata_tests {
+    /// information_schema hands back `TABLE_NAME` as VARBINARY, which is why
+    /// every metadata decode here goes through `my_text`. Needs the local
+    /// fixture, so it is `#[ignore]`d:
+    /// `docker compose -f docker/test-stack.yml up -d mysql`
+    /// `cargo test --lib mysql_metadata -- --ignored`
+    #[tokio::test]
+    #[ignore]
+    async fn lists_tables_from_a_binary_flagged_catalog() {
+        let pool = sqlx::MySqlPool::connect("mysql://root:stroke@127.0.0.1:53306/shop")
+            .await
+            .expect("local mysql fixture");
+        let tables = super::list_tables_mysql(&pool, "shop").await.expect("list");
+        assert!(
+            tables.iter().any(|t| t.name == "products"),
+            "expected the fixture's `products` table, got {:?}",
+            tables.iter().map(|t| &t.name).collect::<Vec<_>>()
+        );
+        let ddl = super::get_ddl_mysql(&pool, "shop", "products").await.expect("ddl");
+        assert!(ddl.contains("CREATE TABLE"), "SHOW CREATE TABLE returned {ddl:?}");
     }
 }

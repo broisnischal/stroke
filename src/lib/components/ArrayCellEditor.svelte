@@ -108,16 +108,16 @@
         </div>
         <div class="min-w-0 flex-1">
           <p class="truncate text-ui-sm font-semibold tracking-tight text-foreground antialiased">{column}</p>
-          <p class="truncate text-ui-2xs leading-relaxed text-muted-foreground/70">
+          <p class="truncate text-ui-2xs leading-relaxed text-muted-foreground">
             <span class="font-mono">{elementType || 'array'}[]</span>
-            <span class="text-muted-foreground/40">·</span>
+            <span class="text-muted-foreground">·</span>
             <span class="tabular-nums">{items.length}</span> {items.length === 1 ? 'element' : 'elements'}
           </p>
         </div>
         <button
           type="button"
           aria-label="Close"
-          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/50 hover:text-foreground active:scale-[0.94]"
+          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/50 hover:text-foreground active:scale-[0.94]"
           onclick={cancel}
         >
           <X class="size-4" />
@@ -128,7 +128,7 @@
       <div class="min-h-0 flex-1 overflow-y-auto p-2">
         {#if items.length === 0}
           <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-8 text-center">
-            <p class="text-ui-xs text-muted-foreground/60">Empty array <span class="font-mono">{'{}'}</span></p>
+            <p class="text-ui-xs text-muted-foreground">Empty array <span class="font-mono">{'{}'}</span></p>
             <button
               type="button"
               class="inline-flex items-center gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-ui-2xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
@@ -161,15 +161,15 @@
                   draggable="true"
                   ondragstart={(e) => onDragStart(i, e)}
                   ondragend={onDragEnd}
-                  class="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/30 transition-colors hover:text-muted-foreground/70 active:cursor-grabbing"
+                  class="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground transition-colors hover:text-muted-foreground active:cursor-grabbing"
                 >
                   <GripVertical class="size-3.5" />
                 </button>
-                <span class="w-5 shrink-0 text-right font-mono text-ui-2xs tabular-nums text-muted-foreground/35">{i}</span>
+                <span class="w-5 shrink-0 text-right font-mono text-ui-2xs tabular-nums text-muted-foreground">{i}</span>
                 {#if item.v === null}
                   <button
                     type="button"
-                    class="flex h-8 flex-1 items-center rounded-md border border-border/40 bg-muted/15 px-2.5 text-ui-xs font-medium italic tracking-wide text-warning/80 transition-colors hover:bg-muted/25"
+                    class= "field-surface flex h-8 flex-1 items-center bg-muted/15 px-2.5 text-ui-xs font-medium italic tracking-wide text-warning transition-colors hover:bg-muted/25"
                     onclick={() => toggleNull(i)}
                     title="Click to enter a value"
                   >NULL</button>
@@ -180,17 +180,17 @@
                     placeholder="value"
                     spellcheck="false"
                     autocomplete="off"
-                    class="h-8 min-w-0 flex-1 rounded-lg border-2 border-border bg-muted/15 px-2.5 font-mono text-ui-xs leading-none text-foreground outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                    class= "field-surface h-8 min-w-0 flex-1 bg-muted/15 px-2.5 font-mono text-ui-xs leading-none text-foreground outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground hover:"
                     onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addItem() } }}
                   />
                 {/if}
                 <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
                   <button type="button" aria-label={item.v === null ? 'Clear NULL' : 'Set NULL'}
-                    class={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/50', item.v === null ? 'text-warning' : 'text-muted-foreground/60 hover:text-foreground')}
+                    class={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/50', item.v === null ? 'text-warning' : 'text-muted-foreground hover:text-foreground')}
                     title={item.v === null ? 'Clear NULL' : 'Set NULL'}
                     onclick={() => toggleNull(i)}><CircleSlash class="size-3.5" /></button>
                   <button type="button" aria-label="Remove element"
-                    class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-destructive/15 hover:text-destructive"
+                    class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
                     title="Remove"
                     onclick={() => removeAt(i)}><X class="size-3.5" /></button>
                 </div>
@@ -204,7 +204,7 @@
       <div class="flex items-center gap-2 border-t border-border/15 px-3 py-2.5">
         <button
           type="button"
-          class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/50 px-2.5 text-ui-xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
+          class= "field-surface inline-flex h-8 items-center gap-1.5 px-2.5 text-ui-xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
           onclick={addItem}
         >
           <Plus class="size-3.5" /> Add
@@ -212,14 +212,14 @@
         {#if items.length > 0}
           <button
             type="button"
-            class="inline-flex h-8 items-center rounded-md px-2.5 text-ui-xs text-muted-foreground/50 transition-colors hover:text-destructive"
+            class="inline-flex h-8 items-center rounded-md px-2.5 text-ui-xs text-muted-foreground transition-colors hover:text-destructive"
             onclick={clearAll}
           >Clear</button>
         {/if}
         <div class="ml-auto flex items-center gap-2">
           <button
             type="button"
-            class="inline-flex h-8 items-center rounded-md border border-border/50 px-3 text-ui-xs text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
+            class= "field-surface inline-flex h-8 items-center px-3 text-ui-xs text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
             onclick={cancel}
           >Cancel</button>
           <button

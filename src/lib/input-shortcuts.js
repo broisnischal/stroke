@@ -11,6 +11,7 @@
  * Windows / Linux:
  *   Ctrl+Backspace            → delete previous word
  *   Ctrl+Delete               → delete next word
+ *   Alt+Backspace / Alt+Delete → delete previous / next word
  *   Ctrl+Shift+Backspace      → clear the whole field
  *   Ctrl+Z / Ctrl+Shift+Z     → undo / redo
  *   Ctrl+Y                    → redo
@@ -196,6 +197,12 @@ function onKeyDown(e) {
     } else {
       if (e.ctrlKey && e.shiftKey) mode = 'all'
       else if (e.ctrlKey && !e.altKey) mode = 'word'
+      // Alt+Backspace deletes a word here too, not only on macOS. Muscle memory
+      // is the smaller reason; the real one is that the app binds Alt+Backspace
+      // globally to "discard staged changes", and an unclaimed chord reaches the
+      // hotkey layer - so pressing it while typing threw the row away instead of
+      // deleting a word. Claiming it is what stops the field being overruled.
+      else if (e.altKey && !e.ctrlKey && !e.metaKey) mode = 'word'
     }
     if (!mode) return
     e.stopPropagation() // shield from the bubble-phase global hotkey layer
@@ -211,6 +218,20 @@ function onInput(e) {
   if (!(el instanceof HTMLElement) || inManagedEditor(el)) return
   if (editableKind(el) !== 'field') return
   record(/** @type {HTMLInputElement | HTMLTextAreaElement} */ (el))
+}
+
+/**
+ * Forget an element's undo history.
+ *
+ * The stack is keyed by ELEMENT, which is right for a field that holds one
+ * value for its lifetime and wrong for one that is re-pointed at a new value
+ * while staying mounted - the cell editor dock follows the grid's cursor, so
+ * without this an undo in row 12 could restore row 8's text.
+ * @param {HTMLInputElement | HTMLTextAreaElement | null} el
+ */
+export function resetInputHistory(el) {
+  if (!el) return
+  histories.set(el, { stack: [el.value], idx: 0, t: 0, suppress: false })
 }
 
 /** Install global listeners. Returns a cleanup function. */

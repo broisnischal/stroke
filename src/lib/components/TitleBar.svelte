@@ -1,8 +1,5 @@
 <script>
   import { onMount } from 'svelte'
-  import ChevronLeft   from '@lucide/svelte/icons/chevron-left'
-  import ChevronRight  from '@lucide/svelte/icons/chevron-right'
-  import PanelLeft     from '@lucide/svelte/icons/panel-left'
   import MessageSquare from '@lucide/svelte/icons/message-square'
   import X             from '@lucide/svelte/icons/x'
   import KeyRound      from '@lucide/svelte/icons/key-round'
@@ -11,11 +8,13 @@
   import { isTrialActive, licenseStatus } from '$lib/stores/license.js'
   import LicenseActivation from './LicenseActivation.svelte'
   import Logo from './Logo.svelte'
+  import AppMenuBar from './AppMenuBar.svelte'
+  import { appMenuBar } from '$lib/stores/settings.js'
   import WindowControls from './WindowControls.svelte'
   import * as Dialog from '$lib/components/ui/dialog/index.js'
 
   const isMac = typeof navigator !== 'undefined' && detectOs() === 'macos'
-  const mod   = isMac ? '⌘' : 'Ctrl'
+  const mod = isMac ? '⌘' : 'Ctrl'
 
   // Window is frameless everywhere (see src-tauri/src/lib.rs), so this bar is
   // the drag region and double-click-to-maximize target.
@@ -37,16 +36,12 @@
   }
 
   let {
-    title = 'studio',
-    canGoBack = false,
-    canGoForward = false,
-    sidebarOpen = true,
+    title = 'Stroke',
     connected = false,
     aiSidebarOpen = false,
-    ongoback          = () => {},
-    ongoforward       = () => {},
-    ontogglesidebar   = () => {},
     ontoggleaisidebar = () => {},
+    /** Named actions for the menu bar - see AppMenuBar. */
+    menuActions = /** @type {Record<string, () => void>} */ ({}),
   } = $props()
 
   let showActivationDialog = $state(false)
@@ -56,7 +51,7 @@
   )
   const trialUrgent = $derived(trialDays <= 3)
 
-  const iconBtn = 'inline-flex size-[24px] items-center justify-center rounded-md text-muted-foreground/50 transition-[background-color,color] duration-150 hover:bg-foreground/[0.06] hover:text-foreground'
+  const iconBtn = 'inline-flex size-[24px] items-center justify-center rounded-md text-muted-foreground transition-[background-color,color] duration-150 hover:bg-foreground/[0.06] hover:text-foreground'
 </script>
 
 <!--
@@ -84,46 +79,19 @@
   <!-- Stroke mark -->
   <Logo class="mr-2 size-4 shrink-0" />
 
-  <!-- Sidebar toggle, disabled when not connected -->
-  <button
-    type="button"
-    class={cn(
-      'shrink-0',
-      iconBtn,
-      !connected ? 'opacity-25 !pointer-events-none' : !sidebarOpen && 'bg-foreground/[0.05] text-foreground/60',
-    )}
-    onclick={ontogglesidebar}
-    disabled={!connected}
-    title={connected ? (sidebarOpen ? `Hide sidebar (${mod}B)` : `Show sidebar (${mod}B)`) : 'No active connection'}
-  >
-    <PanelLeft class="size-[13px]" />
-  </button>
-
-  <!-- Back / Forward -->
-  <button
-    type="button"
-    class={cn('ml-0.5 shrink-0', iconBtn, !canGoBack && 'opacity-20 !pointer-events-none')}
-    onclick={ongoback}
-    disabled={!canGoBack}
-    title="Go back (Alt+←)"
-  >
-    <ChevronLeft class="size-[13px]" />
-  </button>
-  <button
-    type="button"
-    class={cn('shrink-0', iconBtn, !canGoForward && 'opacity-20 !pointer-events-none')}
-    onclick={ongoforward}
-    disabled={!canGoForward}
-    title="Go forward (Alt+→)"
-  >
-    <ChevronRight class="size-[13px]" />
-  </button>
+  <!-- Menu bar. First after the mark, which is where every desktop app puts it
+       and where people look before they look for a shortcut. Optional: everything
+       in it is also in ⌘K and on a shortcut, so hiding it costs nothing but the
+       menus themselves. -->
+  {#if $appMenuBar}
+    <AppMenuBar {connected} actions={menuActions} />
+  {/if}
 
   <!-- Center title. Capped and centered so an unexpectedly long label (a file
        path, a verbose connection name) truncates instead of running under the
        controls on either side. -->
   <div class="pointer-events-none absolute inset-x-0 flex items-center justify-center px-40">
-    <span class="max-w-full truncate font-mono text-ui-2xs font-medium tracking-widest text-muted-foreground/30 lowercase select-none">
+    <span class="max-w-full truncate font-mono text-ui-2xs font-medium tracking-widest text-muted-foreground select-none">
       {title}
     </span>
   </div>
@@ -191,8 +159,8 @@
       </div>
       <LicenseActivation compact onactivated={() => { showActivationDialog = false }} />
       <div class="border-t border-border/60 px-5 py-3">
-        <p class="text-ui-xs text-muted-foreground/50">
-          No license? <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="text-primary/70 underline-offset-2 hover:underline">stroke.click →</a>
+        <p class="text-ui-xs text-muted-foreground">
+          No license? <a href="https://stroke.click" target="_blank" rel="noopener noreferrer" class="text-primary underline-offset-2 hover:underline">stroke.click →</a>
         </p>
       </div>
     </Dialog.Content>

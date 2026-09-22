@@ -18,41 +18,41 @@
 
   let {
     tableName = '',
-    fromCol   = '',
-    toCol     = '',
+    fromCol = '',
+    toCol = '',
     direction = /** @type {'in'|'out'} */ ('out'),
-    depth     = 1,
-    path      = '',
+    depth = 1,
+    path = '',
     /** @type {Map<string, TableMeta>} */
     tableMeta = new Map(),
     /** @type {Map<string, {col:string, refTable:string, refCol:string}[]>} */
-    outbound  = new Map(),
+    outbound = new Map(),
     /** @type {Map<string, {fromTable:string, fromCol:string, refCol:string}[]>} */
-    inbound   = new Map(),
+    inbound = new Map(),
     /** @type {Set<string>} */
-    expanded  = new Set(),
+    expanded = new Set(),
     /** @type {Set<string>} */
-    showCols  = new Set(),
+    showCols = new Set(),
     /** @type {Map<string, number>} Background-filled exact row counts, keyed by table name. */
     rowCounts = new Map(),
     toggleExpand = /** @type {(k:string)=>void} */ (() => {}),
-    toggleCols   = /** @type {(k:string)=>void} */ (() => {}),
+    toggleCols = /** @type {(k:string)=>void} */ (() => {}),
     onfocustable = /** @type {(name:string)=>void} */ (() => {}),
-    onopentable  = /** @type {((schema:string, table:string)=>void)|undefined} */ (undefined),
+    onopentable = /** @type {((schema:string, table:string)=>void)|undefined} */ (undefined),
     activeSchema = 'public',
   } = $props()
 
-  const meta     = $derived(tableMeta.get(tableName))
+  const meta = $derived(tableMeta.get(tableName))
   const rowCount = $derived(rowCounts.get(tableName))
   const nodeOut = $derived(outbound.get(tableName) ?? [])
-  const nodeIn  = $derived(inbound.get(tableName) ?? [])
+  const nodeIn = $derived(inbound.get(tableName) ?? [])
   const hasMore = $derived(depth < 5 && (nodeOut.length > 0 || nodeIn.length > 0))
 
-  const expKey  = `${path}:${depth}`
-  const colKey  = `cols:${path}:${depth}`
-  const isOpen  = $derived(expanded.has(expKey))
+  const expKey = `${path}:${depth}`
+  const colKey = `cols:${path}:${depth}`
+  const isOpen = $derived(expanded.has(expKey))
   const colsOpen = $derived(showCols.has(colKey))
-  const isOut   = direction === 'out'
+  const isOut = direction === 'out'
 
   // Visited tables in the current path (to detect circular refs)
   const visited = $derived(new Set(path.split(/[><:]/g).filter(Boolean)))
@@ -64,11 +64,11 @@
     <!-- Direction + relation label -->
     <div class="flex shrink-0 items-center gap-1.5">
       {#if isOut}
-        <ArrowUpRight class="size-3.5 text-info/60" />
+        <ArrowUpRight class="size-3.5 text-info" />
       {:else}
-        <ArrowDownRight class="size-3.5 text-success/60" />
+        <ArrowDownRight class="size-3.5 text-success" />
       {/if}
-      <span class="font-mono text-ui-3xs text-muted-foreground/50">
+      <span class="font-mono text-ui-3xs text-muted-foreground">
         {isOut ? `${fromCol} → ${tableName}.${toCol}` : `${tableName}.${fromCol} → ${toCol}`}
       </span>
     </div>
@@ -76,7 +76,7 @@
     <!-- Table name, click to jump to root -->
     <button
       type="button"
-      class="min-w-0 flex-1 truncate text-left font-mono text-ui-xs font-semibold hover:underline {isOut ? 'text-info/90' : 'text-success/90'}"
+      class="min-w-0 flex-1 truncate text-left font-mono text-ui-xs font-semibold hover:underline {isOut ? 'text-info' : 'text-success'}"
       onclick={() => onfocustable(tableName)}
     >{tableName}</button>
 
@@ -84,10 +84,10 @@
       <!-- Row count, filled in asynchronously; absent until the background pass resolves -->
       {#if rowCount !== undefined}
         <span
-          class="inline-flex h-5 items-center gap-1 rounded px-1.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/45"
+          class="inline-flex h-5 items-center gap-1 rounded px-1.5 font-mono text-ui-3xs tabular-nums text-muted-foreground"
           title="{rowCount.toLocaleString()} row{rowCount === 1 ? '' : 's'}"
         >
-          <Rows3 class="size-2.5 opacity-70" />{formatTableRowCount(rowCount)}
+          <Rows3 class="size-3 opacity-70" />{formatTableRowCount(rowCount)}
         </span>
       {/if}
 
@@ -95,7 +95,7 @@
       {#if meta}
         <button
           type="button"
-          class="inline-flex h-5 items-center gap-0.5 rounded px-1.5 font-mono text-ui-3xs text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground"
+          class="inline-flex h-5 items-center gap-0.5 rounded px-1.5 font-mono text-ui-3xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onclick={() => toggleCols(colKey)}
         >{colsOpen ? '−' : '+'}{meta.columns.length}c</button>
       {/if}
@@ -104,7 +104,7 @@
       {#if hasMore}
         <button
           type="button"
-          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-accent hover:text-foreground"
+          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onclick={() => toggleExpand(expKey)}
           title="{isOpen ? 'Collapse' : 'Expand'} relationships"
         >
@@ -117,7 +117,7 @@
       <!-- Open table -->
       <button
         type="button"
-        class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/30 transition-colors hover:bg-accent hover:text-foreground"
+        class="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         onclick={() => onopentable?.(activeSchema, tableName)}
         title="Open table"
       ><ExternalLink class="size-3" /></button>
@@ -131,11 +131,11 @@
         {@const isPk = meta.pkCols.has(col.name)}
         {@const isFk = !!col.foreignKey}
         <div class="flex items-center gap-1.5 py-[2px]">
-          {#if isPk}<KeyRound class="size-2.5 shrink-0 text-warning/70" />
-          {:else if isFk}<Link class="size-2.5 shrink-0 text-info/50" />
+          {#if isPk}<KeyRound class="size-3 shrink-0 text-warning" />
+          {:else if isFk}<Link class="size-3 shrink-0 text-info" />
           {:else}<span class="size-2.5 shrink-0"></span>{/if}
-          <span class="font-mono text-ui-3xs {isPk ? 'text-warning/80' : isFk ? 'text-info/60' : 'text-foreground/55'}">{col.name}</span>
-          <span class="ml-auto font-mono text-ui-3xs text-muted-foreground/30">{col.dataType}</span>
+          <span class="font-mono text-ui-3xs {isPk ? 'text-warning' : isFk ? 'text-info' : 'text-foreground/55'}">{col.name}</span>
+          <span class="ml-auto font-mono text-ui-3xs text-muted-foreground">{col.dataType}</span>
         </div>
       {/each}
     </div>
@@ -147,7 +147,7 @@
     <div class="border-t border-border/20 bg-background/30 p-2">
 
       {#if nodeOut.length > 0}
-        <div class="mb-1 px-1 font-mono text-ui-3xs uppercase tracking-widest text-muted-foreground/40">References</div>
+        <div class="mb-1 px-1 font-mono text-ui-3xs uppercase tracking-widest text-muted-foreground">References</div>
         <div class="flex flex-col gap-1.5 pl-2">
           {#each nodeOut as rel (rel.col)}
             {@const childPath = `${path}>${rel.refTable}:${rel.col}`}
@@ -155,8 +155,8 @@
               <svelte:self tableName={rel.refTable} fromCol={rel.col} toCol={rel.refCol}
                 direction="out" depth={depth + 1} path={childPath} {...shared} />
             {:else}
-              <div class="flex items-center gap-2 rounded-md border border-border/20 px-3 py-1.5 font-mono text-ui-3xs text-muted-foreground/40">
-                <Link class="size-2.5" />{rel.refTable} (circular)
+              <div class="flex items-center gap-2 rounded-md border border-border/20 px-3 py-1.5 font-mono text-ui-3xs text-muted-foreground">
+                <Link class="size-3" />{rel.refTable} (circular)
               </div>
             {/if}
           {/each}
@@ -165,7 +165,7 @@
 
       {#if nodeIn.length > 0}
         {#if nodeOut.length > 0}<div class="my-1.5 border-t border-border/20"></div>{/if}
-        <div class="mb-1 px-1 font-mono text-ui-3xs uppercase tracking-widest text-muted-foreground/40">Referenced by</div>
+        <div class="mb-1 px-1 font-mono text-ui-3xs uppercase tracking-widest text-muted-foreground">Referenced by</div>
         <div class="flex flex-col gap-1.5 pl-2">
           {#each nodeIn as rel (`${rel.fromTable}${rel.fromCol}`)}
             {@const childPath = `${path}<${rel.fromTable}:${rel.fromCol}`}
@@ -173,8 +173,8 @@
               <svelte:self tableName={rel.fromTable} fromCol={rel.fromCol} toCol={rel.refCol}
                 direction="in" depth={depth + 1} path={childPath} {...shared} />
             {:else}
-              <div class="flex items-center gap-2 rounded-md border border-border/20 px-3 py-1.5 font-mono text-ui-3xs text-muted-foreground/40">
-                <Link class="size-2.5" />{rel.fromTable} (circular)
+              <div class="flex items-center gap-2 rounded-md border border-border/20 px-3 py-1.5 font-mono text-ui-3xs text-muted-foreground">
+                <Link class="size-3" />{rel.fromTable} (circular)
               </div>
             {/if}
           {/each}

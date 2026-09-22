@@ -1,4 +1,5 @@
 use crate::db::connection::ActiveConnection;
+use crate::db::mysql::{my_int, my_text, my_text_named};
 use crate::mcp::ConnMeta;
 use futures::TryStreamExt;
 use serde_json::{json, Value};
@@ -571,7 +572,7 @@ async fn list_tables(conn: &ActiveConnection, schema: &str) -> Result<String, St
         }
         ActiveConnection::Mysql(pool) => list_tables_mysql(pool, schema).await,
         ActiveConnection::Clickhouse(cfg) => {
-            let tables = crate::db::clickhouse::list_tables(cfg).await?;
+            let tables = crate::db::clickhouse::list_tables(cfg, schema).await?;
             Ok(json!({"tables":tables.iter().map(|t|&t.name).collect::<Vec<_>>()}).to_string())
         }
         ActiveConnection::Redis(cfg) => {
@@ -602,9 +603,11 @@ async fn list_tables_mysql(pool: &sqlx::MySqlPool, schema: &str) -> Result<Strin
     let tables: Vec<serde_json::Value> = rows
         .iter()
         .map(|r| {
-            let name: String = r.try_get(0).unwrap_or_default();
-            let kind: String = r.try_get(1).unwrap_or_default();
-            let row_count: i64 = r.try_get::<Option<i64>, _>(2).ok().flatten().unwrap_or(0);
+            // information_schema columns are binary-flagged, so a String
+            // decode is refused - see db::mysql::my_text. These read "" before.
+            let name = my_text(r, 0).unwrap_or_default();
+            let kind = my_text(r, 1).unwrap_or_default();
+            let row_count = my_int(r, 2).unwrap_or(0);
             json!({ "name": name, "type": kind, "row_estimate": row_count })
         })
         .collect();
@@ -689,7 +692,7 @@ async fn describe_table(
         }
         ActiveConnection::Mysql(pool) => describe_table_mysql(pool, schema, table).await,
         ActiveConnection::Clickhouse(cfg) => {
-            let cols = crate::db::clickhouse::get_column_structure(cfg, table).await?;
+            let cols = crate::db::clickhouse::get_column_structure(cfg, schema, table).await?;
             let columns: Vec<_> = cols.iter().map(|c| json!({
                 "name": c.name, "type": c.data_type, "nullable": c.is_nullable,
                 "default": c.column_default, "comment": c.comment,
@@ -738,11 +741,11 @@ async fn describe_table_mysql(pool: &sqlx::MySqlPool, schema: &str, table: &str)
     let columns: Vec<serde_json::Value> = col_rows
         .iter()
         .map(|r| {
-            let name: String = r.try_get(0).unwrap_or_default();
-            let col_type: String = r.try_get(1).unwrap_or_default();
-            let nullable: String = r.try_get(2).unwrap_or_else(|_| "YES".to_string());
-            let default: Option<String> = r.try_get::<Option<String>, _>(3).ok().flatten();
-            let extra: String = r.try_get(4).unwrap_or_default();
+            let name = my_text(r, 0).unwrap_or_default();
+            let col_type = my_text(r, 1).unwrap_or_default();
+            let nullable = my_text(r, 2).unwrap_or_else(|| "YES".to_string());
+            let default = my_text(r, 3);
+            let extra = my_text(r, 4).unwrap_or_default();
             json!({
                 "name": name,
                 "type": col_type,
@@ -1008,7 +1011,7 @@ async fn check_migrations_mysql(pool: &sqlx::MySqlPool, schema: &str) -> Result<
         .unwrap_or_default();
         let entries: Vec<serde_json::Value> = recent
             .iter()
-            .map(|r| json!({ "name": r.try_get::<String, _>("name").unwrap_or_default() }))
+            .map(|r| json!({ "name": my_text_named(r, "name").unwrap_or_default() }))
             .collect();
         results.push(json!({ "table": tbl, "framework": framework, "found": true, "total_migrations": count, "recent": entries }));
     }
@@ -1202,7 +1205,7 @@ async fn explain_query_mysql(pool: &sqlx::MySqlPool, sql: &str) -> Result<String
 
     let plan_text: String = rows
         .first()
-        .and_then(|r| r.try_get::<String, _>(0).ok())
+        .and_then(|r| my_text(&r, 0))
         .unwrap_or_default();
     let plan: serde_json::Value = serde_json::from_str(&plan_text).unwrap_or(json!(plan_text));
     Ok(json!({ "plan": plan, "database": "mysql" }).to_string())
@@ -1263,7 +1266,7 @@ async fn get_database_stats(conn: &ActiveConnection, schema: &str) -> Result<Str
         }
         ActiveConnection::Mysql(pool) => get_database_stats_mysql(pool, schema).await,
         ActiveConnection::Clickhouse(cfg) => {
-            let tables = crate::db::clickhouse::list_tables(cfg).await?;
+            let tables = crate::db::clickhouse::list_tables(cfg, schema).await?;
             Ok(json!({"database":"clickhouse","table_count":tables.len()}).to_string())
         }
         ActiveConnection::Redis(cfg) => {

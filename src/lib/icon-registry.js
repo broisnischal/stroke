@@ -109,6 +109,7 @@ import Columns3 from '@lucide/svelte/icons/columns-3'
 import Crosshair from '@lucide/svelte/icons/crosshair'
 import Eraser from '@lucide/svelte/icons/eraser'
 import FileDown from '@lucide/svelte/icons/file-down'
+import FileUp from '@lucide/svelte/icons/file-up'
 import FileText from '@lucide/svelte/icons/file-text'
 import FunctionSquare from '@lucide/svelte/icons/function-square'
 import Hash from '@lucide/svelte/icons/hash'
@@ -116,6 +117,8 @@ import Infinity from '@lucide/svelte/icons/infinity'
 import Keyboard from '@lucide/svelte/icons/keyboard'
 import Layers from '@lucide/svelte/icons/layers'
 import LayoutList from '@lucide/svelte/icons/layout-list'
+import PanelLeftClose from '@lucide/svelte/icons/panel-left-close'
+import PanelLeftOpen from '@lucide/svelte/icons/panel-left-open'
 import Link2 from '@lucide/svelte/icons/link-2'
 import ListFilter from '@lucide/svelte/icons/list-filter'
 import Network from '@lucide/svelte/icons/network'
@@ -150,11 +153,13 @@ import {
   WifiConnected01Icon, WifiDisconnected01Icon, TestTubeIcon, WorkflowSquare02Icon,
   Share08Icon, GitCompareIcon, PuzzleIcon, PlugSocketIcon, NoteEditIcon, ChartBarLineIcon, GlobalIcon,
   InformationCircleIcon, ArrowUpDownIcon, ArrowLeftRightIcon, Bookmark01Icon, BugIcon,
-  UnavailableIcon, Target01Icon, EraserIcon, FileDownloadIcon, File01Icon, FunctionSquareIcon,
+  UnavailableIcon, Target01Icon, EraserIcon, FileDownloadIcon, FileUploadIcon, File01Icon, FunctionSquareIcon,
   HashIcon, InfinityIcon, KeyboardIcon, Layers01Icon, LeftToRightListBulletIcon, Link01Icon,
   WorkflowSquare01Icon, PackageIcon, PinLocation01Icon, PinOffIcon, FilterHorizontalIcon,
   SquareIcon, CheckmarkSquare01Icon, UnfoldMoreIcon, UnfoldLessIcon, SortingDownIcon,
   SortByDown01Icon, SortingUpIcon, SortByUp01Icon,
+  LayoutThreeColumnIcon,
+  SidebarLeftIcon, SidebarLeft01Icon,
 } from '@hugeicons/core-free-icons'
 
 /** @type {Record<string, { lucide: any, huge?: any }>} */
@@ -254,10 +259,11 @@ export const ICON_MAP = {
   'circle-slash':   { lucide: CircleSlash,    huge: UnavailableIcon },
   'clipboard-copy': { lucide: ClipboardCopy,  huge: Copy01Icon },
   'cog':            { lucide: Cog,            huge: Settings01Icon },
-  'columns-3':      { lucide: Columns3,       huge: Table01Icon },
+  'columns-3':      { lucide: Columns3,       huge: LayoutThreeColumnIcon },
   'crosshair':      { lucide: Crosshair,      huge: Target01Icon },
   'eraser':         { lucide: Eraser,         huge: EraserIcon },
   'file-down':      { lucide: FileDown,       huge: FileDownloadIcon },
+  'file-up':        { lucide: FileUp,         huge: FileUploadIcon },
   'file-text':      { lucide: FileText,       huge: File01Icon },
   'function-square':{ lucide: FunctionSquare, huge: FunctionSquareIcon },
   'hash':           { lucide: Hash,           huge: HashIcon },
@@ -265,6 +271,8 @@ export const ICON_MAP = {
   'keyboard':       { lucide: Keyboard,       huge: KeyboardIcon },
   'layers':         { lucide: Layers,         huge: Layers01Icon },
   'layout-list':    { lucide: LayoutList,     huge: LeftToRightListBulletIcon },
+  'panel-left-close':{ lucide: PanelLeftClose, huge: SidebarLeftIcon },
+  'panel-left-open': { lucide: PanelLeftOpen,  huge: SidebarLeft01Icon },
   'link-2':         { lucide: Link2,          huge: Link01Icon },
   'list-filter':    { lucide: ListFilter,     huge: FilterIcon },
   'network':        { lucide: Network,        huge: WorkflowSquare01Icon },
@@ -367,6 +375,8 @@ import PhPuzzlePiece from 'phosphor-svelte/lib/PuzzlePiece'
 import PhWifiHigh from 'phosphor-svelte/lib/WifiHigh'
 import PhWifiSlash from 'phosphor-svelte/lib/WifiSlash'
 import PhColumns from 'phosphor-svelte/lib/Columns'
+import PhSidebar from 'phosphor-svelte/lib/Sidebar'
+import PhSidebarSimple from 'phosphor-svelte/lib/SidebarSimple'
 import PhPlug from 'phosphor-svelte/lib/Plug'
 
 /** @type {Record<string, any>} */
@@ -451,6 +461,8 @@ export const PHOSPHOR_MAP = {
   'sliders-horizontal': PhFadersHorizontal,
   'settings-2': PhFadersHorizontal,
   'layout-dashboard': PhSquaresFour,
+  'panel-left-close': PhSidebarSimple,
+  'panel-left-open': PhSidebar,
   'layers': PhStack,
   'blocks': PhPuzzlePiece,
   'globe': PhGlobe,

@@ -12,6 +12,11 @@
   import { onMount } from 'svelte'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import { cn } from '$lib/utils.js'
+  import * as Dialog from '$lib/components/ui/dialog/index.js'
+  import { Button } from '$lib/components/ui/button/index.js'
+  import FileCode from '@lucide/svelte/icons/file-code'
+  import Copy from '@lucide/svelte/icons/copy'
+  import { buildMigration, formatMigrationScript } from '$lib/schema-migration.js'
   import { listSchemas, listSchemasOnConnection, executeSql, executeSqlOnConnection } from '$lib/api.js'
   import {
     captureSnapshot,
@@ -81,15 +86,46 @@
   ])
 
   const beforeSnap = $derived(snapshots.find((s) => s.id === beforeId) ?? null)
-  const afterSnap  = $derived(snapshots.find((s) => s.id === afterId)  ?? null)
-  const diff       = $derived(beforeSnap && afterSnap ? diffSnapshots(beforeSnap, afterSnap) : null)
+  const afterSnap = $derived(snapshots.find((s) => s.id === afterId)  ?? null)
+  const diff = $derived(beforeSnap && afterSnap ? diffSnapshots(beforeSnap, afterSnap) : null)
+
+  // ── Migration ──────────────────────────────────────────────────────────────
+  // The diff already knows what changed; this renders it as SQL to review.
+  let migrationOpen = $state(false)
+
+  /** The dialect only decides syntax, so anything not MySQL/SQLite reads as Postgres. */
+  const migrationDialect = $derived(
+    dbType === 'mysql' ? 'mysql' : dbType === 'sqlite' ? 'sqlite' : 'postgres',
+  )
+
+  const migration = $derived(
+    diff ? buildMigration(diff, { dialect: migrationDialect }) : null,
+  )
+
+  const migrationScript = $derived(
+    migration
+      ? formatMigrationScript(migration, {
+          dialect: migrationDialect,
+          title: `${beforeSnap?.title || 'earlier snapshot'} → ${afterSnap?.title || 'later snapshot'}`,
+        })
+      : '',
+  )
+
+  async function copyMigration() {
+    try {
+      await navigator.clipboard.writeText(migrationScript)
+      toast.success('Migration copied')
+    } catch (e) {
+      toast.error('Could not copy', { description: String(e) })
+    }
+  }
   const totalChanges = $derived(
     diff ? diff.addedTables.length + diff.removedTables.length + diff.modifiedTables.length : 0,
   )
 
   $effect(() => {
     if (snapshots.length >= 2 && !beforeId && !afterId) {
-      afterId  = snapshots[0].id
+      afterId = snapshots[0].id
       beforeId = snapshots[1].id
     }
   })
@@ -108,9 +144,9 @@
 
   const selectedDdlDiff = $derived.by(() => {
     if (!selectedTable || !beforeSnap || !afterSnap) return null
-    const dot    = selectedTable.indexOf('.')
+    const dot = selectedTable.indexOf('.')
     const schema = selectedTable.slice(0, dot)
-    const name   = selectedTable.slice(dot + 1)
+    const name = selectedTable.slice(dot + 1)
 
     const bDdl = beforeSnap.ddl?.[selectedTable]
       ?? pseudoDdl(schema, name, (beforeSnap.tables?.[schema] ?? []).find((t) => t.name === name)?.columns ?? [])
@@ -161,9 +197,9 @@
 
   async function openCaptureModal() {
     captureTitle = ''
-    captureConn  = null
-    captureDb    = ''
-    captureOpen  = true
+    captureConn = null
+    captureDb = ''
+    captureOpen = true
     await loadCaptureData(null)
   }
 
@@ -171,18 +207,18 @@
   async function selectCaptureConn(conn) {
     if (captureConn?.id === conn?.id || (captureConn === null && conn === null)) return
     captureConn = conn
-    captureDb   = ''
+    captureDb = ''
     captureSchemaList = []
-    captureChecked    = new Set()
+    captureChecked = new Set()
     await loadCaptureData(conn)
   }
 
   /** @param {SavedConnection | null} conn */
   async function loadCaptureData(conn) {
     captureLoadingDbs = true
-    captureDatabases  = []
+    captureDatabases = []
     captureSchemaList = []
-    captureChecked    = new Set()
+    captureChecked = new Set()
     try {
       const dbs = await fetchDatabases(conn)
       captureDatabases = dbs
@@ -200,8 +236,8 @@
    */
   async function loadCaptureSchemas(conn, db) {
     captureLoadingSchemas = true
-    captureSchemaList     = []
-    captureChecked        = new Set()
+    captureSchemaList = []
+    captureChecked = new Set()
     try {
       let cfg = null
       if (conn) {
@@ -216,7 +252,7 @@
       const raw = cfg ? await listSchemasOnConnection(cfg) : await listSchemas()
       const filtered = (raw ?? []).filter((s) => !SYSTEM_SCHEMAS.has(s))
       captureSchemaList = filtered
-      captureChecked    = new Set(filtered)
+      captureChecked = new Set(filtered)
     } catch {
       captureSchemaList = []
     } finally {
@@ -242,10 +278,10 @@
     captureOpen = false
     if (capturing) return
     capturing = true
-    const conn  = captureConn
-    const id    = conn?.id ?? connectionId
+    const conn = captureConn
+    const id = conn?.id ?? connectionId
     const label = conn?.name ?? connectionLabel
-    const type  = /** @type {string} */ (conn?.type ?? dbType)
+    const type = /** @type {string} */ (conn?.type ?? dbType)
     let cfgConn = null
     if (conn) {
       cfgConn = (captureDb && captureDb !== conn.database) ? { ...conn, database: captureDb } : conn
@@ -434,7 +470,7 @@
       <span class="flex-1 text-ui-2xs font-medium text-foreground/65">Snapshots</span>
 
       {#if snapshots.length > 0}
-        <span class="text-ui-3xs tabular-nums text-muted-foreground/55">{snapshots.length}</span>
+        <span class="text-ui-3xs tabular-nums text-muted-foreground">{snapshots.length}</span>
 
         <!-- More menu -->
         <div class="relative">
@@ -443,7 +479,7 @@
           {/if}
           <button
             onclick={() => { moreMenuOpen = !moreMenuOpen }}
-            class="rounded p-1 text-muted-foreground/50 hover:text-muted-foreground/70"
+            class="rounded p-1 text-muted-foreground hover:text-muted-foreground"
           >
             <Ellipsis class="size-3" />
           </button>
@@ -455,7 +491,7 @@
                   'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm hover:bg-accent',
                   clearStep === 1
                     ? 'text-destructive'
-                    : 'text-muted-foreground/60 hover:text-destructive',
+                    : 'text-muted-foreground hover:text-destructive',
                 )}
               >
                 <Trash2 class="size-3 shrink-0" />
@@ -486,14 +522,14 @@
     <div class="min-h-0 flex-1 overflow-y-auto">
       {#if loading}
         <div class="flex items-center justify-center py-12">
-          <Loader2 class="size-3.5 animate-spin text-muted-foreground/50" />
+          <Loader2 class="size-3.5 animate-spin text-muted-foreground" />
         </div>
 
       {:else if snapshots.length === 0}
         <div class="flex flex-col items-center px-5 py-14 text-center">
-          <Camera class="mb-2.5 size-5 text-muted-foreground/40" />
+          <Camera class="mb-2.5 size-5 text-muted-foreground" />
           <p class="text-ui-2xs text-foreground/55">No snapshots yet</p>
-          <p class="mt-1 text-ui-3xs leading-relaxed text-muted-foreground/50">
+          <p class="mt-1 text-ui-3xs leading-relaxed text-muted-foreground">
             Capture your schema to track changes over time
           </p>
         </div>
@@ -501,7 +537,7 @@
       {:else}
         {#each snapshots as snap (snap.id)}
           {@const isBefore = snap.id === beforeId}
-          {@const isAfter  = snap.id === afterId}
+          {@const isAfter = snap.id === afterId}
           {@const isActive = isBefore || isAfter}
           {@const tableCount = Object.values(snap.tables ?? {}).flat().length}
           {@const displayName = snap.title || shortName(snap.connectionLabel)}
@@ -529,7 +565,7 @@
                     'shrink-0 rounded px-1 py-0.5 text-ui-3xs leading-none',
                     isBefore
                       ? 'bg-muted text-foreground/70'
-                      : 'text-muted-foreground/40 hover:text-muted-foreground/60',
+                      : 'text-muted-foreground hover:text-muted-foreground',
                   )}
                   title="Set as Before (baseline)"
                 >←</button>
@@ -541,7 +577,7 @@
                     'shrink-0 rounded px-1 py-0.5 text-ui-3xs leading-none',
                     isAfter
                       ? 'bg-muted text-foreground/70'
-                      : 'text-muted-foreground/40 hover:text-muted-foreground/60',
+                      : 'text-muted-foreground hover:text-muted-foreground',
                   )}
                   title="Set as After (compare target)"
                 >→</button>
@@ -549,7 +585,7 @@
                 <!-- Delete -->
                 <button
                   onclick={() => remove(snap.id)}
-                  class="shrink-0 text-transparent group-hover:text-muted-foreground/40 hover:!text-destructive/60"
+                  class="shrink-0 text-transparent group-hover:text-muted-foreground hover:!text-destructive"
                   aria-label="Delete"
                 >
                   <X class="size-3" />
@@ -557,7 +593,7 @@
               </div>
 
               <!-- Meta row -->
-              <div class="mt-0.5 flex items-center gap-1 text-ui-3xs text-muted-foreground/55">
+              <div class="mt-0.5 flex items-center gap-1 text-ui-3xs text-muted-foreground">
                 <span class="flex-1 truncate">{fmtDate(snap.capturedAt)}</span>
                 <span class="shrink-0 tabular-nums">{tableCount} tbl</span>
               </div>
@@ -572,10 +608,10 @@
   <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
     {#if !beforeSnap || !afterSnap}
       <div class="flex flex-1 flex-col items-center justify-center gap-3">
-        <GitCompare class="size-8 text-muted-foreground/55" />
+        <GitCompare class="size-8 text-muted-foreground" />
         <div class="text-center">
           <p class="text-ui-sm font-medium text-foreground/55">No comparison active</p>
-          <p class="mt-1 text-ui-xs text-muted-foreground/50">Mark one snapshot as B and another as A</p>
+          <p class="mt-1 text-ui-xs text-muted-foreground">Mark one snapshot as B and another as A</p>
         </div>
       </div>
 
@@ -583,42 +619,53 @@
       <!-- Comparison header bar -->
       <div class="flex h-9 shrink-0 items-center gap-2 overflow-hidden border-b border-border/30 px-4 text-ui-2xs">
         <div class="flex min-w-0 shrink items-center gap-1.5">
-          <span class="shrink-0 text-ui-3xs text-muted-foreground/40">←</span>
+          <span class="shrink-0 text-ui-3xs text-muted-foreground">←</span>
           <span class="min-w-0 truncate text-foreground/55" title={beforeSnap.connectionLabel}>
             {beforeSnap.title || shortName(beforeSnap.connectionLabel)}
           </span>
-          <span class="shrink-0 text-muted-foreground/50">{fmtDate(beforeSnap.capturedAt)}</span>
+          <span class="shrink-0 text-muted-foreground">{fmtDate(beforeSnap.capturedAt)}</span>
         </div>
 
         <button
           onclick={swapSnapshots}
           title="Swap Before ↔ After"
-          class="shrink-0 rounded p-1 text-muted-foreground/40 hover:bg-muted/40 hover:text-foreground/70"
+          class="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted/40 hover:text-foreground/70"
         >
           <ArrowLeftRight class="size-3" />
         </button>
 
         <div class="flex min-w-0 shrink items-center gap-1.5">
-          <span class="shrink-0 text-ui-3xs text-muted-foreground/40">→</span>
+          <span class="shrink-0 text-ui-3xs text-muted-foreground">→</span>
           <span class="min-w-0 truncate text-foreground/55" title={afterSnap.connectionLabel}>
             {afterSnap.title || shortName(afterSnap.connectionLabel)}
           </span>
-          <span class="shrink-0 text-muted-foreground/50">{fmtDate(afterSnap.capturedAt)}</span>
+          <span class="shrink-0 text-muted-foreground">{fmtDate(afterSnap.capturedAt)}</span>
         </div>
 
         {#if diff}
           <div class="ml-auto flex shrink-0 items-center gap-3 pl-3">
             {#if diff.addedTables.length}
-              <span class="font-medium text-success/80">+{diff.addedTables.length}</span>
+              <span class="font-medium text-success">+{diff.addedTables.length}</span>
             {/if}
             {#if diff.removedTables.length}
-              <span class="font-medium text-destructive/80">−{diff.removedTables.length}</span>
+              <span class="font-medium text-destructive">−{diff.removedTables.length}</span>
             {/if}
             {#if diff.modifiedTables.length}
-              <span class="font-medium text-warning/80">~{diff.modifiedTables.length}</span>
+              <span class="font-medium text-warning">~{diff.modifiedTables.length}</span>
             {/if}
             {#if isDiffEmpty(diff)}
-              <span class="text-muted-foreground/60">Identical</span>
+              <span class="text-muted-foreground">Identical</span>
+            {:else}
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-7 shrink-0"
+                onclick={() => (migrationOpen = true)}
+                title="Generate the SQL that turns the earlier snapshot into the later one"
+              >
+                <FileCode class="size-3.5 shrink-0" />
+                Migration
+              </Button>
             {/if}
           </div>
         {/if}
@@ -626,17 +673,17 @@
 
       {#if !diff}
         <div class="flex flex-1 items-center justify-center">
-          <Loader2 class="size-4 animate-spin text-muted-foreground/50" />
+          <Loader2 class="size-4 animate-spin text-muted-foreground" />
         </div>
 
       {:else if isDiffEmpty(diff)}
         <div class="flex flex-1 flex-col items-center justify-center gap-4">
           <div class="flex size-14 items-center justify-center rounded-lg border border-success/20 bg-success/5">
-            <Check class="size-6 text-success/50" />
+            <Check class="size-6 text-success" />
           </div>
           <div class="text-center">
             <p class="text-ui-sm font-semibold text-foreground/65">Schemas are identical</p>
-            <p class="mt-1 text-ui-xs text-muted-foreground/55">No structural differences between these two snapshots</p>
+            <p class="mt-1 text-ui-xs text-muted-foreground">No structural differences between these two snapshots</p>
           </div>
         </div>
 
@@ -645,8 +692,8 @@
           <!-- Changed tables tree -->
           <div class="flex w-52 shrink-0 flex-col overflow-hidden border-r border-border/30">
             <div class="flex h-8 shrink-0 items-center border-b border-border/25 px-3">
-              <span class="flex-1 text-ui-3xs font-medium uppercase tracking-widest text-muted-foreground/60">Changed</span>
-              <span class="font-mono text-ui-3xs text-muted-foreground/50 tabular-nums">{totalChanges}</span>
+              <span class="flex-1 text-ui-3xs font-medium uppercase tracking-widest text-muted-foreground">Changed</span>
+              <span class="font-mono text-ui-3xs text-muted-foreground tabular-nums">{totalChanges}</span>
             </div>
             <div class="min-h-0 flex-1 overflow-y-auto">
               {@render FileTree(diff)}
@@ -657,7 +704,7 @@
           <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
             {#if !selectedTable}
               <div class="flex flex-1 items-center justify-center">
-                <p class="text-ui-xs text-muted-foreground/50">Select a table to view its DDL diff</p>
+                <p class="text-ui-xs text-muted-foreground">Select a table to view its DDL diff</p>
               </div>
             {:else}
               {@render DdlDiff(selectedTable)}
@@ -684,7 +731,7 @@
         <p class="flex-1 text-ui-sm font-semibold text-foreground/85">New Snapshot</p>
         <button
           onclick={() => { captureOpen = false }}
-          class="rounded p-1 text-muted-foreground/55 hover:text-muted-foreground/70"
+          class="rounded p-1 text-muted-foreground hover:text-muted-foreground"
         >
           <X class="size-3.5" />
         </button>
@@ -696,14 +743,14 @@
           <input
             bind:value={captureTitle}
             placeholder="Snapshot title (optional), e.g. Before migration v2"
-            class="w-full bg-transparent text-ui-xs text-foreground/75 outline-none placeholder:text-muted-foreground/50"
+            class="w-full bg-transparent text-ui-xs text-foreground/75 outline-none placeholder:text-muted-foreground"
           />
         </div>
 
         <!-- Connection list -->
         <div class="border-t border-border/25">
           <div class="flex items-center px-5 py-2">
-            <span class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/60">Connection</span>
+            <span class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground">Connection</span>
           </div>
           <div>
             {#if connectionId}
@@ -722,7 +769,7 @@
                   {#if captureConn === null}<span class="size-1.5 rounded-full bg-primary/80"></span>{/if}
                 </span>
                 <span class="min-w-0 flex-1 truncate font-medium text-foreground/75" title={connectionLabel}>{shortName(connectionLabel)}</span>
-                <span class="shrink-0 rounded bg-success/10 px-1.5 py-0.5 text-ui-3xs font-medium text-success/70">active</span>
+                <span class="shrink-0 rounded bg-success/10 px-1.5 py-0.5 text-ui-3xs font-medium text-success">active</span>
               </button>
             {/if}
             {#each connections.filter((c) => c.id !== connectionId) as conn (conn.id)}
@@ -740,11 +787,11 @@
                   {#if captureConn?.id === conn.id}<span class="size-1.5 rounded-full bg-primary/80"></span>{/if}
                 </span>
                 <span class="min-w-0 flex-1 truncate text-foreground/65" title={conn.name}>{shortName(conn.name)}</span>
-                <span class="shrink-0 text-ui-3xs uppercase text-muted-foreground/55">{conn.type}</span>
+                <span class="shrink-0 text-ui-3xs uppercase text-muted-foreground">{conn.type}</span>
               </button>
             {/each}
             {#if !connectionId && connections.length === 0}
-              <p class="px-5 py-3 text-ui-xs text-muted-foreground/55">No connections configured</p>
+              <p class="px-5 py-3 text-ui-xs text-muted-foreground">No connections configured</p>
             {/if}
           </div>
         </div>
@@ -755,12 +802,12 @@
             <!-- Database -->
             <div class="w-44 shrink-0">
               <div class="flex items-center border-b border-border/20 px-4 py-2">
-                <span class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/60">Database</span>
-                {#if captureLoadingDbs}<Loader2 class="ml-auto size-2.5 animate-spin text-muted-foreground/55" />{/if}
+                <span class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground">Database</span>
+                {#if captureLoadingDbs}<Loader2 class="ml-auto size-3 animate-spin text-muted-foreground" />{/if}
               </div>
               <div class="max-h-44 overflow-y-auto py-1">
                 {#if !captureLoadingDbs && captureDatabases.length === 0}
-                  <p class="px-4 py-2 text-ui-3xs italic text-muted-foreground/50">None found</p>
+                  <p class="px-4 py-2 text-ui-3xs italic text-muted-foreground">None found</p>
                 {/if}
                 {#each captureDatabases as db (db)}
                   <button
@@ -769,7 +816,7 @@
                       'flex w-full items-center gap-2 px-4 py-1.5 text-left text-ui-xs',
                       captureDb === db
                         ? 'bg-muted/[0.08] font-medium text-foreground/80'
-                        : 'text-muted-foreground/50 hover:bg-muted/[0.05] hover:text-foreground/65',
+                        : 'text-muted-foreground hover:bg-muted/[0.05] hover:text-foreground/65',
                     )}
                   >
                     {#if captureDb === db}
@@ -786,19 +833,19 @@
             <!-- Schemas -->
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 border-b border-border/20 px-4 py-2">
-                <span class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground/60">Schemas</span>
+                <span class="text-ui-3xs font-semibold uppercase tracking-widest text-muted-foreground">Schemas</span>
                 {#if captureLoadingSchemas}
-                  <Loader2 class="ml-auto size-2.5 animate-spin text-muted-foreground/55" />
+                  <Loader2 class="ml-auto size-3 animate-spin text-muted-foreground" />
                 {:else if captureSchemaList.length > 0}
                   <div class="ml-auto flex items-center gap-2">
-                    <button onclick={() => { captureChecked = new Set(captureSchemaList) }} class="text-ui-3xs text-muted-foreground/55 hover:text-foreground/60">All</button>
-                    <button onclick={() => { captureChecked = new Set() }} class="text-ui-3xs text-muted-foreground/55 hover:text-foreground/60">None</button>
+                    <button onclick={() => { captureChecked = new Set(captureSchemaList) }} class="text-ui-3xs text-muted-foreground hover:text-foreground/60">All</button>
+                    <button onclick={() => { captureChecked = new Set() }} class="text-ui-3xs text-muted-foreground hover:text-foreground/60">None</button>
                   </div>
                 {/if}
               </div>
               <div class="max-h-44 overflow-y-auto py-1">
                 {#if !captureLoadingSchemas && captureSchemaList.length === 0}
-                  <p class="px-4 py-2 text-ui-3xs italic text-muted-foreground/50">
+                  <p class="px-4 py-2 text-ui-3xs italic text-muted-foreground">
                     {captureDb ? 'No schemas found' : 'Select a database first'}
                   </p>
                 {/if}
@@ -810,7 +857,7 @@
                       'flex w-full cursor-pointer items-center gap-2.5 px-4 py-1.5 text-ui-xs',
                       captureChecked.has(schema)
                         ? 'text-foreground/75'
-                        : 'text-muted-foreground/40 hover:text-foreground/55',
+                        : 'text-muted-foreground hover:text-foreground/55',
                     )}
                   >
                     <span class={cn(
@@ -819,7 +866,7 @@
                         ? 'border-primary/40 bg-primary/15'
                         : 'border-border/40',
                     )}>
-                      {#if captureChecked.has(schema)}<Check class="size-2.5 text-primary/80" />{/if}
+                      {#if captureChecked.has(schema)}<Check class="size-3 text-primary" />{/if}
                     </span>
                     <span class="truncate font-mono text-ui-2xs">{schema}</span>
                   </button>
@@ -832,7 +879,7 @@
 
       <!-- Footer -->
       <div class="flex shrink-0 items-center justify-between border-t border-border/25 px-5 py-3">
-        <p class="text-ui-3xs text-muted-foreground/50">
+        <p class="text-ui-3xs text-muted-foreground">
           {#if captureChecked.size > 0 && captureSchemaList.length > 0}
             {captureChecked.size} / {captureSchemaList.length} schemas
           {:else if captureSchemaList.length > 0}
@@ -842,7 +889,7 @@
         <div class="flex items-center gap-2">
           <button
             onclick={() => { captureOpen = false }}
-            class="rounded px-3 py-1.5 text-ui-xs text-muted-foreground/50 hover:text-foreground/80"
+            class="rounded px-3 py-1.5 text-ui-xs text-muted-foreground hover:text-foreground/80"
           >Cancel</button>
           <button
             onclick={doCapture}
@@ -857,6 +904,41 @@
     </div>
   </div>
 {/if}
+
+<Dialog.Root bind:open={migrationOpen}>
+  <Dialog.Content class="flex max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+    <Dialog.Header class="border-b border-border/60 px-5 py-4">
+      <Dialog.Title class="text-ui-sm">Migration SQL</Dialog.Title>
+      <Dialog.Description class="text-ui-2xs">
+        {migration?.statementCount ?? 0} statement{(migration?.statementCount ?? 0) === 1 ? '' : 's'}
+        taking the earlier snapshot to the later one. Review it before running — the
+        rollback below is commented out.
+      </Dialog.Description>
+    </Dialog.Header>
+
+    <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      {#if migration && migration.warnings.length > 0}
+        <div class="mb-3 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2.5">
+          <p class="text-ui-2xs font-semibold text-foreground">Read before running</p>
+          <ul class="mt-1.5 flex flex-col gap-1">
+            {#each migration.warnings as warning (warning)}
+              <li class="text-ui-3xs text-muted-foreground">• {warning}</li>
+            {/each}
+          </ul>
+        </div>
+      {/if}
+      <pre class="overflow-x-auto rounded-lg border border-border/60 bg-background p-3 font-mono text-ui-3xs leading-relaxed text-foreground"><code>{migrationScript}</code></pre>
+    </div>
+
+    <Dialog.Footer class="border-t border-border/60 px-5 py-3">
+      <Button variant="outline" size="sm" onclick={() => (migrationOpen = false)}>Close</Button>
+      <Button size="sm" onclick={copyMigration}>
+        <Copy class="size-3.5 shrink-0" />
+        Copy
+      </Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
 
 <!-- ── Snippets ──────────────────────────────────────────────────────────── -->
 
@@ -873,14 +955,14 @@
         >
           <ChevronRight
             class={cn(
-              'size-3 shrink-0 text-muted-foreground/60 transition-transform duration-100',
+              'size-3 shrink-0 text-muted-foreground transition-transform duration-100',
               !collapsed && 'rotate-90',
             )}
           />
           <span class="min-w-0 flex-1 truncate font-mono text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">
             {schema}
           </span>
-          <span class="ml-1 shrink-0 font-mono text-ui-2xs text-muted-foreground/60 tabular-nums">{items.length}</span>
+          <span class="ml-1 shrink-0 font-mono text-ui-2xs text-muted-foreground tabular-nums">{items.length}</span>
         </button>
 
         {#if !collapsed}
@@ -922,7 +1004,7 @@
 {#snippet DdlDiff(tableKey)}
   {@const status = getTableStatus(diff, tableKey)}
   {@const statusColor = status === 'added' ? 'text-success' : status === 'removed' ? 'text-destructive' : 'text-warning'}
-  {@const addCount    = selectedDdlDiff?.filter((l) => l.type === 'add').length    ?? 0}
+  {@const addCount = selectedDdlDiff?.filter((l) => l.type === 'add').length    ?? 0}
   {@const removeCount = selectedDdlDiff?.filter((l) => l.type === 'remove').length ?? 0}
 
   <div class="flex h-8 shrink-0 items-center gap-2 border-b border-border/40 px-4">
@@ -938,38 +1020,38 @@
 
   <div class="min-h-0 flex-1 overflow-auto">
     {#if !selectedDdlDiff}
-      <div class="flex items-center justify-center py-10 text-ui-xs text-muted-foreground/55">No DDL available</div>
+      <div class="flex items-center justify-center py-10 text-ui-xs text-muted-foreground">No DDL available</div>
     {:else}
       <table class="w-full border-collapse font-mono text-ui-xs leading-5">
         <tbody>
           {#each selectedDdlDiff as line, i (i)}
             {#if line.type === 'ellipsis'}
               <tr class="bg-muted/10">
-                <td class="w-10 select-none border-r border-border/15 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
-                <td class="w-10 select-none border-r border-border/15 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
+                <td class="w-10 select-none border-r border-border/15 px-2 text-right text-ui-3xs text-muted-foreground"></td>
+                <td class="w-10 select-none border-r border-border/15 px-2 text-right text-ui-3xs text-muted-foreground"></td>
                 <td class="w-5 select-none"></td>
-                <td class="px-4 py-0.5 text-ui-3xs text-muted-foreground/55">··· {line.count} unchanged line{line.count !== 1 ? 's' : ''}</td>
+                <td class="px-4 py-0.5 text-ui-3xs text-muted-foreground">··· {line.count} unchanged line{line.count !== 1 ? 's' : ''}</td>
               </tr>
             {:else if line.type === 'add'}
               <tr class="bg-success/[0.06] hover:bg-success/[0.1]">
-                <td class="w-10 select-none border-r border-success/10 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
-                <td class="w-10 select-none border-r border-success/10 px-2 text-right text-ui-3xs text-success/40">{line.lineB}</td>
-                <td class="w-5 select-none text-center text-success/50">+</td>
-                <td class="px-4 py-px text-success/80"><span class="whitespace-pre">{line.content}</span></td>
+                <td class="w-10 select-none border-r border-success/10 px-2 text-right text-ui-3xs text-muted-foreground"></td>
+                <td class="w-10 select-none border-r border-success/10 px-2 text-right text-ui-3xs text-success">{line.lineB}</td>
+                <td class="w-5 select-none text-center text-success">+</td>
+                <td class="px-4 py-px text-success"><span class="whitespace-pre">{line.content}</span></td>
               </tr>
             {:else if line.type === 'remove'}
               <tr class="bg-destructive/[0.06] hover:bg-destructive/[0.1]">
-                <td class="w-10 select-none border-r border-destructive/10 px-2 text-right text-ui-3xs text-destructive/40">{line.lineA}</td>
-                <td class="w-10 select-none border-r border-destructive/10 px-2 text-right text-ui-3xs text-muted-foreground/40"></td>
-                <td class="w-5 select-none text-center text-destructive/50">−</td>
-                <td class="px-4 py-px text-destructive/80"><span class="whitespace-pre">{line.content}</span></td>
+                <td class="w-10 select-none border-r border-destructive/10 px-2 text-right text-ui-3xs text-destructive">{line.lineA}</td>
+                <td class="w-10 select-none border-r border-destructive/10 px-2 text-right text-ui-3xs text-muted-foreground"></td>
+                <td class="w-5 select-none text-center text-destructive">−</td>
+                <td class="px-4 py-px text-destructive"><span class="whitespace-pre">{line.content}</span></td>
               </tr>
             {:else}
               <tr class="hover:bg-muted/8">
-                <td class="w-10 select-none border-r border-border/10 px-2 text-right text-ui-3xs text-muted-foreground/60">{line.lineA}</td>
-                <td class="w-10 select-none border-r border-border/10 px-2 text-right text-ui-3xs text-muted-foreground/60">{line.lineB}</td>
+                <td class="w-10 select-none border-r border-border/10 px-2 text-right text-ui-3xs text-muted-foreground">{line.lineA}</td>
+                <td class="w-10 select-none border-r border-border/10 px-2 text-right text-ui-3xs text-muted-foreground">{line.lineB}</td>
                 <td class="w-5 select-none"></td>
-                <td class="px-4 py-px text-muted-foreground/60"><span class="whitespace-pre">{line.content}</span></td>
+                <td class="px-4 py-px text-muted-foreground"><span class="whitespace-pre">{line.content}</span></td>
               </tr>
             {/if}
           {/each}

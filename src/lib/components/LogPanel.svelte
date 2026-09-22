@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte'
+  import { getAppScale } from '$lib/app-zoom.js'
   import X from '@lucide/svelte/icons/x'
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
@@ -21,6 +22,8 @@
   const initialLayout = loadLayout()
   let width = $state(initialLayout.logPanelWidth)
   let resizeStartWidth = initialLayout.logPanelWidth
+  /** App scale sampled at drag start - `dx` is screen px, `width` is px at 100%. */
+  let resizeScale = 1
 
   /** @type {import('$lib/stores/activity-log.js').ActivityEntry[]} */
   let entries = $state([])
@@ -66,12 +69,12 @@
   function entryColor(e) {
     if (!e.success)              return 'text-destructive'
     if (e.type === 'connect')    return 'text-primary'
-    if (e.type === 'disconnect') return 'text-muted-foreground/50'
+    if (e.type === 'disconnect') return 'text-muted-foreground'
     if (e.type === 'row_delete') return 'text-warning'
     if (e.type === 'row_insert') return 'text-success'
     if (e.type === 'row_save')   return 'text-info'
     if (e.type === 'sql_exec')   return 'text-foreground/80'
-    return 'text-muted-foreground/70'
+    return 'text-muted-foreground'
   }
 
   /** @param {number} ts */
@@ -92,18 +95,18 @@
 
 <div
   class="flex h-full min-w-0 shrink-0 flex-col border-l border-border bg-panel"
-  style="width: {width}px; min-width: {width}px; max-width: {width}px"
+  style="width: calc({width}px * var(--app-scale, 1)); min-width: calc({width}px * var(--app-scale, 1)); max-width: calc({width}px * var(--app-scale, 1))"
 >
   <ResizeHandle
     edge="start"
-    onresizestart={() => { resizeStartWidth = width }}
-    onresize={(dx) => { width = clampLogPanelWidth(resizeStartWidth - dx) }}
+    onresizestart={() => { resizeStartWidth = width; resizeScale = getAppScale() }}
+    onresize={(dx) => { width = clampLogPanelWidth(resizeStartWidth - dx / resizeScale) }}
     onresizeend={() => saveLayout({ logPanelWidth: width })}
   />
 
   <!-- Header -->
   <div class="studio-chrome flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-3">
-    <CircleDot class="size-3.5 shrink-0 text-primary/60" />
+    <CircleDot class="size-3.5 shrink-0 text-primary" />
     <span class="flex-1 font-mono text-ui-sm font-medium">Activity</span>
 
     <!-- Segmented filter -->
@@ -146,8 +149,8 @@
   >
     {#if displayed.length === 0}
       <div class="flex flex-col items-center justify-center gap-2 py-10 text-center">
-        <CircleDot class="size-7 text-muted-foreground/15" />
-        <p class="font-mono text-ui-2xs text-muted-foreground/40">
+        <CircleDot class="size-7 text-muted-foreground" />
+        <p class="font-mono text-ui-2xs text-muted-foreground">
           {entries.length === 0 ? 'Waiting for activity…' : 'No errors logged'}
         </p>
       </div>
@@ -163,7 +166,7 @@
           )}
           title={entry.detail || entry.error || entry.title}
         >
-          <span class="w-[52px] shrink-0 select-none text-ui-3xs tabular-nums text-muted-foreground/30">
+          <span class="w-[52px] shrink-0 select-none text-ui-3xs tabular-nums text-muted-foreground">
             {hms(entry.timestamp)}
           </span>
           <span class={cn('w-7 shrink-0 select-none text-ui-3xs font-bold uppercase tracking-wider', color)}>
@@ -172,15 +175,15 @@
           <span class={cn('min-w-0 flex-1 truncate', color)}>
             {entry.title}
             {#if entry.table && entry.type !== 'table_open'}
-              <span class="text-muted-foreground/30"> · {entry.table}</span>
+              <span class="text-muted-foreground"> · {entry.table}</span>
             {/if}
           </span>
           {#if entry.durationMs != null}
-            <span class="shrink-0 text-ui-3xs tabular-nums text-muted-foreground/25">{entry.durationMs}ms</span>
+            <span class="shrink-0 text-ui-3xs tabular-nums text-muted-foreground">{entry.durationMs}ms</span>
           {/if}
         </div>
         {#if entry.error}
-          <div class="truncate rounded px-1.5 py-px font-mono text-ui-3xs text-destructive/60" title={entry.error}>
+          <div class="truncate rounded px-1.5 py-px font-mono text-ui-3xs text-destructive" title={entry.error}>
             &nbsp;&nbsp;↳ {entry.error.split('\n')[0]}
           </div>
         {/if}
@@ -190,10 +193,10 @@
 
   <!-- Footer -->
   <div class="flex shrink-0 items-center justify-between border-t border-border/50 px-3 py-1">
-    <span class="font-mono text-ui-2xs text-muted-foreground/40 tabular-nums">
+    <span class="font-mono text-ui-2xs text-muted-foreground tabular-nums">
       {entries.length} events
       {#if errorCount > 0}
-        · <span class="text-destructive/60">{errorCount} err</span>
+        · <span class="text-destructive">{errorCount} err</span>
       {/if}
     </span>
     {#if !autoScroll}

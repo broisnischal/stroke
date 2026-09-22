@@ -1,5 +1,6 @@
 <script>
   import FieldSelect from './FieldSelect.svelte';
+  import { getAppScale } from '$lib/app-zoom.js'
   import X from '@lucide/svelte/icons/x'
   import Copy from '@lucide/svelte/icons/copy'
   import Search from '@lucide/svelte/icons/search'
@@ -57,6 +58,8 @@
   const initialLayout = loadLayout()
   let width = $state(initialLayout.inspectorWidth)
   let resizeStartWidth = initialLayout.inspectorWidth
+  /** App scale sampled at drag start - `dx` is screen px, `width` is px at 100%. */
+  let resizeScale = 1
   /** @type {'details' | 'normal' | 'json' | 'preview'} */
   let viewMode = $state(initialLayout.inspectorView)
   let fieldSearch = $state('')
@@ -355,14 +358,15 @@
 </script>
 
 {#if target && meta}
-  <div class="flex h-full shrink-0" style:width="{width}px">
+  <div class="flex h-full shrink-0" style:width="calc({width}px * var(--app-scale, 1))">
     <ResizeHandle
       edge="start"
       onresizestart={() => {
+        resizeScale = getAppScale()
         resizeStartWidth = width
       }}
       onresize={(dx) => {
-        width = clampInspectorWidth(resizeStartWidth + dx)
+        width = clampInspectorWidth(resizeStartWidth + dx / resizeScale)
       }}
       onresizeend={() => {
         resizeStartWidth = width
@@ -426,7 +430,7 @@
                     type="text"
                     placeholder="Search for field..."
                     bind:value={fieldSearch}
-                    class="w-full rounded-lg border-2 border-border bg-muted/20 py-1.5 pl-7 pr-2.5 font-mono text-ui-xs placeholder:text-muted-foreground/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
+                    class="w-full rounded-lg border-2 border-border bg-muted/20 py-1.5 pl-7 pr-2.5 font-mono text-ui-xs placeholder:text-muted-foreground focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
                   />
                 </div>
               </div>
@@ -440,16 +444,16 @@
                       <div class="mb-0.5 flex h-5 items-center gap-1">
                         <span class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground">{field.name}</span>
                         {#if field.isPk}
-                          <span title="Primary key, cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-warning/70">
-                            <KeyRound class="size-2.5" />PK
+                          <span title="Primary key, cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-warning">
+                            <KeyRound class="size-3" />PK
                           </span>
                         {/if}
-                        <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/40">{field.dataType}</span>
+                        <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">{field.dataType}</span>
 
                         {#if field.editable}
                           <DropdownMenu.Root>
                             <DropdownMenu.Trigger
-                              class="invisible ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground group-hover/field:visible"
+                              class="opacity-0 ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground group-hover/field:opacity-100"
                               aria-label="Field actions"
                             >
                               <Ellipsis class="size-3" />
@@ -503,7 +507,7 @@
                           <!-- Non-editable: copy only -->
                           <button
                             type="button"
-                            class="invisible ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground group-hover/field:visible"
+                            class="opacity-0 ml-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground group-hover/field:opacity-100"
                             title="Copy value"
                             onclick={() => copyFieldValue(field)}
                           >
@@ -516,7 +520,7 @@
                       {#if !field.editable}
                         <!-- Read-only -->
                         <div
-                          class="w-full rounded border border-border/60 bg-muted/10 px-2.5 py-1.5 font-mono text-ui-xs {field.isNull || field.isEmpty ? 'italic text-muted-foreground/40' : 'text-foreground'} {field.isMultiline ? 'whitespace-pre-wrap break-all' : 'truncate'}"
+                          class="w-full rounded border border-border/60 bg-muted/10 px-2.5 py-1.5 font-mono text-ui-xs {field.isNull || field.isEmpty ? 'italic text-muted-foreground' : 'text-foreground'} {field.isMultiline ? 'whitespace-pre-wrap break-all' : 'truncate'}"
                           title={field.displayValue}
                         >{field.displayValue}</div>
 
@@ -534,7 +538,7 @@
                             ]}
                           />
                           {#if savingFields[field.colIdx]}
-                            <span class="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 text-muted-foreground/50">
+                            <span class="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 text-muted-foreground">
                               <Loader class="size-3 animate-spin" />
                             </span>
                           {/if}
@@ -553,7 +557,7 @@
                             ]}
                           />
                           {#if savingFields[field.colIdx]}
-                            <span class="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 text-muted-foreground/50">
+                            <span class="pointer-events-none absolute right-7 top-1/2 -translate-y-1/2 text-muted-foreground">
                               <Loader class="size-3 animate-spin" />
                             </span>
                           {/if}
@@ -566,7 +570,7 @@
                             rows={Math.min(6, Math.max(2, (field.initialEditStr.match(/\n/g)?.length ?? 0) + 1))}
                             disabled={savingFields[field.colIdx]}
                             placeholder={field.isNull ? 'NULL' : ''}
-                            class="w-full resize-none rounded-lg border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
+                            class="w-full resize-none rounded-lg border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
                             oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLTextAreaElement} */ (e.currentTarget).value)}
                             onblur={(e) => handleFieldBlur(field.colIdx, e)}
                             onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
@@ -583,7 +587,7 @@
                             value={field.initialEditStr}
                             disabled={savingFields[field.colIdx]}
                             placeholder={field.isNull ? 'NULL' : ''}
-                            class="w-full rounded-lg border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
+                            class="w-full rounded-lg border bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs text-foreground placeholder:text-muted-foreground focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-50 {fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border'}"
                             oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLInputElement} */ (e.currentTarget).value)}
                             onblur={(e) => handleFieldBlur(field.colIdx, e)}
                             onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
@@ -601,7 +605,7 @@
                   {/each}
 
                   {#if filteredFields.length === 0 && fieldSearch}
-                    <p class="py-6 text-center font-mono text-ui-xs text-muted-foreground/60">No fields match</p>
+                    <p class="py-6 text-center font-mono text-ui-xs text-muted-foreground">No fields match</p>
                   {/if}
                 {/key}
               </div>
@@ -618,7 +622,7 @@
                 />
               {:else if cellPreviewType === 'pdf'}
                 <div class="flex flex-col items-center gap-3 rounded-lg border border-border bg-muted/30 px-6 py-8 text-center">
-                  <svg class="size-10 text-muted-foreground/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <svg class="size-10 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                     <polyline points="14 2 14 8 20 8"/>
                     <path d="M9 13h1.5a1.5 1.5 0 0 1 0 3H9v-3z"/>

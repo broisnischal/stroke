@@ -49,3 +49,5 @@ src-tauri/src/**/*.tmp.*
 dummy.txt
 file.txt
 **/.claude/phobos-state.md
+**/.claude/phobos-activity.log
+**/.claude/phobos-benchmark.jsonl

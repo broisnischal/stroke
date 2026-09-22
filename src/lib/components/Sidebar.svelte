@@ -1,8 +1,10 @@
 <script>
   import { untrack } from "svelte";
+  import { getAppScale } from '$lib/app-zoom.js';
   import { createHotkey } from "@tanstack/svelte-hotkeys";
   import Icon from "./Icon.svelte";
   import SearchableMenu from "./SearchableMenu.svelte";
+  import FindReplacePanel from "./FindReplacePanel.svelte";
   import { listDatabases, canSwitchDatabase, currentDatabaseKey } from "$lib/databases.js";
   import { dbAdminKind, dbActionBlocker } from "$lib/database-admin.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
@@ -17,10 +19,14 @@
   import ResizeHandle from "./ResizeHandle.svelte";
   import ConnectionsSidebarPanel from "./ConnectionsSidebarPanel.svelte";
   import ExtensionsSidebarPanel from "./ExtensionsSidebarPanel.svelte";
+  import { Button } from '$lib/components/ui/button/index.js'
   import { cn } from "$lib/utils.js";
+  import { CRASH_WORD, isMagic, armCrash } from '$lib/games/easter-eggs.js'
+  import { flushSync, tick } from "svelte";
   import { t } from "$lib/i18n.js";
+  import { visibleRowCount, soleMatch } from "$lib/sidebar-filter.js";
+  import { splitSchemas, isSystemSchema } from "$lib/system-schemas.js";
   import { formatTableRowCount } from "$lib/table-list.js";
-  import { virtualWindow, offsetWithin, measureRowStride, VIRT_THRESHOLD, VIRT_BUFFER } from "$lib/virtual-window.js";
   import {
     clampNavSidebarWidth,
     loadLayout,
@@ -30,6 +36,8 @@
   const initialLayout = loadLayout();
   let width = $state(initialLayout.navSidebarWidth);
   let resizeStartWidth = initialLayout.navSidebarWidth;
+  /** App scale sampled at drag start - `dx` is screen px, `width` is px at 100%. */
+  let resizeScale = 1;
 
   let {
     connectionName = "",
@@ -78,6 +86,7 @@
     /** Switch the live connection to another database on the same server.
      *  @type {(entry: { key: string, label: string }) => void} */
     onswitchdatabase = () => {},
+    onswitchdatabasenow = /** @type {(db: { key: string, label: string }) => void} */ (() => {}),
     /** Open the Create database dialog. */
     onnewdatabase = () => {},
     /** Server-level database actions. Each takes the row's name, plus the full
@@ -112,6 +121,39 @@
     oncountrows = /** @type {(table: string) => void} */ (() => {}),
     /** Copy the table's column names as a comma-separated list. */
     oncopycolumns = /** @type {(table: string) => void} */ (() => {}),
+    // ── Find & replace panel ────────────────────────────────────────────────
+    // The panel works on the rows the grid has loaded, so the data comes from
+    // the shell rather than being fetched again here.
+    /** @type {Array<{ name: string, dataType?: string }>} */
+    frColumns = [],
+    /** @type {unknown[][]} */
+    frRows = [],
+    /** @type {string | null} */
+    frTableName = null,
+    frEnabled = false,
+    // The key columns, so the panel can refuse to rewrite them. Replacing
+    // inside a foreign key is what produced "FOREIGN KEY constraint failed"
+    // from D1 - the new value referenced a parent row that does not exist.
+    /** @type {string[]} */
+    frPrimaryKey = [],
+    /** @type {Array<{ columns: string[] }>} */
+    frForeignKeys = [],
+    /** @type {(edits: Array<{ rowIdx: number, colIdx: number, value: string }>) => Promise<void>} */
+    onfindreplaceapply = async () => {},
+    /** Put the grid's cell cursor on a match. */
+    onrevealcell = /** @type {(rowIdx: number, colIdx: number) => void} */ (() => {}),
+    /** Assigned here; the shell calls it to show the panel and focus its field. */
+    openFindReplace = $bindable(/** @type {() => void} */ (() => {})),
+    /**
+     * Assigned here; the shell calls it once a database switch has landed.
+     *
+     * This used to be inferred in the sidebar, by bookmarking `activeDbKey` and
+     * watching it change. The shell is the only place that actually knows a
+     * switch happened - it is the thing that performs one - and an inference
+     * that has to survive a disconnect, a reconnect and a rebuilt connection
+     * object is a guess with three ways to be wrong.
+     */
+    showTablesTab = $bindable(/** @type {() => void} */ (() => {})),
   } = $props();
 
   const openTableSet = $derived(new Set(openTables))
@@ -146,19 +188,12 @@
     } catch {}
   }
 
-  const _initial = loadSidebarSections()
-  let recentOpen = $state(_initial.recent ?? false);
-  let databasesOpen = $state(_initial.databases ?? false);
+  const databasesOpen = $derived(sidebarTab === 'databases')
   /** @type {import('$lib/databases.js').DatabaseEntry[]} */
   let dbEntries = $state([]);
   let dbEntriesLoading = $state(false);
   let dbEntriesLoaded = $state(false);
   let dbEntriesError = $state('');
-  let tablesOpen = $state(_initial.tables ?? true);
-  let viewsOpen = $state(_initial.views ?? false);
-  let matViewsOpen = $state(_initial.matViews ?? false);
-  $effect(() => { saveSidebarSection('recent', recentOpen) })
-  $effect(() => { saveSidebarSection('databases', databasesOpen) })
 
   // Listing databases costs a round trip (a catalog query, or a Cloudflare /
   // provider API call), so it waits for the section to be expanded rather than
@@ -177,10 +212,6 @@
     }
   }
 
-  function toggleDatabases() {
-    databasesOpen = !databasesOpen
-  }
-
   // Load whenever the section is open and holds nothing for this connection.
   // Hanging the fetch off the toggle alone missed both cases that matter: the
   // section restoring already-expanded from the persisted prefs, and a
@@ -195,12 +226,34 @@
     })
   })
 
-  // A new connection invalidates the list - drop it so the next expand refetches.
+  /**
+   * Which server a loaded database list belongs to. Not the database - switching
+   * database rebuilds the connection object, and the list of databases ON that
+   * server is the same list either way.
+   * @param {any} c
+   */
+  function dbServerKey(c) {
+    if (!c) return ''
+    return [c.type ?? '', c.host ?? '', c.port ?? '', c.filePath ?? '', c.accountId ?? '', c.url ?? ''].join('|')
+  }
+  let dbEntriesServer = untrack(() => dbServerKey(connection))
+
+  // A new connection invalidates the list, so the next expand refetches it. The
+  // rows only get dropped when the SERVER changes though: every database switch
+  // rebuilds the connection, and blanking the list on each one is what made
+  // switching flash - the panel emptied, drew its loading rows, then refilled
+  // with the same names and the tick on a different row. Now it refetches
+  // underneath the rows it already has.
   $effect(() => {
-    connection
-    dbEntries = []
-    dbEntriesLoaded = false
-    dbEntriesError = ''
+    const server = dbServerKey(connection)
+    untrack(() => {
+      if (server !== dbEntriesServer) {
+        dbEntries = []
+        dbEntriesServer = server
+      }
+      dbEntriesLoaded = false
+      dbEntriesError = ''
+    })
   })
 
   // The shell bumps this after a create/rename/duplicate/drop, since the list it
@@ -225,9 +278,6 @@
     const blocker = dbActionBlocker(action, connection, { isCurrent })
     return { disabled: !!blocker, title: blocker || undefined }
   }
-  $effect(() => { saveSidebarSection('tables', tablesOpen) })
-  $effect(() => { saveSidebarSection('views', viewsOpen) })
-  $effect(() => { saveSidebarSection('matViews', matViewsOpen) })
 
   // ── Pinned tables ─────────────────────────────────────────────────────────
   const PINNED_KEY = 'stroke:pinned-tables'
@@ -252,13 +302,91 @@
   const _rowCountByName = $derived(new Map(tables.map((t) => [t.name, t.rowCount])))
   const visiblePinnedTables = $derived(pinnedTables.filter((n) => _tableNameSet.has(n)))
 
+  /**
+   * The reduced-motion rule from app.css, in JS.
+   *
+   * Needed because `scrollTo({ behavior: 'smooth' })` states the behaviour
+   * explicitly, and an explicit behaviour is NOT overridden by the
+   * `scroll-behavior: auto !important` that the stylesheet applies under the
+   * media query - that one only decides what `behavior: 'auto'` means. A
+   * scripted smooth scroll has to ask the question itself.
+   */
+  function prefersReducedMotion() {
+    const mode = document.documentElement.getAttribute('data-motion')
+    if (mode === 'full') return false      // Settings → Appearance overrides the OS
+    if (mode === 'reduced') return true
+    return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+  }
+
+  /**
+   * Pin or unpin, and put the scroll offset where the row went.
+   *
+   * The two directions want opposite things, because the row moves in opposite
+   * directions:
+   *
+   *   PINNING moves the row UP, out of the table list and into the Pinned
+   *   section at the top. Scroll there and follow it - the point of pinning is
+   *   to put a table somewhere you can find it, and a pin that silently files
+   *   the row off-screen never shows you where that somewhere is. The scroll is
+   *   also the only confirmation the action worked, since the row vanishes from
+   *   where you clicked it.
+   *
+   *   UNPINNING moves the row DOWN, back into the table list at its sorted
+   *   position - which is somewhere you did not ask to go. So hold the list
+   *   still instead. Without that, the Pinned section shrinking by one row drags
+   *   everything below it up and the list appears to scroll on its own.
+   *
+   * Holding it still is scroll anchoring, which browsers do natively with
+   * `overflow-anchor` and WebKit - the engine this app ships on - does not
+   * implement. Doing it by hand is the whole of it: keep one element where it
+   * was and move the offset by however far it travelled.
+   */
   function togglePin(tableName) {
+    const root = scrollContainerEl
     const current = _allPinned[_connKey] ?? []
-    const next = current.includes(tableName)
-      ? current.filter((n) => n !== tableName)
-      : [...current, tableName]
+    const pinning = !current.includes(tableName)
+
+    // Only unpinning needs an anchor; pinning is going to the top regardless.
+    // The toggled row is the one that moves, so it can never BE the anchor -
+    // take the first other row at or below the viewport's top edge, since rows
+    // above it may sit in the section that is about to change size.
+    /** @type {HTMLElement | null} */
+    let anchor = null
+    let beforeY = 0
+    if (!pinning && root) {
+      const rootTop = root.getBoundingClientRect().top
+      for (const el of root.querySelectorAll('li[data-table], li[data-pin]')) {
+        const li = /** @type {HTMLElement} */ (el)
+        if (li.dataset.table === tableName || li.dataset.pin === tableName) continue
+        const y = li.getBoundingClientRect().top - rootTop
+        if (y >= 0) { anchor = li; beforeY = y; break }
+      }
+    }
+
+    const next = pinning
+      ? [...current, tableName]
+      : current.filter((n) => n !== tableName)
     _allPinned = { ..._allPinned, [_connKey]: next }
     savePinnedAll(_allPinned)
+
+    if (!root) return
+    // `flushSync` rather than `tick()`: both paths measure or move the scroll
+    // offset against the NEW list, and a frame later is not a fix - it is the
+    // jump, followed by a correction you can see.
+    flushSync()
+
+    if (pinning) {
+      // Safe against the wheel-ease controller on this container: it adopts any
+      // offset it did not set (`onScroll` → `sync`), and the pointerdown that
+      // delivered this click already stopped it.
+      root.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+      return
+    }
+    // Both lists are keyed by table name, so the anchor's node survives the
+    // re-render. Checked anyway - a filter settling in the same flush could drop it.
+    if (!anchor || !anchor.isConnected) return
+    const afterY = anchor.getBoundingClientRect().top - root.getBoundingClientRect().top
+    root.scrollTop += afterY - beforeY
   }
 
   function clearAllPins() {
@@ -280,12 +408,196 @@
   }
 
   const _dp = loadDisplayPrefs()
-  let showTables = $state(_dp.showTables ?? true)
-  let showViews = $state(_dp.showViews ?? true)
-  let showMatViews = $state(_dp.showMatViews ?? true)
-  let showRecent = $state(_dp.showRecent ?? true)
-  let showPins = $state(_dp.showPins ?? true)
-  let showDatabases = $state(_dp.showDatabases ?? true)
+
+  /**
+   * One list at a time, chosen from the strip at the top of the sidebar.
+   *
+   * This replaces six independently-collapsible sections stacked in one scroll
+   * container. That layout had two problems no amount of styling fixes: the
+   * height of everything below a section moved every time one was opened, so
+   * nothing in the panel held still; and with several open at once the list you
+   * were actually looking for was usually below the fold, which is what the
+   * accordion was supposed to prevent. A tab strip costs one fixed row and the
+   * list underneath always starts at the same place.
+   *
+   * Materialized views ride in the Views tab - they are views, and splitting
+   * them out is what produced six sections in the first place.
+   * @typedef {'tables' | 'views' | 'recent' | 'databases' | 'search'} SidebarTab
+   */
+  const SIDEBAR_TAB_KEY = 'stroke:sidebar-tab'
+  /** @type {{ id: SidebarTab, label: string, icon: string }[]} */
+  const SIDEBAR_TABS = [
+    { id: 'tables',    label: 'Tables',    icon: 'table-2' },
+    // Second, not last: switching database is a navigation move you make as
+    // often as switching schema, and it was sitting behind three lists you visit
+    // far less.
+    { id: 'databases', label: 'Databases', icon: 'database' },
+    { id: 'views',     label: 'Views',     icon: 'table-view' },
+    { id: 'recent',    label: 'Recent',    icon: 'clock' },
+    // Last, and not a list: find & replace is a tool that works on the table
+    // you already have open, so it belongs where the other panels live rather
+    // than in a modal over the rows it is about to rewrite.
+    { id: 'search',    label: 'Find & replace', icon: 'replace' },
+  ]
+  function loadSidebarTab() {
+    try {
+      const raw = localStorage.getItem(SIDEBAR_TAB_KEY)
+      if (SIDEBAR_TABS.some((t) => t.id === raw)) return /** @type {SidebarTab} */ (raw)
+    } catch {}
+    return /** @type {SidebarTab} */ ('tables')
+  }
+  let sidebarTab = $state(loadSidebarTab())
+
+  $effect(() => {
+    openFindReplace = () => {
+      sidebarTab = 'search'
+      // After the tab renders, or the field is not in the DOM yet.
+      tick().then(() => focusFindField())
+    }
+    showTablesTab = () => { sidebarTab = 'tables' }
+  })
+  /** Assigned by the panel. */
+  let focusFindField = $state(/** @type {() => void} */ (() => {}))
+
+  /**
+   * Keyboard access to the strip. Registered here rather than in StudioShell
+   * because the state and the tab list both live here - a hotkey that has to
+   * reach across a component boundary to set one field is how that field ends up
+   * lifted for no other reason.
+   *
+   *   ⌘⇧1-5      jump straight to a tab
+   *   ⌘⌥← / ⌘⌥→  cycle, wrapping at both ends
+   *
+   * ⌘1-9 is already "go to editor tab" and ⌘⌥1-9 is "switch saved connection",
+   * so neither of those ranges was free.
+   */
+  const modLabel =
+    typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '\u2318' : 'Ctrl+'
+
+  /** @param {number} delta */
+  function cycleSidebarTab(delta) {
+    const i = SIDEBAR_TABS.findIndex((t) => t.id === sidebarTab)
+    const next = (i + delta + SIDEBAR_TABS.length) % SIDEBAR_TABS.length
+    sidebarTab = SIDEBAR_TABS[next].id
+  }
+  SIDEBAR_TABS.forEach((tab, i) => {
+    createHotkey(`Mod+Shift+${i + 1}`, (e) => {
+      if (!connectionName) return
+      e.preventDefault()
+      sidebarTab = tab.id
+    })
+  })
+  createHotkey('Mod+Alt+ArrowRight', (e) => {
+    if (!connectionName) return
+    e.preventDefault()
+    cycleSidebarTab(1)
+  })
+  createHotkey('Mod+Alt+ArrowLeft', (e) => {
+    if (!connectionName) return
+    e.preventDefault()
+    cycleSidebarTab(-1)
+  })
+  /** Pending single-click database switch, held so a second click can cancel it. */
+  let dbClickTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null)
+  /** @param {{ key: string, label: string }} db */
+  function onDbClick(db) {
+    if (dbClickTimer) clearTimeout(dbClickTimer)
+    dbClickTimer = setTimeout(() => { dbClickTimer = null; focusListAfterSwitch(); onswitchdatabase(db) }, 220)
+  }
+  /** @param {{ key: string, label: string }} db */
+  function onDbDblClick(db) {
+    if (dbClickTimer) { clearTimeout(dbClickTimer); dbClickTimer = null }
+    focusListAfterSwitch()
+    onswitchdatabasenow(db)
+  }
+
+  /**
+   * What an empty tab says. `filtered` fires when the list has rows but the
+   * filter matched none - a different problem from having nothing at all, and
+   * one the user can fix by clearing the box rather than by creating anything.
+   * @type {Record<SidebarTab, { icon: string, title: string, hint: string }>}
+   */
+  const TAB_EMPTY = {
+    tables:    { icon: 'table-2',    title: 'No tables',    hint: 'Nothing in this schema yet.' },
+    views:     { icon: 'table-view', title: 'No views',     hint: 'Views and materialized views show up here.' },
+    recent:    { icon: 'clock',      title: 'No recents',   hint: 'Tables you open appear here.' },
+    databases: { icon: 'database',   title: 'No databases', hint: 'Nothing else on this server.' },
+  }
+  const tabIsEmpty = $derived(
+    sidebarTab !== 'search' && !loadingTables && !!connectionName && tabCounts[sidebarTab] === 0,
+  )
+  /** True when the tab has rows but the filter hid all of them. */
+  const tabEmptyFromFilter = $derived(
+    tabIsEmpty &&
+      !!debouncedFilter &&
+      (sidebarTab === 'tables'
+        ? regularTablesUnpinned.length + visiblePinnedTables.length > 0
+        : sidebarTab === 'views'
+          ? views.length + matViews.length > 0
+          : sidebarTab === 'databases'
+            ? dbEntries.length > 0
+            : recentTables.length > 0),
+  )
+
+  /** How many rows each tab holds BEFORE the filter. @type {Record<SidebarTab, number>} */
+  const tabTotals = $derived({
+    // Pinned rows render at the top of this tab, so they count towards it. Only
+    // pins whose table still exists are counted, because only those draw a row.
+    tables: regularTablesUnpinned.length + visiblePinnedTables.length,
+    views: views.length + matViews.length,
+    // The recents list is capped at 5 rows, so that is the denominator too.
+    recent: Math.min(recentTabs.length, 5),
+    databases: dbEntries.length,
+    search: 0,
+  })
+
+  /** How many rows each tab holds, after the filter. @type {Record<SidebarTab, number>} */
+  const tabCounts = $derived({
+    tables: filteredRegularTables.length + filteredPinnedTables.length,
+    views: filteredViews.length + filteredMatViews.length,
+    recent: Math.min(filteredRecent.length, 5),
+    databases: filteredDbEntries.length,
+    search: 0,
+  })
+  $effect(() => { try { localStorage.setItem(SIDEBAR_TAB_KEY, sidebarTab) } catch {} })
+
+
+  // The old per-section visibility flags are now just "is this the open tab".
+  // Keeping the names means the ~900 lines of list markup below did not have to
+  // be rewritten to ask a different question.
+  const showTables    = $derived(sidebarTab === 'tables')
+  const showViews     = $derived(sidebarTab === 'views')
+  const showMatViews  = $derived(sidebarTab === 'views')
+  const showRecent    = $derived(sidebarTab === 'recent')
+  // Pinned is a section of Tables, not a tab of its own. It was a fifth icon in
+  // the strip that held, for most connections, nothing at all - and it split
+  // "the tables in this schema" across two places you had to switch between to
+  // see. It renders above the Tables header, which is where the pins already
+  // sorted in `selectableOrder`.
+  const showPins      = $derived(sidebarTab === 'tables')
+  const showDatabases = $derived(sidebarTab === 'databases')
+  // Nothing collapses any more, so every list in the open tab is open.
+  const recentOpen = true, tablesOpen = true, viewsOpen = true, matViewsOpen = true
+  // The engine's own schemas (`pg_catalog`, `information_schema`, `sys`…) are
+  // loaded like any other - they are browsable, and sometimes the thing you
+  // actually need - but they are not where anyone keeps data, so the picker
+  // holds them behind one entry rather than burying `public` among them.
+  let showSystemSchemas = $state(_dp.showSystemSchemas ?? false)
+  const splitSchemaList = $derived(splitSchemas(schemas))
+  const SYSTEM_TOGGLE = '\u0000system-schemas'
+  const schemaMenuItems = $derived([
+    ...splitSchemaList.user.map((sc) => ({ value: sc, label: sc })),
+    ...(showSystemSchemas ? splitSchemaList.system.map((sc) => ({ value: sc, label: sc })) : []),
+    ...(splitSchemaList.system.length
+      ? [{
+          value: SYSTEM_TOGGLE,
+          label: showSystemSchemas
+            ? 'Hide system schemas'
+            : `Show system schemas (${splitSchemaList.system.length})`,
+        }]
+      : []),
+  ])
+
   let showRowCount = $state(_dp.showRowCount ?? true)
   let hideEmpty = $state(_dp.hideEmpty ?? false)
   let hideSystem = $state(_dp.hideSystem ?? false)
@@ -294,16 +606,26 @@
   /** @type {'asc' | 'desc'} */
   let sortDir = $state(_dp.sortDir ?? 'asc')
 
-  $effect(() => { saveDisplayPrefs({ showTables, showViews, showMatViews, showRecent, showDatabases, sortBy, showPins, showRowCount, sortDir, hideEmpty, hideSystem }) })
+  $effect(() => { saveDisplayPrefs({ sortBy, showRowCount, sortDir, hideEmpty, hideSystem, showSystemSchemas }) })
 
   /** System / migration tables that are usually noise: `_prisma_migrations`, `pg_*`, `sqlite_*`, leading-underscore. */
   function isSystemTable(/** @type {string} */ name) {
     return /^(_|pg_|sql_|sqlite_)/i.test(name)
   }
 
+  // ── Shared context-menu target ────────────────────────────────────────────
+  // Each long list owns ONE ContextMenu.Root; the row that was right-clicked is
+  // recorded here from the event, the way DataTable does it for the grid. Keeps
+  // the per-row cost to a <button>, which is what makes an unwindowed list of a
+  // few thousand tables affordable.
+  let menuTable = $state('')
+  let menuView = $state('')
+  let menuMatView = $state('')
+
   // ── Selection state ───────────────────────────────────────────────────────
   /** @type {Set<string>} */
   let selectedItems = $state(new Set())
+  const menuTableSelected = $derived(selectedItems.has(menuTable))
   /** Anchor for shift range-select. @type {string | null} */
   let lastSelectedName = $state(null)
 
@@ -337,6 +659,29 @@
     savePinnedAll(_allPinned)
     clearSelection()
   }
+
+  /**
+   * Select, or deselect, every pinned table on screen.
+   *
+   * A toggle rather than a one-way "select all": having selected seven rows to
+   * act on them, the way back was clicking each one again. Only the rows the
+   * filter is showing are touched, so it always matches what you can see.
+   */
+  function toggleSelectAllPinned() {
+    const names = filteredPinnedTables
+    if (!names.length) return
+    const allOn = names.every((n) => selectedItems.has(n))
+    const next = new Set(selectedItems)
+    for (const n of names) { if (allOn) next.delete(n); else next.add(n) }
+    selectedItems = next
+    lastSelectedName = allOn ? null : names[names.length - 1]
+  }
+
+  /** Open every pinned table on screen in its own tab, in the order shown. */
+  function openAllPinned() {
+    for (const n of filteredPinnedTables) ontableselect(n)
+  }
+
 
   function copySelectedNames() {
     navigator.clipboard.writeText([...selectedItems].join('\n'))
@@ -386,6 +731,18 @@
 
   /** @param {string} value */
   function handleFilterInput(value) {
+    // The fake crash. Exact whole-value match, so filtering for a `crash_logs`
+    // table still filters - only a bare "crash" is the joke. Handled before the
+    // debounce, so the filter never actually runs with it.
+    if (isMagic(value, CRASH_WORD)) {
+      localFilter = "";
+      if (filterDebounce) clearTimeout(filterDebounce);
+      filterDebounce = null;
+      debouncedFilter = "";
+      ontablefilter("");
+      armCrash();
+      return;
+    }
     localFilter = value;
     if (filterDebounce) clearTimeout(filterDebounce);
     filterDebounce = setTimeout(() => {
@@ -448,9 +805,23 @@
     lf ? sortedRegularBase.filter((t) => t.name.toLowerCase().includes(lf)) : sortedRegularBase,
   );
 
+  // Pinned rows were never filtered: in their own tab the filter box was the
+  // only thing on screen that could act on them, and it did not. Sharing a tab
+  // with the table list makes that a visible bug - type a name and the pins
+  // would sit above the results untouched - so they take the same predicate.
+  const filteredPinnedTables = $derived(
+    lf ? visiblePinnedTables.filter((n) => n.toLowerCase().includes(lf)) : visiblePinnedTables,
+  );
+
+  /** Drives the pinned header's select-all toggle: its state and its label. */
+  const allPinnedSelected = $derived(
+    filteredPinnedTables.length > 0 &&
+      filteredPinnedTables.every((n) => selectedItems.has(n)),
+  );
+
   // Selectable rows in display order (pinned first, then regular) - drives shift range-select.
   const selectableOrder = $derived([
-    ...visiblePinnedTables,
+    ...filteredPinnedTables,
     ...filteredRegularTables.map((t) => t.name),
   ]);
 
@@ -516,6 +887,227 @@
     lf !== '' || hideEmpty || hideSystem || sortBy !== 'name' || sortDir !== 'asc',
   );
 
+  /** Name of the open list, for the filter's accessible name and its live region. */
+  const activeTabLabel = $derived(SIDEBAR_TABS.find((t) => t.id === sidebarTab)?.label ?? 'items')
+
+  /** Everything the filter rule counts, in the shape `sidebar-filter.js` wants. */
+  const filterLists = $derived({
+    tables: filteredRegularTables, tablesTotal: regularTablesUnpinned.length,
+    views: filteredViews, matViews: filteredMatViews, viewsTotal: views.length + matViews.length,
+    recent: filteredRecent, recentTotal: recentTabs.length,
+    pins: filteredPinnedTables, pinsTotal: visiblePinnedTables.length,
+    databases: filteredDbEntries, databasesTotal: dbEntries.length,
+    activeDbKey,
+  })
+
+  /** Rows the open tab is showing right now, against what it would show unfiltered. */
+  const visibleRows = $derived(visibleRowCount(sidebarTab, filterLists))
+
+  /**
+   * The one row left when the filter has narrowed the open tab to exactly one -
+   * Enter in the filter box opens it. The picking rule lives in
+   * `sidebar-filter.js` under test; this only binds the result to the handler
+   * that acts on it.
+   * @returns {{ label: string, open: () => void } | null}
+   */
+  const soleResult = $derived.by(() => {
+    if (!connectionName) return null
+    const m = soleMatch(sidebarTab, filterLists)
+    if (!m) return null
+    switch (m.kind) {
+      case 'table': return { label: m.name, open: () => ontableselect(m.name) }
+      case 'recent': return { label: m.name, open: () => onrecentselect(m.schema, m.name) }
+      case 'database': return { label: m.name, open: () => onswitchdatabase(m.entry) }
+      default: return null
+    }
+  })
+
+  /**
+   * What the filter's live region says. Reads off `lf`, which is already
+   * debounced, so it announces once the typing settles rather than per keystroke.
+   */
+  const filterStatus = $derived.by(() => {
+    if (!connectionName) return ''
+    const { shown, total } = visibleRows
+    const list = activeTabLabel.toLowerCase()
+    if (!lf) return `${total} ${list}`
+    if (shown === 0) return `No ${list} match ${lf}`
+    if (renderedRowCount === 1) return `1 of ${total} ${list}. Press Enter to open ${soleResult?.label ?? 'it'}.`
+    return `${shown} of ${total} ${list}`
+  })
+
+  /**
+   * How many rows the open list is drawing, kept in sync with the DOM.
+   *
+   * The model said one row and the chip did not appear, while the section
+   * header - reading the very same expression - said 1/14. Rather than keep
+   * hunting that, both the chip and Enter now read the rows themselves. There is
+   * one source of truth for "is there exactly one thing here", and it is the
+   * thing the user is looking at.
+   *
+   * The effect re-runs whenever any list or the open tab changes; `$effect` runs
+   * after the DOM is updated, so the count it takes is the list as rendered.
+   */
+  let renderedRowCount = $state(0)
+  $effect(() => {
+    // Touch every list so this re-runs when the rendering could have changed.
+    void sidebarTab
+    void filteredRegularTables.length
+    void filteredViews.length
+    void filteredMatViews.length
+    void filteredRecent.length
+    void filteredPinnedTables.length
+    void filteredDbEntries.length
+    // …and on the key too: the stop moves with focus, not just with the data.
+    void rovingRowKey
+    void activeTable
+    const rows = listRowButtons()
+    renderedRowCount = rows.length
+    const stop = rovingRow(rows)
+    for (const row of rows) {
+      // Compared before writing: this runs on every filter keystroke, and a
+      // schema can hold thousands of rows.
+      const want = row === stop ? 0 : -1
+      if (row.tabIndex !== want) row.tabIndex = want
+    }
+  })
+
+  /**
+   * One activation button per row the open list is actually drawing, in order.
+   *
+   * Counted off the DOM rather than off `soleResult`, because the model and the
+   * rendering can disagree and only one of them is what the user is looking at:
+   * a tab that draws two sections, an empty-state row, a list still holding the
+   * previous tab's rows. If there is exactly one row on screen, Enter opens that
+   * row - and it opens it by clicking the row's own button, so Enter and a click
+   * cannot drift apart no matter what a row grows into later.
+   *
+   * Rows are marked with `data-sidebar-row` rather than being found as "the
+   * first button in the `li`". That older rule read the wrong element on the
+   * Recent tab, where the row is a `role="button"` div and the first real
+   * `<button>` inside it is the remove-from-recent control - so a filter that
+   * left one recent row and an Enter in the box deleted it instead of opening
+   * it. The attribute also spans every section in the open tab, which is what
+   * both the row count and the arrow-key walk below need.
+   * @returns {HTMLElement[]}
+   */
+  function listRowButtons() {
+    const root = scrollContainerEl
+    if (!root) return []
+    return /** @type {HTMLElement[]} */ ([...root.querySelectorAll('[data-sidebar-row]')])
+      .filter((el) => !(el instanceof HTMLButtonElement && el.disabled))
+  }
+
+  // ── One tab stop for the list (ARIA APG roving tabindex) ──────────────────
+  // Every row was its own tab stop, so crossing the sidebar with Tab took one
+  // press per table - 23 of them on the schema in the screenshot - and the focus
+  // ring crawled the list a row at a time instead of moving between the controls
+  // around it. A list is one widget: Tab reaches it once, arrows move inside it,
+  // Tab leaves it. Every row renders `tabindex="-1"` and exactly one is promoted
+  // to 0 below.
+  /** The row holding the tab stop, as its `data-sidebar-row` key. */
+  let rovingRowKey = $state(/** @type {string | null} */ (null))
+
+  /**
+   * The row that should hold the stop: the one last focused, else the row for
+   * the open table, else the first. The fallbacks are what make Tab land
+   * somewhere useful after the list is replaced - a schema switch leaves
+   * `rovingRowKey` pointing at a row that no longer exists.
+   * @param {HTMLElement[]} [rows]
+   */
+  function rovingRow(rows = listRowButtons()) {
+    return (
+      rows.find((r) => r.dataset.sidebarRow === rovingRowKey) ??
+      rows.find((r) => r.dataset.sidebarCurrent !== undefined) ??
+      rows[0] ??
+      null
+    )
+  }
+
+  /**
+   * True while the keyboard is the thing moving focus around the sidebar.
+   *
+   * Every move this component makes is a scripted `.focus()` - the arrow walk,
+   * the handoff out of the filter, the landing after a schema switch - and
+   * WebKit, the engine this ships on, does not promise `:focus-visible` for
+   * scripted focus. The rows would take focus with nothing drawn on them, which
+   * is exactly what "I don't see the focus" looks like. The flag puts a plain
+   * `:focus` ring on roving rows (see `[data-kbd-nav]` in app.css) and a
+   * pointerdown takes it away again, so a click still leaves no ring.
+   */
+  let kbdNav = $state(false)
+
+  /** Focusable things, in the order the browser would tab through them. */
+  const TABBABLE =
+    'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+
+  /**
+   * Move focus out of the sidebar and into the content region.
+   *
+   * Tab off a row landed on the panel splitter, which sits between the two in
+   * the DOM: a 1px line most people do not know is a control, and the only sign
+   * anything had happened was that line changing colour. The grid is what comes
+   * next in reading order, so Tab goes there. The splitter keeps its keyboard
+   * resize and is still reachable with Shift+Tab from the content.
+   * @returns {boolean} whether focus actually moved
+   */
+  function focusMainRegion() {
+    const main = document.querySelector('[data-studio-region="main"]')
+    if (!main) return false
+    // The grid is `tabindex="-1"` - it is focused, never tabbed to - so it has
+    // to be named rather than found among the tabbables.
+    const grid = main.querySelector('[data-canvas-table]')
+    const target =
+      grid instanceof HTMLElement
+        ? grid
+        : /** @type {HTMLElement | undefined} */ (
+            [...main.querySelectorAll(TABBABLE)].find(
+              (el) => el instanceof HTMLElement && el.offsetParent !== null,
+            )
+          )
+    if (!target) return false
+    target.focus()
+    return true
+  }
+
+  /**
+   * Schema + database the list was showing when a switch was asked for, or null
+   * when none is pending. Picking a schema or another database leaves focus on
+   * the control that was picked from, which is the one thing on screen that has
+   * nothing left to say - what the user wants next is the new schema's tables.
+   *
+   * Armed rather than acted on immediately, for two reasons: the outgoing
+   * schema's rows are still mounted for a frame or two after the click, and a
+   * switch that opens a confirm dialog must not move focus behind it. It fires
+   * on the first render that actually shows a different schema or database, so a
+   * cancelled switch never fires at all.
+   */
+  let listFocusFrom = /** @type {string | null} */ (null)
+  const listIdentity = $derived(`${activeSchema}\u0000${activeDbKey}`)
+  function focusListAfterSwitch() { listFocusFrom = listIdentity }
+  $effect(() => {
+    if (listFocusFrom === null || loadingTables || listIdentity === listFocusFrom) return
+    listFocusFrom = null
+    // Only while focus is still where the switch left it. The load takes a
+    // moment, and someone who clicked into the editor meanwhile keeps it.
+    const from = document.activeElement
+    const sidebar = scrollContainerEl?.closest('[data-studio-region="sidebar"]')
+    if (from && from !== document.body && !sidebar?.contains(from)) return
+    // The filter box is the fallback: a schema with no tables has no row to
+    // land on, and leaving focus on the schema button would strand it there.
+    kbdNav = true
+    ;(rovingRow() ?? filterEl)?.focus()
+  })
+
+  /** Commit a pending debounce now, so Enter acts on what is actually typed. */
+  function flushFilter() {
+    if (!filterDebounce) return
+    clearTimeout(filterDebounce)
+    filterDebounce = null
+    debouncedFilter = localFilter
+    ontablefilter(localFilter)
+  }
+
   function resetFilters() {
     localFilter = '';
     debouncedFilter = '';
@@ -526,153 +1118,33 @@
     sortBy = 'name';
     sortDir = 'asc';
   }
-  function setAllSections(/** @type {boolean} */ open) {
-    recentOpen = open; tablesOpen = open; viewsOpen = open; matViewsOpen = open;
-  }
-  // ── Virtual lists (tables, views, materialized views, databases) ─────────
-  // The window maths lives in $lib/virtual-window.js; this block owns the two
-  // measurements only the DOM can answer - the row stride and where each list
-  // sits inside the scrolled content.
-  //
-  // Row stride is MEASURED, not assumed: row height scales with the app zoom /
-  // font-size (Linux even uses a 15px base), and any drift between an assumed
-  // constant and reality × hundreds of rows = phantom scroll space below the
-  // last row (the "keeps scrolling past the end" gutter). 27px is only the
-  // pre-measure fallback. Every list uses the same row chrome, so one stride
-  // covers all four.
-  let rowH = $state(27)
-  $effect(() => {
-    const el = tableListEl
-    void scrollContainerEl // re-attach the observer when the scroll host mounts
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const measure = () => {
-      // Spacer <li>s are aria-hidden - measure the stride between two real rows.
-      const stride = measureRowStride(el)
-      if (stride !== null) {
-        // Read rowH untracked: this effect must NOT depend on the value it writes,
-        // or setting rowH re-runs it, and a stride that doesn't settle in one pass
-        // spins until Svelte's infinite-loop guard trips. The ResizeObserver still
-        // re-measures on real layout changes.
-        const cur = untrack(() => rowH)
-        if (Math.abs(stride - cur) > 0.5) rowH = stride
-      }
-      // Same observer covers the other half of the window maths: a layout change
-      // in the list also means its offset in the scroll container may have moved.
-      untrack(() => measureListOffset())
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    // Also watch the scrolled content: a section above the list (databases,
-    // recent, pinned) opening or closing moves the list without resizing it.
-    const content = scrollContainerEl?.firstElementChild
-    if (content) ro.observe(content)
-    return () => ro.disconnect()
-  })
-  // The window shifts one row at a time: the start index is floored to the row
-  // stride, so the derived short-circuits (same value) for every scroll event
-  // within a row - no re-render, no spacer resize until a row boundary is
-  // actually crossed. Each update stays tiny (±1 row) instead of arriving as a
-  // batched chunk hitch.
-
+  // ── Lists (tables, views, materialized views, databases) ─────────────────
   /** @type {HTMLElement | null} */
   let scrollContainerEl = $state(null)
-  /** @type {HTMLElement | null} */
-  let tableListEl = $state(null)
-  let sidebarScrollTop = $state(0)
-  let sidebarHeight = $state(0)
-  // Update the virtual window synchronously on scroll. Reading scrollTop here is a
-  // cheap cached read (layout is already up to date inside a scroll handler) and
-  // Svelte coalesces the resulting re-renders into a single flush per frame. A RAF
-  // hop would only push the rendered window one frame *behind* the scrollbar thumb,
-  // which reads as lag while dragging.
-  function onSidebarScroll() {
-    if (!scrollContainerEl) return
-    sidebarScrollTop = scrollContainerEl.scrollTop
-  }
-  /** Offset of each windowed <ul> from the top of the scroll container.
-   *  Re-measured whenever anything above one of them opens, closes or filters. */
-  let tableListOffsetTop = $state(0)
-  let viewListOffsetTop = $state(0)
-  let matViewListOffsetTop = $state(0)
-  let dbListOffsetTop = $state(0)
 
-  /** @type {HTMLElement | null} */
-  let viewListEl = $state(null)
-  /** @type {HTMLElement | null} */
-  let matViewListEl = $state(null)
-  /** @type {HTMLElement | null} */
-  let dbListEl = $state(null)
-
-  /**
-   * Re-measure where every windowed list sits in the scrolled content.
-   *
-   * Read from live rects rather than walked through `offsetParent`: that walk
-   * only terminated when an ancestor happened to be the scroll container, and it
-   * ran off an enumerated list of "things above the list". Anything else that
-   * grew above it - expanding the databases section, a filter that changes the
-   * pinned block - left the offset stale and small, which pushed the window far
-   * past the real first visible row: the list rendered its tail behind a giant
-   * empty spacer (the black gap).
-   */
-  function measureListOffset() {
-    const container = scrollContainerEl
-    if (!container) return
-    const tables = offsetWithin(tableListEl, container)
-    if (tables !== null && Math.abs(tables - tableListOffsetTop) > 0.5) tableListOffsetTop = tables
-    const views = offsetWithin(viewListEl, container)
-    if (views !== null && Math.abs(views - viewListOffsetTop) > 0.5) viewListOffsetTop = views
-    const matViews = offsetWithin(matViewListEl, container)
-    if (matViews !== null && Math.abs(matViews - matViewListOffsetTop) > 0.5) matViewListOffsetTop = matViews
-    const dbs = offsetWithin(dbListEl, container)
-    if (dbs !== null && Math.abs(dbs - dbListOffsetTop) > 0.5) dbListOffsetTop = dbs
-  }
-
-  // Re-measure whenever anything that can move the list re-renders. Cheap: two
-  // rect reads, and only when one of these actually changes.
-  $effect(() => {
-    void recentOpen
-    void visiblePinnedTables.length
-    void showRecent
-    void filteredRegularTables.length
-    void filteredViews.length
-    void filteredMatViews.length
-    void filteredDbEntries.length
-    void tablesOpen
-    void viewsOpen
-    void matViewsOpen
-    void databasesOpen
-    void tableListEl
-    void viewListEl
-    void matViewListEl
-    void dbListEl
-    void scrollContainerEl
-    measureListOffset()
-  })
-
-  /** @param {number} count @param {number} offsetTop */
-  function windowFor(count, offsetTop) {
-    return virtualWindow({
-      count,
-      scrollTop: sidebarScrollTop,
-      viewportHeight: sidebarHeight,
-      offsetTop,
-      rowH,
-    })
-  }
-
-  const tableWin = $derived(windowFor(filteredRegularTables.length, tableListOffsetTop))
-  const viewWin = $derived(windowFor(filteredViews.length, viewListOffsetTop))
-  const matViewWin = $derived(windowFor(filteredMatViews.length, matViewListOffsetTop))
-  const dbWin = $derived(windowFor(filteredDbEntries.length, dbListOffsetTop))
-
-  const viewsToRender = $derived(filteredViews.slice(viewWin.start, viewWin.end))
-  const matViewsToRender = $derived(filteredMatViews.slice(matViewWin.start, matViewWin.end))
-  const dbEntriesToRender = $derived(filteredDbEntries.slice(dbWin.start, dbWin.end))
+  // No windowing, and no `content-visibility` either. The sidebar renders every
+  // row, plainly.
+  //
+  // It used to virtualize all four lists, and the window maths was the source of
+  // a run of scroll bugs - a blank list behind a full-height spacer, and jitter
+  // from a fractional row stride that `offsetTop` could only report as an integer.
+  // `content-visibility: auto` on each row replaced it, and traded those bugs for
+  // a worse one: WebKit - which is the engine this app actually ships on, via
+  // WKWebView - renders skipped subtrees lazily enough that a fast scroll outruns
+  // it, and rows arrive as blank dark gaps that fill in a frame or two later. A
+  // list that disappears while you scroll it is worse than a list that costs more
+  // to build.
+  //
+  // What makes rendering every row affordable is that a row is now just a <button>:
+  // the per-row ContextMenu.Root + Trigger (two component instances each) were
+  // hoisted to one shared menu per list. See the tables list markup below.
+  const viewsToRender = $derived(filteredViews)
+  const matViewsToRender = $derived(filteredMatViews)
+  const dbEntriesToRender = $derived(filteredDbEntries)
 
   /** Shared field chrome for schema select + table filter (aligned in sidebar grid) */
   const sidebarFieldClass =
-    "h-7 w-full min-w-0 rounded-lg border-2 border-border bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:border-foreground/30 hover:bg-background/55 focus-visible:border-ring/55 focus-visible:ring-2 focus-visible:ring-ring/15";
+"field-surface h-7 w-full min-w-0 bg-background/40 text-ui-sm text-foreground shadow-none transition-colors hover:bg-background/55";
 </script>
 
 <svelte:window onkeydown={(e) => {
@@ -689,70 +1161,134 @@
   if (isEscClear) clearSelection()
 }} />
 
+<!-- The sidebar's one loading state. The tables list had the dots; every other
+     list wrote its own bare "Loading…" line, so the Databases tab looked like it
+     had failed and printed a label rather than like it was working. -->
+{#snippet listLoading(/** @type {string} */ label)}
+  <div class="flex items-center justify-center py-6" role="status" aria-label={label}>
+    <span class="inline-flex gap-1.5" aria-hidden="true">
+      <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 0ms"></span>
+      <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 150ms"></span>
+      <span class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" style="animation-delay: 300ms"></span>
+    </span>
+  </div>
+{/snippet}
+
 <!-- Section count badge: shows "visible/total" when filters hide rows, else just the total. -->
-{#snippet countBadge(visible, total)}
+<!-- `tight` keeps the count beside the section name instead of pushing it to
+     the far edge. A section with actions in its header needs that edge for
+     them, and a count floating between the two reads as part of the buttons. -->
+{#snippet countBadge(visible, total, tight = false)}
+  {@const cls = cn(tight ? "" : "ml-auto", "shrink-0 font-mono text-ui-2xs text-muted-foreground")}
   {#if visible !== total}
-    <span class="ml-auto font-mono text-ui-2xs text-muted-foreground" title="{visible} shown · {total - visible} hidden of {total}"
-      >{visible}<span class="text-muted-foreground/55">/{total}</span></span>
+    <span class={cls} title="{visible} shown · {total - visible} hidden of {total}"
+      >{visible}<span class="text-muted-foreground">/{total}</span></span>
   {:else}
-    <span class="ml-auto font-mono text-ui-2xs text-muted-foreground">{total}</span>
+    <span class={cls}>{total}</span>
   {/if}
 {/snippet}
 
 <div
   class={cn("flex h-full shrink-0", side === "right" && "flex-row-reverse")}
-  style:width="{width}px"
+  style:width="calc({width}px * var(--app-scale, 1))"
   data-studio-region="sidebar"
 >
   <ContextMenu.Root>
   <ContextMenu.Trigger class="flex h-full min-w-0 flex-1">
+  <!-- Deliberately NOT a size container (`@container/sb`). Declaring one made the
+       whole sidebar subtree re-resolve its container queries on every pixel of a
+       resize drag, which measured 31ms of layout per frame against 5.8ms without
+       it in the same A/B - the drag ran at ~20fps. The one query it fed is gone:
+       the section headers below name their own list and carry their own count,
+       which needs no query at all. -->
   <aside
     class="studio-chrome flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground"
     data-studio-chrome
+    data-kbd-nav={kbdNav ? "" : undefined}
+    onpointerdown={() => (kbdNav = false)}
   >
     {#if navSidebarPanel === "tables"}
     <div class="flex min-h-0 flex-1 flex-col">
 
       <div class="flex shrink-0 flex-col">
-        <div class="flex h-9 min-w-0 items-center gap-1 px-2">
-          <div class="min-w-0 flex-1">
-            {#if schemas.length === 0}
-              <span
+        <!-- Top row. One list at a time, chosen from the strip: the old sidebar
+             stacked six independently-collapsible sections in one scroller, so
+             opening any of them moved everything below it and the list you
+             wanted was usually past the fold.
+
+             Top row: the tabs on the left, the list actions pushed to the right.
+             They act on whichever list the tab picked, so they belong on the line
+             with the tabs rather than wedged against a filter they have nothing to
+             do with. `ml-auto` is the gap - a fixed one would drift as the sidebar
+             is dragged wider. The tablist stays its own element: a tablist holding
+             three non-tab buttons is a lie to every screen reader. -->
+        <div class="flex h-9 shrink-0 items-center gap-1 border-b border-sidebar-border px-2">
+          <div
+            role="tablist"
+            aria-label="Sidebar sections"
+            class="app-scroll-x flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+          >
+            {#each SIDEBAR_TABS as tab (tab.id)}
+              {@const active = sidebarTab === tab.id}
+              {@const count = tabCounts[tab.id]}
+              <button
+                type="button"
+                role="tab"
+                data-roving
+                aria-selected={active}
+                aria-label={count > 0 ? `${tab.label}, ${count}` : tab.label}
+                title={`${tab.label} · ${modLabel}⇧${SIDEBAR_TABS.indexOf(tab) + 1}`}
+                tabindex={active ? 0 : -1}
+                disabled={!connectionName}
                 class={cn(
-                  sidebarFieldClass,
-                  "flex items-center px-2.5 font-medium",
+                  // Full row height, 32px wide: the whole strip is the target, which
+                  // clears 24x24 with room over and lets the accent rail sit on the
+                  // row's own bottom edge. It was a 28px pill with the rail pushed
+                  // 7px below it, so the rail floated in the gap between the pill and
+                  // the border, attached to neither.
+                  "group/tab relative inline-flex h-9 w-8 shrink-0 items-center justify-center transition-colors disabled:pointer-events-none disabled:opacity-40",
+                  // Two cues, not one. Colour alone does not separate four line icons
+                  // at this size, so the selected tab also carries a filled surface and
+                  // an accent rail - the same "which panel am I in" signal the VS Code
+                  // activity bar uses.
+                  active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                 )}
-                id="sidebar-schema"
+                onclick={() => (sidebarTab = tab.id)}
+                onkeydown={(e) => {
+                  // Arrow keys move between tabs (ARIA APG tablist); the roving
+                  // tabindex above is what keeps the strip to one tab stop.
+                  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return
+                  e.preventDefault()
+                  kbdNav = true
+                  const i = SIDEBAR_TABS.findIndex((t) => t.id === sidebarTab)
+                  const next = (i + (e.key === "ArrowRight" ? 1 : -1) + SIDEBAR_TABS.length) % SIDEBAR_TABS.length
+                  sidebarTab = SIDEBAR_TABS[next].id
+                  /** @type {HTMLElement | null} */ (
+                    e.currentTarget.parentElement?.children[next] ?? null
+                  )?.focus()
+                }}
               >
-                -
-              </span>
-            {:else}
-              <SearchableMenu
-                contentClass="w-[var(--bits-popover-anchor-width)] min-w-[180px]"
-                placeholder="Search schemas…"
-                empty="No schema"
-                items={schemas.map((s) => ({ value: s, label: s }))}
-                onselect={(it) => { if (it.value) onschemachange(it.value); }}
-              >
-                {#snippet trigger(props)}
-                  <button
-                    {...props}
-                    id="sidebar-schema"
-                    type="button"
-                    class={cn(sidebarFieldClass, "flex h-7 w-full items-center justify-between gap-2 px-2.5 font-normal")}
-                  >
-                    <span class="truncate">{activeSchema}</span>
-                    <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground" />
-                  </button>
-                {/snippet}
-                {#snippet item(it)}
-                  <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground/50" />
-                  <span class="min-w-0 flex-1 truncate">{it.label}</span>
-                  {#if it.value === activeSchema}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
-                {/snippet}
-              </SearchableMenu>
-            {/if}
+                <!-- The pill is a child, not the button's own background: the
+                     button spans the full row so its target is generous, while
+                     the shape you see stays 28px and centred. -->
+                <span
+                  class={cn(
+                    "pointer-events-none absolute inset-x-0.5 inset-y-1 rounded-md transition-colors",
+                    active ? "bg-sidebar-accent" : "group-hover/tab:bg-sidebar-accent/50",
+                  )}
+                  aria-hidden="true"
+                ></span>
+                <Icon name={tab.icon} class="relative size-4 shrink-0" />
+                {#if active}
+                  <span
+                    class="pointer-events-none absolute inset-x-1 bottom-0 h-0.5 rounded-t-full bg-primary"
+                    aria-hidden="true"
+                  ></span>
+                {/if}
+              </button>
+            {/each}
           </div>
+          <div class="ml-auto flex shrink-0 items-center gap-0.5">
           <DropdownMenu.Root>
             <DropdownMenu.Trigger
               class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground disabled:pointer-events-none disabled:opacity-40"
@@ -762,36 +1298,10 @@
               <Icon name="list-filter" class="size-3.5" />
             </DropdownMenu.Trigger>
             <DropdownMenu.Content align="start" class="min-w-52">
-              <div class="px-2 pt-1 pb-1.5 text-ui-2xs text-muted-foreground/70 leading-relaxed">
+              <div class="px-2 pt-1 pb-1.5 text-ui-2xs text-muted-foreground leading-relaxed">
                 <span class="font-mono text-foreground/80">{regularTables.length}</span> tables{#if views.length} · <span class="font-mono text-foreground/80">{views.length}</span> views{/if}{#if matViews.length} · <span class="font-mono text-foreground/80">{matViews.length}</span> mat.{/if}
                 {#if hiddenCount > 0}<br /><span class="text-warning">{hiddenCount} hidden by filters</span>{/if}
               </div>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Label class="px-2 py-0.5 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Show</DropdownMenu.Label>
-              <DropdownMenu.CheckboxItem
-                checked={showDatabases}
-                onCheckedChange={(v) => (showDatabases = v)}
-              ><Icon name="database" class="text-muted-foreground" />Databases</DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showRecent}
-                onCheckedChange={(v) => (showRecent = v)}
-              ><Icon name="clock" class="text-muted-foreground" />Recent</DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showTables}
-                onCheckedChange={(v) => (showTables = v)}
-              ><Icon name="table-2" class="text-muted-foreground" />Tables</DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showViews}
-                onCheckedChange={(v) => (showViews = v)}
-              ><Icon name="table-view" class="text-muted-foreground" />Views</DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showMatViews}
-                onCheckedChange={(v) => (showMatViews = v)}
-              ><Icon name="layers" class="text-muted-foreground" />Materialized Views</DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem
-                checked={showPins}
-                onCheckedChange={(v) => (showPins = v)}
-              ><Icon name="pin" class="text-muted-foreground" />Pins</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
               <DropdownMenu.CheckboxItem
                 checked={showRowCount}
@@ -806,7 +1316,7 @@
                 onCheckedChange={(v) => (hideSystem = v)}
               ><Icon name="cog" class="text-muted-foreground" />Hide system tables</DropdownMenu.CheckboxItem>
               <DropdownMenu.Separator />
-              <DropdownMenu.Label class="px-2 py-0.5 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground/60">Sort by</DropdownMenu.Label>
+              <DropdownMenu.Label class="px-2 py-0.5 text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">Sort by</DropdownMenu.Label>
               <!-- Field + direction merged: pick a field, click it again to flip. -->
               <DropdownMenu.Item
                 closeOnSelect={false}
@@ -816,7 +1326,7 @@
                 <Icon name={sortBy === 'name' && sortDir === 'desc' ? 'arrow-up-a-z' : 'arrow-down-a-z'} class="text-muted-foreground" />
                 Name
                 {#if sortBy === 'name'}
-                  <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/50">{sortDir === 'asc' ? 'A→Z' : 'Z→A'}</span>
+                  <span class="ml-auto font-mono text-ui-2xs text-muted-foreground">{sortDir === 'asc' ? 'A→Z' : 'Z→A'}</span>
                 {/if}
               </DropdownMenu.Item>
               <DropdownMenu.Item
@@ -827,18 +1337,10 @@
                 <Icon name={sortBy === 'rowCount' && sortDir === 'asc' ? 'arrow-up-0-1' : 'arrow-down-0-1'} class="text-muted-foreground" />
                 Row count
                 {#if sortBy === 'rowCount'}
-                  <span class="ml-auto font-mono text-ui-2xs text-muted-foreground/50">{sortDir === 'desc' ? '9→0' : '0→9'}</span>
+                  <span class="ml-auto font-mono text-ui-2xs text-muted-foreground">{sortDir === 'desc' ? '9→0' : '0→9'}</span>
                 {/if}
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
-              <DropdownMenu.Item onSelect={() => setAllSections(true)} closeOnSelect={false}>
-                <Icon name="chevrons-up-down" class="text-muted-foreground" />
-                Expand all
-              </DropdownMenu.Item>
-              <DropdownMenu.Item onSelect={() => setAllSections(false)} closeOnSelect={false}>
-                <Icon name="chevrons-down-up" class="text-muted-foreground" />
-                Collapse all
-              </DropdownMenu.Item>
               <DropdownMenu.Item onSelect={resetFilters} disabled={!filtersActive}>
                 <Icon name="rotate-ccw" class="text-muted-foreground" />
                 Reset filters &amp; sort
@@ -897,10 +1399,75 @@
               <Icon name="plus" class="size-3.5" />
             </button>
           {/if}
+          </div>
         </div>
 
-        <div class="flex h-9 items-center border-b border-sidebar-border px-2">
-          <div class="relative min-w-0 w-full">
+        <!-- The filter row belongs to the lists. Find & replace brings its own
+             fields, so leaving this here would be a second search box with
+             nothing to search. -->
+        {#if sidebarTab !== 'search'}
+        <!-- Filter row: the schema the list belongs to, and the filter itself. -->
+        <div class="flex h-9 shrink-0 items-center gap-1.5 border-b border-sidebar-border px-2">
+          <!-- Shown when the engine actually has schemas to pick between, which
+               is not the same question as `supportsSchemas` - that flag is
+               postgres-only because Postgres is the only driver with a CREATE
+               SCHEMA namespace, and it gates the "New schema" action below.
+               MySQL and SQL Server both LIST schemas without supporting that,
+               so gating the picker on it hid theirs. SQLite, D1 and Redis have
+               no schemas at all and correctly show nothing. -->
+          {#if schemas.length > 0}
+            <div class="max-w-[8rem] shrink-0">
+                    <SearchableMenu
+                      contentClass="min-w-60"
+                      placeholder="Search schemas…"
+                      empty="No schema"
+                      items={schemaMenuItems}
+                      onselect={(it) => {
+                        if (!it.value) return
+                        // The last entry is the toggle, not a schema.
+                        if (it.value === SYSTEM_TOGGLE) { showSystemSchemas = !showSystemSchemas; return }
+                        // Armed BEFORE the switch: `activeSchema` is bound, so the
+                        // shell writes the new one back synchronously and arming
+                        // afterwards would record the schema we are moving TO.
+                        focusListAfterSwitch()
+                        onschemachange(it.value)
+                      }}
+                    >
+                      {#snippet trigger(props)}
+                        <button
+                          {...props}
+                          id="sidebar-schema"
+                          type="button"
+                          class={cn(sidebarFieldClass, "flex h-7 w-full items-center gap-1 px-2 font-normal")}
+                        >
+                          <Icon name="box" class="size-3.5 shrink-0 text-muted-foreground" />
+                          <span class="min-w-0 truncate">{activeSchema}</span>
+                          <Icon name="chevron-down" class="size-3 shrink-0 text-muted-foreground" />
+                        </button>
+                      {/snippet}
+                      {#snippet item(it)}
+                        {#if it.value === SYSTEM_TOGGLE}
+                          <Icon name={showSystemSchemas ? 'eye-off' : 'eye'} class="size-3.5 shrink-0 text-muted-foreground" />
+                          <span class="min-w-0 flex-1 truncate text-muted-foreground">{it.label}</span>
+                        {:else}
+                          <Icon name="box" class={cn('size-3.5 shrink-0', isSystemSchema(it.value) ? 'text-muted-foreground/60' : 'text-muted-foreground')} />
+                          <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                          {#if isSystemSchema(it.value)}
+                            <!-- A padlock, not the word "system". The word was as
+                                 long as the names it sat beside, so it pushed
+                                 `information_schema` into an ellipsis to label the
+                                 thing it had just made unreadable. -->
+                            <span class="flex shrink-0 items-center" title="System schema" aria-label="System schema">
+                              <Icon name="lock" class="size-3 text-muted-foreground/70" />
+                            </span>
+                          {/if}
+                          {#if it.value === activeSchema}<Icon name="check" class="size-3.5 shrink-0 text-primary" />{/if}
+                        {/if}
+                      {/snippet}
+                    </SearchableMenu>
+            </div>
+          {/if}
+          <div class="relative min-w-0 flex-1">
           <Icon name="search"
             class="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
           />
@@ -912,90 +1479,196 @@
             disabled={!connectionName}
             oninput={(e) => handleFilterInput(e.currentTarget.value)}
             onkeydown={(e) => {
+              // Enter opens the match when the filter has left exactly one. The
+              // debounce is committed first, or a fast typist who narrows to one
+              // row and hits Enter within 200ms is judged against the previous
+              // term. Inert with nothing or several to open: a key that guesses
+              // which of six rows was meant is worse than a key that does nothing.
+              if (e.key === 'Enter') {
+                flushFilter()
+                // Commit the render too: `flushFilter` only sets state, and the
+                // rows are counted off the DOM, which is a frame behind until
+                // this runs.
+                flushSync()
+                const rows = listRowButtons()
+                if (rows.length === 1) {
+                  e.preventDefault()
+                  rows[0].click()
+                  return
+                }
+                // Nothing on screen to act on, or several. Fall back to the model
+                // only where the list is not rendered at all (a collapsed section).
+                const sole = rows.length === 0 ? soleResult : null
+                if (!sole) return
+                e.preventDefault()
+                sole.open()
+                return
+              }
               // Tab / ArrowDown from the filter → jump focus into the result list
               // so the user can keyboard-navigate the matched tables directly.
               if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'ArrowDown') {
-                const first = /** @type {HTMLElement | null} */ (
-                  (tableListEl ?? scrollContainerEl)?.querySelector('button')
-                )
-                if (first) { e.preventDefault(); first.focus() }
+                // The FIRST result, not the row holding the tab stop: this is a
+                // search box, and the answer to what was typed starts at the top
+                // of the list. (It was also not the first `<button>` under the
+                // scroller - that is whichever section-header action comes first,
+                // so Tab out of the filter landed on an icon in a heading.)
+                const row = listRowButtons()[0]
+                if (row) { e.preventDefault(); kbdNav = true; row.focus() }
               }
             }}
             class={cn(sidebarFieldClass, "w-full pl-8 pr-2.5 outline-none disabled:opacity-40 disabled:cursor-not-allowed")}
-            aria-label="Filter sidebar"
+            aria-label="Filter {activeTabLabel.toLowerCase()}"
+            aria-describedby="sidebar-filter-hint"
             data-sidebar-filter
           />
           </div>
+          {#if renderedRowCount === 1}
+            <!-- A real target, not a legend. When the filter has left one row,
+                 the fastest thing to do with it is open it, and a hint that only
+                 tells you which key to press makes the pointer take the long way
+                 round to a row it can already see.
+                 `tabindex="-1"` keeps it out of the tab order on purpose: Tab
+                 from the filter goes to the list, which with one match is this
+                 same row, so a stop here would be a second stop on one thing.
+                 The keyboard path is Enter in the field, which the field's own
+                 description offers. -->
+            <button
+              type="button"
+              tabindex="-1"
+              class="hit-area shrink-0 rounded border border-border/60 bg-muted/40 px-1 py-px font-mono text-ui-3xs text-muted-foreground transition-colors hover:border-primary/60 hover:bg-accent hover:text-foreground"
+              title={soleResult ? `Open ${soleResult.label} (Enter)` : 'Open the only match (Enter)'}
+              aria-label={soleResult ? `Open ${soleResult.label}` : 'Open the only match'}
+              onclick={() => { const rows = listRowButtons(); if (rows.length === 1) rows[0].click(); else soleResult?.open() }}
+            >↵</button>
+          {/if}
+          <!-- Held apart: the description is static and read on focus, the status
+               is rewritten as the list narrows. Merging them would re-announce
+               the instruction on every keystroke. Both are rendered whether or
+               not they have anything to say, because a polite region inserted at
+               the moment its text appears is announced unreliably. -->
+          <span id="sidebar-filter-hint" class="sr-only"
+            >Filters the {activeTabLabel.toLowerCase()} list. Tab or press the down arrow to move into the results, then Tab or the arrow keys to move through them. Press Enter to open a row, or Shift and Enter to open it and move into the data grid.</span>
+          <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">{filterStatus}</span>
         </div>
+        {/if}
       </div>
 
+      {#if sidebarTab === 'search'}
+        <FindReplacePanel
+          bind:focusFind={focusFindField}
+          columns={frColumns}
+          rows={frRows}
+          primaryKey={frPrimaryKey}
+          foreignKeys={frForeignKeys}
+          tableName={frEnabled ? frTableName : null}
+          onapply={onfindreplaceapply}
+          onreveal={onrevealcell}
+        />
+      {:else}
       <div class="flex min-h-0 flex-1 flex-col">
         <div
           bind:this={scrollContainerEl}
-          bind:clientHeight={sidebarHeight}
           class="app-scroll min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain [will-change:scroll-position]"
           role="none"
           use:smoothScroll={{ enabled: !$appNativeScroll }}
-          onscroll={onSidebarScroll}
           onclick={(e) => {
-            if (selectedItems.size > 0 && !/** @type {Element} */(e.target).closest?.('li')) {
+            // Clicking the empty space around the rows drops the selection.
+            // A button is not empty space: the section headers carry actions
+            // that operate ON the selection, and this handler was undoing them
+            // on the same click that made them.
+            const el = /** @type {Element} */ (e.target)
+            if (selectedItems.size > 0 && !el.closest?.('li') && !el.closest?.('button')) {
               clearSelection()
             }
           }}
+          onfocusin={(e) => {
+            // The stop follows focus, so Tab comes back to the row it left.
+            const row = e.target instanceof Element ? e.target.closest('[data-sidebar-row]') : null
+            if (row instanceof HTMLElement) rovingRowKey = row.dataset.sidebarRow ?? null
+          }}
           onkeydown={(e) => {
-            if (e.key === 'Escape' && selectedItems.size > 0) clearSelection()
+            if (e.key === 'Escape' && selectedItems.size > 0) { clearSelection(); return }
+            // Shift+Enter opens the row AND hands focus to the grid, which is
+            // the one thing Enter deliberately does not do: Enter keeps you in
+            // the list so you can keep looking, and there was no way to say
+            // "this one, and let me work in it" without reaching for the mouse.
+            if (e.key === 'Enter' && e.shiftKey) {
+              const row = e.target instanceof Element ? e.target.closest('[data-sidebar-row]') : null
+              if (!(row instanceof HTMLElement)) return
+              e.preventDefault()
+              row.click()
+              // After the click: opening a table re-renders the content region,
+              // and the grid has to exist before it can take focus.
+              tick().then(() => focusMainRegion())
+              return
+            }
+            // Tab walks the list, one row per press, because that is what the
+            // key does everywhere else in this panel and pressing it twice from
+            // the filter box otherwise skipped the whole list to land in the
+            // grid. Tab off the LAST row still leaves for the content region -
+            // a list you cannot tab out of is a focus trap - and Shift+Tab off
+            // the first returns to the filter the list was narrowed from.
+            // Shift+Enter (above) is the deliberate way into the grid.
+            if (e.key === 'Tab') {
+              const onRow = e.target instanceof Element && e.target.closest('[data-sidebar-row]')
+              if (!onRow) return
+              const rows = listRowButtons()
+              const i = rows.indexOf(/** @type {HTMLElement} */ (document.activeElement))
+              const next = i === -1 ? null : rows[i + (e.shiftKey ? -1 : 1)]
+              if (next) {
+                e.preventDefault(); kbdNav = true; next.focus()
+                return
+              }
+              if (e.shiftKey) {
+                if (!filterEl) return
+                e.preventDefault(); kbdNav = true; filterEl.focus(); filterEl.select()
+              } else if (focusMainRegion()) {
+                e.preventDefault()
+              }
+              return
+            }
+            // Arrows walk the rows of every section in the open tab, Home/End
+            // jump to its ends, and ArrowUp off the top row returns to the filter
+            // box - the field the list was narrowed from.
+            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return
+            const rows = listRowButtons()
+            const i = rows.indexOf(/** @type {HTMLElement} */ (document.activeElement))
+            if (i === -1) return
+            e.preventDefault()
+            kbdNav = true
+            if (e.key === 'Home') rows[0]?.focus()
+            else if (e.key === 'End') rows[rows.length - 1]?.focus()
+            else if (e.key === 'ArrowDown') rows[i + 1]?.focus()
+            else if (i === 0) filterEl?.focus()
+            else rows[i - 1]?.focus()
           }}
         >
           {#if loadingTables}
-            <div
-              class="flex items-center justify-center py-8"
-              role="status"
-              aria-label="Loading"
-            >
-              <span class="inline-flex gap-1.5" aria-hidden="true">
-                <span
-                  class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50"
-                  style="animation-delay: 0ms"
-                ></span>
-                <span
-                  class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50"
-                  style="animation-delay: 150ms"
-                ></span>
-                <span
-                  class="size-1.5 animate-bounce rounded-full bg-muted-foreground/50"
-                  style="animation-delay: 300ms"
-                ></span>
-              </span>
-            </div>
+            {@render listLoading('Loading tables')}
           {:else}
             <!-- ── Databases ──────────────────────────────────────
                  Other databases on the same server. Collapsed by default and
                  only fetched once expanded - see loadDatabases(). Engines that
                  cannot switch in place (SQLite, Redis) never render it. -->
-            {#if showDatabases && canSwitchDb && connectionName}
+            <!-- `!tabIsEmpty`: with nothing to list, the tab-level empty state
+                 below already says so in the middle of the panel. Rendering the
+                 section as well put a second, quieter "No other databases" at the
+                 top-left of the same empty panel - two answers to one question,
+                 in two different places and two different type sizes. -->
+            {#if showDatabases && canSwitchDb && connectionName && !tabIsEmpty}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
-                <button
-                  type="button"
-                  class="flex min-w-0 flex-1 items-center gap-1 text-left"
-                  onclick={toggleDatabases}
-                >
-                  <Icon name="chevron-down"
-                    class={cn(
-                      "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                      !databasesOpen && "-rotate-90",
-                    )}
-                  />
-                  <Icon name="database" class="size-3 shrink-0 text-muted-foreground/60" />
-                  <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Databases</span>
-                  {#if filteredDbEntries.length > 0}
-                    <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{filteredDbEntries.length}</span>
-                  {/if}
-                </button>
-                {#if databasesOpen}
+                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Databases</span>
+                {#if dbEntries.length > 0}
+                  {@render countBadge(filteredDbEntries.length, dbEntries.length)}
+                {/if}
+                <!-- `countBadge` carries the `ml-auto` that pushes this group right;
+                     the buttons must not carry one too, or the free space splits
+                     between them and the count drifts into the middle of the row. -->
+                <div class={cn("flex shrink-0 items-center gap-1", dbEntries.length === 0 && "ml-auto")}>
                   {#if dbAdmin}
                     <button
                       type="button"
-                      class="ml-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground disabled:opacity-40"
+                      class="hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                       onclick={onnewdatabase}
                       title={$readOnlyMode ? READ_ONLY_HINT : "New database"}
                       disabled={$readOnlyMode}
@@ -1005,27 +1678,33 @@
                   {/if}
                   <button
                     type="button"
-                    class={cn("inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:text-foreground", !dbAdmin && "ml-auto")}
+                    class="hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
                     onclick={() => void loadDatabases()}
                     title="Refresh databases"
                     disabled={dbEntriesLoading}
                   >
                     <Icon name="refresh-cw" class={cn("size-3", dbEntriesLoading && "animate-spin")} />
                   </button>
-                {/if}
+                </div>
               </div>
               {#if databasesOpen}
                 {#if dbEntriesLoading && dbEntries.length === 0}
-                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground/40">Loading…</p>
+                  {@render listLoading('Loading databases')}
                 {:else if dbEntriesError && dbEntries.length === 0}
-                  <p class="px-4 pb-1.5 text-ui-2xs text-destructive/70">{dbEntriesError}</p>
+                  <p class="px-4 pb-1.5 text-ui-2xs text-destructive">{dbEntriesError}</p>
+                {:else if !dbEntriesLoaded && dbEntries.length === 0}
+                  <!-- Opened but the first fetch has not started or landed yet.
+                       This branch used to print "Loading…" as body text, which is
+                       the state the list spends longest in on a remote server.
+                       Only when there is nothing to show: a refetch over an
+                       existing list leaves the list up. -->
+                  {@render listLoading('Loading databases')}
                 {:else if filteredDbEntries.length === 0}
-                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground/40">
-                    {!dbEntriesLoaded ? 'Loading…' : lf ? 'No matching databases' : 'No other databases'}
+                  <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground">
+                    {lf ? 'No matching databases' : 'No other databases'}
                   </p>
                 {:else}
-                  <ul bind:this={dbListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
-                    {#if dbWin.topPad > 0}<li style="height:{dbWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
+                  <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5">
                     {#each dbEntriesToRender as db (db.key)}
                       {@const isCurrent = db.key === activeDbKey}
                       <li>
@@ -1034,14 +1713,19 @@
                             <button
                               type="button"
                               disabled={isCurrent}
+                              data-sidebar-row="db:{db.key}"
+                              data-roving
+                              tabindex="-1"
                               class={cn(
                                 "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                                 isCurrent
                                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                                   : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
                               )}
-                              onclick={() => !isCurrent && onswitchdatabase(db)}
-                              title={isCurrent ? `${db.label} (current)` : `Switch to ${db.label}`}
+                              onclick={() => !isCurrent && onDbClick(db)}
+                              ondblclick={() => !isCurrent && onDbDblClick(db)}
+                              title={isCurrent ? `${db.label} (current)` : `Switch to ${db.label} · double-click to switch without confirming`}
+                              aria-label={isCurrent ? `${db.label}, current database` : `Switch to ${db.label}`}
                             >
                               <Icon name="database" class="size-3 shrink-0 opacity-50" />
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{db.label}</span>
@@ -1050,9 +1734,9 @@
                               {/if}
                             </button>
                           </ContextMenu.Trigger>
-                          <ContextMenu.Content class="min-w-52 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                          <ContextMenu.Content class="min-w-52">
                             {#if !isCurrent}
-                              <ContextMenu.Item onSelect={() => onswitchdatabase(db)}>
+                              <ContextMenu.Item onSelect={() => { focusListAfterSwitch(); onswitchdatabase(db) }}>
                                 <Icon name="arrow-right" />
                                 Switch to this database
                               </ContextMenu.Item>
@@ -1095,7 +1779,6 @@
                         </ContextMenu.Root>
                       </li>
                     {/each}
-                    {#if dbWin.botPad > 0}<li style="height:{dbWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   </ul>
                 {/if}
               {/if}
@@ -1104,30 +1787,17 @@
             <!-- ── Recent ─────────────────────────────────────────── -->
             {#if showRecent && filteredRecent.length > 0 && connectionName}
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
+                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Recent</span>
+                {@render countBadge(Math.min(filteredRecent.length, 5), Math.min(recentTabs.length, 5))}
                 <button
                   type="button"
-                  class="flex min-w-0 flex-1 items-center gap-1 text-left"
-                  onclick={() => (recentOpen = !recentOpen)}
-                >
-                  <Icon name="chevron-down"
-                    class={cn(
-                      "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                      !recentOpen && "-rotate-90",
-                    )}
-                  />
-                  <Icon name="clock" class="size-3 shrink-0 text-muted-foreground/60" />
-                  <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Recent</span>
-                  <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{Math.min(filteredRecent.length, 5)}</span>
-                </button>
-                <button
-                  type="button"
-                  class="ml-auto font-mono text-ui-2xs text-muted-foreground/50 hover:text-destructive transition-colors"
+                  class="shrink-0 font-mono text-ui-2xs text-muted-foreground transition-colors hover:text-destructive"
                   onclick={onrecentclear}
                   title="Clear recent"
                 >Clear</button>
               </div>
               {#if recentOpen}
-                <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5">
                   {#each filteredRecent.slice(0, 5) as item (item.schema + '.' + item.table)}
                     <li class="group/recent">
                       <div
@@ -1138,9 +1808,36 @@
                             : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
                         )}
                         role="button"
-                        tabindex="0"
+                        tabindex="-1"
+                        data-sidebar-row="recent:{item.schema}.{item.table}"
+                        data-roving
+                        data-sidebar-current={activeTable === item.table ? '' : undefined}
                         onclick={() => onrecentselect(item.schema, item.table)}
-                        onkeydown={(e) => e.key === 'Enter' && onrecentselect(item.schema, item.table)}
+                        onkeydown={(e) => {
+                          // role="button" has to answer Space as well as Enter (ARIA APG).
+                          // Shift+Enter belongs to the list's own handler, which
+                          // opens the row AND moves focus into the grid - taking
+                          // it here too would open it twice.
+                          if ((e.key === 'Enter' && !e.shiftKey) || e.key === ' ') {
+                            e.preventDefault()
+                            onrecentselect(item.schema, item.table)
+                            return
+                          }
+                          // The remove control is hover-revealed and out of the
+                          // tab order, so the keyboard reaches it here instead.
+                          if (e.key === 'Delete' || e.key === 'Backspace') {
+                            e.preventDefault()
+                            // The row being removed is the one holding focus, so
+                            // the next one has to take it or focus falls to the
+                            // body and the list has to be tabbed into again.
+                            const rows = listRowButtons()
+                            const i = rows.indexOf(/** @type {HTMLElement} */ (e.currentTarget))
+                            const next = rows[i + 1] ?? rows[i - 1] ?? null
+                            onrecentremove(item.schema, item.table)
+                            kbdNav = true
+                            void tick().then(() => (next ?? filterEl)?.focus())
+                          }
+                        }}
                       >
                         {#if item.tableKind === 'view'}
                           <Icon name="table-view" class="size-3 shrink-0 opacity-50" />
@@ -1152,8 +1849,9 @@
                         <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{item.table}</span>
                         <button
                           type="button"
-                          title="Remove from recent"
-                          class="invisible inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground group-hover/recent:inline-flex"
+                          tabindex="-1"
+                          aria-label="Remove {item.table} from recent (Delete)"
+                          class="hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/recent:opacity-100 hover:text-foreground focus-visible:opacity-100"
                           onclick={(e) => { e.stopPropagation(); onrecentremove(item.schema, item.table) }}
                         >
                           <Icon name="x" class="size-3" />
@@ -1166,28 +1864,76 @@
             {/if}
 
             <!-- ── Pinned ─────────────────────────────────────────── -->
-            {#if showPins && visiblePinnedTables.length > 0 && connectionName}
-              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
-                <Icon name="pin" class="size-3 shrink-0 text-muted-foreground/60" />
-                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase">Pinned</span>
-                <span class="ml-1 font-mono text-ui-2xs text-muted-foreground/60">{visiblePinnedTables.length}</span>
-                {#if pinnedTables.length > 5}
+            {#if showPins && filteredPinnedTables.length > 0 && connectionName}
+              <!-- `pb-1.5`, because the action row is 20px tall now and 4px of
+                   air put it on top of the first pin. -->
+              <div class="flex w-full items-center gap-1.5 px-2.5 pt-2 pb-1.5">
+                <Icon name="pin" class="size-3 shrink-0 text-muted-foreground" />
+                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Pinned</span>
+                {@render countBadge(filteredPinnedTables.length, visiblePinnedTables.length, true)}
+                <!-- The actions own the trailing edge, the count stays with the
+                     name. `stopPropagation` on every one of them: the list's
+                     own click handler clears the selection for any click that
+                     did not land on a row, and the header is not a row - so
+                     "select all" selected seven tables and the same click
+                     deselected them again before the frame was out. -->
+                <!-- `size-5` with `gap-1.5`, not `size-4` with `gap-1`:
+                     `hit-area` gives each of these a 24px target whatever their
+                     visual size, and 16px buttons 4px apart put those targets
+                     20px apart - overlapping by 4px, so a click near the edge
+                     of one landed on the other. 20px buttons 6px apart clear
+                     each other, and a hover surface makes them read as buttons
+                     rather than as two glyphs in the heading. -->
+                <div class="ml-auto flex shrink-0 items-center gap-1.5">
                   <button
                     type="button"
-                    class="ml-auto font-mono text-ui-2xs text-muted-foreground/50 hover:text-destructive transition-colors"
-                    onclick={clearAllPins}
-                    title="Clear all pinned tables"
-                  >Clear all</button>
-                {/if}
+                    aria-pressed={allPinnedSelected}
+                    class={cn(
+                      'hit-area inline-flex size-5 items-center justify-center rounded-md transition-colors hover:bg-muted/50 hover:text-foreground',
+                      allPinnedSelected ? 'text-primary' : 'text-muted-foreground',
+                    )}
+                    onclick={(e) => { e.stopPropagation(); toggleSelectAllPinned() }}
+                    title={allPinnedSelected
+                      ? `Deselect all ${filteredPinnedTables.length} pinned tables`
+                      : `Select all ${filteredPinnedTables.length} pinned tables`}
+                  >
+                    <Icon name={allPinnedSelected ? 'check-circle-2' : 'check'} class="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    class="hit-area inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                    onclick={(e) => { e.stopPropagation(); openAllPinned() }}
+                    title="Open all {filteredPinnedTables.length} pinned tables in tabs"
+                  >
+                    <Icon name="external-link" class="size-3.5" />
+                  </button>
+                  {#if pinnedTables.length > 5}
+                    <!-- A hairline before the destructive one. It is a word
+                         among glyphs and the only action here that throws
+                         something away, so it gets its own side of a rule
+                         rather than sitting flush against "open all". -->
+                    <span class="h-3 w-px shrink-0 bg-border/50" aria-hidden="true"></span>
+                    <button
+                      type="button"
+                      class="hit-area inline-flex h-5 items-center rounded-md px-1 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      onclick={(e) => { e.stopPropagation(); clearAllPins() }}
+                      title="Clear all pinned tables"
+                    >Clear all</button>
+                  {/if}
+                </div>
               </div>
-              <ul class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
-                {#each visiblePinnedTables as tableName, idx (tableName)}
+              <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5">
+                {#each filteredPinnedTables as tableName, idx (tableName)}
                   {@const isSelected = selectedItems.has(tableName)}
-                  <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
+                  <li data-pin={tableName}>
                     <ContextMenu.Root>
                       <ContextMenu.Trigger class="w-full">
                         <button
                           type="button"
+                          tabindex="-1"
+                          data-sidebar-row="pin:{tableName}"
+                          data-roving
+                          data-sidebar-current={activeTable === tableName ? '' : undefined}
                           class={cn(
                             "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                             isSelected
@@ -1213,19 +1959,19 @@
                             {#if isSelected}
                               <Icon name="square-check" class="size-3 text-primary" />
                             {:else}
-                              <Icon name="pin" class="size-3 text-muted-foreground/45 group-hover:hidden" />
-                              <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
+                              <Icon name="pin" class="absolute inset-0 size-3 text-muted-foreground group-hover:opacity-0" />
+                              <Icon name="square" class="absolute inset-0 size-3 opacity-0 group-hover:opacity-40" />
                             {/if}
                           </span>
                           <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{tableName}</span>
                           {#if showRowCount}
-                          <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground/85">
+                          <span class="shrink-0 text-right font-mono text-ui-xs leading-4 tabular-nums text-muted-foreground">
                             {formatTableRowCount(_rowCountByName.get(tableName))}
                           </span>
                           {/if}
                         </button>
                       </ContextMenu.Trigger>
-                      <ContextMenu.Content class="min-w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
+                      <ContextMenu.Content class="min-w-48">
                         {#if isSelected && selectedItems.size > 1}
                           <!-- Multi-select: actions apply to all selected tables -->
                           <ContextMenu.Item onSelect={openSelected}>
@@ -1320,284 +2066,282 @@
 
             <!-- ── Tables ─────────────────────────────────────────── -->
             {#if showTables}
-            <button
-              type="button"
-              class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1 text-left"
-              onclick={() => {
-                tablesOpen = !tablesOpen;
-              }}
-            >
-              <Icon name="chevron-down"
-                class={cn(
-                  "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                  !tablesOpen && "-rotate-90",
-                )}
-              />
-              <span
-                class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
-                >{$t('sidebar.tables')}</span
-              >
-              {#if regularTablesUnpinned.length > 0}
-                {@render countBadge(filteredRegularTables.length, regularTablesUnpinned.length)}
-              {/if}
-            </button>
+              <!-- Outside `tablesOpen`, like every other section header: a
+                   collapsed list still has to say what it is and how much it is
+                   hiding. `regularTablesUnpinned` is the denominator because
+                   pinning relocates a row into the Pinned list rather than
+                   filtering it out - counting against `regularTables` would read
+                   as "one table went missing" every time one is pinned. -->
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
+                <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">{$t('sidebar.tables')}</span>
+                {#if regularTablesUnpinned.length > 0}
+                  {@render countBadge(filteredRegularTables.length, regularTablesUnpinned.length)}
+                {/if}
+              </div>
+
             {#if tablesOpen}
-              <div
-                role="none"
-                onkeydown={(e) => {
-                  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
-                  const btns = /** @type {HTMLButtonElement[]} */ ([...(tableListEl?.querySelectorAll('button') ?? [])])
-                  const i = btns.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement))
-                  if (i === -1) return
-                  e.preventDefault()
-                  if (e.key === 'ArrowDown') btns[i + 1]?.focus()
-                  else if (i === 0) filterEl?.focus()
-                  else btns[i - 1]?.focus()
-                }}
-              >
-              <ul
-                bind:this={tableListEl}
-                class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1"
-              >
+              <!-- The arrow walk lives on the scroll container, which reaches
+                   every section in the tab rather than this one list. -->
+              <div>
+              <!-- ONE context menu for the whole list, not one per row.
+                   A ContextMenu.Root + Trigger per <li> is two component instances
+                   per table, and this list is no longer windowed - a 5,000-table
+                   schema instantiated 10,000 menu components that exist only to be
+                   right-clicked, and that cost is paid in full on every schema
+                   switch and every filter keystroke. Which row was clicked is read
+                   off the event instead. -->
+              <ContextMenu.Root>
+                <ContextMenu.Trigger>
+                  {#snippet child({ props })}
+                    {@const openMenu = props.oncontextmenu}
+                    <ul
+                      {...props}
+                      oncontextmenu={(e) => {
+                        const li = e.target instanceof Element ? e.target.closest("li[data-table]") : null
+                        if (!(li instanceof HTMLElement)) return
+                        menuTable = li.dataset.table ?? ""
+                        openMenu?.(e)
+                      }}
+                      class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5"
+                    >
                 {#if regularTables.length === 0 && tables.length > 0}
                   <li
                     class="flex w-full flex-col items-center gap-2 px-4 py-8 text-center"
                   >
-                    <Icon name="table-2" class="size-7 text-muted-foreground/25" />
+                    <Icon name="table-2" class="size-7 text-muted-foreground" />
                     <p class="text-ui-sm text-muted-foreground">
                       No tables in {activeSchema || "schema"}
                     </p>
                   </li>
-                {:else if filteredRegularTables.length === 0 && lf}
-                  <li
-                    class="px-3 py-3 text-center text-ui-xs text-muted-foreground"
-                  >
-                    No tables match
-                  </li>
                 {:else}
-                  {#if tableWin.topPad > 0}<li style="height:{tableWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
-                  {#each filteredRegularTables.slice(tableWin.start, tableWin.end) as table (table.name)}
+                  {#each filteredRegularTables as table (table.name)}
                     {@const isSelected = selectedItems.has(table.name)}
-                    <li>
-                      <ContextMenu.Root>
-                        <ContextMenu.Trigger class="w-full">
-                          <button
-                            type="button"
-                            class={cn(
-                              "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
-                              isSelected
-                                ? "bg-primary/10 text-foreground"
-                                : activeTable === table.name
-                                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                                  : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
-                            )}
-                            onclick={(e) => {
-                              if (e.shiftKey) { e.preventDefault(); selectItem(table.name, true) }
-                              else if (e.metaKey || e.ctrlKey) { e.preventDefault(); selectItem(table.name, false) }
-                              else ontableselect(table.name)
-                            }}
-                          >
-                            <span
-                              class="relative size-3.5 shrink-0"
-                              onclick={(e) => { e.stopPropagation(); selectItem(table.name, e.shiftKey) }}
-                              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); selectItem(table.name, e.shiftKey); } }}
-                              role="checkbox"
-                              aria-checked={isSelected}
-                              tabindex="-1"
-                            >
-                              {#if isSelected}
-                                <Icon name="square-check" class="size-3.5 text-primary" />
-                              {:else}
-                                <Icon name="table-2" class="size-3.5 opacity-45 group-hover:hidden" />
-                                <Icon name="square" class="size-3.5 hidden opacity-40 group-hover:block" />
-                              {/if}
-                            </span>
-                            <span class="flex min-w-0 items-center gap-1.5">
-                              <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{table.name}</span>
-                              {#if table.rlsEnabled}
-                                <Icon name="lock" class="size-2.5 shrink-0 text-muted-foreground/50" title="Row-level security enabled" />
-                              {/if}
-                            </span>
-                            {#if showRowCount}
-                            <!-- Fixed min-width so the column doesn't shift every
-                                 row sideways as lazy counts land. A count that has
-                                 not arrived draws nothing at all: a placeholder mark
-                                 on every row made a long list read as a column of
-                                 dashes, which says "empty" far louder than "counting". -->
-                            <span
-                              class="flex min-w-[4ch] shrink-0 items-center justify-end font-mono text-ui-2xs leading-4 tabular-nums text-muted-foreground/55"
-                              title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : "Counting rows…"}
-                            >
-                              {#if table.rowCount != null}{formatTableRowCount(table.rowCount)}{/if}
-                            </span>
-                            {/if}
-                          </button>
-                        </ContextMenu.Trigger>
-                        <ContextMenu.Content class="min-w-48 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-                          {#if isSelected && selectedItems.size > 1}
-                            <!-- Multi-select: actions apply to all selected tables -->
-                            <ContextMenu.Item onSelect={openSelected}>
-                              <Icon name="external-link" />
-                              Open {selectedItems.size} tables
-                            </ContextMenu.Item>
-                            {#if [...selectedItems].some((n) => openTableSet.has(n))}
-                              <ContextMenu.Item onSelect={closeSelectedTabs}>
-                                <Icon name="x" />
-                                Close open tabs
-                              </ContextMenu.Item>
-                            {/if}
-                            <ContextMenu.Separator />
-                            <ContextMenu.Item onSelect={copySelectedNames}>
-                              <Icon name="clipboard-copy" />
-                              Copy {selectedItems.size} names
-                            </ContextMenu.Item>
-                            <ContextMenu.Item onSelect={() => (allSelectedPinned ? unpinSelected() : pinSelected())}>
-                              {#if allSelectedPinned}
-                                <Icon name="pin-off" />
-                                Unpin {selectedItems.size} tables
-                              {:else}
-                                <Icon name="pin" />
-                                Pin {selectedItems.size} tables
-                              {/if}
-                            </ContextMenu.Item>
-                            <ContextMenu.Separator />
-                            <ContextMenu.Item onSelect={clearSelection}>
-                              <Icon name="square" />
-                              Deselect all
-                            </ContextMenu.Item>
-                          {:else}
-                          <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(table.name) }}>
-                            <Icon name="clipboard-copy" />
-                            Copy name
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => oncopycolumns(table.name)}>
-                            <Icon name="copy" />
-                            Copy columns
-                          </ContextMenu.Item>
-                          {#if openTableSet.has(table.name)}
-                            <ContextMenu.Item onSelect={() => onclosetable(table.name)}>
-                              <Icon name="x" />
-                              Close tab
-                            </ContextMenu.Item>
-                          {/if}
-                          <ContextMenu.Item onSelect={() => togglePin(table.name)}>
-                            {#if pinnedTables.includes(table.name)}
-                              <Icon name="pin-off" />
-                              Unpin table
-                            {:else}
-                              <Icon name="pin" />
-                              Pin table
-                            {/if}
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => toggleSelect(table.name)}>
-                            {#if isSelected}
-                              <Icon name="square" />
-                              Deselect
-                            {:else}
-                              <Icon name="square-check" />
-                              Select
-                            {/if}
-                          </ContextMenu.Item>
-                          <ContextMenu.Separator />
-                          <ContextMenu.Item onSelect={() => onopeninconsole(table.name)}>
-                            <Icon name="terminal" />
-                            Open in SQL console
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => ongeneratesql(table.name)}>
-                            <Icon name="zap" />
-                            Generate SQL…
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => oncountrows(table.name)}>
-                            <Icon name="hash" />
-                            Count rows
-                          </ContextMenu.Item>
-                          <ContextMenu.Separator />
-                          <ContextMenu.Item onSelect={() => onviewstructure(table.name)}>
-                            <Icon name="layout-list" />
-                            View structure
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => onviewddl(table.name)}>
-                            <Icon name="code-2" />
-                            View DDL
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => onexportsql(table.name)}>
-                            <Icon name="file-down" />
-                            Export as SQL
-                          </ContextMenu.Item>
-                          <ContextMenu.Item onSelect={() => onexportdata(table.name)}>
-                            <Icon name="download" />
-                            Export data
-                          </ContextMenu.Item>
-                          <ContextMenu.Separator />
-                          <ContextMenu.Item
-                            disabled={$readOnlyMode}
-                            title={$readOnlyMode ? READ_ONLY_HINT : undefined}
-                            onSelect={() => openDangerDialog('truncate', table.name)}
-                          >
-                            <Icon name="eraser" />
-                            Truncate table
-                          </ContextMenu.Item>
-                          <ContextMenu.Item
-                            variant="destructive"
-                            disabled={$readOnlyMode}
-                            title={$readOnlyMode ? READ_ONLY_HINT : undefined}
-                            onSelect={() => openDangerDialog('drop', table.name)}
-                          >
-                            <Icon name="trash-2" />
-                            Drop table
-                          </ContextMenu.Item>
-                          {/if}
-                        </ContextMenu.Content>
-                      </ContextMenu.Root>
+                    <li data-table={table.name}>
+                    <button
+                      type="button"
+                      tabindex="-1"
+                      data-sidebar-row="table:{table.name}"
+                      data-roving
+                      data-sidebar-current={activeTable === table.name ? '' : undefined}
+                      class={cn(
+                        "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
+                        isSelected
+                          ? "bg-primary/10 text-foreground"
+                          : activeTable === table.name
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                            : "text-foreground/70 hover:bg-sidebar-accent/50 hover:text-foreground",
+                      )}
+                      onclick={(e) => {
+                        if (e.shiftKey) { e.preventDefault(); selectItem(table.name, true) }
+                        else if (e.metaKey || e.ctrlKey) { e.preventDefault(); selectItem(table.name, false) }
+                        else ontableselect(table.name)
+                      }}
+                    >
+                      <span
+                        class="relative size-3.5 shrink-0"
+                        onclick={(e) => { e.stopPropagation(); selectItem(table.name, e.shiftKey) }}
+                        onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); selectItem(table.name, e.shiftKey); } }}
+                        role="checkbox"
+                        aria-checked={isSelected}
+                        tabindex="-1"
+                      >
+                        {#if isSelected}
+                          <Icon name="square-check" class="size-3.5 text-primary" />
+                        {:else}
+                          <Icon name="table-2" class="absolute inset-0 size-3.5 opacity-70 group-hover:opacity-0" />
+                          <Icon name="square" class="absolute inset-0 size-3.5 opacity-0 group-hover:opacity-70" />
+                        {/if}
+                      </span>
+                      <span class="flex min-w-0 items-center gap-1.5">
+                        <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{table.name}</span>
+                        {#if table.rlsEnabled}
+                          <Icon
+                            name="lock"
+                            class="size-3 shrink-0 text-muted-foreground"
+                            role="img"
+                            aria-label="Row-level security enabled"
+                          />
+                        {/if}
+                      </span>
+                      {#if showRowCount}
+                      <!-- Fixed min-width so the column doesn't shift every
+                           row sideways as lazy counts land. A count that has
+                           not arrived draws nothing at all: a placeholder mark
+                           on every row made a long list read as a column of
+                           dashes, which says "empty" far louder than "counting". -->
+                      <span
+                        class="flex min-w-[4ch] shrink-0 items-center justify-end font-mono text-ui-2xs leading-4 tabular-nums text-muted-foreground"
+                        title={table.rowCount != null ? Number(table.rowCount).toLocaleString("en-US") : "Counting rows…"}
+                      >
+                        {#if table.rowCount != null}{formatTableRowCount(table.rowCount)}{/if}
+                      </span>
+                      {/if}
+                    </button>
                     </li>
                   {/each}
-                  {#if tableWin.botPad > 0}<li style="height:{tableWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                 {/if}
-              </ul>
+                    </ul>
+                  {/snippet}
+                </ContextMenu.Trigger>
+            <ContextMenu.Content class="min-w-48">
+              {#if menuTableSelected && selectedItems.size > 1}
+                <!-- Multi-select: actions apply to all selected tables -->
+                <ContextMenu.Item onSelect={openSelected}>
+                  <Icon name="external-link" />
+                  Open {selectedItems.size} tables
+                </ContextMenu.Item>
+                {#if [...selectedItems].some((n) => openTableSet.has(n))}
+                  <ContextMenu.Item onSelect={closeSelectedTabs}>
+                    <Icon name="x" />
+                    Close open tabs
+                  </ContextMenu.Item>
+                {/if}
+                <ContextMenu.Separator />
+                <ContextMenu.Item onSelect={copySelectedNames}>
+                  <Icon name="clipboard-copy" />
+                  Copy {selectedItems.size} names
+                </ContextMenu.Item>
+                <ContextMenu.Item onSelect={() => (allSelectedPinned ? unpinSelected() : pinSelected())}>
+                  {#if allSelectedPinned}
+                    <Icon name="pin-off" />
+                    Unpin {selectedItems.size} tables
+                  {:else}
+                    <Icon name="pin" />
+                    Pin {selectedItems.size} tables
+                  {/if}
+                </ContextMenu.Item>
+                <ContextMenu.Separator />
+                <ContextMenu.Item onSelect={clearSelection}>
+                  <Icon name="square" />
+                  Deselect all
+                </ContextMenu.Item>
+              {:else}
+              <ContextMenu.Item onSelect={() => { navigator.clipboard.writeText(menuTable) }}>
+                <Icon name="clipboard-copy" />
+                Copy name
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => oncopycolumns(menuTable)}>
+                <Icon name="copy" />
+                Copy columns
+              </ContextMenu.Item>
+              {#if openTableSet.has(menuTable)}
+                <ContextMenu.Item onSelect={() => onclosetable(menuTable)}>
+                  <Icon name="x" />
+                  Close tab
+                </ContextMenu.Item>
+              {/if}
+              <ContextMenu.Item onSelect={() => togglePin(menuTable)}>
+                {#if pinnedTables.includes(menuTable)}
+                  <Icon name="pin-off" />
+                  Unpin table
+                {:else}
+                  <Icon name="pin" />
+                  Pin table
+                {/if}
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => toggleSelect(menuTable)}>
+                {#if menuTableSelected}
+                  <Icon name="square" />
+                  Deselect
+                {:else}
+                  <Icon name="square-check" />
+                  Select
+                {/if}
+              </ContextMenu.Item>
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => onopeninconsole(menuTable)}>
+                <Icon name="terminal" />
+                Open in SQL console
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => ongeneratesql(menuTable)}>
+                <Icon name="zap" />
+                Generate SQL…
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => oncountrows(menuTable)}>
+                <Icon name="hash" />
+                Count rows
+              </ContextMenu.Item>
+              <ContextMenu.Separator />
+              <ContextMenu.Item onSelect={() => onviewstructure(menuTable)}>
+                <Icon name="layout-list" />
+                View structure
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => onviewddl(menuTable)}>
+                <Icon name="code-2" />
+                View DDL
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => onexportsql(menuTable)}>
+                <Icon name="file-down" />
+                Export as SQL
+              </ContextMenu.Item>
+              <ContextMenu.Item onSelect={() => onexportdata(menuTable)}>
+                <Icon name="download" />
+                Export data
+              </ContextMenu.Item>
+              <ContextMenu.Separator />
+              <ContextMenu.Item
+                disabled={$readOnlyMode}
+                title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                onSelect={() => openDangerDialog('truncate', menuTable)}
+              >
+                <Icon name="eraser" />
+                Truncate table
+              </ContextMenu.Item>
+              <ContextMenu.Item
+                variant="destructive"
+                disabled={$readOnlyMode}
+                title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                onSelect={() => openDangerDialog('drop', menuTable)}
+              >
+                <Icon name="trash-2" />
+                Drop table
+              </ContextMenu.Item>
+              {/if}
+            </ContextMenu.Content>
+              </ContextMenu.Root>
               </div>
             {/if}
             {/if}
 
             <!-- ── Views ──────────────────────────────────────────── -->
             {#if showViews && (views.length > 0 || filteredViews.length > 0)}
-              <button
-                type="button"
-                class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1 text-left"
-                onclick={() => {
-                  viewsOpen = !viewsOpen;
-                }}
-              >
-                <Icon name="chevron-down"
-                  class={cn(
-                    "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                    !viewsOpen && "-rotate-90",
-                  )}
-                />
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <span
-                  class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
+                  class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase"
                   >{$t('sidebar.views')}</span
                 >
                 {#if views.length > 0}
                   {@render countBadge(filteredViews.length, views.length)}
                 {/if}
-              </button>
+              </div>
               {#if viewsOpen}
-                <ul bind:this={viewListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                <!-- One menu for the list - see the tables list above for why. -->
+                <ContextMenu.Root>
+                <ContextMenu.Trigger>
+                {#snippet child({ props })}
+                {@const openMenu = props.oncontextmenu}
+                <ul
+                  {...props}
+                  oncontextmenu={(e) => {
+                    const li = e.target instanceof Element ? e.target.closest('li[data-view]') : null
+                    if (!(li instanceof HTMLElement)) return
+                    menuView = li.dataset.view ?? ''
+                    openMenu?.(e)
+                  }}
+                  class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5"
+                >
                   {#if filteredViews.length === 0}
-                    <li
-                      class="px-3 py-3 text-center text-ui-xs text-muted-foreground"
-                    >
-                      No views match
-                    </li>
+                    <!-- The tab-level empty state covers this. -->
                   {:else}
-                    {#if viewWin.topPad > 0}<li style="height:{viewWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                     {#each viewsToRender as view (view.name)}
                       {@const isSelected = selectedItems.has(view.name)}
-                      <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
-                        <ContextMenu.Root>
-                          <ContextMenu.Trigger class="w-full">
+                      <li data-view={view.name}>
                             <button
                               type="button"
+                              tabindex="-1"
+                              data-sidebar-row="view:{view.name}"
+                              data-roving
+                              data-sidebar-current={activeTable === view.name ? '' : undefined}
                               class={cn(
                                 "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                                 isSelected
@@ -1619,8 +2363,8 @@
                                 {#if isSelected}
                                   <Icon name="square-check" class="size-3 text-primary" />
                                 {:else}
-                                  <Icon name="table-view" class="size-3 opacity-50 group-hover:hidden" />
-                                  <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
+                                  <Icon name="table-view" class="absolute inset-0 size-3 opacity-50 group-hover:opacity-0" />
+                                  <Icon name="square" class="absolute inset-0 size-3 opacity-0 group-hover:opacity-40" />
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{view.name}</span>
@@ -1628,101 +2372,128 @@
                                    source, so this only ever rendered a misleading 0. Materialized
                                    views are physical tables and keep theirs. -->
                             </button>
-                          </ContextMenu.Trigger>
-                          <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-                            <ContextMenu.Item onSelect={() => toggleSelect(view.name)}>
-                              {#if isSelected}
-                                <Icon name="square" />
-                                Deselect
-                              {:else}
-                                <Icon name="square-check" />
-                                Select
-                              {/if}
-                            </ContextMenu.Item>
-                            <ContextMenu.Separator />
-                            <ContextMenu.Item variant="destructive" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : undefined} onSelect={() => openDangerDialog('drop', view.name)}>
-                              <Icon name="trash-2" />
-                              Drop view
-                            </ContextMenu.Item>
-                          </ContextMenu.Content>
-                        </ContextMenu.Root>
                       </li>
                     {/each}
-                    {#if viewWin.botPad > 0}<li style="height:{viewWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   {/if}
                 </ul>
+                {/snippet}
+                </ContextMenu.Trigger>
+                <ContextMenu.Content class="min-w-44">
+                  <ContextMenu.Item onSelect={() => toggleSelect(menuView)}>
+                    {#if selectedItems.has(menuView)}
+                      <Icon name="square" />
+                      Deselect
+                    {:else}
+                      <Icon name="square-check" />
+                      Select
+                    {/if}
+                  </ContextMenu.Item>
+                  <ContextMenu.Separator />
+                  <ContextMenu.Item variant="destructive" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : undefined} onSelect={() => openDangerDialog('drop', menuView)}>
+                    <Icon name="trash-2" />
+                    Drop view
+                  </ContextMenu.Item>
+                </ContextMenu.Content>
+                </ContextMenu.Root>
               {/if}
             {/if}
 
-            <!-- ── All sections hidden ───────────────────────────── -->
-            {#if !showTables && !showViews && !showMatViews && !showRecent}
-              <div class="flex flex-col items-center justify-center gap-2 px-4 py-16 text-center">
-                <p class="text-ui-xs text-muted-foreground/50">All sections are hidden</p>
-                <p class="text-ui-2xs text-muted-foreground/30">Use the filter menu to show them</p>
-              </div>
-            {/if}
 
-            <!-- ── Empty state ───────────────────────────────────── -->
-            {#if !loadingTables && connectionName && tables.length === 0}
-              <div class="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center">
-                <div class="flex size-10 items-center justify-center rounded-lg border border-border/50 bg-muted/30">
-                  <Icon name="table-2" class="size-5 text-muted-foreground/30" />
+            <!-- ── Empty state, one per tab ──────────────────────── -->
+            {#if tabIsEmpty}
+              {@const empty = TAB_EMPTY[sidebarTab]}
+              <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+                <div class="flex size-10 items-center justify-center rounded-lg border border-border bg-muted/30">
+                  <Icon name={tabEmptyFromFilter ? 'search' : empty.icon} class="size-5 text-muted-foreground" />
                 </div>
-                <div>
-                  <p class="text-ui-xs font-medium text-muted-foreground">No tables found</p>
-                  <p class="mt-0.5 text-ui-2xs text-muted-foreground/50">{activeSchema ? `in "${activeSchema}"` : 'in this database'}</p>
+                <div class="max-w-[16rem]">
+                  <p class="text-ui-xs font-medium text-foreground">
+                    {tabEmptyFromFilter ? 'No matches' : empty.title}
+                  </p>
+                  <p class="mt-1 text-ui-2xs leading-relaxed text-muted-foreground">
+                    {#if tabEmptyFromFilter}
+                      Nothing here matches “{debouncedFilter}”.
+                    {:else if sidebarTab === 'tables' && activeSchema}
+                      Nothing in “{activeSchema}” yet.
+                    {:else}
+                      {empty.hint}
+                    {/if}
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-background/60 px-3 py-1.5 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  onclick={onrefresh}
-                >
-                  <Icon name="refresh-cw" class="size-3" />
-                  Retry
-                </button>
+                {#if tabEmptyFromFilter}
+                  <Button variant="outline" size="sm" onclick={() => handleFilterInput('')}>
+                    <Icon name="x" class="size-3.5" />
+                    Clear filter
+                  </Button>
+                {:else if sidebarTab === 'databases'}
+                  <!-- The section header is not rendered in this state, so its
+                       two actions live here instead of being unreachable. -->
+                  <div class="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onclick={() => void loadDatabases()} disabled={dbEntriesLoading}>
+                      <Icon name="refresh-cw" class={cn('size-3.5', dbEntriesLoading && 'animate-spin')} />
+                      Refresh
+                    </Button>
+                    {#if dbAdmin}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onclick={onnewdatabase}
+                        disabled={$readOnlyMode}
+                        title={$readOnlyMode ? READ_ONLY_HINT : undefined}
+                      >
+                        <Icon name="plus" class="size-3.5" />
+                        New database
+                      </Button>
+                    {/if}
+                  </div>
+                {:else if sidebarTab === 'tables'}
+                  <Button variant="outline" size="sm" onclick={onrefresh}>
+                    <Icon name="refresh-cw" class="size-3.5" />
+                    Refresh
+                  </Button>
+                {/if}
               </div>
             {/if}
 
             <!-- ── Materialized Views ─────────────────────────────── -->
             {#if showMatViews && (matViews.length > 0 || filteredMatViews.length > 0)}
-              <button
-                type="button"
-                class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1 text-left"
-                onclick={() => {
-                  matViewsOpen = !matViewsOpen;
-                }}
-              >
-                <Icon name="chevron-down"
-                  class={cn(
-                    "size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150",
-                    !matViewsOpen && "-rotate-90",
-                  )}
-                />
+              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <span
-                  class="text-ui-2xs font-medium tracking-wider text-muted-foreground/55 uppercase"
+                  class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase"
                   >Materialized Views</span
                 >
                 {#if matViews.length > 0}
                   {@render countBadge(filteredMatViews.length, matViews.length)}
                 {/if}
-              </button>
+              </div>
               {#if matViewsOpen}
-                <ul bind:this={matViewListEl} class="flex w-full min-w-full flex-col gap-0.5 px-1.5 pb-1">
+                <!-- One menu for the list - see the tables list above for why. -->
+                <ContextMenu.Root>
+                <ContextMenu.Trigger>
+                {#snippet child({ props })}
+                {@const openMenu = props.oncontextmenu}
+                <ul
+                  {...props}
+                  oncontextmenu={(e) => {
+                    const li = e.target instanceof Element ? e.target.closest('li[data-matview]') : null
+                    if (!(li instanceof HTMLElement)) return
+                    menuMatView = li.dataset.matview ?? ''
+                    openMenu?.(e)
+                  }}
+                  class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5"
+                >
                   {#if filteredMatViews.length === 0}
-                    <li
-                      class="px-3 py-3 text-center text-ui-xs text-muted-foreground"
-                    >
-                      No materialized views match
-                    </li>
+                    <!-- The tab-level empty state covers this. -->
                   {:else}
-                    {#if matViewWin.topPad > 0}<li style="height:{matViewWin.topPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                     {#each matViewsToRender as mv (mv.name)}
                       {@const isSelected = selectedItems.has(mv.name)}
-                      <li class="[content-visibility:auto] [contain-intrinsic-size:auto_28px]">
-                        <ContextMenu.Root>
-                          <ContextMenu.Trigger class="w-full">
+                      <li data-matview={mv.name}>
                             <button
                               type="button"
+                              tabindex="-1"
+                              data-sidebar-row="mview:{mv.name}"
+                              data-roving
+                              data-sidebar-current={activeTable === mv.name ? '' : undefined}
                               class={cn(
                                 "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 py-1.5 text-left transition-colors",
                                 isSelected
@@ -1744,8 +2515,8 @@
                                 {#if isSelected}
                                   <Icon name="square-check" class="size-3 text-primary" />
                                 {:else}
-                                  <Icon name="layers" class="size-3 opacity-50 group-hover:hidden" />
-                                  <Icon name="square" class="size-3 hidden opacity-40 group-hover:block" />
+                                  <Icon name="layers" class="absolute inset-0 size-3 opacity-50 group-hover:opacity-0" />
+                                  <Icon name="square" class="absolute inset-0 size-3 opacity-0 group-hover:opacity-40" />
                                 {/if}
                               </span>
                               <span class="min-w-0 truncate font-mono text-ui-sm leading-4">{mv.name}</span>
@@ -1755,29 +2526,29 @@
                               </span>
                               {/if}
                             </button>
-                          </ContextMenu.Trigger>
-                          <ContextMenu.Content class="min-w-44 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]]:text-ui-xs [&_[data-slot=context-menu-item]_svg]:size-3.5">
-                            <ContextMenu.Item onSelect={() => toggleSelect(mv.name)}>
-                              {#if isSelected}
-                                <Icon name="square" />
-                                Deselect
-                              {:else}
-                                <Icon name="square-check" />
-                                Select
-                              {/if}
-                            </ContextMenu.Item>
-                            <ContextMenu.Separator />
-                            <ContextMenu.Item variant="destructive" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : undefined} onSelect={() => openDangerDialog('drop', mv.name)}>
-                              <Icon name="trash-2" />
-                              Drop view
-                            </ContextMenu.Item>
-                          </ContextMenu.Content>
-                        </ContextMenu.Root>
                       </li>
                     {/each}
-                    {#if matViewWin.botPad > 0}<li style="height:{matViewWin.botPad}px;flex-shrink:0" aria-hidden="true"></li>{/if}
                   {/if}
                 </ul>
+                {/snippet}
+                </ContextMenu.Trigger>
+                <ContextMenu.Content class="min-w-44">
+                  <ContextMenu.Item onSelect={() => toggleSelect(menuMatView)}>
+                    {#if selectedItems.has(menuMatView)}
+                      <Icon name="square" />
+                      Deselect
+                    {:else}
+                      <Icon name="square-check" />
+                      Select
+                    {/if}
+                  </ContextMenu.Item>
+                  <ContextMenu.Separator />
+                  <ContextMenu.Item variant="destructive" disabled={$readOnlyMode} title={$readOnlyMode ? READ_ONLY_HINT : undefined} onSelect={() => openDangerDialog('drop', menuMatView)}>
+                    <Icon name="trash-2" />
+                    Drop view
+                  </ContextMenu.Item>
+                </ContextMenu.Content>
+                </ContextMenu.Root>
               {/if}
             {/if}
 
@@ -1786,6 +2557,7 @@
 
         </div>
       </div>
+      {/if}
     </div>
     {:else if navSidebarPanel === "connections"}
       <ConnectionsSidebarPanel
@@ -1803,7 +2575,7 @@
 
   </aside>
   </ContextMenu.Trigger>
-  <ContextMenu.Content class="min-w-52 p-1 text-ui-xs [&_[data-slot=context-menu-item]]:items-center [&_[data-slot=context-menu-item]]:gap-1.5 [&_[data-slot=context-menu-item]]:whitespace-nowrap [&_[data-slot=context-menu-item]]:px-2 [&_[data-slot=context-menu-item]]:py-1 [&_[data-slot=context-menu-item]_svg]:size-3.5 [&_[data-slot=context-menu-item]_svg]:shrink-0">
+  <ContextMenu.Content class="min-w-52">
     <ContextMenu.Item onSelect={() => onmoveside(side === "right" ? "left" : "right")}>
       {#if side === "right"}
         <PanelLeft /> Move sidebar to the left
@@ -1817,9 +2589,10 @@
     edge={side === "right" ? "start" : "end"}
     onresizestart={() => {
       resizeStartWidth = width;
+      resizeScale = getAppScale();
     }}
     onresize={(dx) => {
-      width = clampNavSidebarWidth(resizeStartWidth + dx);
+      width = clampNavSidebarWidth(resizeStartWidth + dx / resizeScale);
     }}
     onresizeend={() => {
       resizeStartWidth = width;

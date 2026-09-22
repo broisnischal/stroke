@@ -5,10 +5,9 @@
  * Backend contract: `{ search, searchIsRegex, searchCaseSensitive }`.
  *   - searchIsRegex     → the engine matches with its regex operator (`~*`/`~`
  *                         for Postgres, `REGEXP` for MySQL) instead of substring.
- *   - searchCaseSensitive → drop the case-folding the substring path applies by
- *                         default (SQLite `instr` on lowered text; MySQL `LIKE`;
- *                         Postgres bakes case into the pattern so it never sets
- *                         this flag).
+ *   - searchCaseSensitive → drop the case-folding the search applies by default
+ *                         (SQLite `instr` on lowered text; MySQL `BINARY` cast;
+ *                         Postgres `LIKE`/`~` instead of `ILIKE`/`~*`).
  *
  * Support differs by engine (see `supportedSearchOptions`):
  *   - Postgres / MySQL: all three (Postgres via ARE `~*`, MySQL via ICU REGEXP).
@@ -18,6 +17,35 @@
  */
 
 /** @typedef {{ matchCase?: boolean, wholeWord?: boolean, regex?: boolean }} SearchOptions */
+
+/**
+ * The find widget's modifier keys, straight out of VS Code: Alt+C match case,
+ * Alt+R regular expression, Alt+W whole word. Returns the option to toggle, or
+ * null when the event is something else.
+ *
+ * Keyed on `e.code`, not `e.key`: Alt+letter produces a different character on
+ * plenty of layouts (macOS Alt+C is ç, Alt+W is ∑), so the physical key is the
+ * only stable identity a chord like this has.
+ *
+ * @param {KeyboardEvent} e
+ * @returns {'matchCase' | 'wholeWord' | 'regex' | null}
+ */
+export function searchOptionHotkey(e) {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null
+  switch (e.code) {
+    case 'KeyC': return 'matchCase'
+    case 'KeyR': return 'regex'
+    case 'KeyW': return 'wholeWord'
+    default: return null
+  }
+}
+
+/** The chord each option answers to, for titles and tooltips. */
+export const SEARCH_OPTION_KEYS = /** @type {const} */ ({
+  matchCase: 'Alt+C',
+  wholeWord: 'Alt+W',
+  regex: 'Alt+R',
+})
 
 /** @param {string} s */
 export const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -70,14 +98,25 @@ export function buildSearchQuery(term, opts, dialect) {
     return { search: t, searchIsRegex: false, searchCaseSensitive: matchCase }
   }
 
-  // Postgres: one ARE pattern via `~*`. `(?c)` forces case-sensitivity and
-  // `\m … \M` anchor word boundaries, so all three fold into the pattern and
-  // the separate case flag stays off.
+  // Postgres: `\m … \M` anchor word boundaries in the pattern, and CASE IS A
+  // FLAG, not a pattern prefix.
+  //
+  // It used to prefix the ARE option `(?c)` and leave the operator as `~*`,
+  // which meant match-case for Postgres lived entirely inside the pattern
+  // string - the backend never received the flag, so its own case handling was
+  // unreachable and the option silently did nothing on the substring path. The
+  // flag now picks `~` over `~*` (and `LIKE` over `ILIKE`) in build_where.
   if (dialect === 'postgres') {
     let pattern = regex ? t : escapeRegExp(t)
     if (wholeWord) pattern = `\\m(?:${pattern})\\M`
-    if (matchCase) pattern = `(?c)${pattern}`
-    return { search: pattern, searchIsRegex: true, searchCaseSensitive: false }
+    // Word boundaries need the regex operator; plain match-case does not, and a
+    // literal substring is cheaper for the planner than an equivalent regex.
+    const needsRegex = regex || wholeWord
+    return {
+      search: needsRegex ? pattern : t,
+      searchIsRegex: needsRegex,
+      searchCaseSensitive: matchCase,
+    }
   }
 
   // MySQL: ICU `REGEXP`. Word boundary is `\b`; case-sensitivity is applied by

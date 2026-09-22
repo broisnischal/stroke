@@ -52,6 +52,12 @@ fn http() -> &'static reqwest::Client {
             .user_agent("stroke/1.0")
             .tcp_keepalive(std::time::Duration::from_secs(60))
             .pool_max_idle_per_host(4)
+            // Bounded on purpose. `reqwest` has no default timeout, so a request
+            // that never answers - captive portal, dropped route, a stalled edge -
+            // leaves the command awaiting forever and the UI on its spinner with no
+            // way out. "Loading your Cloudflare accounts…" sat there permanently.
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .expect("failed to build CF HTTP client")
     })

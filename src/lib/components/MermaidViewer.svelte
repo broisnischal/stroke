@@ -67,7 +67,7 @@
       _asyncDiagrams[asyncKey] = svg
     } catch (e) {
       const msg = String(e).replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      _asyncDiagrams[asyncKey] = `<div class="flex flex-col gap-1.5 p-3 rounded border border-destructive/30 bg-destructive/5 text-ui-xs"><p class="font-medium text-destructive">Render failed</p><pre class="font-mono text-ui-3xs text-muted-foreground/70 whitespace-pre-wrap">${msg}</pre></div>`
+      _asyncDiagrams[asyncKey] = `<div class="flex flex-col gap-1.5 p-3 rounded border border-destructive/30 bg-destructive/5 text-ui-xs"><p class="font-medium text-destructive">Render failed</p><pre class="font-mono text-ui-3xs text-muted-foreground whitespace-pre-wrap">${msg}</pre></div>`
     }
   }
 
@@ -79,7 +79,7 @@
     const asyncKey = `async:${cacheKey}`
     if (_asyncDiagrams[asyncKey] !== undefined) {
       return _asyncDiagrams[asyncKey] === ''
-        ? `<div class="flex items-center gap-2 p-4 text-ui-xs text-muted-foreground/60"><span class="size-3 animate-spin rounded-full border-2 border-border border-t-muted-foreground inline-block shrink-0"></span>Rendering…</div>`
+        ? `<div class="flex items-center gap-2 p-4 text-ui-xs text-muted-foreground"><span class="size-3 animate-spin rounded-full border-2 border-border border-t-muted-foreground inline-block shrink-0"></span>Rendering…</div>`
         : _asyncDiagrams[asyncKey]
     }
     try {
@@ -89,7 +89,7 @@
       return svg
     } catch { /* fall through to async */ }
     void _renderWithMermaidJs(normalized, asyncKey)
-    return `<div class="flex items-center gap-2 p-4 text-ui-xs text-muted-foreground/60"><span class="size-3 animate-spin rounded-full border-2 border-border border-t-muted-foreground inline-block shrink-0"></span>Rendering…</div>`
+    return `<div class="flex items-center gap-2 p-4 text-ui-xs text-muted-foreground"><span class="size-3 animate-spin rounded-full border-2 border-border border-t-muted-foreground inline-block shrink-0"></span>Rendering…</div>`
   }
 
   // ── Pan / zoom action ───────────────────────────────────────────────────────
@@ -175,8 +175,8 @@
       }
 
       const onDblClick = () => { scale = 1; tx = 0; ty = 0; applyTransform(true) }
-      const onZoomIn    = () => { scale = Math.min(10, scale * 1.25); applyTransform() }
-      const onZoomOut   = () => { scale = Math.max(0.1, scale / 1.25); applyTransform() }
+      const onZoomIn = () => { scale = Math.min(10, scale * 1.25); applyTransform() }
+      const onZoomOut = () => { scale = Math.max(0.1, scale / 1.25); applyTransform() }
       const onZoomReset = () => { scale = 1; tx = 0; ty = 0; applyTransform(true) }
 
       node.style.cursor = 'grab'

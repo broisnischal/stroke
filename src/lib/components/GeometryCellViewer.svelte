@@ -150,13 +150,13 @@
        can't land on top of the tab switcher. -->
   <Dialog.Content showCloseButton={false} class="max-w-2xl gap-0 overflow-hidden p-0">
     <div class="flex h-11 shrink-0 items-center gap-2 border-b border-border/50 px-4">
-      <Icon name="globe" class="size-3.5 shrink-0 text-primary/60" />
+      <Icon name="globe" class="size-3.5 shrink-0 text-primary" />
       <span class="min-w-0 truncate font-mono text-ui-sm font-medium">{column}</span>
-      <span class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs text-muted-foreground/70">
+      <span class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-ui-2xs text-muted-foreground">
         {dataType.replace(/\(.*$/, '')}{#if geom} · {geom.type}{/if}
       </span>
       {#if nullable}
-        <span class="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground/50">nullable</span>
+        <span class="shrink-0 rounded bg-muted/40 px-1.5 py-0.5 font-mono text-ui-3xs text-muted-foreground">nullable</span>
       {/if}
 
       <div class="ml-auto flex shrink-0 items-center gap-0.5 rounded-md bg-muted/40 p-0.5">
@@ -173,7 +173,7 @@
       </div>
 
       <Dialog.Close
-        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none"
+        class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none"
         aria-label="Close"
       >
         <Icon name="x" class="size-3.5" />
@@ -183,7 +183,7 @@
     {#if !geom}
       <div class="px-4 py-10 text-center">
         <p class="text-ui-sm text-muted-foreground">This value isn't a geometry literal.</p>
-        <p class="mt-1 font-mono text-ui-2xs text-muted-foreground/50">{String(value ?? '').slice(0, 120)}</p>
+        <p class="mt-1 font-mono text-ui-2xs text-muted-foreground">{String(value ?? '').slice(0, 120)}</p>
       </div>
     {:else}
       <!-- ── Shape ─────────────────────────────────────────────────────────── -->
@@ -191,7 +191,7 @@
         <div class="px-4 pt-4">
           {#if geom.empty}
             <div class="flex h-40 items-center justify-center rounded-md border border-border/40 bg-muted/10">
-              <p class="font-mono text-ui-sm text-muted-foreground/60">{geom.type} EMPTY</p>
+              <p class="font-mono text-ui-sm text-muted-foreground">{geom.type} EMPTY</p>
             </div>
           {:else if geoShape}
             <GeoMiniMap shape={geoShape} height={260} />
@@ -250,13 +250,13 @@
                visible rather than squeezed into a truncating tile. -->
           {#if position}
             <div class="mt-2.5 flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/10 px-2.5 py-1.5">
-              <Icon name="crosshair" class="size-3.5 shrink-0 text-primary/60" />
-              <span class="text-ui-3xs uppercase tracking-wider text-muted-foreground/45">{position.label}</span>
+              <Icon name="crosshair" class="size-3.5 shrink-0 text-primary" />
+              <span class="text-ui-3xs uppercase tracking-wider text-muted-foreground">{position.label}</span>
               <span class="ml-1 truncate font-mono text-ui-sm tabular-nums text-foreground/90">{position.text}</span>
               {#if geoShape?.assumed}
-                <span class="ml-auto shrink-0 text-ui-3xs text-warning/70">no SRID · read as WGS 84</span>
+                <span class="ml-auto shrink-0 text-ui-3xs text-warning">no SRID · read as WGS 84</span>
               {:else if geom.srid === 3857}
-                <span class="ml-auto shrink-0 text-ui-3xs text-muted-foreground/40">from mercator meters</span>
+                <span class="ml-auto shrink-0 text-ui-3xs text-muted-foreground">from mercator meters</span>
               {/if}
             </div>
           {/if}
@@ -265,10 +265,10 @@
           <div class="mt-2 grid grid-cols-[repeat(auto-fit,minmax(108px,1fr))] gap-2">
             {#each stats as s (s.label)}
               <div class="rounded-md border border-border/40 bg-muted/10 px-2.5 py-1.5">
-                <p class="text-ui-3xs uppercase tracking-wider text-muted-foreground/45">{s.label}</p>
+                <p class="text-ui-3xs uppercase tracking-wider text-muted-foreground">{s.label}</p>
                 <p class="mt-0.5 truncate font-mono text-ui-sm tabular-nums text-foreground/90">{s.value}</p>
                 {#if s.hint}
-                  <p class={cn('mt-0.5 truncate text-ui-3xs', s.warn ? 'text-warning/80' : 'text-muted-foreground/40')}>{s.hint}</p>
+                  <p class={cn('mt-0.5 truncate text-ui-3xs', s.warn ? 'text-warning' : 'text-muted-foreground')}>{s.hint}</p>
                 {/if}
               </div>
             {/each}
@@ -280,12 +280,12 @@
         <div class="max-h-[22rem] overflow-y-auto px-4 pt-3">
           {#each coordParts as part, pi (pi)}
             {#if coordParts.length > 1}
-              <p class="mt-2 mb-1 text-ui-3xs uppercase tracking-wider text-muted-foreground/45 first:mt-0">{part.title}</p>
+              <p class="mt-2 mb-1 text-ui-3xs uppercase tracking-wider text-muted-foreground first:mt-0">{part.title}</p>
             {/if}
             <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-2">
               {#each part.vertices.slice(0, COORD_CAP) as v, i (i)}
                 <div class="flex items-baseline gap-2 rounded px-1.5 py-0.5 hover:bg-muted/30">
-                  <span class="w-9 shrink-0 text-right font-mono text-ui-3xs text-muted-foreground/40">{i}</span>
+                  <span class="w-9 shrink-0 text-right font-mono text-ui-3xs text-muted-foreground">{i}</span>
                   <span class="truncate font-mono text-ui-2xs tabular-nums text-foreground/85">
                     {shortCoord(v.x)}, {shortCoord(v.y)}{v.z !== undefined ? `, ${shortCoord(v.z)}` : ''}{v.m !== undefined ? ` (m ${shortCoord(v.m)})` : ''}
                   </span>
@@ -294,7 +294,7 @@
             </div>
           {/each}
           {#if geom.vertexCount > coordsShown || coordParts.some((p) => p.vertices.length > COORD_CAP)}
-            <p class="py-2 text-center text-ui-3xs text-muted-foreground/50">
+            <p class="py-2 text-center text-ui-3xs text-muted-foreground">
               Showing the first {COORD_CAP.toLocaleString()} vertices per part - the raw tab has all of them.
             </p>
           {/if}
@@ -323,7 +323,7 @@
         <Icon name="copy" class="size-3.5" />
         Copy
       </Button>
-      <span class="ml-auto font-mono text-ui-3xs text-muted-foreground/40">
+      <span class="ml-auto font-mono text-ui-3xs text-muted-foreground">
         {String(value ?? '').length.toLocaleString()} chars
       </span>
       <Button variant="ghost" size="sm" class="h-7 px-2 text-ui-xs" onclick={() => (open = false)}>

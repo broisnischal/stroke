@@ -40,7 +40,7 @@
     getCurrentWindow().close()
   }
 
-  const winBtn = 'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground/60 transition-colors duration-150 hover:bg-foreground/[0.08] hover:text-foreground'
+  const winBtn = 'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.08] hover:text-foreground'
 </script>
 
 {#if isTauri && !isMac}

@@ -38,9 +38,9 @@
   // the parent swaps it - plain destructuring freezes the initial values, which
   // is what Svelte's `state_referenced_locally` warning flags.
   const NODE_W = $derived(cfg.NODE_W)
-  const ROW_H  = $derived(cfg.ROW_H)
-  const HDR_H  = $derived(cfg.HDR_H)
-  const PAD_B  = $derived(cfg.PAD_B)
+  const ROW_H = $derived(cfg.ROW_H)
+  const HDR_H = $derived(cfg.HDR_H)
+  const PAD_B = $derived(cfg.PAD_B)
 
   // Match the app's type system (Geist / Geist Mono) - the generic ui-monospace
   // fallback renders poorly on Linux/WebKitGTK. Names use sans, types use mono.
@@ -1222,7 +1222,7 @@
 
   <!-- Line routing runs in slices across frames; say so while it is landing. -->
   {#if routePct >= 0}
-    <div class="pointer-events-none absolute left-4 top-4 flex h-6 items-center gap-2 rounded-full border border-border/50 bg-panel/85 px-2.5 font-mono text-ui-3xs tabular-nums text-muted-foreground/70 backdrop-blur-sm">
+    <div class="pointer-events-none absolute left-4 top-4 flex h-6 items-center gap-2 rounded-full border border-border/50 bg-panel/85 px-2.5 font-mono text-ui-3xs tabular-nums text-muted-foreground backdrop-blur-sm">
       <span class="size-1.5 animate-pulse rounded-full bg-primary"></span>
       Routing lines {routePct}%
     </div>

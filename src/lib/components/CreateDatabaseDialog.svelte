@@ -106,23 +106,23 @@
     }
   }
 
-  const inputCls = "h-8 w-full rounded-lg border-2 border-border bg-background px-3 text-ui-xs outline-none placeholder:text-muted-foreground/40 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 disabled:opacity-50"
-  const selectCls = "h-8 w-full rounded-md border-2 border-border bg-background px-2.5 text-ui-xs outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15 disabled:opacity-50"
+  const inputCls = "field-surface h-8 w-full bg-background px-3 text-ui-xs outline-none placeholder:text-muted-foreground disabled:opacity-50"
+  const selectCls = "field-surface h-8 w-full bg-background px-2.5 text-ui-xs outline-none disabled:opacity-50"
   const labelCls = "mb-1.5 block text-ui-xs font-medium text-muted-foreground"
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="w-[440px] max-w-[calc(100vw-2rem)] gap-0 p-0">
+  <Dialog.Content class="w-[32.5rem] max-w-[calc(100vw-2rem)] gap-0 p-0">
 
     <!-- Header -->
     <div class="flex items-center gap-3 px-5 py-4 border-b border-border/60">
       <div class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-muted">
         <Database class="size-3.5 text-muted-foreground" />
       </div>
-      <div>
-        <Dialog.Title class="text-ui-sm font-semibold leading-none">Create Database</Dialog.Title>
-        <p class="mt-0.5 text-ui-xs text-muted-foreground">
-          {isMySQL ? 'MySQL' : 'PostgreSQL'} · new database on this server
+      <div class="min-w-0">
+        <Dialog.Title class="text-ui-sm font-semibold leading-none">Create database</Dialog.Title>
+        <p class="mt-1 truncate text-ui-xs text-muted-foreground">
+          {isMySQL ? 'MySQL' : 'PostgreSQL'} · on this server
         </p>
       </div>
     </div>
@@ -133,7 +133,9 @@
       <!-- Name, always visible -->
       <div class="mb-4">
         <label for="cdb-name" class="mb-1.5 block text-ui-xs font-semibold">
-          Database name <span class="text-destructive">*</span>
+          Database name
+          <span class="text-destructive" aria-hidden="true">*</span>
+          <span class="sr-only">(required)</span>
         </label>
         <input
           id="cdb-name"
@@ -145,29 +147,35 @@
           class={cn(inputCls, 'font-mono text-ui-sm')}
           autocomplete="off"
           spellcheck="false"
+          required
+          aria-describedby="cdb-name-hint"
           disabled={loading}
         />
-        <p class="mt-1 text-ui-3xs text-muted-foreground/50">Letters, digits, underscores · max 63 chars</p>
+        <p id="cdb-name-hint" class="mt-1.5 text-ui-2xs text-muted-foreground">
+          Letters, digits, underscores · max 63 characters
+        </p>
       </div>
 
       <!-- Advanced toggle -->
       <button
         type="button"
-        class="flex w-full items-center gap-1.5 rounded-md py-1.5 text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
+        aria-expanded={showAdvanced}
+        aria-controls="cdb-advanced"
+        class="flex w-full items-center gap-1.5 rounded-md py-1.5 text-left text-ui-xs text-muted-foreground transition-colors hover:text-foreground"
         onclick={() => (showAdvanced = !showAdvanced)}
       >
-        <ChevronDown class={cn('size-3.5 transition-transform duration-150', showAdvanced && 'rotate-180')} />
-        <span class="font-medium">Advanced options</span>
+        <ChevronDown class={cn('size-3.5 shrink-0 transition-transform duration-150', showAdvanced && 'rotate-180')} />
+        <span class="shrink-0 font-medium whitespace-nowrap">Advanced options</span>
         {#if !showAdvanced}
-          <span class="ml-1 text-ui-3xs text-muted-foreground/50">
-            encoding, collation, owner…
+          <span class="ml-auto min-w-0 truncate text-ui-2xs text-muted-foreground">
+            encoding, collation, owner
           </span>
         {/if}
       </button>
 
       <!-- Advanced fields (collapsible) -->
       {#if showAdvanced}
-        <div class="mt-3 flex flex-col gap-3 border-t border-border/40 pt-3">
+        <div id="cdb-advanced" class="mt-3 flex flex-col gap-3 border-t border-border/40 pt-3">
 
           {#if !isMySQL}
             <!-- Owner -->
@@ -246,7 +254,7 @@
             <div>
               <label for="cdb-connlimit" class={labelCls}>
                 Connection limit
-                <span class="font-normal text-muted-foreground/50">(-1 = unlimited)</span>
+                <span class="font-normal text-muted-foreground">(-1 = unlimited)</span>
               </label>
               <input id="cdb-connlimit" type="text" inputmode="numeric" value={connectionLimit}
                 oninput={(e) => {
@@ -269,7 +277,7 @@
       <div class="mt-4 flex items-center justify-end gap-2 border-t border-border/60 pt-4">
         <button
           type="button"
-          class="inline-flex h-8 items-center rounded-md border border-border px-3 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          class= "field-surface inline-flex h-8 items-center px-3 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
           onclick={() => (open = false)}
           disabled={loading}
         >

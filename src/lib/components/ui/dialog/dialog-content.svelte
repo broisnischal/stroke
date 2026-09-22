@@ -52,7 +52,7 @@
 			<DialogPrimitive.Close data-slot="dialog-close">
 				{#snippet child({ props })}
 					<button
-						class="absolute right-3.5 top-3.5 inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+						class="absolute right-3.5 top-3.5 inline-flex size-6 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 						{...props}
 					>
 						<X class="size-3.5" />

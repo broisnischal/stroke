@@ -64,6 +64,21 @@
     const row = listEl.querySelector(`[data-idx="${activeIdx}"]`)
     if (row instanceof HTMLElement) row.scrollIntoView({ block: 'nearest' })
   })
+
+  // Is there more list below the fold? The box caps at max-h-64 and simply cut
+  // the last visible row off flush, so a 12-item list looked like an 8-item one
+  // and the only way to find out otherwise was to press Down and watch it move.
+  let moreBelow = $state(false)
+  function syncOverflow() {
+    const el = listEl
+    if (!el) { moreBelow = false; return }
+    // 1px of slack: fractional row heights make scrollTop + clientHeight land
+    // just shy of scrollHeight at the true bottom.
+    moreBelow = el.scrollHeight - el.scrollTop - el.clientHeight > 1
+  }
+  // Re-measured when the list changes as well as when it scrolls - filtering to
+  // fewer items must drop the cue, not leave it pointing at nothing.
+  $effect(() => { void items.length; void activeIdx; syncOverflow() })
 </script>
 
 <!-- The mousedown handler is not an interaction, it is the opposite of one:
@@ -75,7 +90,8 @@
   class="absolute left-0 top-full z-50 mt-1 w-[min(32rem,calc(100vw-3rem))] overflow-hidden rounded-lg border border-border/70 bg-popover elevate-2-rim"
   onmousedown={(e) => e.preventDefault()}
 >
-  <ul bind:this={listEl} class="max-h-64 overflow-y-auto p-1" role="listbox" aria-label="Path suggestions">
+  <div class="relative">
+  <ul bind:this={listEl} onscroll={syncOverflow} class="max-h-64 overflow-y-auto p-1" role="listbox" aria-label="Path suggestions">
     {#each items as item, i (item.insert)}
       {@const on = i === activeIdx}
       {@const p = parts(item.label)}
@@ -100,32 +116,45 @@
           </span>
 
           {#if item.detail}
-            <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/40">{item.detail}</span>
+            <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">{item.detail}</span>
           {/if}
           <!-- Whether the sample below is representative. A key whose value is
                identical in every element says so, instead of leaving a preview
                that never changes to imply it. -->
           {#if item.spread}
-            <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground/30">{item.spread}</span>
+            <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">{item.spread}</span>
           {/if}
           <!-- The preview is what lets you pick by what is in the data rather
                than by name, so it shows on the armed row where it is being read. -->
           {#if on && item.preview}
-            <span class="max-w-40 shrink-0 truncate font-mono text-ui-3xs text-muted-foreground/35">{item.preview}</span>
+            <span class="max-w-40 shrink-0 truncate font-mono text-ui-3xs text-muted-foreground">{item.preview}</span>
           {/if}
         </button>
       </li>
     {/each}
   </ul>
+  <!-- The "there is more" cue. `pointer-events-none` so it never eats a click on
+       the row it is fading over, and it is purely decorative - the count in the
+       footer is what actually states the number. -->
+  {#if moreBelow}
+    <div class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-popover to-transparent"></div>
+  {/if}
+  </div>
 
   <!-- A list that simply appears teaches none of its keys. -->
-  <div class="flex items-center gap-3 border-t border-border/50 bg-muted/20 px-2.5 py-1 font-mono text-ui-3xs text-muted-foreground/45">
+  <div class="flex items-center gap-3 border-t border-border/50 bg-muted/20 px-2.5 py-1 font-mono text-ui-3xs text-muted-foreground">
     {#snippet key(/** @type {string} */ k)}
-      <span class="rounded border border-border/60 bg-background/60 px-1 py-px text-muted-foreground/60">{k}</span>
+      <span class="rounded border border-border/60 bg-background/60 px-1 py-px text-muted-foreground">{k}</span>
     {/snippet}
     <span class="flex items-center gap-1">{@render key('↑')}{@render key('↓')} move</span>
-    <span class="flex items-center gap-1">{@render key('↵')}{@render key('tab')} accept</span>
+    <span class="flex items-center gap-1">
+      {@render key('↵')}<span class="opacity-50">or</span>{@render key('tab')} accept
+    </span>
     <span class="flex items-center gap-1">{@render key('esc')} dismiss</span>
-    <span class="ml-auto tabular-nums">{items.length}</span>
+    <!-- Position, not just the total. "3 / 12" answers "is there more?" from the
+         footer, which is the question the cut-off list raises. -->
+    <span class="ms-auto tabular-nums">
+      {#if activeIdx >= 0}{activeIdx + 1} / {/if}{items.length}
+    </span>
   </div>
 </div>

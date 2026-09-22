@@ -104,6 +104,30 @@
   // ── Fields ────────────────────────────────────────────────────────────────
   const pkSet = $derived(new Set(primaryKey))
 
+  /**
+   * Which field is currently being edited, by column index.
+   *
+   * Every editable field used to render a live <input>/<textarea>/<select> the
+   * whole time. On a 136-column table that is 136 form controls with three
+   * listeners each, sitting in the DOM whether or not anybody is typing - and
+   * the whole set was wrapped in `{#key idx}`, so stepping to the next record
+   * destroyed and rebuilt all of them. That teardown is what the arrow keys felt
+   * like. A field is plain text until you click it.
+   * @type {number | null}
+   */
+  let editingIdx = $state(null)
+  /** @param {HTMLElement} node */
+  function focusOnMount(node) {
+    const el = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (
+      node.matches('input, textarea') ? node : node.querySelector('input, textarea')
+    )
+    el?.focus()
+    if (el && 'select' in el) el.select()
+  }
+  // Leaving a record closes the editor with it; the draft is already committed
+  // by the blur handler, so there is nothing to carry across.
+  $effect(() => { void idx; editingIdx = null })
+
   const fields = $derived.by(() => {
     if (columns.length === 0 || rows.length === 0) return []
     const row = rows[idx] ?? []
@@ -137,6 +161,9 @@
         enumValues,
         isMultiline: typeof raw === 'object' && raw !== null,
         isJsonType: normalType.startsWith('json'),
+        // Precomputed: this used to run a /\n/g match per field on every
+        // render, allocating an array each time just to count lines.
+        textRows: Math.min(8, Math.max(2, (valueToEditString(raw).match(/\n/g)?.length ?? 0) + 1)),
         nullable: col.nullable !== false,
       })
     })
@@ -351,7 +378,7 @@
           type="text"
           placeholder="Search fields…"
           bind:value={fieldSearch}
-          class="h-6 w-full min-w-0 rounded-md border border-transparent bg-accent/40 pl-6.5 pr-2 font-mono text-ui-2xs placeholder:text-muted-foreground/50 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
+          class="h-6 w-full min-w-0 rounded-md border border-transparent bg-accent/40 pl-6.5 pr-2 font-mono text-ui-2xs placeholder:text-muted-foreground focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none"
         />
       </div>
       <div class="mx-1 h-4 w-px bg-border/60"></div>
@@ -372,84 +399,100 @@
   <div class="app-scroll min-h-0 flex-1 overflow-y-auto bg-panel">
     {#if rows.length === 0}
       <div class="flex h-full items-center justify-center">
-        <p class="font-mono text-ui-sm text-muted-foreground/40">No rows on this page</p>
+        <p class="font-mono text-ui-sm text-muted-foreground">No rows on this page</p>
       </div>
     {:else}
-      <div class="mx-auto w-full max-w-2xl px-6 py-5">
-        <div class="divide-y divide-border/30 overflow-hidden rounded-lg border border-border/50 bg-card/40 shadow-sm">
-        {#key idx}
+      <div class="mx-auto w-full max-w-3xl px-6 py-5">
+        <!-- A label/value list, not a form. Every value used to sit in its own
+             bordered box whether or not it was editable, which made twelve rows
+             read as twelve inputs and gave the panel a ragged right edge: the
+             actions column is `auto`, and an editable field has two buttons
+             where a read-only one has one, so every row ended at a different x.
+             Values are text now, the control appears when you click one, and the
+             actions column is a fixed width so the value column is too. -->
+        <dl class="divide-y divide-border/30 overflow-hidden rounded-lg border border-border/50 bg-card/40">
           {#each filteredFields as field (field.colIdx)}
-            <div
-              class={cn(
-                'group/field grid grid-cols-[minmax(8.5rem,11rem)_minmax(0,1fr)_auto] items-start gap-x-4 px-4 py-2 transition-colors hover:bg-accent/20',
-                fields.length > 100 && '[content-visibility:auto] [contain-intrinsic-size:auto_44px]',
-              )}
-            >
-              <!-- Label -->
-              <div class="flex min-w-0 flex-col pt-1.5">
-                <span class="flex items-center gap-1 truncate font-mono text-ui-xs text-foreground/85">
+            {@const editing = editingIdx === field.colIdx}
+            <div class="group/field grid grid-cols-[minmax(8.5rem,12rem)_minmax(0,1fr)_3.25rem] items-start gap-x-4 px-4 py-2 transition-colors [contain-intrinsic-size:auto_44px] [content-visibility:auto] hover:bg-accent/20">
+              <dt class="flex min-w-0 flex-col pt-1.5">
+                <span class="flex items-center gap-1 truncate font-mono text-ui-xs text-foreground">
                   <span class="truncate">{field.name}</span>
                   {#if field.isPk}
-                    <span title="Primary key, cannot be changed" class="inline-flex shrink-0 items-center gap-0.5 font-mono text-ui-3xs text-warning/70">
-                      <Icon name="key-round" class="size-2.5" />
-                    </span>
+                    <Icon name="key-round" class="size-3 shrink-0 text-warning" title="Primary key, cannot be changed" />
                   {/if}
                 </span>
-                <span class="truncate font-mono text-ui-3xs text-muted-foreground/50">{field.dataType}</span>
-              </div>
+                <span class="truncate font-mono text-ui-3xs text-muted-foreground" title={field.dataType}>{field.dataType}</span>
+              </dt>
 
-              <!-- Value -->
-              <div class="relative min-w-0">
-                {#if !field.editable}
+              <dd class="relative min-w-0">
+                {#if field.editable && editing}
+                  {#if field.isBoolean || field.enumValues}
+                    <div use:focusOnMount>
+                      <FieldSelect
+                        class="w-full bg-transparent text-ui-xs"
+                        value={field.initialEditStr}
+                        disabled={savingFields[field.colIdx]}
+                        onchange={(v) => { void saveField(field.colIdx, v); editingIdx = null }}
+                        options={[
+                          ...(field.nullable ? [{ value: '', label: 'NULL' }] : []),
+                          ...(field.isBoolean
+                            ? [{ value: 'true', label: 'true' }, { value: 'false', label: 'false' }]
+                            : field.enumValues.map((/** @type {string} */ opt) => ({ value: opt, label: opt }))),
+                        ]}
+                      />
+                    </div>
+                  {:else if field.isMultiline}
+                    <textarea
+                      use:focusOnMount
+                      value={field.initialEditStr}
+                      rows={field.textRows}
+                      disabled={savingFields[field.colIdx]}
+                      placeholder={field.isNull ? 'NULL' : ''}
+                      class={cn(
+                        'field-surface w-full resize-none bg-transparent px-2.5 py-1.5 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50',
+                        fieldErrors[field.colIdx] && 'border-destructive',
+                      )}
+                      oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLTextAreaElement} */ (e.currentTarget).value)}
+                      onblur={(e) => { handleFieldBlur(field.colIdx, e); editingIdx = null }}
+                      onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
+                    ></textarea>
+                  {:else}
+                    <input
+                      use:focusOnMount
+                      type="text"
+                      value={field.initialEditStr}
+                      disabled={savingFields[field.colIdx]}
+                      placeholder={field.isNull ? 'NULL' : ''}
+                      class={cn(
+                        'field-surface w-full bg-transparent px-2.5 py-1.5 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50',
+                        fieldErrors[field.colIdx] && 'border-destructive',
+                      )}
+                      oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLInputElement} */ (e.currentTarget).value)}
+                      onblur={(e) => { handleFieldBlur(field.colIdx, e); editingIdx = null }}
+                      onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
+                    />
+                  {/if}
+                {:else}
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
                   <div
+                    role={field.editable ? 'button' : undefined}
+                    tabindex={field.editable ? 0 : undefined}
+                    aria-label={field.editable ? `Edit ${field.name}` : undefined}
                     class={cn(
-                      'w-full rounded-md border border-transparent bg-muted/20 px-2.5 py-1.5 font-mono text-ui-xs',
-                      field.isNull || field.isEmpty ? 'italic text-muted-foreground/40' : 'text-foreground',
-                      field.isMultiline ? 'whitespace-pre-wrap break-all' : 'truncate',
+                      'w-full rounded-md border border-transparent px-2.5 py-1.5 font-mono text-ui-xs',
+                      field.editable && 'cursor-text hover:border-field-border',
+                      field.isNull || field.isEmpty ? 'italic text-muted-foreground' : 'text-foreground',
+                      field.isMultiline ? 'line-clamp-3 break-all whitespace-pre-wrap' : 'truncate',
                     )}
                     title={field.displayValue}
+                    onclick={() => { if (field.editable) editingIdx = field.colIdx }}
+                    onkeydown={(e) => {
+                      if (!field.editable) return
+                      if (e.key !== 'Enter' && e.key !== ' ') return
+                      e.preventDefault()
+                      editingIdx = field.colIdx
+                    }}
                   >{field.displayValue}</div>
-                {:else if field.isBoolean || field.enumValues}
-                  <FieldSelect
-                    class="w-full bg-muted/15 text-ui-xs"
-                    value={field.initialEditStr}
-                    disabled={savingFields[field.colIdx]}
-                    onchange={(v) => void saveField(field.colIdx, v)}
-                    options={[
-                      ...(field.nullable ? [{ value: '', label: 'NULL' }] : []),
-                      ...(field.isBoolean
-                        ? [{ value: 'true', label: 'true' }, { value: 'false', label: 'false' }]
-                        : field.enumValues.map((/** @type {string} */ opt) => ({ value: opt, label: opt }))),
-                    ]}
-                  />
-                {:else if field.isMultiline}
-                  <textarea
-                    value={field.initialEditStr}
-                    rows={Math.min(8, Math.max(2, (field.initialEditStr.match(/\n/g)?.length ?? 0) + 1))}
-                    disabled={savingFields[field.colIdx]}
-                    placeholder={field.isNull ? 'NULL' : ''}
-                    class={cn(
-                      'w-full resize-none rounded-lg border-2 bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-50',
-                      fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border',
-                    )}
-                    oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLTextAreaElement} */ (e.currentTarget).value)}
-                    onblur={(e) => handleFieldBlur(field.colIdx, e)}
-                    onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
-                  ></textarea>
-                {:else}
-                  <input
-                    type="text"
-                    value={field.initialEditStr}
-                    disabled={savingFields[field.colIdx]}
-                    placeholder={field.isNull ? 'NULL' : ''}
-                    class={cn(
-                      'w-full rounded-lg border-2 bg-muted/15 px-2.5 py-1.5 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-50',
-                      fieldErrors[field.colIdx] ? 'border-destructive' : 'border-border',
-                    )}
-                    oninput={(e) => scheduleFieldSave(field.colIdx, /** @type {HTMLInputElement} */ (e.currentTarget).value)}
-                    onblur={(e) => handleFieldBlur(field.colIdx, e)}
-                    onkeydown={(e) => handleFieldKeydown(field.colIdx, e)}
-                  />
                 {/if}
 
                 {#if savingFields[field.colIdx]}
@@ -458,14 +501,16 @@
                 {#if fieldErrors[field.colIdx]}
                   <p class="mt-0.5 font-mono text-ui-3xs text-destructive">{fieldErrors[field.colIdx]}</p>
                 {/if}
-              </div>
+              </dd>
 
-              <!-- Hover actions -->
-              <div class="flex items-center gap-0.5 pt-1">
+              <!-- Fixed width, so a row with a Set-NULL button and one without
+                   still end their value column at the same x. -->
+              <div class="flex items-center justify-end gap-0.5 pt-1">
                 <button
                   type="button"
-                  class="invisible inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground group-hover/field:visible"
+                  class="opacity-0 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground group-hover/field:opacity-100"
                   title="Copy value"
+                  aria-label="Copy {field.name}"
                   onclick={() => void copyFieldValue(field)}
                 >
                   <Icon name="copy" class="size-3" />
@@ -473,8 +518,9 @@
                 {#if field.editable && field.nullable}
                   <button
                     type="button"
-                    class="invisible inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground group-hover/field:visible"
+                    class="opacity-0 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground group-hover/field:opacity-100"
                     title="Set NULL"
+                    aria-label="Set {field.name} to NULL"
                     disabled={field.isNull || savingFields[field.colIdx]}
                     onclick={() => void commitValue(field.colIdx, null)}
                   >
@@ -486,11 +532,10 @@
           {/each}
 
           {#if filteredFields.length === 0 && fieldSearch}
-            <p class="px-4 py-8 text-center font-mono text-ui-xs text-muted-foreground/60">No fields match "{fieldSearch}"</p>
+            <p class="px-4 py-8 text-center font-mono text-ui-xs text-muted-foreground">No fields match "{fieldSearch}"</p>
           {/if}
-        {/key}
-        </div>
-        <p class="mt-3 select-none text-center text-ui-3xs text-muted-foreground/40">
+        </dl>
+        <p class="mt-3 select-none text-center text-ui-3xs text-muted-foreground">
           ← → to navigate records{onsave && !readonly ? ' · Enter saves a field · Esc reverts' : ''}
         </p>
       </div>

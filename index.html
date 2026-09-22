@@ -5,12 +5,21 @@
       try {
         const raw = localStorage.getItem('stroke:settings')
         const parsed = raw ? JSON.parse(raw) : null
+        // Keep both lists in sync with src/lib/themes/registry.js. They were
+        // already a theme behind: obsidian and clay were missing, so choosing
+        // either meant booting into the OS default and repainting once the app
+        // loaded.
         const valid = [
-          'light', 'parchment', 'ice', 'github-light', 'light-high-contrast',
-          'dark', 'graphite', 'midnight', 'vitesse', 'slate', 'forest', 'mono',
-          'rose-pine', 'catppuccin', 'solarized', 'dark-high-contrast',
+          'light', 'parchment', 'clay', 'claude-light', 'moss-light', 'orchid-light',
+          'ice', 'github-light', 'light-high-contrast',
+          'dark', 'obsidian', 'matte', 'claude', 'moss', 'orchid', 'graphite', 'midnight',
+          'vitesse', 'slate', 'forest', 'mono', 'rose-pine', 'catppuccin',
+          'solarized', 'dark-high-contrast', 'hotdog',
         ]
-        const lightThemes = ['light', 'parchment', 'ice', 'github-light', 'light-high-contrast']
+        const lightThemes = [
+          'light', 'parchment', 'clay', 'claude-light', 'moss-light', 'orchid-light',
+          'ice', 'github-light', 'light-high-contrast',
+        ]
         let theme = parsed?.theme
         if (!valid.includes(theme)) {
           // No saved preference - follow the OS

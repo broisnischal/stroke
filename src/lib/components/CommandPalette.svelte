@@ -97,7 +97,7 @@
   }
 
   // Single source of truth for page destinations - rendered both in the root
-  // "Views" group and in the dedicated "Go to page" navigator (Ctrl/⌘+P). Add a
+  // "Views" group and in the dedicated "Go to page" navigator (Ctrl/⌘+Shift+P). Add a
   // page once here and it shows up in both. `keys` is an optional shortcut hint.
   const pageItems = $derived([
     { icon: 'key-round',       label: 'Redis Keyspace',                action: onopenredis,      show: connected && isRedis, value: 'redis keyspace keys browse key value store console cli' },
@@ -376,6 +376,37 @@
     }
   }
 
+  // The mouse's back button inside the palette: a sub-page (tables, pages, ask)
+  // steps back to root, root closes. Same reasoning as the connection dialog -
+  // the global handler bails while an overlay is open, but "back" still means
+  // something in here. Capture-phase and stopped so the global one never sees
+  // it, and the default is suppressed either way: unhandled, the webview walks
+  // its own document history and navigates out of the app.
+  $effect(() => {
+    if (!open) return
+    /** @param {MouseEvent} e */
+    function onMouseNav(e) {
+      if (e.button !== 3 && e.button !== 4) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.button !== 3) return
+      if (page !== 'root') page = 'root'
+      else open = false
+    }
+    /** Swallow the paired auxclick/mouseup so the webview cannot act on them. */
+    function swallowAux(/** @type {MouseEvent} */ e) {
+      if (e.button === 3 || e.button === 4) { e.preventDefault(); e.stopPropagation() }
+    }
+    document.addEventListener('mousedown', onMouseNav, { capture: true })
+    document.addEventListener('auxclick', swallowAux, { capture: true })
+    document.addEventListener('mouseup', swallowAux, { capture: true })
+    return () => {
+      document.removeEventListener('mousedown', onMouseNav, { capture: true })
+      document.removeEventListener('auxclick', swallowAux, { capture: true })
+      document.removeEventListener('mouseup', swallowAux, { capture: true })
+    }
+  })
+
   $effect(() => {
     if (!open) {
       // Abort any in-flight quick-ask: closing mid-stream must stop the tool
@@ -407,7 +438,7 @@
 
   // Derived table groups - used in both the root page and the dedicated tables page
   const regularTables = $derived(tables.filter((t) => !t.tableKind || t.tableKind === 'table' || t.tableKind === 'foreign_table'))
-  const viewTables    = $derived(tables.filter((t) => t.tableKind === 'view'))
+  const viewTables = $derived(tables.filter((t) => t.tableKind === 'view'))
   const matViewTables = $derived(tables.filter((t) => t.tableKind === 'materialized_view'))
 
   // Search text bound from Command.Input. We filter + cap the Tables page
@@ -432,8 +463,8 @@
     const words = l.split(/[\s_.\-]+/).filter(Boolean)
     return { t, l, loose: stripSep(l), words, initials: words.map((w) => w[0]).join('') }
   }
-  const _loweredRegular  = $derived(regularTables.map(prep))
-  const _loweredViews    = $derived(viewTables.map(prep))
+  const _loweredRegular = $derived(regularTables.map(prep))
+  const _loweredViews = $derived(viewTables.map(prep))
   const _loweredMatViews = $derived(matViewTables.map(prep))
 
   /**
@@ -498,8 +529,8 @@
     return { items: scored.slice(0, TABLES_PAGE_CAP).map((x) => x.t), total: scored.length }
   }
 
-  const tablesPageRegular  = $derived(filterAndCap(_loweredRegular))
-  const tablesPageViews    = $derived(filterAndCap(_loweredViews))
+  const tablesPageRegular = $derived(filterAndCap(_loweredRegular))
+  const tablesPageViews = $derived(filterAndCap(_loweredViews))
   const tablesPageMatViews = $derived(filterAndCap(_loweredMatViews))
 
   // On tables page: shouldFilter=false so bits-ui skips its sort/filter pass entirely
@@ -552,8 +583,8 @@
   title="Command menu"
   description="Search tables, schemas, and commands"
   class={page === 'ask'
-    ? 'w-[min(820px,calc(100vw-3rem))] sm:max-w-none'
-    : 'w-[min(540px,calc(100vw-2rem))] sm:max-w-none'}
+    ? 'w-[min(51.25rem,calc(100vw-3rem))] sm:max-w-none'
+    : 'w-[min(33.75rem,calc(100vw-2rem))] sm:max-w-none'}
 >
   {#snippet children()}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -577,13 +608,13 @@
         <div class="order-first flex items-center gap-1.5 border-b border-border/50 px-4 py-2">
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none"
+            class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground focus-visible:outline-none"
             onclick={goBack}
           >
             <Icon name="chevron-left" class="size-3" />
             Back
           </button>
-          <span class="text-muted-foreground/25 text-ui-2xs">/</span>
+          <span class="text-muted-foreground text-ui-2xs">/</span>
           <span class="text-ui-2xs font-medium text-foreground/80">{pageLabel[page]}</span>
         </div>
       {/if}
@@ -592,7 +623,7 @@
            one exchange at a time, so answers and their result tables get clipped. -->
       <Command.List class={page === 'ask' ? 'h-[min(640px,74vh)] max-h-[min(640px,74vh)]' : 'max-h-[min(440px,58vh)]'}>
         {#if page !== 'ask'}
-          <Command.Empty class="py-8 text-center text-ui-xs text-muted-foreground/40">No results.</Command.Empty>
+          <Command.Empty class="py-8 text-center text-ui-xs text-muted-foreground">No results.</Command.Empty>
         {/if}
 
         <!-- Shared page-destination row (root "Views" + "Go to page" navigator) -->
@@ -615,7 +646,7 @@
                 </div>
               {:else if turn.role === 'tool'}
                 <div class="mb-1.5 ml-[22px] flex flex-col gap-1">
-                  <div class="flex items-center gap-1.5 text-ui-2xs {turn.status === 'error' ? 'text-destructive/80' : 'text-muted-foreground/55'}">
+                  <div class="flex items-center gap-1.5 text-ui-2xs {turn.status === 'error' ? 'text-destructive' : 'text-muted-foreground'}">
                     {#if turn.status === 'running'}<Icon name="sparkles" class="size-3 animate-pulse" />
                     {:else if turn.status === 'error'}<Icon name="x" class="size-3" />
                     {:else}<Icon name="check" class="size-3 text-success" />{/if}
@@ -628,7 +659,7 @@
                           <thead>
                             <tr class="bg-muted/25">
                               {#each turn.result.columns.slice(0, 5) as c}
-                                <th class="whitespace-nowrap border-b border-border/40 px-2.5 py-1 text-left text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground/50">{c}</th>
+                                <th class="whitespace-nowrap border-b border-border/40 px-2.5 py-1 text-left text-ui-3xs font-medium uppercase tracking-wide text-muted-foreground">{c}</th>
                               {/each}
                             </tr>
                           </thead>
@@ -636,7 +667,7 @@
                             {#each turn.result.rows as row, ri}
                               <tr class="transition-colors hover:bg-muted/15">
                                 {#each row.slice(0, 5) as cell}
-                                  <td class="max-w-[220px] truncate {ri < turn.result.rows.length - 1 ? 'border-b border-border/15' : ''} px-2.5 py-1 font-mono text-ui-2xs {cell === null ? 'italic text-muted-foreground/40' : 'text-foreground/80'}">{cell === null ? 'NULL' : String(cell)}</td>
+                                  <td class="max-w-[220px] truncate {ri < turn.result.rows.length - 1 ? 'border-b border-border/15' : ''} px-2.5 py-1 font-mono text-ui-2xs {cell === null ? 'italic text-muted-foreground' : 'text-foreground/80'}">{cell === null ? 'NULL' : String(cell)}</td>
                                 {/each}
                               </tr>
                             {/each}
@@ -644,7 +675,7 @@
                         </table>
                       </div>
                       {#if turn.result.total > turn.result.rows.length}
-                        <div class="border-t border-border/30 bg-muted/10 px-2.5 py-1 text-ui-3xs text-muted-foreground/45">showing {turn.result.rows.length} of {turn.result.total} rows</div>
+                        <div class="border-t border-border/30 bg-muted/10 px-2.5 py-1 text-ui-3xs text-muted-foreground">showing {turn.result.rows.length} of {turn.result.total} rows</div>
                       {/if}
                     </div>
                   {/if}
@@ -652,7 +683,7 @@
               {:else}
                 <div class="mb-2 ml-[22px]">
                   {#if turn.streaming && !turn.text}
-                    <div class="flex items-center gap-2 py-1 text-ui-xs text-muted-foreground/50"><Icon name="sparkles" class="size-3.5 animate-pulse" /> Thinking…</div>
+                    <div class="flex items-center gap-2 py-1 text-ui-xs text-muted-foreground"><Icon name="sparkles" class="size-3.5 animate-pulse" /> Thinking…</div>
                   {:else}
                     <AiMarkdown content={turn.text} streaming={turn.streaming} debounceMs={120} class="text-ui-xs" />
                   {/if}
@@ -682,7 +713,7 @@
                 <button type="button" class={askBtn} onclick={() => { const q = lastAskQuestion; open = false; onaskcontinue(q) }}><Icon name="bot" class="size-3" /> Continue in chat</button>
               {/if}
             </div>
-            <div class="ml-[22px] mt-1.5 text-ui-3xs text-muted-foreground/35">Type below and press ↵ to follow up</div>
+            <div class="ml-[22px] mt-1.5 text-ui-3xs text-muted-foreground">Type below and press ↵ to follow up</div>
           </div>
         {/if}
 
@@ -692,7 +723,7 @@
             <Command.Group heading="Ask">
               <Command.Item value={"ask ai " + paletteSearch} onSelect={() => startAsk(paletteSearch)}>
                 <Icon name="sparkles" class="size-4 shrink-0 text-primary" />
-                <span data-slot="command-label" class="truncate">Ask AI: <span class="text-muted-foreground/70">"{paletteSearch}"</span></span>
+                <span data-slot="command-label" class="truncate">Ask AI: <span class="text-muted-foreground">"{paletteSearch}"</span></span>
                 <Command.Shortcut keys="↵" />
               </Command.Item>
             </Command.Group>
@@ -739,7 +770,7 @@
                   <Command.Item value="browse all tables views search" onSelect={() => navigate('tables')}>
                     <Icon name="table-2" class="size-4 shrink-0 opacity-40" />
                     <span data-slot="command-label" class="truncate text-muted-foreground">All {tables.length} tables & views…</span>
-                    <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground/40" />
+                    <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground" />
                   </Command.Item>
                 {/if}
               </Command.Group>
@@ -870,7 +901,7 @@
               {#if savedConnections.length > 0}
                 <span class="shrink-0 font-mono text-ui-xs text-muted-foreground">{savedConnections.length}</span>
               {/if}
-              <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground/40" />
+              <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground" />
             </Command.Item>
           </Command.Group>
 
@@ -879,7 +910,7 @@
             <Command.Item value="docker containers postgresql mysql launch run" onSelect={() => navigate('docker')}>
               <Icon name="package" class="size-4 shrink-0 opacity-60" />
               <span data-slot="command-label" class="truncate">Docker</span>
-              <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground/40" />
+              <Icon name="chevron-right" class="size-3.5 shrink-0 text-muted-foreground" />
             </Command.Item>
           </Command.Group>
 
@@ -899,7 +930,7 @@
                 </Command.Item>
               {/each}
               {#if tablesPageRegular.total > tablesPageRegular.items.length}
-                <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground/40">
+                <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground">
                   Showing {tablesPageRegular.items.length} of {tablesPageRegular.total}, keep typing to narrow.
                 </div>
               {/if}
@@ -914,7 +945,7 @@
                 </Command.Item>
               {/each}
               {#if tablesPageViews.total > tablesPageViews.items.length}
-                <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground/40">
+                <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground">
                   Showing {tablesPageViews.items.length} of {tablesPageViews.total}, keep typing to narrow.
                 </div>
               {/if}
@@ -933,7 +964,7 @@
                 </Command.Item>
               {/each}
               {#if tablesPageMatViews.total > tablesPageMatViews.items.length}
-                <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground/40">
+                <div class="px-2.5 py-1.5 text-ui-2xs text-muted-foreground">
                   Showing {tablesPageMatViews.items.length} of {tablesPageMatViews.total}, keep typing to narrow.
                 </div>
               {/if}

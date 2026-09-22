@@ -133,7 +133,7 @@
 <Dialog.Root bind:open>
   <Dialog.Portal>
     <Dialog.Overlay />
-    <Dialog.Content showCloseButton={false} class="w-[min(340px,calc(100vw-2rem))] gap-0 overflow-hidden p-0 sm:max-w-none">
+    <Dialog.Content showCloseButton={false} class="w-[min(21.25rem,calc(100vw-2rem))] gap-0 overflow-hidden p-0 sm:max-w-none">
       <div class="flex flex-col items-center px-6 pt-6 pb-5 text-center">
         <div class="grid size-9 place-items-center rounded-lg border border-border/50 bg-muted/30">
           <Icon name={isRemove ? 'lock-open' : 'lock'} class="size-4 text-muted-foreground" />
@@ -156,12 +156,12 @@
           {/key}
         </div>
 
-        <p class="mt-2 h-4 text-ui-2xs {error ? 'text-destructive' : 'text-muted-foreground/55'}">
+        <p class="mt-2 h-4 text-ui-2xs {error ? 'text-destructive' : 'text-muted-foreground'}">
           {#if busy}Saving…{:else if error}{error}{/if}
         </p>
 
         {#if step === 'new' && !isRemove}
-          <p class="mt-2 text-ui-2xs leading-relaxed text-balance text-muted-foreground/60">
+          <p class="mt-2 text-ui-2xs leading-relaxed text-balance text-muted-foreground">
             Kept as a salted hash in your OS keychain, never as the digits. There is
             no reset link, so pick one you will remember.
           </p>
@@ -171,10 +171,10 @@
       <div class="flex items-center justify-between border-t border-border/25 px-4 py-2.5">
         <button
           type="button"
-          class="inline-flex h-7 items-center rounded-md px-2.5 text-ui-xs text-muted-foreground/70 transition-colors hover:bg-muted/40 hover:text-foreground"
+          class="inline-flex h-7 items-center rounded-md px-2.5 text-ui-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
           onclick={back}>{step === 'current' || (step === 'new' && !needsCurrent) ? 'Cancel' : 'Back'}</button
         >
-        <p class="text-ui-3xs text-muted-foreground/45">
+        <p class="text-ui-3xs text-muted-foreground">
           {#if !isRemove}Step {step === 'current' ? 1 : step === 'new' ? (needsCurrent ? 2 : 1) : needsCurrent ? 3 : 2} of {needsCurrent ? 3 : 2}{/if}
         </p>
       </div>

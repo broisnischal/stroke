@@ -210,6 +210,11 @@ pub(crate) fn http() -> &'static reqwest::Client {
             .user_agent("stroke/1.0")
             .tcp_keepalive(std::time::Duration::from_secs(60))
             .pool_max_idle_per_host(4)
+            // Same reason as the Cloudflare client: Neon, Supabase, PlanetScale
+            // and Prisma discovery all run through here, and an unbounded call
+            // shows as a provider panel that never finishes loading.
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .expect("failed to build provider HTTP client")
     })

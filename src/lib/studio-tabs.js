@@ -1,4 +1,4 @@
-/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license' | 'orm-schema' | 'map' | 'advisor'} StudioTabKind */
+/** @typedef {'table' | 'sql' | 'ddl' | 'welcome' | 'ai' | 'schema' | 'orm' | 'security' | 'logs' | 'extensions' | 'extension-detail' | 'backup' | 'json' | 'charts' | 'dashboard' | 'erd' | 'reltree' | 'diagrams' | 'search' | 'notebook' | 'schema-timeline' | 'data-diff' | 'insights' | 'objects' | 'redis' | 'license' | 'orm-schema' | 'map' | 'advisor' | 'golf'} StudioTabKind */
 
 import { loadDefaultPageSize } from '$lib/table-query.js'
 
@@ -32,6 +32,9 @@ import { loadDefaultPageSize } from '$lib/table-query.js'
  * @property {Set<string>} hiddenColumns
  * @property {boolean} filterBarOpen
  * @property {'table' | 'json' | 'record' | 'text' | 'chart' | 'erd'} [dataViewMode]
+ * @property {'data' | 'structure'} [tableViewMode] - data grid vs the structure editor
+ * @property {unknown[]} [structureColumns] - the structure editor's rows for THIS table
+ * @property {string} [structureSearch]
  * @property {number} [scrollLeft]
  * @property {number} [scrollTop]
  * @property {number[]} [expandedRows] - row indices with an open inline detail panel; restored in background/snapshot panes
@@ -86,6 +89,8 @@ export function cloneTableTabState(state) {
     hiddenColumns: new Set(state.hiddenColumns),
     editingCell: state.editingCell ? { ...state.editingCell } : null,
     expandedRows: [...(state.expandedRows ?? [])],
+    // Immutable value array, like `columns` - reassigned wholesale by loadStructure().
+    structureColumns: state.structureColumns,
   }
 }
 
@@ -123,6 +128,9 @@ export function createTableTabState(schema = 'public', table = null, tableKind =
     hiddenColumns: new Set(),
     filterBarOpen: false,
     dataViewMode: 'table',
+    tableViewMode: 'data',
+    structureColumns: [],
+    structureSearch: '',
     scrollLeft: 0,
     scrollTop: 0,
     expandedRows: [],
@@ -220,6 +228,7 @@ const SINGLETON_TAB_TITLES = {
   search: 'Find in database',
   'schema-timeline': 'Schema Timeline',
   'data-diff': 'Data Diff',
+  golf: 'VACUUM',
 }
 
 /** @param {StudioTabKind} kind */
@@ -246,6 +255,7 @@ export const createSecurityTab = () => createKindTab('security')
 export const createLogsTab = () => createKindTab('logs')
 export const createInsightsTab = () => createKindTab('insights')
 export const createAdvisorTab = () => createKindTab('advisor')
+export const createGolfTab = () => createKindTab('golf')
 export const createObjectsTab = () => createKindTab('objects')
 export const createRedisTab = () => createKindTab('redis')
 export const createMapTab = () => createKindTab('map')
@@ -278,6 +288,7 @@ export const findLogsTab = (tabs) => findTabByKind(tabs, 'logs')
 export const findInsightsTab = (tabs) => findTabByKind(tabs, 'insights')
 /** @type {(tabs: StudioTab[]) => StudioTab | null} */
 export const findAdvisorTab = (tabs) => findTabByKind(tabs, 'advisor')
+export const findGolfTab = (tabs) => findTabByKind(tabs, 'golf')
 /** @type {(tabs: StudioTab[]) => StudioTab | null} */
 export const findObjectsTab = (tabs) => findTabByKind(tabs, 'objects')
 /** @type {(tabs: StudioTab[]) => StudioTab | null} */

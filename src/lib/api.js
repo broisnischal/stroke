@@ -741,6 +741,9 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
     includeCount: query.includeCount !== false,
     // Null placement for the ORDER BY (dialects that support it); unset → default.
     nullsOrder: (() => { try { const v = loadSettings().nullSortOrder; return v === 'first' || v === 'last' ? v : null } catch { return null } })(),
+    // Fetch a wide column as a size and load its value per cell (Settings →
+    // Data). Off means every value on the page, whatever it weighs.
+    previewWide: (() => { try { return loadSettings().lazyWideColumns !== false } catch { return true } })(),
   })
   recordQuery({ sql: r?.sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), schema, table, source: 'browse', success: true })
   return r
@@ -753,7 +756,7 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
  * count is unavailable (non-Postgres engine); callers keep their current total.
  * @param {string} schema
  * @param {string} table
- * @param {{ search?: string, searchIsRegex?: boolean, filters?: { column: string, op: string, value?: string }[] }} [query]
+ * @param {{ search?: string, searchIsRegex?: boolean, searchCaseSensitive?: boolean, filters?: { column: string, op: string, value?: string }[] }} [query]
  * @returns {Promise<number>}
  */
 export async function countTableRows(schema, table, query = {}) {
@@ -762,6 +765,9 @@ export async function countTableRows(schema, table, query = {}) {
     table,
     search: query.search?.trim() || null,
     searchIsRegex: query.searchIsRegex ?? false,
+    // Mirrors getTableRows: a count taken under a different predicate than the
+    // rows is a pager that disagrees with the page.
+    searchCaseSensitive: query.searchCaseSensitive ?? false,
     filters: query.filters?.length ? query.filters : null,
   })
   return Number(n)
@@ -906,7 +912,12 @@ export async function instanceReplication() { return await inv('instance_replica
  */
 export async function instanceSetConfig(name, value) {
   assertWritable('change server configuration')
-  return await inv('instance_set_config', { name, value })
+  // The command takes an Option<String>, and Tauri rejects the call outright on a
+  // type mismatch rather than coercing. A caller holding a number is an easy
+  // mistake to make - `bind:value` on a number input produces one - so the
+  // contract is enforced here rather than trusted at each call site. `null` has
+  // to survive: it is what resets the setting to its default.
+  return await inv('instance_set_config', { name, value: value == null ? null : String(value) })
 }
 
 /**
@@ -970,6 +981,25 @@ export async function executeDdl(sql) {
 export async function updateTableCell(schema, table, primaryKey, column, value) {
   assertWritable('edit a cell')
   return inv('pg_update_table_cell', { schema, table, primaryKey, column, value })
+}
+
+/**
+ * Load one cell in full.
+ *
+ * A browse page deliberately does not fetch wide columns - they arrive as a
+ * preview with the real size attached - so this is how the whole value is read
+ * when someone asks for it. Postgres only for now; other engines answer with a
+ * message that says so.
+ *
+ * @param {string} schema
+ * @param {string} table
+ * @param {Record<string, unknown>} primaryKey
+ * @param {string} column
+ * @param {number} [maxBytes] ceiling on the text returned (default 4MB, hard max 16MB)
+ * @returns {Promise<{ text: string, bytes: number, truncated: boolean }>}
+ */
+export async function fetchCellValue(schema, table, primaryKey, column, maxBytes) {
+  return inv('pg_fetch_cell_value', { schema, table, primaryKey, column, maxBytes: maxBytes ?? null })
 }
 
 /**
@@ -1063,7 +1093,7 @@ export async function backupExport(schema = null, tables = null, options = null)
 /**
  * Execute a SQL restore script against the connected database.
  * @param {string} sql
- * @returns {Promise<{ statementsOk: number, statementsErr: number, errors: string[] }>}
+ * @returns {Promise<{ statementsOk: number, statementsErr: number, statementsSkipped: number, cancelled: boolean, errors: string[] }>}
  */
 export async function backupImport(sql) {
   assertWritable('restore a backup')
@@ -1077,6 +1107,106 @@ export async function backupImport(sql) {
  */
 export async function backupCancel() {
   return inv('backup_cancel')
+}
+
+// ── Explicit transactions ─────────────────────────────────────────────────────
+
+/**
+ * @typedef {object} TxStatus
+ * @property {boolean} open
+ * @property {number} statements statements run since BEGIN
+ * @property {number} rowsAffected
+ * @property {number} openMs how long the transaction has been held
+ * @property {string|null} engine
+ */
+
+/**
+ * Open a transaction and hold its connection until it is committed or rolled
+ * back. `sessionId` scopes it to one editor tab.
+ * @param {string} sessionId
+ * @returns {Promise<TxStatus>}
+ */
+export async function txBegin(sessionId) {
+  return inv('tx_begin', { sessionId })
+}
+
+/**
+ * Run SQL inside an open transaction. Nothing is visible elsewhere until commit.
+ * @param {string} sessionId
+ * @param {string} sql
+ */
+export async function txExecute(sessionId, sql) {
+  if (isWriteSql(sql)) assertWritable('run that statement')
+  const _t0 = performance.now()
+  try {
+    const r = await inv('tx_execute', { sessionId, sql })
+    recordQuery({ sql: r?.sql || sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), source: 'sql', success: true })
+    return r
+  } catch (err) {
+    recordQuery({ sql, durationMs: Math.round(performance.now() - _t0), source: 'sql', success: false, error: /** @type {Error} */ (err).message })
+    throw err
+  }
+}
+
+/** @param {string} sessionId @returns {Promise<TxStatus>} */
+export async function txCommit(sessionId) {
+  assertWritable('commit a transaction')
+  return inv('tx_commit', { sessionId })
+}
+
+/** @param {string} sessionId @returns {Promise<TxStatus>} */
+export async function txRollback(sessionId) {
+  return inv('tx_rollback', { sessionId })
+}
+
+/** @param {string} sessionId @returns {Promise<TxStatus>} */
+export async function txStatus(sessionId) {
+  return inv('tx_status', { sessionId })
+}
+
+// ── Data import ───────────────────────────────────────────────────────────────
+
+/**
+ * @typedef {object} ImportOptions
+ * @property {'error'|'skip'|'update'} [conflict] what to do when a row already exists
+ * @property {string[]} [conflictColumns] the columns that decide a conflict
+ * @property {boolean} [abortOnError] true (default) imports all-or-nothing
+ * @property {number} [batchSize] rows per INSERT statement
+ */
+
+/**
+ * @typedef {object} ImportRowsResult
+ * @property {number} inserted
+ * @property {number} failed
+ * @property {number} skipped rows never attempted
+ * @property {boolean} cancelled
+ * @property {boolean} rolledBack true when nothing was committed
+ * @property {{ row: number, message: string }[]} errors
+ */
+
+/**
+ * Bulk-insert parsed rows into an existing table.
+ *
+ * `rows` must be positional: one value per entry in `columns`, same order.
+ * @param {string|null} schema
+ * @param {string} table
+ * @param {string[]} columns
+ * @param {unknown[][]} rows
+ * @param {ImportOptions|null} [options]
+ * @returns {Promise<ImportRowsResult>}
+ */
+export async function importRows(schema, table, columns, rows, options = null) {
+  assertWritable('import rows')
+  return inv('import_rows', { schema, table, columns, rows, options })
+}
+
+/**
+ * Request cancellation of the running import. The backend stops at the next
+ * batch; an all-or-nothing import then rolls back what it had written.
+ * @returns {Promise<void>}
+ */
+export async function importCancel() {
+  return inv('import_cancel')
 }
 
 // ── Autostart ─────────────────────────────────────────────────────────────────

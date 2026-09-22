@@ -1,5 +1,5 @@
 <script>
-  import { untrack, onDestroy } from "svelte";
+  import { tick, untrack, onDestroy } from "svelte";
   import Icon from "./Icon.svelte";
   import CloudflareLogin from "./CloudflareLogin.svelte";
   import ProviderConnect from "./ProviderConnect.svelte";
@@ -30,12 +30,16 @@
   import {
     loadSavedConnections,
     upsertConnection,
+    lastPersistFailed,
     removeConnection,
     newConnectionId,
     getLastConnectionId,
     setLastConnectionId,
+    findDuplicateConnection,
   } from "$lib/stores/connections.js";
   import { Input } from "$lib/components/ui/input/index.js";
+  import SearchableMenu from "./SearchableMenu.svelte";
+  import { Popover, PopoverTrigger, PopoverContent } from "$lib/components/ui/popover/index.js";
   import PasswordInput from "./PasswordInput.svelte";
   import { requireUnlock } from "$lib/stores/app-lock.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
@@ -44,12 +48,19 @@
   import { Dialog as DialogPrimitive } from "bits-ui";
   import ResizeHandle from "./ResizeHandle.svelte";
   import { cn } from "$lib/utils.js";
+  import { IS_MAC } from '$lib/shortcuts.js';
+  import { focusTrap } from '$lib/actions/focus-trap.js';
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
-  import { parseConnectionUri } from "$lib/connection-uri.js";
+  import { parseConnectionUri, detectConnectionUri } from "$lib/connection-uri.js";
   import { PROVIDERS, providerBuildConnection } from "$lib/providers.js";
 
   let {
     open = $bindable(false),
+    /**
+     * Engine to open straight into, e.g. from the welcome screen's chips. Cleared
+     * once consumed so the next plain open starts on the picker again.
+     */
+    initialEngine = $bindable(""),
     onconnected = (conn, id) => {},
     maxConnections = Infinity,
     /** Name of the live session, '' when nothing is connected. Drives Disconnect. */
@@ -197,7 +208,7 @@
   const ENGINE_TINT = {
     postgres: "text-sky-500/80",
     cockroachdb: "text-teal-500/80",
-    mysql: "text-amber-500/80",
+    mysql: "text-cyan-500/80", // the dolphin is teal, not amber
     mariadb: "text-orange-500/80",
     sqlite: "text-blue-500/80",
     "sqlite-memory": "text-blue-500/80",
@@ -215,7 +226,7 @@
     redis: "text-red-500/80",
   };
   function engineTint(id) {
-    return ENGINE_TINT[id] ?? "text-muted-foreground/60";
+    return ENGINE_TINT[id] ?? "text-muted-foreground";
   }
 
   /** Most recently connected first; never-connected rows sink to the bottom. */
@@ -241,6 +252,16 @@
   const firstSavedMatch = $derived(savedMatches[0] ?? null);
 
   /**
+   * The rail is one tab stop, not one per row: Tab from the filter lands on the
+   * selected connection (or the first), and the arrow keys walk from there. A
+   * list of forty rows that each take a Tab is not a keyboard path, it is a
+   * reason to reach for the mouse.
+   */
+  const savedRovingId = $derived(
+    savedMatches.find((c) => c.id === editingId)?.id ?? savedMatches[0]?.id ?? null,
+  );
+
+  /**
    * Whether rows still play their staggered entrance.
    *
    * The stagger is a first-impression flourish, and it is the wrong thing the
@@ -254,8 +275,12 @@
   /** Move focus from the filter into the list, so a match can be reached without
    *  leaving the keyboard. Rows carry tabindex, so they take focus directly. */
   function focusFirstSavedRow() {
-    /** @type {HTMLElement | null} */
-    const row = document.querySelector('[data-conn-row]');
+    const rows = /** @type {HTMLElement[]} */ ([
+      ...document.querySelectorAll("[data-conn-row]"),
+    ]);
+    // `tabIndex` rather than an attribute selector: whether the framework writes
+    // the property or the attribute is not something this has to know.
+    const row = rows.find((r) => r.tabIndex === 0) ?? rows[0];
     row?.focus();
   }
   let lastId = $state(getLastConnectionId());
@@ -288,6 +313,19 @@
   let user = $state("postgres");
   let password = $state("");
   let ssl = $state(false);
+  /**
+   * How far TLS verification goes, and what it verifies against.
+   *
+   * `ssl` alone means "require" - encrypted, certificate unchecked - which is
+   * what a managed provider hands you and not what it recommends. `verify-ca`
+   * and `verify-full` need a CA to verify against, hence the path beside it.
+   * Both travel to the backend as `sslMode`/`sslRootCert` and end up in the
+   * connection URL (`sslmode`/`sslrootcert` on Postgres, `ssl-mode`/`ssl-ca` on
+   * MySQL).
+   * @type {'require' | 'verify-ca' | 'verify-full'}
+   */
+  let sslMode = $state("require");
+  let sslCaPath = $state("");
   let secure = $state(false);
   let encrypt = $state(false);
   let trustCert = $state(true);
@@ -301,7 +339,7 @@
   let uriHint = $state("");
   // Manual-form input mode for URI-capable engines: paste a connection string
   // vs. fill individual fields. UI-only - not tracked as a dirty change.
-  let fieldMode = $state(/** @type {'string'|'fields'} */ ("fields"));
+
 
   // ── Connection options ───────────────────────────────────────────────────────
   let readOnly = $state(false);
@@ -312,6 +350,42 @@
   let sshPort = $state("22");
   let sshUsername = $state("");
   let sshKeyPath = $state("");
+  /**
+   * How the tunnel authenticates.
+   *
+   * Two options, because two are what the transport can actually do: the
+   * tunnel is a system `ssh -N -L` process, so an identity file is `-i` and
+   * anything else is the agent. A password option would have to drive an
+   * interactive prompt (or ship `sshpass`), so it is not offered rather than
+   * offered and broken.
+   * @type {'key' | 'agent'}
+   */
+  let sshAuth = $state("key");
+  /** `ServerAliveInterval`, seconds. Blank or 0 disables the keepalive. */
+  let sshKeepalive = $state("30");
+
+  /**
+   * TLS verification levels, in the order they harden.
+   *
+   * One id set for both engines; `sslPayload` maps them to the engine's own
+   * spelling (`verify-full` ↔ MySQL's `VERIFY_IDENTITY`), so the form has one
+   * vocabulary and the URL has the right one.
+   */
+  const SSL_MODES = [
+    { value: "require", label: "Require", desc: "Encrypt, do not check the certificate" },
+    { value: "verify-ca", label: "Verify CA", desc: "Check the certificate against a CA" },
+    { value: "verify-full", label: "Verify full", desc: "Check the CA and that the hostname matches" },
+  ];
+
+  /** What the tunnel can authenticate with - see `sshAuth`. */
+  const SSH_AUTH_MODES = [
+    { value: "key", label: "Key file", desc: "An identity file, passed to ssh as -i" },
+    { value: "agent", label: "SSH agent", desc: "Whatever your running agent holds" },
+  ];
+
+  /** Panel expansion, independent of whether the feature is switched on. */
+  let sslPanelOpen = $state(false);
+  let sshPanelOpen = $state(false);
 
   /** Set when the D1 connection being edited was created by the Cloudflare sign-in. */
   let d1Oauth = $state(false);
@@ -388,6 +462,161 @@
    */
   let step = $state("pick");
 
+
+  /** Providers with an account flow, in the order they are offered. */
+  const PROVIDER_CARDS = ["neon", "supabase", "prisma", "planetscale", "d1"];
+
+  /** Names for providers a URI can identify but the catalog has no card for. */
+  const PROVIDER_LABELS = { turso: "Turso", "prisma-postgres": "Prisma Postgres" };
+
+  /** The front page's paste bar. */
+  let quickUri = $state("");
+  let quickHint = $state("");
+  /** @type {HTMLInputElement | null} */
+  let quickUriEl = $state(null);
+
+  /**
+   * Take a pasted connection string straight to a filled-in form.
+   *
+   * The engine is in the string, so asking for it first is asking the user to
+   * repeat themselves. `detectConnectionUri` reads the scheme (and the host, for
+   * a provider), `pickEngine` puts us on that driver's form, and the existing
+   * `applyConnectionUri` fills the fields from the same string.
+   */
+  /** The form's "Import from URL" popover. */
+  let importOpen = $state(false);
+  let importUri = $state("");
+
+  /**
+   * Import from URL, as an action rather than a mode.
+   *
+   * This was a "Connection string | Fields" switch: two views of one form, one
+   * of which hid every field behind a mode you had to switch back out of. A
+   * connection string is something you HAVE, once - so it is a button that
+   * fills the fields and gets out of the way, which is what every other client
+   * calls Import from URL.
+   */
+  function runImport() {
+    const raw = importUri.trim();
+    if (!raw) return;
+    // A file engine takes a path, and a path is not a URL - hand it straight to
+    // the sqlite parser rather than letting the detector call it unreadable.
+    if (dbType === "sqlite" || dbType === "duckdb") {
+      if (!/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+        filePath = raw;
+        flashFields(["filePath"]);
+        importUri = "";
+        importOpen = false;
+        uriHint = "";
+        return;
+      }
+    }
+    const hit = detectConnectionUri(raw);
+    // A string for another engine switches the engine too - refusing it and
+    // making the user go and change the dropdown first would be pedantry.
+    if (hit && hit.type !== dbType && !DISABLED_TABS.has(hit.type)) switchDriver(hit.type);
+    const ok = applyConnectionUriFrom(raw, hit?.uriType ?? uriTypeFor(dbType));
+    if (ok) {
+      importUri = "";
+      // Left open would mean an empty bar sitting over the fields it just
+      // filled, with a success message about work already done.
+      importOpen = false;
+      uriHint = "";
+    }
+  }
+
+  /**
+   * A connection string in the clipboard is where this dialog usually starts -
+   * copied out of a provider dashboard, a .env, or a teammate's message - and
+   * the first thing anyone does here is paste it. So the dialog pastes it.
+   *
+   * Strictly: only a string that parses as a connection URI, only into an empty
+   * bar, and nothing is applied until Continue is pressed. It saves the paste,
+   * not the decision. A `.env` line is unwrapped (`DATABASE_URL="postgres://…"`)
+   * because that is the form the string is usually copied in.
+   */
+  /** What the clipboard last put in the bar, so a refill can tell its own text from typing. */
+  let clipboardFilled = "";
+  /** A string the user cleared away. Putting it back on the next focus would be a fight. */
+  let clipboardDismissed = "";
+
+  // Re-read on every window focus, not only on open: the usual shape of this is
+  // copying the string from a provider dashboard in the browser and coming
+  // back, and by then the dialog has been open for a minute. Both events are
+  // bound - a Tauri window focus fires `focus` on the webview, and a workspace
+  // switch or an unminimise only fires `visibilitychange`.
+  $effect(() => {
+    if (!open) return;
+    const reread = () => { if (step === "pick") void prefillFromClipboard(); };
+    const onVisible = () => { if (!document.hidden) reread(); };
+    window.addEventListener("focus", reread);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", reread);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  });
+
+  async function prefillFromClipboard() {
+    try {
+      const raw = String((await navigator.clipboard.readText()) ?? "").trim();
+      if (!raw || raw.length > 2000 || raw.includes("\n")) return;
+      const unwrapped = raw
+        .replace(/^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*/, "")
+        .replace(/^["']|["']$/g, "")
+        .trim();
+      const candidate = detectConnectionUri(raw) ? raw : detectConnectionUri(unwrapped) ? unwrapped : "";
+      if (!candidate) return;
+      // Anything the user did in the meantime wins - this lands a tick or two
+      // after the dialog opened, and re-runs every time the window is focused.
+      if (!open || step !== "pick") return;
+      if (candidate === quickUri) return;                 // already there
+      if (candidate === clipboardDismissed) return;       // they cleared this one away
+      // Only ever replaces an empty bar or the text this put there itself.
+      // Typing beats the clipboard, always.
+      if (quickUri.trim() && quickUri !== clipboardFilled) return;
+      quickUri = candidate;
+      clipboardFilled = candidate;
+      quickHint = "Pasted from your clipboard - press Continue to use it.";
+      await tick();
+      quickUriEl?.focus();
+      quickUriEl?.select?.();
+    } catch {
+      // No clipboard access (browser dev, or the OS said no): the bar stays empty.
+    }
+  }
+
+  function useQuickUri() {
+    const raw = quickUri.trim();
+    quickHint = "";
+    if (!raw) return;
+    const hit = detectConnectionUri(raw);
+    if (!hit) {
+      quickHint = "That does not look like a connection string. Try postgres://…, mysql://…, or a path to a .db file.";
+      return;
+    }
+    if (DISABLED_TABS.has(hit.type)) {
+      quickHint = `${driverById(hit.type).label} support is coming soon.`;
+      return;
+    }
+    pickEngine(hit.type);
+    // The provider's own sign-in is the better path when the string is only an
+    // endpoint (no password), but a full URI already has what we need - so fill
+    // the form and just say the provider was recognised.
+    // `driverById` falls back to the first driver for an unknown id, so an
+    // provider that is not itself a catalog entry (turso) must not go through it
+    // - it would claim the string was PostgreSQL.
+    if (hit.provider) {
+      const known = ALL_DRIVERS.find((d) => d.id === hit.provider);
+      quickHint = `Recognised a ${known?.label ?? PROVIDER_LABELS[hit.provider] ?? hit.provider} endpoint.`;
+    }
+    const ok = applyConnectionUriFrom(raw, hit.uriType);
+    if (!ok && !quickHint) quickHint = "Could not read that string.";
+    quickUri = "";
+    // Used. Coming back to the picker should not hand it over again.
+    clipboardDismissed = raw;
+  }
+
   /** A card in step 1 was chosen: set the engine and move on. @param {string} id */
   function pickEngine(id) {
     if (DISABLED_TABS.has(id)) return;
@@ -402,6 +631,43 @@
   }
 
   /** Back to the picker, keeping whatever has been typed so far. */
+  // The mouse's back/forward buttons, inside the dialog.
+  //
+  // StudioShell owns these globally but bails while a modal is open, because
+  // walking the app's tab history behind a dialog is not what the button means
+  // there. It does mean something here though: back is the same step the header
+  // arrow takes, form → engine picker. Registered in the capture phase and
+  // stopped, so the global handler never sees it, and `preventDefault` runs even
+  // when there is nowhere to go - left alone the webview walks its own document
+  // history, which in a Tauri window navigates away from the app.
+  $effect(() => {
+    if (!open) return;
+    /** @param {MouseEvent} e */
+    function onMouseNav(e) {
+      if (e.button !== 3 && e.button !== 4) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.button !== 3) return; // nothing to go forward to
+      if (step === "form") backToPick();
+      else requestClose();
+    }
+    /** Swallow the paired auxclick/mouseup so the webview cannot act on them. */
+    function swallowAux(/** @type {MouseEvent} */ e) {
+      if (e.button === 3 || e.button === 4) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+    document.addEventListener("mousedown", onMouseNav, { capture: true });
+    document.addEventListener("auxclick", swallowAux, { capture: true });
+    document.addEventListener("mouseup", swallowAux, { capture: true });
+    return () => {
+      document.removeEventListener("mousedown", onMouseNav, { capture: true });
+      document.removeEventListener("auxclick", swallowAux, { capture: true });
+      document.removeEventListener("mouseup", swallowAux, { capture: true });
+    };
+  });
+
   function backToPick() {
     error = "";
     testOk = false;
@@ -409,8 +675,54 @@
     engineQuery = "";
   }
 
+  /**
+   * "New connection" - straight to the form, on the commonest engine.
+   *
+   * There was a page in between: seventeen drivers under five headings, laid
+   * out as a grid of icons, whose entire job was to set one field. That field
+   * is a dropdown on the form now - searchable, in reading order with the rest
+   * of the connection - so the step is gone and so is the grid.
+   */
+  function newConnectionForm() {
+    error = "";
+    testOk = false;
+    quickHint = "";
+    pickEngine("postgres");
+  }
+
+  /** Every driver, for the form's engine dropdown. */
+  const engineItems = $derived(
+    CATEGORIES.flatMap((cat) =>
+      cat.drivers.map((d) => ({
+        value: d.id,
+        label: d.label,
+        // The category and the blurb are searchable too, so "cloud", "edge" or
+        // "serverless" finds what the label alone does not.
+        keywords: [d.label, cat.label, d.desc, d.id],
+        group: cat.label,
+        desc: d.desc,
+        disabled: DISABLED_TABS.has(d.id),
+      })),
+    ),
+  );
+
   // Engines that expose the "Connection string | Manual fields" toggle.
-  const URI_TOGGLE_ENGINES = ["postgres", "cockroachdb", "mysql", "mariadb"];
+  /**
+   * Engines whose form offers the "Connection string | Fields" switch.
+   *
+   * ClickHouse and SQL Server used to carry their own URI input inside their
+   * field forms instead - a second way to do the same thing, with its own
+   * label, its own Parse button and its own copy of the hint markup, in an
+   * engine-specific branch. They use the switch now, so there is one import
+   * path per form and one on the front page, rather than four.
+   */
+  const URI_TOGGLE_ENGINES = [
+    "postgres", "cockroachdb", "mysql", "mariadb", "clickhouse", "mssql",
+    // Every dialect that has a URL form, not just the SQL ones: a Redis or
+    // Turso string is the same paste, and refusing it here sent people to fill
+    // four fields by hand from a string they already had.
+    "redis", "libsql", "sqlite", "duckdb",
+  ];
   const hasFieldToggle = $derived(URI_TOGGLE_ENGINES.includes(dbType));
 
   // Briefly ring-highlight the fields a parsed connection string just filled in.
@@ -435,8 +747,29 @@
       host: sshHost.trim(),
       port: Number(sshPort) || 22,
       username: sshUsername.trim(),
-      privateKeyPath: sshKeyPath.trim(),
+      // Agent auth IS an empty identity path, as far as `ssh` is concerned.
+      privateKeyPath: sshAuth === "agent" ? "" : sshKeyPath.trim(),
+      keepalive: Math.max(0, Math.min(3600, Number(sshKeepalive) || 0)),
     };
+  }
+
+  /**
+   * The TLS pair for a host engine, in that engine's spelling.
+   *
+   * Only sent when TLS is on: `sslMode` overrides the plain boolean in the
+   * backend, so passing it while `ssl` is false would quietly re-enable it.
+   * @param {'postgres' | 'mysql'} family
+   */
+  function sslPayload(family) {
+    if (!ssl) return {};
+    const mode =
+      family === "mysql"
+        ? { require: "required", "verify-ca": "verify_ca", "verify-full": "verify_identity" }[sslMode]
+        : sslMode;
+    /** @type {Record<string, string>} */
+    const out = { sslMode: mode };
+    if (sslMode !== "require" && sslCaPath.trim()) out.sslRootCert = sslCaPath.trim();
+    return out;
   }
 
   function formPayload() {
@@ -476,6 +809,7 @@
         user,
         password,
         ssl,
+        ...sslPayload("mysql"),
         ...(ssh && { ssh }),
       };
     if (dbType === "cockroachdb")
@@ -488,6 +822,7 @@
         user,
         password,
         ssl,
+        ...sslPayload("postgres"),
         ...(ssh && { ssh }),
       };
     if (dbType === "clickhouse")
@@ -538,6 +873,7 @@
       user,
       password,
       ssl,
+      ...sslPayload("postgres"),
       ...(ssh && { ssh }),
     };
   }
@@ -613,6 +949,17 @@
       sshPort = String(s?.port ?? 22);
       sshUsername = s?.username ?? "";
       sshKeyPath = s?.privateKeyPath ?? "";
+      // A saved tunnel with no identity path was using the agent.
+      sshAuth = s?.privateKeyPath ? "key" : "agent";
+      sshKeepalive = String(s?.keepalive ?? 30);
+      sslMode = /** @type {any} */ (
+        conn.sslMode === "verify_ca" ? "verify-ca"
+        : conn.sslMode === "verify_identity" ? "verify-full"
+        : conn.sslMode || "require"
+      );
+      sslCaPath = conn.sslRootCert ?? "";
+      sslPanelOpen = !!conn.ssl;
+      sshPanelOpen = !!s?.host;
       readOnly = conn.readOnly ?? false;
     } else {
       dbType = "postgres";
@@ -638,6 +985,12 @@
       sshPort = "22";
       sshUsername = "";
       sshKeyPath = "";
+      sshAuth = "key";
+      sshKeepalive = "30";
+      sslMode = "require";
+      sslCaPath = "";
+      sslPanelOpen = false;
+      sshPanelOpen = false;
       readOnly = false;
     }
     entryMode =
@@ -645,7 +998,6 @@
     // An existing connection already answered "what are you connecting to", so it
     // opens on its details. A new one starts at the choice.
     step = conn ? "form" : "pick";
-    fieldMode = "fields";
     advancedOpen = false;
     flashedFields = new Set();
     error = "";
@@ -757,14 +1109,64 @@
     });
   }
 
+  /**
+   * Default port per engine. One table, read by both the engine picker and the
+   * save path - they used to carry separate copies that already disagreed about
+   * ClickHouse (8123 here, TLS-aware there), so which port a saved row ended up
+   * with depended on whether you had touched the picker.
+   * Engines with no port at all (SQLite, DuckDB, D1, libSQL) are absent on
+   * purpose: `undefined` is what clears the field.
+   */
+  const DEFAULT_PORTS = {
+    postgres: 5432,
+    mysql: 3306,
+    mariadb: 3306,
+    cockroachdb: 26257,
+    clickhouse: 8123,
+    mssql: 1433,
+    redis: 6379,
+  };
+  /** @param {string} id @param {boolean} [isSecure] */
+  function defaultPortFor(id, isSecure = secure) {
+    if (id === "clickhouse") return isSecure ? 8443 : 8123;
+    return DEFAULT_PORTS[id];
+  }
+
+  /**
+   * Default database and login per engine. The port already worked this way; the
+   * other two did not, so picking MySQL left "postgres" sitting in Database and
+   * Username - a Postgres default under a MySQL header, which is not a form you
+   * can trust. Absent = the engine has no sensible default and the field clears.
+   * @type {Record<string, { database?: string, user?: string }>}
+   */
+  const ENGINE_DEFAULTS = {
+    postgres:    { database: "postgres", user: "postgres" },
+    cockroachdb: { database: "defaultdb", user: "root" },
+    mysql:       { database: "", user: "root" },
+    mariadb:     { database: "", user: "root" },
+    clickhouse:  { database: "default", user: "default" },
+    mssql:       { database: "master", user: "sa" },
+    redis:       { database: "0", user: "" },
+  };
+
   function switchDriver(id) {
+    const prevPort = defaultPortFor(dbType);
+    const prev = ENGINE_DEFAULTS[dbType] ?? {};
+    const next = ENGINE_DEFAULTS[id] ?? {};
     dbType = id;
-    if (id === "postgres") port = "5432";
-    if (id === "mysql" || id === "mariadb") port = "3306";
-    if (id === "cockroachdb") port = "26257";
-    if (id === "clickhouse") port = secure ? "8443" : "8123";
-    if (id === "mssql") port = "1433";
-    if (id === "redis") port = "6379";
+    // Re-default a field only when it still holds the *previous* engine's
+    // default. Anything typed by hand is the user's and survives a trip through
+    // the engine picker and back; every switch used to overwrite the port, and
+    // never touched database or username at all - which is how a MySQL form
+    // ended up asking for the "postgres" database as user "postgres".
+    // An engine with no default clears the field rather than inheriting a stale
+    // value from the last one.
+    if (port === "" || String(prevPort ?? "") === String(port)) {
+      const p = defaultPortFor(id);
+      port = p != null ? String(p) : "";
+    }
+    if (database === "" || database === prev.database) database = next.database ?? "";
+    if (user === "" || user === prev.user) user = next.user ?? "";
     if (id === "sqlite-memory" || id === "duckdb-memory") filePath = ":memory:";
     if (id === "duckdb") filePath = "";
     error = "";
@@ -773,26 +1175,68 @@
     uriHint = "";
   }
 
+
+  /**
+   * Which of the five parsers `dbType` needs.
+   *
+   * Was written out twice - here and in `studioConnection` - and now three
+   * times over, with the front page's paste bar. One function.
+   * @param {string} t
+   * @returns {'postgres'|'sqlite'|'mysql'|'mssql'|'clickhouse'}
+   */
+  function uriTypeFor(t) {
+    if (t === "sqlite" || t === "sqlite-memory" || t === "duckdb" || t === "duckdb-memory") return "sqlite";
+    if (t === "mysql" || t === "mariadb") return "mysql";
+    if (t === "mssql") return "mssql";
+    if (t === "clickhouse") return "clickhouse";
+    // Redis and LibSQL have their own shapes: a `redis://` string read by the
+    // Postgres parser loses the database index and mistakes a bare password for
+    // a username, and a Turso URL carries its token in the query string.
+    if (t === "redis") return "redis";
+    if (t === "libsql") return "libsql";
+    return "postgres";
+  }
+
   function applyConnectionUri() {
+    return applyConnectionUriFrom(connectionUri, uriTypeFor(dbType));
+  }
+
+  /**
+   * Fill the form from a connection string.
+   * @param {string} raw
+   * @param {'postgres'|'sqlite'|'mysql'|'mssql'|'clickhouse'} uriType
+   */
+  function applyConnectionUriFrom(raw, uriType) {
     uriHint = "";
-    const uriType =
-      dbType === "sqlite" || dbType === "sqlite-memory"
-        ? "sqlite"
-        : dbType === "mysql" || dbType === "mariadb"
-          ? "mysql"
-          : dbType === "mssql"
-            ? "mssql"
-            : dbType === "clickhouse"
-              ? "clickhouse"
-              : "postgres";
-    const parsed = parseConnectionUri(uriType, connectionUri);
+    const parsed = parseConnectionUri(uriType, raw);
     if (!parsed) return false;
     if ("error" in parsed) {
       uriHint = parsed.error;
       return false;
     }
+    // Redis: host, port, logical database, TLS and a password that may have
+    // arrived without a username.
+    if ("tls" in parsed) {
+      host = parsed.host;
+      port = parsed.port;
+      database = parsed.db;
+      user = parsed.user;
+      password = parsed.password;
+      secure = parsed.tls;
+      flashFields(["host", "port", "database", "user", "password", "secure"]);
+      uriHint = "Fields updated from URL";
+      return true;
+    }
+    // LibSQL / Turso: the URL, with any `authToken` moved to its own field.
+    if ("authToken" in parsed) {
+      libsqlUrl = parsed.url;
+      if (parsed.authToken) libsqlToken = parsed.authToken;
+      flashFields(["libsqlUrl", "libsqlToken"]);
+      uriHint = "Fields updated from URL";
+      return true;
+    }
     if (
-      (dbType === "sqlite" || dbType === "sqlite-memory") &&
+      (dbType === "sqlite" || dbType === "sqlite-memory" || dbType === "duckdb" || dbType === "duckdb-memory") &&
       "filePath" in parsed
     ) {
       filePath = parsed.filePath;
@@ -851,37 +1295,20 @@
   });
 
   /** Placeholder for the paste bar - the shape this engine actually accepts. */
+  const URI_PLACEHOLDERS = {
+    mysql: "mysql://user:pass@host:3306/db",
+    mariadb: "mysql://user:pass@host:3306/db",
+    cockroachdb: "postgresql://user:pass@host:26257/defaultdb",
+    clickhouse: "clickhouse://user:pass@host:8123/db",
+    mssql: "sqlserver://user:pass@host:1433;database=db",
+    redis: "rediss://:password@host:6379/0",
+    libsql: "libsql://db-org.turso.io?authToken=…",
+    sqlite: "/path/to/app.db",
+    duckdb: "/path/to/warehouse.duckdb",
+  };
   const uriPlaceholder = $derived(
-    dbType === "mysql" || dbType === "mariadb"
-      ? "mysql://user:pass@host:3306/db"
-      : dbType === "cockroachdb"
-        ? "postgresql://user:pass@host:26257/defaultdb"
-        : "postgresql://user:pass@host:5432/db",
+    URI_PLACEHOLDERS[dbType] ?? "postgresql://user:pass@host:5432/db",
   );
-
-  /**
-   * Read a connection string straight off the clipboard and fill the form.
-   *
-   * Pasting is how people actually arrive here - the string is in the buffer
-   * from a provider dashboard - so it gets a button rather than requiring a
-   * click into the right field first.
-   */
-  async function pasteConnectionUri() {
-    try {
-      const text = (await navigator.clipboard.readText()).trim();
-      if (!text) {
-        uriHint = "Clipboard is empty";
-        return;
-      }
-      connectionUri = text;
-      if (!applyConnectionUri() && !uriHint)
-        uriHint = "That doesn't look like a connection string";
-    } catch {
-      // Clipboard read can be refused; fall back to letting them paste by hand.
-      uriHint = "Paste into the field with ⌘V";
-      document.getElementById("cn-paste-uri")?.focus();
-    }
-  }
 
   /** @param {string} id */
   function focusField(id) {
@@ -1000,23 +1427,24 @@
     return null;
   });
 
-  /** Left-rail subtitle: engine, or the studio a connection was picked up from. */
-  function connSubtitle(conn, cid) {
-    const source = conn.origin
-      ? conn.toolLabel || (conn.origin === "docker" ? "Docker" : "Studio")
-      : driverById(cid).label;
-    return `${source} · ${connDetail(conn)}`;
-  }
-
-  function connDetail(conn) {
-    if (conn.type === "sqlite" || conn.type === "duckdb")
-      return conn.filePath === ":memory:" ? "in-memory" : conn.filePath || "—";
-    if (conn.type === "libsql") return conn.url || "—";
-    if (conn.type === "d1")
-      return conn.accountId?.slice(0, 8)
-        ? `${conn.accountId.slice(0, 8)}…`
-        : "—";
-    return `${conn.host ?? ""}/${conn.database ?? ""}`;
+  /**
+   * The one line under a connection's name, and it answers one question: which
+   * database does this open? It used to print source · image · host, which is
+   * the connection string in three parts - at 11px in a 220px rail the host was
+   * always truncated mid-word, and every one of those fields is already on the
+   * form this row opens.
+   */
+  function connSubtitle(conn) {
+    if (conn.type === "sqlite" || conn.type === "duckdb") {
+      if (conn.filePath === ":memory:") return "in-memory";
+      return String(conn.filePath ?? "").split(/[\\/]/).pop() || "—";
+    }
+    if (conn.type === "libsql") {
+      try { return new URL(conn.url).pathname.replace(/^\//, "") || conn.url; }
+      catch { return conn.url || "—"; }
+    }
+    if (conn.type === "d1") return conn.database || conn.name || "—";
+    return conn.database || "—";
   }
 
   function relativeTime(ts) {
@@ -1034,8 +1462,20 @@
       saved = loadSavedConnections().sort(byLastConnected);
       lastId = getLastConnectionId();
       resetForm(null);
+      duplicatePrompt = null;
+      duplicateAck = false;
+      clipboardFilled = "";
+      clipboardDismissed = "";
+      // Arriving from an engine chip skips the picker - that choice is already made.
+      if (initialEngine) { pickEngine(initialEngine); initialEngine = ""; }
       engineQuery = "";
+      quickUri = "";
+      quickHint = "";
       void refreshLocal();
+      void prefillFromClipboard();
+      // The paste bar takes focus: the modal opens, you paste, you press Enter.
+      // Only on the front page - a saved connection opens straight into its form.
+      void tick().then(() => { if (step === "pick") quickUriEl?.focus(); });
     });
   });
 
@@ -1092,35 +1532,20 @@
   // appear here as one-click targets: nothing to type, and nothing left behind -
   // the row exists only while the studio does.
 
-  // Free-text filter over the driver grid and the detected studios. 17 engines
-  // in six groups is more than anyone should have to scan by eye.
+  /**
+   * Free-text filter over the detected local targets.
+   *
+   * It used to filter a grid of seventeen driver tiles as well; that grid is a
+   * dropdown on the form now, with its own search, so this is only ever a
+   * filter over what is running on this machine - and with nothing to type into
+   * on the front page, it stays empty unless a caller sets it.
+   */
   let engineQuery = $state("");
-  /** @type {HTMLInputElement | null} */
-  let engineSearchEl = $state(null);
-
-  const engineMatches = $derived.by(() => {
-    const q = engineQuery.trim().toLowerCase();
-    if (!q) return CATEGORIES;
-    return CATEGORIES.map((c) => ({
-      ...c,
-      drivers: c.drivers.filter((d) =>
-        `${d.label} ${d.desc} ${d.id}`.toLowerCase().includes(q),
-      ),
-    })).filter((c) => c.drivers.length > 0);
-  });
-  /** Enter in the search box opens the single obvious result. */
-  const firstEngineMatch = $derived(
-    engineMatches[0]?.drivers.find((d) => !DISABLED_TABS.has(d.id)) ?? null,
-  );
 
   /** Same rule as the rail's `savedStagger`: the local-target cards are filtered
    *  by this search, so their entrance stagger has to stop once it would be
    *  replaying on every keystroke rather than introducing the panel. */
   let engineStagger = $state(true);
-
-  $effect(() => {
-    if (open && step === "pick" && engineSearchEl) engineSearchEl.focus();
-  });
 
   // A fresh open is a fresh first impression: the rail's entrance stagger is
   // armed again, and a filter left over from last time is not what you want to
@@ -1419,14 +1844,6 @@
     try {
       // In connection-string mode the payload is built from the individual
       // fields, so parse the URI into them first (finally clears `testing`).
-      if (
-        fieldMode === "string" &&
-        URI_TOGGLE_ENGINES.includes(dbType) &&
-        !applyConnectionUri()
-      ) {
-        failWith(uriHint || "Enter a valid connection string");
-        return;
-      }
       const p = formPayload();
       if (p.type === "sqlite") await testSqliteConnection(p);
       else if (p.type === "d1") await testD1Connection(p);
@@ -1451,19 +1868,9 @@
   }
 
   // Engines addressed by host + port, with the port a blank field saves as.
-  const DEFAULT_PORTS = {
-    postgres: 5432,
-    mysql: 3306,
-    mariadb: 3306,
-    cockroachdb: 26257,
-    clickhouse: 8123,
-    mssql: 1433,
-    redis: 6379,
-  };
-
   /** Shape a form payload into the persisted SavedConnection row (Save and Connect share it). */
   function buildSavedConn(payload, id, lastConnectedAt) {
-    const defaultPort = DEFAULT_PORTS[payload.type];
+    const defaultPort = defaultPortFor(payload.type);
     return {
       id,
       ...payload,
@@ -1491,15 +1898,8 @@
       return;
     }
     error = "";
-    if (
-      fieldMode === "string" &&
-      URI_TOGGLE_ENGINES.includes(dbType) &&
-      !applyConnectionUri()
-    ) {
-      failWith(uriHint || "Enter a valid connection string");
-      return;
-    }
     const payload = formPayload();
+    if (blockedAsDuplicate(payload, handleSave)) return;
     const existing = editingId ? saved.find((s) => s.id === editingId) : null;
     const id = existing?.id ?? newConnectionId();
     // lastConnectedAt is deliberately NOT touched - nothing was connected, so
@@ -1509,6 +1909,12 @@
     ).sort(byLastConnected);
     // Keep editing the row we just saved, so a follow-up Connect updates it
     // instead of creating a duplicate.
+    if (lastPersistFailed()) {
+      failWith(
+        "Couldn't save this connection - local storage is full. Delete a few saved queries or connections and try again.",
+      );
+      return;
+    }
     editingId = id;
     baseline = snapshot();
     justSaved = true;
@@ -1518,37 +1924,63 @@
     }, 2000);
   }
 
-  async function handleConnect() {
-    if (!editingId && saved.length >= maxConnections) {
+  /**
+   * Dial the form's connection.
+   *
+   * `save: false` is the plain Connect: it opens the session and writes nothing,
+   * for the case where the row is already on file (or deliberately is not).
+   * @param {{ save?: boolean }} [opts]
+   */
+  async function handleConnect(opts = {}) {
+    const save = opts.save !== false;
+    if (save && !editingId && saved.length >= maxConnections) {
       failWith(
         `Free plan allows ${maxConnections} saved connections. Upgrade to Stroke Pro for unlimited.`,
       );
       return;
     }
+    // Built before the spinner goes up: the duplicate check needs the resolved
+    // target, and in connection-string mode that is what parses the URI into
+    // fields. It reads state and allocates an object - nothing that can fail.
+    const payload = formPayload();
+    // Only for a row that does not exist yet: connecting to a connection you
+    // already have saved is not a filing decision, and being asked about it on
+    // the way in is the wrong question at the wrong time.
+    if (save && !editingId && blockedAsDuplicate(payload, () => void handleConnect({ save }))) return;
     const myOp = ++opId;
     connecting = editingId ?? "__new__";
     error = "";
     try {
-      // In connection-string mode the payload is built from the individual
-      // fields, so parse the URI into them first (finally clears `connecting`).
-      if (
-        fieldMode === "string" &&
-        URI_TOGGLE_ENGINES.includes(dbType) &&
-        !applyConnectionUri()
-      ) {
-        failWith(uriHint || "Enter a valid connection string");
-        return;
-      }
-      const payload = formPayload();
-      await openConnection(payload);
-      if (myOp !== opId) return; // cancelled by the user
       const existing = editingId ? saved.find((s) => s.id === editingId) : null;
       const id = existing?.id ?? newConnectionId();
+      // Persist BEFORE dialling. Everything the user typed is worth keeping the
+      // moment they commit to it, and a connect can fail for reasons that have
+      // nothing to do with what they entered - no network, VPN down, server
+      // asleep. Saving only on success meant a dropped connection threw the
+      // whole form away and they had to retype it, which is what made
+      // connections look like they were disappearing after being saved.
+      // lastConnectedAt stays at its previous value so a failed attempt does not
+      // jump the row to the top of the recents list or turn it into "Resume".
+      if (save) {
+        saved = upsertConnection(
+          buildSavedConn(payload, id, existing?.lastConnectedAt),
+        ).sort(byLastConnected);
+        editingId = id;
+      }
+      await openConnection(payload);
+      if (myOp !== opId) return; // cancelled by the user
       const saved_conn = buildSavedConn(payload, id, Date.now());
-      saved = upsertConnection(saved_conn).sort(byLastConnected);
-      setLastConnectionId(id);
+      if (save) {
+        saved = upsertConnection(saved_conn).sort(byLastConnected);
+        setLastConnectionId(id);
+      }
       open = false;
-      await onconnected(saved_conn, id);
+      // The id is what files this as the last connection - and the shell writes
+      // the payload back under it, so an unsaved EDIT must not travel with one
+      // or "connect without saving" would save. An untouched saved row has
+      // nothing to leak, so it keeps its id and still resumes on next launch.
+      const handoverId = save || (editingId && !isDirty) ? id : "";
+      await onconnected(saved_conn, handoverId);
     } catch (e) {
       if (myOp === opId) failWith(friendlyError(e));
     } finally {
@@ -1557,6 +1989,30 @@
   }
 
   const isBusy = $derived(testing || !!connecting);
+
+  /**
+   * A second connection to a database you already have saved is usually a
+   * mistake - a re-paste of the same URI, or a second pass through the Docker
+   * scan - and the list is sorted by last use, so the copy hides the original.
+   * It is not always a mistake though (a read-only twin, a different name for a
+   * different project), so this asks rather than refuses.
+   * @type {{ existing: any, proceed: () => void } | null}
+   */
+  let duplicatePrompt = $state(null);
+  /** Set by "Save anyway", so the retry of the same action goes straight through. */
+  let duplicateAck = false;
+
+  /**
+   * Returns true when the action should stop and let the user answer first.
+   * @param {any} payload @param {() => void} proceed
+   */
+  function blockedAsDuplicate(payload, proceed) {
+    if (duplicateAck) return false;
+    const existing = findDuplicateConnection(payload, saved, editingId);
+    if (!existing) return false;
+    duplicatePrompt = { existing, proceed };
+    return true;
+  }
 
   // Transient "Saved" confirmation on the Save button (no toast - the dialog
   // stays open, so the feedback belongs on the control that was pressed).
@@ -1594,6 +2050,10 @@
       sshPort,
       sshUsername,
       sshKeyPath,
+      sshAuth,
+      sshKeepalive,
+      sslMode,
+      sslCaPath,
     ]);
   }
   const isDirty = $derived(snapshot() !== baseline);
@@ -1635,10 +2095,45 @@
   // the form lined up, which is most of what made it look thrown together.
   const row6 = "grid grid-cols-6 gap-x-4";
   const inp =
-    "h-8 w-full rounded-md border-2 border-foreground/15 bg-muted/20 px-2.5 text-ui-xs text-foreground placeholder:text-muted-foreground/35 placeholder:font-normal outline-none transition-[color,border-color,box-shadow] hover:border-foreground/40";
+    "field-surface h-9 w-full bg-transparent px-3 text-ui-xs text-foreground placeholder:text-muted-foreground placeholder:font-normal outline-none";
+  // Ports, keepalives and the like: figures in a narrow field, where a
+  // proportional 1 makes a three-digit value look off-centre.
   const inpNum =
     inp +
     " [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
+  /**
+   * Pick a file for one of the transport paths.
+   *
+   * Typing a path into a text field is how you find out you typed it wrong at
+   * connect time. The field stays editable - a path from a password manager or
+   * a CI secret gets pasted, not browsed to.
+   * @param {'ca' | 'key'} which
+   */
+  async function pickTransportFile(which) {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const path = await open(
+        which === "ca"
+          ? {
+              title: "Select CA certificate",
+              filters: [
+                { name: "Certificates", extensions: ["pem", "crt", "cer", "ca"] },
+                { name: "All files", extensions: ["*"] },
+              ],
+            }
+          : {
+              title: "Select private key",
+              filters: [{ name: "All files", extensions: ["*"] }],
+            },
+      );
+      if (typeof path !== "string" || !path) return;
+      if (which === "ca") sslCaPath = path;
+      else sshKeyPath = path;
+    } catch {
+      /* browser/non-Tauri env - the field is still typeable */
+    }
+  }
 
   async function pickSqliteFile() {
     try {
@@ -1702,132 +2197,354 @@
 <!-- Advanced options, SSL / SSH tunnel / encryption / read-only. Laid out to
      fill the available width (toggle row + horizontal SSH grid); wraps to a
      column on the narrow provider/D1 collapsible. -->
+<!-- Transport: the two things that sit between this app and the database, each
+     in a panel of its own, plus the one switch that changes what the session is
+     allowed to do.
+
+     They used to be three checkboxes in a six-column row with the SSH fields
+     spilling out underneath: "Connect via SSH tunnel" wrapped onto two lines at
+     most widths, turning it on grew four fields into the middle of the form, and
+     TLS was one boolean with no way to say what it should verify. A disclosure
+     panel per concern keeps the form the same height until you need one, and
+     gives each its own fields, its own note and its own switch. -->
+{#snippet transportPanel(
+  /** @type {string} */ id,
+  /** @type {string} */ title,
+  /** @type {string} */ summary,
+  /** @type {string} */ icon,
+  /** @type {boolean} */ enabled,
+  /** @type {(v: boolean) => void} */ onToggle,
+  /** @type {boolean} */ isOpen,
+  /** @type {() => void} */ onDisclose,
+  /** @type {import('svelte').Snippet} */ body,
+)}
+  <!-- `rounded-xl` (12px), not `rounded-lg`: the fields inside carry the 10px
+       `--radius-field`, and an outer radius smaller than its contents is the
+       thing that reads as "off" without anyone being able to say why. -->
+  <section class="overflow-hidden rounded-xl border border-border/50 bg-card/30">
+    <!-- Two controls, not one: the row discloses, the switch enables. Nesting a
+         switch inside the disclosure button would make one hit area that does
+         two things and announce as neither. -->
+    <!-- A two-line header needs room for two lines. At h-10 with the inherited
+         1.5 leading, the title and summary came to 33px of the 40px row: 3px of
+         air top and bottom, the two lines touching each other, and the chevron
+         10px off the card's own border. h-14 with `leading-tight` on both lines
+         puts 12px above and below the pair and 2px between them, which is what
+         separates a title from its caption rather than stacking them. -->
+    <div class="flex items-center gap-2 pe-3">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        aria-controls="{id}-body"
+        onclick={onDisclose}
+        class="flex h-14 min-w-0 flex-1 items-center gap-3 px-3.5 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:bg-muted/30"
+      >
+        <Icon
+          name="chevron-right"
+          class={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out",
+            isOpen && "rotate-90",
+          )}
+          aria-hidden="true"
+        />
+        <Icon name={icon} class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-ui-xs font-medium leading-tight text-foreground">{title}</span>
+          <span class="mt-0.5 block truncate text-ui-3xs leading-tight text-muted-foreground">{summary}</span>
+        </span>
+      </button>
+      <label class="flex shrink-0 cursor-pointer select-none items-center gap-2 py-2">
+        <span class="text-ui-3xs text-muted-foreground">{enabled ? "On" : "Off"}</span>
+        <!-- The role announces checked/unchecked, so the name must not say it
+             again; the visible On/Off text is the redundant cue for everyone
+             who is not hearing it. -->
+        <Checkbox
+          id="{id}-enabled"
+          checked={enabled}
+          aria-label={title}
+          onCheckedChange={(v) => onToggle(v === true)}
+        />
+      </label>
+    </div>
+    {#if isOpen}
+      <!-- `inert` when off, not merely dimmed: a field you can focus and type
+           into that will not be used is worse than no field. The switch stays
+           reachable because it is outside this element. -->
+      <div
+        id="{id}-body"
+        inert={!enabled || undefined}
+        class={cn(
+          "flex flex-col gap-3.5 border-t border-border/40 p-3.5 transition-opacity duration-150 ease-out",
+          !enabled && "opacity-45",
+        )}
+      >
+        {@render body()}
+      </div>
+    {/if}
+  </section>
+{/snippet}
+
+<!-- A note inside a panel: what the option does to the connection, in one
+     sentence, where the decision is being made. -->
+{#snippet panelNote(/** @type {string} */ text)}
+  <p class="flex items-start gap-2 rounded-md bg-muted/30 px-2.5 py-2 text-ui-3xs leading-relaxed text-muted-foreground">
+    <Icon name="info" class="mt-px size-3.5 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+    <span class="min-w-0">{text}</span>
+  </p>
+{/snippet}
+
+<!-- A path field with a Browse button. The field stays typeable: a path often
+     arrives pasted from a password manager or a CI secret. -->
+{#snippet pathField(
+  /** @type {string} */ id,
+  /** @type {string} */ label,
+  /** @type {string} */ value,
+  /** @type {string} */ placeholder,
+  /** @type {(v: string) => void} */ onInput,
+  /** @type {() => void} */ onBrowse,
+  /** @type {string} */ hint = "",
+)}
+  <div class="min-w-0">
+    <label for={id} class={lbl}>{label}</label>
+    <div class="flex min-w-0 gap-1.5">
+      <Input
+        {id}
+        {placeholder}
+        value={value}
+        spellcheck="false"
+        oninput={(e) => onInput(e.currentTarget.value)}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        class={cn(inp, "font-mono text-ui-2xs")}
+      />
+      <button
+        type="button"
+        onclick={onBrowse}
+        class="field-surface inline-flex h-8 shrink-0 items-center px-2.5 text-ui-2xs text-muted-foreground transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.96]"
+      >
+        Browse…
+      </button>
+    </div>
+    {#if hint}
+      <p id="{id}-hint" class="mt-1 text-ui-3xs leading-snug text-muted-foreground">{hint}</p>
+    {/if}
+  </div>
+{/snippet}
+
 {#snippet advancedFields()}
   {@const isPgMy =
     dbType === "postgres" ||
     dbType === "cockroachdb" ||
     dbType === "mysql" ||
     dbType === "mariadb"}
-  <div class="flex flex-col gap-4">
-    <!-- Toggle row, on the same six columns as the fields above: hand-tuned
-         gap-x spacing left these sitting at arbitrary positions relative to the
-         form. -->
-    <div class={cn(row6, "gap-y-3")}>
-      {#if isPgMy}
-        <label
-          class="col-span-3 flex cursor-pointer select-none items-center gap-2 sm:col-span-2"
-        >
-          <Checkbox
-            id="cn-ssl"
-            checked={ssl}
-            onCheckedChange={(v) => (ssl = v === true)}
-          />
-          <span class="text-ui-xs text-muted-foreground/70">Use SSL / TLS</span>
-        </label>
-        <label
-          class="col-span-3 flex cursor-pointer select-none items-center gap-2 sm:col-span-2"
-        >
-          <Checkbox
-            id="cn-ssh-enabled"
-            checked={sshEnabled}
-            onCheckedChange={(v) => (sshEnabled = v === true)}
-          />
-          <span
-            class="flex items-center gap-1.5 text-ui-xs text-muted-foreground/70"
-          >
-            <Icon name="terminal" class="size-3 shrink-0" />
-            Connect via SSH tunnel
-          </span>
-        </label>
-      {:else if dbType === "clickhouse"}
-        <label
-          class="col-span-3 flex cursor-pointer select-none items-center gap-2 sm:col-span-2"
-        >
-          <Checkbox
-            id="cn-ch-secure"
-            checked={secure}
-            onCheckedChange={(v) => {
-              secure = v === true;
-              if (secure && port === "8123") port = "8443";
-              else if (!secure && port === "8443") port = "8123";
-            }}
-          />
-          <span class="text-ui-xs text-muted-foreground/70"
-            >Use HTTPS (TLS)</span
-          >
-        </label>
-      {/if}
-      <label
-        class="col-span-3 flex cursor-pointer select-none items-center gap-2 sm:col-span-2"
-      >
-        <Checkbox
-          id="cn-readonly"
-          checked={readOnly}
-          onCheckedChange={(v) => (readOnly = v === true)}
-        />
-        <span
-          class="flex items-center gap-1.5 text-ui-xs text-muted-foreground/70"
-        >
-          <Icon name="lock" class="size-3 shrink-0" />
-          Open in read-only mode
-        </span>
-      </label>
-    </div>
+  {@const isMy = dbType === "mysql" || dbType === "mariadb"}
+  <!-- 12px between two bordered cards, not 10: the fields inside one card sit
+       14px apart, and a gap between cards tighter than the gap within one makes
+       the pair read as a single block. -->
+  <div class="flex flex-col gap-3">
+    {#if isPgMy}
+      <!-- ── TLS ─────────────────────────────────────────────────────────── -->
+      {#snippet sslBody()}
+        {@render panelNote(
+          "Require encrypts the connection but does not check the server's certificate. The verifying levels do check it, against a CA - name one below unless this machine already trusts it.",
+        )}
+        <div class="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+          <div class="min-w-0 max-w-[16rem]">
+            <span id="cn-ssl-mode-label" class={lbl}>Verification</span>
+            <SearchableMenu
+              items={SSL_MODES}
+              searchThreshold={99}
+              contentClass="w-[18rem]"
+              align="start"
+              onselect={(it) => (sslMode = it.value)}
+            >
+              {#snippet trigger(props)}
+                <button
+                  {...props}
+                  type="button"
+                  aria-labelledby="cn-ssl-mode-label"
+                  class="field-surface flex h-8 w-full min-w-0 items-center gap-1.5 px-2.5 text-left text-ui-xs transition-colors hover:bg-accent/40"
+                >
+                  <span class="min-w-0 flex-1 truncate text-foreground">
+                    {SSL_MODES.find((m) => m.value === sslMode)?.label ?? "Require"}
+                  </span>
+                  <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground" />
+                </button>
+              {/snippet}
+              {#snippet item(it)}
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate">{it.label}</span>
+                  <span class="block truncate text-ui-3xs text-muted-foreground">{it.desc}</span>
+                </span>
+                {#if it.value === sslMode}
+                  <Icon name="check" class="size-3.5 shrink-0 text-primary" />
+                {/if}
+              {/snippet}
+            </SearchableMenu>
+          </div>
+          {#if sslMode !== "require"}
+            {@render pathField(
+              "cn-ssl-ca",
+              "CA certificate",
+              sslCaPath,
+              "~/certs/server-ca.pem",
+              (v) => (sslCaPath = v),
+              () => void pickTransportFile("ca"),
+            )}
+          {/if}
+        </div>
+      {/snippet}
+      {@render transportPanel(
+        "cn-ssl",
+        "SSL / TLS",
+        ssl ? `Encrypted · ${SSL_MODES.find((m) => m.value === sslMode)?.label ?? "Require"}` : "Not encrypted",
+        "lock",
+        ssl,
+        (v) => {
+          ssl = v;
+          if (v) sslPanelOpen = true;
+        },
+        sslPanelOpen,
+        () => (sslPanelOpen = !sslPanelOpen),
+        sslBody,
+      )}
 
-    <!-- SSH tunnel fields, horizontal, fills the width -->
-    {#if isPgMy && sshEnabled}
-      <div
-        class="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] items-start gap-x-4 gap-y-3 border-t border-border/15 pt-4"
-      >
-        <div class="grid grid-cols-[1fr_72px] gap-2">
-          <div>
-            <label for="cn-ssh-host" class={lbl}>SSH Host</label>
+      <!-- ── SSH tunnel ──────────────────────────────────────────────────── -->
+      {#snippet sshBody()}
+        <!-- One note for the panel, rather than a line of helper text under two
+             of the six fields: those hints set the row's height, wrapped at the
+             narrow columns they sat in, and left the grid looking like two rows
+             that had nothing to do with each other. -->
+        {@render panelNote(
+          "Forwarded with your system ssh, so the server needs AllowTcpForwarding, and an encrypted key needs its passphrase in your agent. Keepalive is in seconds; 0 turns it off.",
+        )}
+        <!-- Two rows at this width: address on the first, credentials on the
+             second. It was four stacked rows, which is where the form's height
+             came from. -->
+        <div class={cn(row6, "items-start gap-y-3")}>
+          <div class="col-span-6 min-w-0 sm:col-span-3">
+            <label for="cn-ssh-host" class={lbl}>SSH host</label>
             <Input
               id="cn-ssh-host"
               bind:value={sshHost}
               placeholder="bastion.example.com"
+              spellcheck="false"
+              autocomplete="off"
               class={inp}
             />
           </div>
-          <div>
+          <div class="col-span-2 min-w-0 sm:col-span-1">
             <label for="cn-ssh-port" class={lbl}>Port</label>
             <Input
               id="cn-ssh-port"
               bind:value={sshPort}
               type="text"
               inputmode="numeric"
+              placeholder="22"
+              class={inpNum}
+            />
+          </div>
+          <div class="col-span-4 min-w-0 sm:col-span-2">
+            <label for="cn-ssh-user" class={lbl}>SSH username</label>
+            <Input
+              id="cn-ssh-user"
+              bind:value={sshUsername}
+              placeholder="ec2-user"
+              spellcheck="false"
+              autocomplete="off"
+              class={inp}
+            />
+          </div>
+
+          <div class="col-span-6 min-w-0 sm:col-span-2">
+            <span id="cn-ssh-auth-label" class={lbl}>Authentication</span>
+            <SearchableMenu
+              items={SSH_AUTH_MODES}
+              searchThreshold={99}
+              contentClass="w-[18rem]"
+              align="start"
+              onselect={(it) => (sshAuth = it.value)}
+            >
+              {#snippet trigger(props)}
+                <button
+                  {...props}
+                  type="button"
+                  aria-labelledby="cn-ssh-auth-label"
+                  class="field-surface flex h-8 w-full min-w-0 items-center gap-1.5 px-2.5 text-left text-ui-xs transition-colors hover:bg-accent/40"
+                >
+                  <span class="min-w-0 flex-1 truncate text-foreground">
+                    {SSH_AUTH_MODES.find((m) => m.value === sshAuth)?.label ?? "Key file"}
+                  </span>
+                  <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground" />
+                </button>
+              {/snippet}
+              {#snippet item(it)}
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate">{it.label}</span>
+                  <span class="block truncate text-ui-3xs text-muted-foreground">{it.desc}</span>
+                </span>
+                {#if it.value === sshAuth}
+                  <Icon name="check" class="size-3.5 shrink-0 text-primary" />
+                {/if}
+              {/snippet}
+            </SearchableMenu>
+          </div>
+          {#if sshAuth === "key"}
+            <div class="col-span-4 min-w-0 sm:col-span-3">
+              {@render pathField(
+                "cn-ssh-key",
+                "Identity file",
+                sshKeyPath,
+                "~/.ssh/id_rsa",
+                (v) => (sshKeyPath = v),
+                () => void pickTransportFile("key"),
+              )}
+            </div>
+          {/if}
+          <div class="col-span-2 min-w-0 sm:col-span-1">
+            <label for="cn-ssh-keepalive" class={lbl}>Keepalive</label>
+            <Input
+              id="cn-ssh-keepalive"
+              bind:value={sshKeepalive}
+              type="text"
+              inputmode="numeric"
+              placeholder="30"
               class={inpNum}
             />
           </div>
         </div>
-        <div>
-          <label for="cn-ssh-user" class={lbl}>SSH Username</label>
-          <Input
-            id="cn-ssh-user"
-            bind:value={sshUsername}
-            placeholder="ec2-user"
-            autocomplete="username"
-            class={inp}
-          />
-        </div>
-        <div>
-          <label for="cn-ssh-key" class={lbl}>Identity file</label>
-          <Input
-            id="cn-ssh-key"
-            bind:value={sshKeyPath}
-            placeholder="~/.ssh/id_rsa"
-            class={cn(inp, "font-mono text-ui-2xs")}
-          />
-          <p class="mt-1 text-ui-3xs leading-snug text-muted-foreground/40">
-            Optional, leave blank to use your SSH agent.
-          </p>
-        </div>
-      </div>
+      {/snippet}
+      {@render transportPanel(
+        "cn-ssh",
+        "SSH tunnel",
+        sshEnabled ? sshHost.trim() || "No host yet" : "Direct connection",
+        "terminal",
+        sshEnabled,
+        (v) => {
+          sshEnabled = v;
+          if (v) sshPanelOpen = true;
+        },
+        sshPanelOpen,
+        () => (sshPanelOpen = !sshPanelOpen),
+        sshBody,
+      )}
+    {:else if dbType === "clickhouse"}
+      <label class="flex cursor-pointer select-none items-center gap-2">
+        <Checkbox
+          id="cn-ch-secure"
+          checked={secure}
+          onCheckedChange={(v) => {
+            secure = v === true;
+            if (secure && port === "8123") port = "8443";
+            else if (!secure && port === "8443") port = "8123";
+          }}
+        />
+        <span class="text-ui-xs text-foreground/75">Use HTTPS (TLS)</span>
+      </label>
     {/if}
 
-    <!-- SQL Server encryption -->
+    <!-- SQL Server carries its own TLS pair rather than a `sslmode`. -->
     {#if dbType === "mssql"}
-      <div class="flex flex-col gap-3 border-t border-border/15 pt-4">
+      <div class="flex flex-col gap-3 rounded-xl border border-border/50 bg-card/30 p-3">
         <label class="flex cursor-pointer select-none items-start gap-2">
           <Checkbox
             id="cn-mssql-encrypt"
@@ -1836,10 +2553,8 @@
             class="mt-px"
           />
           <span class="flex flex-col">
-            <span class="text-ui-xs text-muted-foreground/75"
-              >Encrypt connection (TLS)</span
-            >
-            <span class="text-ui-2xs leading-snug text-muted-foreground/40"
+            <span class="text-ui-xs text-foreground/75">Encrypt connection (TLS)</span>
+            <span class="text-ui-3xs leading-snug text-muted-foreground"
               >Encrypts traffic between Stroke and the server.</span
             >
           </span>
@@ -1858,17 +2573,29 @@
             class="mt-px"
           />
           <span class="flex flex-col">
-            <span class="text-ui-xs text-muted-foreground/75"
-              >Trust server certificate</span
-            >
-            <span class="text-ui-2xs leading-snug text-muted-foreground/40"
-              >Accept self-signed or otherwise untrusted certificates. Needed
-              for many local / dev servers.</span
+            <span class="text-ui-xs text-foreground/75">Trust server certificate</span>
+            <span class="text-ui-3xs leading-snug text-muted-foreground"
+              >Accept self-signed or otherwise untrusted certificates. Needed for many local
+              and dev servers.</span
             >
           </span>
         </label>
       </div>
     {/if}
+
+    <!-- Read-only is a property of the session, not of the transport, so it sits
+         outside both panels rather than being a third checkbox in a row. -->
+    <label class="flex cursor-pointer select-none items-center gap-2 px-0.5 py-1">
+      <Checkbox
+        id="cn-readonly"
+        checked={readOnly}
+        onCheckedChange={(v) => (readOnly = v === true)}
+      />
+      <span class="flex min-w-0 items-center gap-1.5 text-ui-xs text-foreground/75">
+        <Icon name="lock" class="size-3.5 shrink-0" aria-hidden="true" />
+        Open in read-only mode
+      </span>
+    </label>
   </div>
 {/snippet}
 
@@ -1879,7 +2606,7 @@
       type="button"
       onclick={() => (advancedOpen = !advancedOpen)}
       aria-expanded={advancedOpen}
-      class="flex w-full items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/50 transition-colors hover:text-foreground"
+      class="flex w-full items-center gap-1.5 text-ui-2xs font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
     >
       <Icon
         name="chevron-right"
@@ -1949,14 +2676,31 @@
               }}
               title="Show connections (⌘B)"
               aria-label="Show connections"
-              class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground/45 transition-colors hover:bg-muted/50 hover:text-foreground"
+              class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
             >
               <Icon name="chevrons-right" class="size-4" />
             </button>
           </aside>
         {:else}
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
           <aside
             class="relative flex min-h-0 flex-col overflow-hidden border-r border-border/15 bg-muted/[0.015]"
+            onkeydowncapture={(e) => {
+              // One rule for the whole rail: Tab goes to the connections.
+              //
+              // Per-control handlers kept missing a stop - the filter, its ✕, the
+              // scroll box Chromium makes focusable on its own, a context-menu
+              // wrapper - and each miss reads as "Tab did nothing", because none
+              // of those stops draw anything. Caught in the capture phase from
+              // the rail itself, so it does not matter which of them holds focus.
+              // A row is the exception: Tab off a row leaves for the form, which
+              // is where it should go next.
+              if (e.key !== "Tab" || e.shiftKey || !savedMatches.length) return;
+              const el = /** @type {HTMLElement | null} */ (e.target);
+              if (el?.closest?.("[data-conn-row]")) return;
+              e.preventDefault();
+              focusFirstSavedRow();
+            }}
           >
             <!-- Title -->
             <div class="flex h-[52px] shrink-0 items-center gap-2 px-4">
@@ -1965,7 +2709,7 @@
               </h2>
               {#if saved.length > 0}
                 <span
-                  class="rounded-full bg-muted/60 px-1.5 py-px text-ui-3xs font-medium tabular-nums text-muted-foreground/70"
+                  class="rounded-full bg-muted/60 px-1.5 py-px text-ui-2xs font-medium tabular-nums text-muted-foreground"
                   >{savedQuery ? `${savedMatches.length}/${saved.length}` : saved.length}</span
                 >
               {/if}
@@ -1977,7 +2721,7 @@
                 }}
                 title="Hide connections (⌘B)"
                 aria-label="Hide connections"
-                class="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/45 transition-colors hover:bg-muted/50 hover:text-foreground"
+                class="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
               >
                 <Icon name="chevrons-left" class="size-4" />
               </button>
@@ -1985,17 +2729,33 @@
 
             <!-- New connection button -->
             <div class="shrink-0 border-t border-border/15 px-2 pb-2 pt-2">
+              <!-- Same geometry as a connection row - icon slot, gap and radius -
+                   so "New connection" and every saved name start on one left
+                   edge. It sat on its own grid before, which read as a control
+                   bolted above the list rather than the first entry in it. -->
               <button
                 type="button"
                 onclick={() => resetForm(null)}
+                onkeydown={(e) => {
+                  // Straight into the list. Chromium makes a scrollable container
+                  // a tab stop of its own (keyboard-focusable scrollers), so left
+                  // to the browser this Tab can land on the scroll box instead of
+                  // a row - a stop with nothing on it.
+                  if (e.key === "Tab" && !e.shiftKey && savedMatches.length) {
+                    e.preventDefault();
+                    focusFirstSavedRow();
+                  }
+                }}
                 class={cn(
-                  "flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left text-ui-xs transition-[color,background-color,border-color,transform] duration-150 ease-out active:scale-[0.98]",
+                  "flex w-full items-center gap-2.5 rounded-md border px-2 py-1.5 text-left text-ui-xs outline-none transition-[color,background-color,border-color,transform] duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring active:scale-[0.98]",
                   !editingId
                     ? "border-border/40 bg-muted/40 font-medium text-foreground"
-                    : "border-transparent text-muted-foreground/60 hover:bg-muted/25 hover:text-foreground",
+                    : "border-transparent text-muted-foreground hover:bg-muted/25 hover:text-foreground",
                 )}
               >
-                <Icon name="plus" class="size-3.5 shrink-0" />
+                <span class="flex size-6 shrink-0 items-center justify-center">
+                  <Icon name="plus" class="size-3.5" />
+                </span>
                 New connection
               </button>
             </div>
@@ -2014,16 +2774,24 @@
                 <div class="relative">
                   <Icon
                     name="search"
-                    class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40"
+                    class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
                   />
                   <!-- The shared Input, resized to the rail's compact scale, so
                        the focus ring and border states match the engine search
                        rather than being approximated a second time. -->
+                  <!-- Not a forward tab stop. The rail's job is the list, and a
+                       filter field standing between the two took a whole Tab to
+                       pass on the way to it. It is still reachable without a
+                       mouse - Shift+Tab off the top row lands here, and typing
+                       into it is a click or that chord away - so the path exists,
+                       it just is not in the way. -->
                   <Input
                     bind:ref={savedSearchEl}
                     bind:value={savedQuery}
                     placeholder="Filter connections…"
                     aria-label="Filter saved connections"
+                    title="Filter connections (Shift+Tab from the list)"
+                    tabindex="-1"
                     autocomplete="off"
                     spellcheck="false"
                     class="h-8 rounded-md border pl-8 pr-8 text-ui-xs"
@@ -2037,15 +2805,25 @@
                         savedQuery = "";
                         return;
                       }
-                      // Enter takes the top match, the same way clicking it would.
+                      // Enter takes the top match, the same way clicking it would;
+                      // Mod+Enter connects to it instead of just opening it.
                       if (e.key === "Enter" && firstSavedMatch) {
                         e.preventDefault();
-                        resetForm(firstSavedMatch);
+                        if (e.metaKey || e.ctrlKey) { if (!connecting) void connectWith(firstSavedMatch); }
+                        else resetForm(firstSavedMatch);
                         return;
                       }
                       // Down arrow hands off to the list, so a filtered result can
                       // be reached without going back to the mouse.
                       if (e.key === "ArrowDown" && savedMatches.length) {
+                        e.preventDefault();
+                        focusFirstSavedRow();
+                        return;
+                      }
+                      // So does Tab. Left to the browser it walks whatever the
+                      // scroll container wraps the list in first, which spends a
+                      // keystroke on a stop with nothing to show for it.
+                      if (e.key === "Tab" && !e.shiftKey && savedMatches.length) {
                         e.preventDefault();
                         focusFirstSavedRow();
                       }
@@ -2054,12 +2832,14 @@
                   {#if savedQuery}
                     <button
                       type="button"
-                      aria-label="Clear filter"
+                      aria-label="Clear filter (Escape)"
+                      title="Clear filter (Esc)"
+                      tabindex="-1"
                       onclick={() => {
                         savedQuery = "";
                         savedSearchEl?.focus();
                       }}
-                      class="absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground after:absolute after:-inset-1 after:content-['']"
+                      class="absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground after:absolute after:-inset-1 after:content-['']"
                       ><Icon name="x" class="size-3.5" /></button
                     >
                   {/if}
@@ -2072,7 +2852,7 @@
                 <!-- A dead end needs a way out: the filter that emptied the list
                      is the only thing standing between here and the list. -->
                 <div class="flex flex-col items-start gap-1.5 px-4 py-3">
-                  <p class="text-ui-2xs text-muted-foreground/50">
+                  <p class="text-ui-2xs text-muted-foreground">
                     No connection matches “{savedQuery}”.
                   </p>
                   <button
@@ -2099,21 +2879,49 @@
                       <div
                         data-conn-row
                         class={cn(
-                          "group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.98]",
+                          "group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none focus:bg-muted/60 focus:text-foreground focus:outline-2 focus:-outline-offset-2 focus:outline-ring active:scale-[0.98]",
                           savedStagger && "cn-stagger-in",
                           isSel
                             ? "bg-muted/50 text-foreground"
-                            : "text-muted-foreground/60 hover:bg-muted/30 hover:text-foreground",
+                            : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
                         )}
                         style={savedStagger
                           ? `animation-delay: ${Math.min(i, 12) * 40}ms`
                           : ""}
                         role="button"
-                        tabindex="0"
+                        tabindex={conn.id === savedRovingId ? 0 : -1}
                         onclick={() => resetForm(conn)}
                         ondblclick={() => { if (!connecting) void connectWith(conn); }}
                         onkeydown={(e) => {
-                          if (e.key === "Enter") { resetForm(conn); return; }
+                          // Enter opens the connection in the form, the same as a
+                          // click. Mod+Enter connects, the same as a double-click -
+                          // the keyboard gets both gestures the mouse has.
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                              if (!connecting) void connectWith(conn);
+                            } else resetForm(conn);
+                            return;
+                          }
+                          if (e.key === "Delete" || e.key === "Backspace") {
+                            e.preventDefault();
+                            handleDelete(conn.id);
+                            // The element that had focus no longer exists - hand it
+                            // to whatever took its place rather than letting it fall
+                            // back to the document.
+                            void tick().then(() => {
+                              if (savedMatches.length) focusFirstSavedRow();
+                              else savedSearchEl?.focus();
+                            });
+                            return;
+                          }
+                          // Shift+Tab is the way back to the filter, the mirror of
+                          // the Tab that got here.
+                          if (e.key === "Tab" && e.shiftKey && savedSearchEl) {
+                            e.preventDefault();
+                            savedSearchEl.focus();
+                            return;
+                          }
                           // Arrow keys walk the list; Up off the top row returns
                           // to the filter, so the whole rail is one keyboard path.
                           if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -2123,7 +2931,7 @@
                           if (next < 0) savedSearchEl?.focus();
                           else /** @type {HTMLElement|undefined} */ (rows[next])?.focus();
                         }}
-                        title="Click to edit · double-click to connect"
+                        title="Click to edit · double-click to connect ({IS_MAC ? '⌘' : 'Ctrl'}+Enter)"
                       >
                         {#if isSel}
                           <span
@@ -2134,7 +2942,9 @@
                         <button
                           type="button"
                           class="relative flex size-6 shrink-0 items-center justify-center rounded-md disabled:opacity-30"
-                          title="Connect"
+                          title="Connect ({IS_MAC ? '⌘' : 'Ctrl'}+Enter)"
+                          aria-label="Connect to {conn.name || 'this connection'}"
+                          tabindex="-1"
                           disabled={!!connecting}
                           onclick={(e) => {
                             e.stopPropagation();
@@ -2171,16 +2981,19 @@
                             {conn.name || "Unnamed"}
                           </p>
                           <p
-                            class="mt-0.5 truncate text-ui-2xs leading-tight text-muted-foreground/55"
+                            class="mt-0.5 truncate text-ui-2xs leading-tight text-muted-foreground"
                           >
-                            {connSubtitle(conn, cid)}
+                            {connSubtitle(conn)}
                           </p>
                         </div>
 
                         <!-- Trash: hidden until hover -->
                         <button
                           type="button"
-                          class="shrink-0 rounded p-0.5 text-muted-foreground/25 opacity-0 transition-opacity duration-150 hover:text-destructive group-hover:opacity-100"
+                          class="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-150 hover:text-destructive group-hover:opacity-100"
+                          title="Delete (Del)"
+                          aria-label="Delete {conn.name || 'this connection'}"
+                          tabindex="-1"
                           onclick={(e) => {
                             e.stopPropagation();
                             handleDelete(conn.id);
@@ -2192,7 +3005,7 @@
                 </ScrollArea>
               {:else}
                 <div class="flex h-full items-center justify-center pb-8">
-                  <p class="text-ui-2xs text-muted-foreground/25">
+                  <p class="text-ui-2xs text-muted-foreground">
                     No saved connections
                   </p>
                 </div>
@@ -2222,42 +3035,140 @@
              the title becomes that choice in step 2, with the back arrow as the
              way to change it - so there is never a form on screen for a database
              nobody has picked yet. -->
-          <div class="shrink-0 px-8 pt-6">
+          <!-- The header lines up with whatever is under it: the tile column on
+               step 1, the full-width form on step 2. -->
+          <div
+            class={cn(
+              "w-full shrink-0 px-8 pt-5",
+              step === "pick" && "max-w-[64rem]",
+            )}
+          >
             {#if step === "pick"}
-              <h2
-                class="text-ui-lg font-semibold tracking-tight text-foreground"
-              >
-                Connect a database
-              </h2>
-              <p class="mt-1 text-ui-xs text-muted-foreground">
-                Choose what you're connecting to.
-              </p>
+              <!-- pe-6 keeps the rescan button clear of the dialog's own close
+                 button, which floats at right-4 top-4 over this same corner. -->
+              <div class="flex items-center gap-3 pe-6">
+                <h2
+                  class="text-ui-lg font-semibold tracking-tight text-foreground"
+                >
+                  Connect a database
+                </h2>
+                {#if localPhase === "scanning"}
+                  <!-- The scan used to announce itself inside the "Local studios"
+                       heading, which is a heading that may not exist. -->
+                  <span class="flex items-center gap-1.5 text-ui-3xs text-muted-foreground" role="status">
+                    <Icon name="loader-2" class="size-3 animate-spin" aria-hidden="true" />
+                    Scanning
+                  </span>
+                {/if}
+                <!-- The rescan already existed as a size-3 glyph at 35% opacity
+                   beside a section heading, findable only if you knew it was
+                   there. Same action, where you would look for it. -->
+                <button
+                  type="button"
+                  title="Rescan local databases (⌘R)"
+                  aria-label="Rescan local databases"
+                  disabled={localPhase === "scanning"}
+                  onclick={() => {
+                    saved = loadSavedConnections().sort(byLastConnected);
+                    void refreshLocal();
+                  }}
+                  class="field-surface inline-flex size-8 shrink-0 items-center justify-center text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.96] disabled:opacity-50"
+                >
+                  <Icon
+                    name="refresh-cw"
+                    class={cn(
+                      "size-3.5 shrink-0",
+                      localPhase === "scanning" && "animate-spin",
+                    )}
+                  />
+                </button>
+              </div>
             {:else}
-              <div class="flex items-center gap-3">
+              <!-- pe-14, not pe-6: the URL button now sits at the right edge of
+                   this row and the dialog's own close ✕ floats over the same
+                   corner (right-4, size-8). -->
+              <div class="flex items-center gap-2 pe-14">
                 <button
                   type="button"
                   onclick={backToPick}
-                  title="Choose a different database"
-                  class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted/50 hover:text-foreground"
+                  title="Back"
+                  aria-label="Back"
+                  class="-ml-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
                 >
                   <Icon name="chevron-left" class="size-4" />
                 </button>
-                <DbIcon
-                  id={activeDriver.id}
-                  class={cn("size-5 shrink-0", engineTint(activeDriver.id))}
-                />
-                <!-- No blurb under the title: by this point the engine has been
-                     chosen, so "Local file-based database" is describing a
-                     decision already made. The form below is what to read. -->
-                <div class="min-w-0">
-                  <h2
-                    class="truncate text-ui-lg font-semibold tracking-tight text-foreground"
+
+                <!-- The engine, as a dropdown. It was a page of seventeen tiles
+                     you had to visit before this form existed, and then a static
+                     title telling you what you had picked - so changing your
+                     mind meant going back a page. It is one field of the
+                     connection, so it sits in the form like one. -->
+                <SearchableMenu
+                  items={engineItems}
+                  placeholder="Search databases…"
+                  contentClass="w-[22rem]"
+                  align="start"
+                  onselect={(it) => pickEngine(it.value)}
+                >
+                  {#snippet trigger(props)}
+                    <button
+                      {...props}
+                      type="button"
+                      aria-label="Database engine"
+                      class="field-surface flex h-8 min-w-0 max-w-[22rem] items-center gap-2 px-2.5 text-left transition-colors hover:bg-accent/40"
+                      title={editingId ? name || activeDriver.label : activeDriver.label}
+                    >
+                      <DbIcon
+                        id={activeDriver.id}
+                        class={cn("size-4 shrink-0", engineTint(activeDriver.id))}
+                      />
+                      <span class="min-w-0 truncate text-ui-sm font-medium text-foreground">
+                        {editingId ? name || activeDriver.label : activeDriver.label}
+                      </span>
+                      <Icon name="chevron-down" class="size-3.5 shrink-0 text-muted-foreground" />
+                    </button>
+                  {/snippet}
+                  {#snippet item(it)}
+                    <DbIcon id={it.value} class={cn("size-4 shrink-0", engineTint(it.value))} />
+                    <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                    <span class="shrink-0 text-ui-3xs text-muted-foreground">{it.group}</span>
+                    {#if it.value === dbType}
+                      <Icon name="check" class="size-3.5 shrink-0 text-primary" />
+                    {/if}
+                  {/snippet}
+                </SearchableMenu>
+
+                <!-- Opens the URL bar above the footer. It sat down there beside
+                     the status text, in the row your eye goes to last, wearing
+                     the quietest treatment on the form - so the fastest way to
+                     fill this form was also the hardest thing on it to find. Up
+                     here it is a control among controls; the bar it opens stays
+                     where the fields are. -->
+                {#if entryMode === "manual" && hasFieldToggle}
+                  <button
+                    type="button"
+                    aria-expanded={importOpen}
+                    aria-controls="cn-url-bar"
+                    title="Fill this form from a connection string"
+                    onclick={() => {
+                      importOpen = !importOpen;
+                      uriHint = "";
+                      if (importOpen)
+                        void tick().then(() =>
+                          document.getElementById("cn-import-uri")?.focus(),
+                        );
+                    }}
+                    class={cn(
+                      "field-surface ms-auto inline-flex h-8 shrink-0 items-center gap-1.5 px-2.5 text-ui-2xs transition-colors",
+                      importOpen
+                        ? "bg-accent/60 text-foreground"
+                        : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                    )}
                   >
-                    {editingId
-                      ? name || activeDriver.label
-                      : activeDriver.label}
-                  </h2>
-                </div>
+                    <Icon name="link-2" class="size-3.5 shrink-0" aria-hidden="true" />
+                    Paste a URL
+                  </button>
+                {/if}
               </div>
             {/if}
           </div>
@@ -2267,76 +3178,124 @@
              blurbs turned this into a wall of prose to read before the first
              decision, and the mark is what people actually recognise. -->
           {#if step === "pick"}
-            <!-- Search sits outside the scroller: it is how you get to an engine
-               without reading six groups, so it must never scroll away. -->
-            <div class="flex shrink-0 items-center gap-2 px-8 pt-4">
-              <div class="relative max-w-[720px] flex-1">
-                <Icon
-                  name="search"
-                  class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40"
-                />
-                <Input
-                  bind:ref={engineSearchEl}
-                  bind:value={engineQuery}
-                  placeholder="Search databases and local studios…"
-                  aria-label="Search databases"
-                  class="pl-9 pr-8"
-                  oninput={() => (engineStagger = false)}
-                  onkeydown={(e) => {
-                    if (e.key !== "Enter" || !firstEngineMatch) return;
-                    e.preventDefault();
-                    pickEngine(firstEngineMatch.id);
-                  }}
-                />
-                {#if engineQuery}
-                  <button
-                    type="button"
-                    onclick={() => {
-                      engineQuery = "";
-                      engineSearchEl?.focus();
-                    }}
-                    aria-label="Clear search"
-                    class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground/40 transition-colors hover:text-foreground"
-                    ><Icon name="x" class="size-3" /></button
-                  >
-                {/if}
-              </div>
-              <!-- The rescan already existed as a size-3 glyph at 35% opacity beside a
-                   section heading - findable only if you knew it was there. This is the
-                   same action, where you would look for it. -->
-              <button
-                type="button"
-                title="Rescan local databases (⌘R)"
-                aria-label="Rescan local databases"
-                disabled={localPhase === "scanning"}
-                onclick={() => { saved = loadSavedConnections().sort(byLastConnected); void refreshLocal(); }}
-                class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2.5 text-ui-xs text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground disabled:opacity-50"
-              >
-                <Icon name="refresh-cw" class={cn("size-3.5 shrink-0", localPhase === "scanning" && "animate-spin")} />
-                Refresh
-              </button>
-            </div>
             <ScrollArea type="auto" class="min-h-0 flex-1 scroll-smooth">
-              <div class="flex flex-col gap-5 px-8 py-5">
+              <!-- A connection is a form, and a form has a width. Everything
+                   here used to span the panel: on a 2000px window the paste bar
+                   was 1900px long, the five provider marks sat in an eight-column
+                   auto-fill grid with 200px of air between them, and "New
+                   connection" put its chevron 1800px from its own label. One
+                   42rem column, one leading edge. -->
+              <!-- Left-aligned, not centred: the rail is on the left and the
+                   header sits above this, so a column centred in the panel
+                   starts somewhere neither of them does. One leading edge. -->
+              <div class="@container flex w-full max-w-[64rem] flex-col gap-5 px-8 py-5">
+                  <!-- ── Paste a connection string ─────────────────────────
+                       The fastest path there is, and the one a developer already
+                       has in a clipboard from their provider dashboard or a
+                       .env. The engine is in the string, so nothing needs to be
+                       picked first: `detectConnectionUri` reads the scheme (and
+                       the host, for a provider) and the form opens filled in.
+                       "Import from URL" used to live inside the form, behind
+                       choosing a driver - which is the one step this removes. -->
+                  <div class="flex flex-col gap-1.5">
+                    <div class="flex items-stretch gap-2">
+                      <div class="relative min-w-0 flex-1">
+                        <Icon
+                          name="link-2"
+                          class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                        />
+                        <Input
+                          bind:ref={quickUriEl}
+                          bind:value={quickUri}
+                          placeholder="Paste a connection string, or a path to a .db file"
+                          aria-label="Paste a connection string"
+                          spellcheck="false"
+                          class="h-9 pl-8 font-mono text-ui-xs"
+                          oninput={(e) => {
+                            quickHint = "";
+                            // Cleared on purpose: do not hand the same string
+                            // back on the next window focus.
+                            const v = /** @type {HTMLInputElement} */ (e.currentTarget).value;
+                            if (!v.trim() && clipboardFilled) clipboardDismissed = clipboardFilled;
+                          }}
+                          onkeydown={(e) => {
+                            if (e.key !== "Enter") return;
+                            e.preventDefault();
+                            useQuickUri();
+                          }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!quickUri.trim()}
+                        onclick={useQuickUri}
+                        class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-ui-xs font-medium text-primary-foreground transition-[opacity,transform] hover:opacity-90 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40"
+                      >
+                        Continue
+                        <Icon name="arrow-right" class="size-3.5 shrink-0" />
+                      </button>
+                    </div>
+                    {#if quickHint}
+                      <p class="px-0.5 text-ui-2xs text-muted-foreground">{quickHint}</p>
+                    {/if}
+                  </div>
+
+                  <!-- ── Providers ─────────────────────────────────────────
+                       An account, not a host and port: these four hand back a
+                       database list once you are signed in, so they are the only
+                       engines worth naming on the front page. -->
+                  <div>
+                    <p class="text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                      Connect with a provider
+                    </p>
+                    <!-- Two columns: five providers in an auto-fill track came
+                         out as five marks strung across the window with 200px of
+                         air between them. -->
+                    <!-- Horizontal: five providers on one row once there is
+                         room, wrapping to two or three columns only when the
+                         panel is narrow. Stacked two-up they took three rows and
+                         half the page to say five words. -->
+                    <div class="mt-2 grid grid-cols-2 gap-1.5 @xl:grid-cols-3 @3xl:grid-cols-5">
+                      {#each PROVIDER_CARDS as id (id)}
+                        {@const d = driverById(id)}
+                        {@const off = DISABLED_TABS.has(id)}
+                        <button
+                          type="button"
+                          disabled={off}
+                          title={off ? `${d.label} - coming soon` : `${d.label} - ${d.desc}`}
+                          onclick={() => pickEngine(id)}
+                          class={cn(
+                            "group flex h-9 items-center gap-2 rounded-lg border px-2.5 text-left outline-none transition-[color,background-color,border-color,scale] duration-150 ease-out",
+                            off
+                              ? "cursor-not-allowed border-border/40 opacity-45"
+                              : "border-border/60 bg-card/40 text-foreground hover:border-border hover:bg-accent/40 focus-visible:border-ring active:scale-[0.98]",
+                          )}
+                        >
+                          <DbIcon
+                            id={d.id}
+                            class={cn(
+                              "size-4 shrink-0 transition-opacity",
+                              off ? "opacity-30 grayscale" : engineTint(d.id),
+                            )}
+                          />
+                          <span class="min-w-0 flex-1 truncate text-ui-2xs font-medium">{d.label}</span>
+                          {#if off}
+                            <span class="shrink-0 text-ui-3xs text-muted-foreground/70">soon</span>
+                          {/if}
+                        </button>
+                      {/each}
+                    </div>
+                  </div>
+
                 <!-- ── Studios running on this machine ────────────────────────
                    A running `prisma studio` / `drizzle-kit studio` already knows
                    its database, so this offers it directly - one click, no
                    connection string, nothing saved afterwards. -->
-                {#if localPhase !== "idle" && (localMatches.length > 0 || !engineQuery)}
-                  <div class="flex flex-col gap-4">
-                    {#if localGroups.length === 0}
-                      <!-- <div>
-                      <p class="flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/40">
-                        {@render liveDot()}
-                        Running on this machine
-                      </p>
-                      <p class="mt-2 text-ui-2xs leading-relaxed text-muted-foreground/45">
-                        {localPhase === 'scanning'
-                          ? 'Looking for local studios, installed servers and database containers…'
-                          : 'Nothing running locally. Start a Prisma or Drizzle studio, and it shows up here ready to open.'}
-                      </p>
-                    </div> -->
-                    {/if}
+                <!-- Only when a group actually has rows: an empty wrapper still
+                     carried the column's gap either side of it, which is where
+                     the hole between the providers and Docker came from. -->
+                {#if localGroups.length > 0}
+                  <div class="flex flex-col gap-5">
                     {#each localGroups as group, i (group.key)}
                       {@render localGroup(group.label, group.targets, i === 0)}
                     {/each}
@@ -2361,34 +3320,19 @@
                 )}
                   <div>
                     <p
-                      class="flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/40"
+                      class="flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground"
                     >
                       {#if lead}{@render liveDot()}{/if}
                       {label}
-                      <span class="font-mono text-muted-foreground/30"
-                        >{targets.length}</span
+                      <span class="font-mono text-muted-foreground/60"
+                        >· {targets.length}</span
                       >
-                      {#if lead}
-                        {#if localPhase === "scanning"}
-                          <Icon
-                            name="loader-2"
-                            class="size-3 animate-spin text-muted-foreground/35"
-                          />
-                        {:else}
-                          <button
-                            type="button"
-                            title="Scan again (⌘R)"
-                            aria-label="Scan again for local databases"
-                            onclick={() => void refreshLocal()}
-                            class="-my-1 inline-flex size-6 items-center justify-center rounded text-muted-foreground/35 transition-colors hover:bg-muted/50 hover:text-foreground"
-                            ><Icon name="refresh-cw" class="size-3" /></button
-                          >
-                        {/if}
-                      {/if}
                     </p>
-                    <div
-                      class="mt-2 grid grid-cols-[repeat(auto-fill,minmax(380px,1fr))] gap-2"
-                    >
+                    <!-- A grid of small cards, two or three across. Four
+                         containers as full-width two-line rows took as much
+                         height as the whole rest of the page; they are the same
+                         shape and the same size as each other, so they tile. -->
+                    <div class="mt-2 grid grid-cols-1 gap-1.5 @xl:grid-cols-2 @4xl:grid-cols-3">
                       {#each targets as t, i (t.id)}
                         {@const busy = connecting === t.id}
                         <button
@@ -2400,17 +3344,17 @@
                             ? `animation-delay: ${Math.min(i, 8) * 35}ms`
                             : ""}
                           class={cn(
-                            "group flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out",
+                            "group flex h-12 items-center gap-2 rounded-lg border px-2.5 text-left outline-none transition-[color,background-color,border-color,scale] duration-150 ease-out",
                             engineStagger && "cn-stagger-in",
                             t.conn
-                              ? "border-border/50 text-foreground/90 hover:border-border hover:bg-muted/40 hover:text-foreground active:scale-[0.98] disabled:opacity-60"
-                              : "cursor-not-allowed border-border/30 text-muted-foreground/40",
+                              ? "border-border/60 bg-card/40 text-foreground hover:border-border hover:bg-accent/40 focus-visible:border-ring active:scale-[0.98] disabled:opacity-60"
+                              : "cursor-not-allowed border-border/40 opacity-50",
                           )}
                         >
                           {#if busy}
                             <Icon
                               name="loader-2"
-                              class="mt-0.5 size-4 shrink-0 animate-spin self-start"
+                              class="size-4 shrink-0 animate-spin"
                             />
                           {:else if t.conn}
                             <DbIcon
@@ -2422,11 +3366,11 @@
                                  "needs attention", not a greyed-out database. -->
                             <Icon
                               name="alert-triangle"
-                              class="mt-0.5 size-4 shrink-0 self-start text-warning/70"
+                              class="size-4 shrink-0 text-warning"
                             />
                           {/if}
                           <span class="min-w-0 flex-1">
-                            <span class="block truncate text-ui-sm font-medium"
+                            <span class="block truncate text-ui-2xs font-medium"
                               >{t.title}</span
                             >
                             <!-- A resolved target shows its URL on one line; a
@@ -2434,10 +3378,8 @@
                                  readable instead of cut off mid-sentence. -->
                             <span
                               class={cn(
-                                "mt-0.5 block font-mono text-ui-2xs leading-tight",
-                                t.conn
-                                  ? "truncate text-muted-foreground/50"
-                                  : "line-clamp-2 text-muted-foreground/60",
+                                "mt-0.5 block font-mono text-ui-3xs leading-tight tabular-nums text-muted-foreground",
+                                t.conn ? "truncate" : "line-clamp-2",
                               )}
                               >{t.subtitle}</span
                             >
@@ -2458,92 +3400,53 @@
                   </div>
                 {/snippet}
 
-                {#each engineMatches as cat (cat.label)}
-                  <div>
-                    <p
-                      class="text-ui-3xs font-semibold uppercase tracking-wider text-muted-foreground/45"
-                    >
-                      {cat.label}
-                    </p>
-                    <!-- Columns come from the window, not a fixed count: a card
-                       never goes below 230px (which is what turned "PostgreSQL"
-                       into "PostgreS…"), and on a wide window each group
-                       collapses to one row instead of leaving half the dialog
-                       empty. -->
-                    <div
-                      class="mt-2 grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2"
-                    >
-                      {#each cat.drivers as d (d.id)}
-                        {@const off = DISABLED_TABS.has(d.id)}
-                        <button
-                          type="button"
-                          disabled={off}
-                          title={off ? `${d.label} - coming soon` : d.desc}
-                          onclick={() => pickEngine(d.id)}
-                          class={cn(
-                            "group flex h-9 items-center gap-2 rounded-md border px-2.5 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out",
-                            off
-                              ? "cursor-not-allowed border-border/30 text-muted-foreground/30"
-                              : "border-border/50 text-foreground/90 hover:border-border hover:bg-muted/40 hover:text-foreground active:scale-[0.98]",
-                          )}
-                        >
-                          <DbIcon
-                            id={d.id}
-                            class={cn(
-                              "size-4 shrink-0 transition-opacity",
-                              off ? "opacity-30 grayscale" : engineTint(d.id),
-                            )}
-                          />
-                          <span
-                            class="min-w-0 flex-1 truncate text-ui-sm font-medium"
-                            >{d.label}</span
-                          >
-                          {#if off}
-                            <span
-                              class="shrink-0 rounded bg-muted/50 px-1 py-px text-ui-3xs font-medium text-muted-foreground/50"
-                              >soon</span
-                            >
-                          {/if}
-                        </button>
-                      {/each}
-                    </div>
-                  </div>
-                {/each}
-
                 {#if dockerTargets.length > 0}
                   {@render localGroup("Docker", dockerTargets, false)}
                 {/if}
 
-                {#if engineQuery && engineMatches.length === 0 && localMatches.length === 0}
-                  <div class="py-10 text-center">
-                    <p class="text-ui-sm text-muted-foreground">
-                      No database matches “{engineQuery}”.
+                  <!-- Everything else: the form, on its own engine dropdown.
+                       This used to be a second page of seventeen driver tiles. -->
+                  <div>
+                    <p class="text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                      Something else
                     </p>
                     <button
                       type="button"
-                      onclick={() => {
-                        engineQuery = "";
-                        engineSearchEl?.focus();
-                      }}
-                      class="mt-1 text-ui-xs text-muted-foreground/60 underline-offset-2 transition-colors hover:text-foreground hover:underline"
-                      >Clear search</button
+                      onclick={newConnectionForm}
+                      class="group mt-2 flex h-12 w-full items-center gap-2.5 rounded-lg border border-border/60 bg-card/40 px-3 text-left text-foreground outline-none transition-[color,background-color,border-color,scale] duration-150 ease-out hover:border-border hover:bg-accent/40 focus-visible:border-ring active:scale-[0.99]"
                     >
+                      <Icon name="plus" class="size-4 shrink-0 text-muted-foreground" />
+                      <span class="min-w-0 flex-1">
+                        <span class="block truncate text-ui-xs font-medium">New connection</span>
+                        <span class="block truncate text-ui-3xs text-muted-foreground">
+                          Pick an engine and enter its details
+                        </span>
+                      </span>
+                      <Icon name="chevron-right" class="size-4 shrink-0 text-muted-foreground" />
+                    </button>
                   </div>
-                {/if}
+
               </div>
             </ScrollArea>
 
             <!-- ── Step 2 · details for the chosen database ── -->
           {:else}
             <ScrollArea type="auto" class="min-h-0 flex-1 scroll-smooth">
-              <div class="flex items-start gap-10 px-8 py-6">
+              <!-- No column cap on this step. It had one, at 42rem and then at
+                   64rem, because the fields used to invent their own widths and
+                   a wide window strung five of them out with nothing lining up.
+                   They share one 12-column grid now, so width only makes the
+                   same layout roomier - and the panel already runs the header,
+                   the footer and the URL bar edge to edge, so a capped form in
+                   the middle of them was the odd one out. -->
+              <div class="flex w-full items-start gap-10 px-8 py-5">
                 <!-- Enter connects, from any field - filling a form and having to go
                  find the button is the one interaction nobody expects here. The
                  paste bar's own Enter handler runs first and marks the event
                  handled, so pasting a URI still just fills the fields. -->
                 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <div
-                  class="min-w-0 flex-1 max-w-[880px]"
+                  class="@container min-w-0 w-full"
                   onkeydown={(e) => {
                     if (e.key !== "Enter" || e.defaultPrevented || isBusy)
                       return;
@@ -2556,103 +3459,33 @@
                   {#if entryMode === "manual"}
                     <!-- Manual form, core connection fields, then a full-width Advanced
                      section at the bottom. -->
-                    <div class="flex min-w-0 flex-col gap-5">
-                      <!-- The engine came from step 1, so there is no picker here -
-                     the header's back arrow is how you change it.
+                      <div class="flex min-w-0 flex-col gap-4">
+                        <!-- The form reads as three parts, in the order the work actually happens:
+                             say where the database is, adjust how you reach it, then name it. Name
+                             used to hold the most prominent slot on the page despite being the one
+                             optional field on it, and the connection string sat beside the six
+                             fields it fills, so the same address was on screen twice. -->
 
-                     Name and the connection string share the first row. Both
-                     labels are single-line so they sit on one baseline: the
-                     Fields/URI switch used to ride in the right-hand label and
-                     pushed that label down a few pixels, which is the kind of
-                     misalignment you feel without being able to name. -->
-                      <div class={cn(row6, "gap-y-4")}>
-                        <div class="col-span-6 lg:col-span-3">
-                          <label for="cn-name" class={lbl}>
-                            Name
-                            <span class="font-normal text-muted-foreground/45"
-                              >· optional</span
-                            >
-                          </label>
-                          <Input
-                            id="cn-name"
-                            bind:value={name}
-                            class={inp}
-                            placeholder={autoName}
-                          />
-                        </div>
-
-                        {#if hasFieldToggle}
-                          <!-- A URI-only mode was redundant once this field fills the
-                         ones below: paste here and everything downstream is
-                         populated, so there is nothing a separate view added. -->
-                          <div class="col-span-6 min-w-0 lg:col-span-3">
-                            <label for="cn-paste-uri" class={lbl}>
-                              Connection string
-                              <span class="font-normal text-muted-foreground/45"
-                                >· fills the fields below</span
-                              >
-                            </label>
-                            <div class="flex gap-2">
-                              <Input
-                                id="cn-paste-uri"
-                                bind:value={connectionUri}
-                                placeholder="postgresql://…"
-                                class={cn(
-                                  inp,
-                                  "min-w-0 flex-1 font-mono text-ui-2xs",
-                                )}
-                                onpaste={() =>
-                                  requestAnimationFrame(applyConnectionUri)}
-                                onblur={() =>
-                                  connectionUri.trim() && applyConnectionUri()}
-                                onkeydown={(e) =>
-                                  e.key === "Enter" &&
-                                  (e.preventDefault(), applyConnectionUri())}
-                              />
-                              <button
-                                type="button"
-                                onclick={pasteConnectionUri}
-                                title="Paste from clipboard"
-                                aria-label="Paste from clipboard"
-                                class="inline-flex size-8 shrink-0 items-center justify-center rounded-md border-2 border-foreground/15 bg-muted/20 text-muted-foreground/70 transition-[color,border-color] hover:border-foreground/40 hover:text-foreground"
-                              >
-                                <Icon name="clipboard-copy" class="size-3.5" />
-                              </button>
-                            </div>
-                            {#if uriHint}
-                              <p
-                                class="mt-1.5 flex items-center gap-1 text-ui-2xs"
-                              >
-                                {#if uriHint.includes("Could") || uriHint.includes("Expected") || uriHint.includes("doesn't") || uriHint.includes("empty")}
-                                  <Icon
-                                    name="alert-circle"
-                                    class="size-3 shrink-0 text-destructive"
-                                  />
-                                  <span class="text-destructive">{uriHint}</span
-                                  >
-                                {:else}
-                                  <Icon
-                                    name="check-circle-2"
-                                    class="size-3 shrink-0 text-success"
-                                  />
-                                  <span class="text-success">{uriHint}</span>
-                                {/if}
-                              </p>
-                            {/if}
-                          </div>
-                        {/if}
-                      </div>
-
-                      <!-- Driver-specific fields -->
+                        <!-- ── 1 · Address ──────────────────────────────────────────────────── -->
+                        <section>
+                          <!-- Driver-specific fields. No caption: the labels say
+                               what this is, and the engine is named in the
+                               dropdown above. A URL fills these, from the bar
+                               the footer opens. -->
                       {#key dbType}
                         <div class="flex flex-col gap-3.5">
                           <!-- ── PostgreSQL / CockroachDB / MySQL / MariaDB ── -->
                           {#if dbType === "postgres" || dbType === "cockroachdb" || dbType === "mysql" || dbType === "mariadb"}
-                            <!-- Host, port and database are one address, so they share a row -
-              and the Host+Port pair spans exactly the three columns Name spans
-              above it, so the two rows break on the same line. -->
-                            <div class={row6}>
-                              <div class="col-span-3 sm:col-span-2">
+                            <!-- Host, port, database, user and password are one
+              address, so they share one row where the panel is wide enough and
+              break 3+2 where it is not. -->
+                            <!-- One row at 64rem: host 3 · port 2 · database 3 ·
+                                 user 2 · password 2, the five parts of one
+                                 address, breaking 3+3 only when the panel is
+                                 narrow. Port held one twelfth of the track and
+                                 clipped its own value at 5432. -->
+                            <div class={cn(row6, "gap-y-4 @3xl:grid-cols-12")}>
+                              <div class="col-span-3 min-w-0 sm:col-span-2 @3xl:col-span-3">
                                 <label for="cn-host" class={lbl}>Host</label>
                                 <Input
                                   id="cn-host"
@@ -2663,7 +3496,7 @@
                                   )}
                                 />
                               </div>
-                              <div class="col-span-3 sm:col-span-1">
+                              <div class="col-span-3 min-w-0 sm:col-span-1 @3xl:col-span-2">
                                 <label for="cn-port" class={lbl}>Port</label>
                                 <Input
                                   id="cn-port"
@@ -2676,7 +3509,7 @@
                                   )}
                                 />
                               </div>
-                              <div class="col-span-6 sm:col-span-3">
+                              <div class="col-span-6 min-w-0 sm:col-span-3 @3xl:col-span-3">
                                 <label for="cn-db" class={lbl}>Database</label>
                                 <Input
                                   id="cn-db"
@@ -2687,10 +3520,7 @@
                                   )}
                                 />
                               </div>
-                            </div>
-
-                            <div class={row6}>
-                              <div class="col-span-6 sm:col-span-3">
+                              <div class="col-span-6 min-w-0 sm:col-span-3 @3xl:col-span-2">
                                 <label for="cn-user" class={lbl}>Username</label
                                 >
                                 <Input
@@ -2703,7 +3533,7 @@
                                   )}
                                 />
                               </div>
-                              <div class="col-span-6 sm:col-span-3">
+                              <div class="col-span-6 min-w-0 sm:col-span-3 @3xl:col-span-2">
                                 <label for="cn-pass" class={lbl}>Password</label
                                 >
                                 <PasswordInput
@@ -2733,7 +3563,7 @@
                               <button
                                 type="button"
                                 onclick={() => (dbType = "libsql")}
-                                class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground"
+                                class="flex-1 rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
                                 >Remote (Turso / libSQL)</button
                               >
                             </div>
@@ -2750,7 +3580,7 @@
                                 <button
                                   type="button"
                                   onclick={pickSqliteFile}
-                                  class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
+                                  class="field-surface inline-flex h-8 shrink-0 items-center gap-1 px-2.5 text-ui-2xs text-muted-foreground transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
                                 >
                                   <Icon name="folder-open" class="size-3" />
                                   Browse
@@ -2769,7 +3599,7 @@
                                 Ephemeral in-memory database
                               </p>
                               <p
-                                class="text-ui-2xs leading-relaxed text-muted-foreground/45"
+                                class="text-ui-2xs leading-relaxed text-muted-foreground"
                               >
                                 Data lives only for this session. Nothing is
                                 written to disk, closing the connection discards
@@ -2785,7 +3615,7 @@
                               <button
                                 type="button"
                                 onclick={() => (dbType = "sqlite")}
-                                class="flex-1 rounded px-2 py-1 text-muted-foreground/60 transition-colors hover:text-foreground"
+                                class="flex-1 rounded px-2 py-1 text-muted-foreground transition-colors hover:text-foreground"
                                 >Local file</button
                               >
                               <button
@@ -2804,7 +3634,7 @@
                                 class={cn(inp, "font-mono text-ui-2xs")}
                               />
                               <p
-                                class="mt-1 text-ui-3xs text-muted-foreground/30"
+                                class="mt-1 text-ui-3xs text-muted-foreground"
                               >
                                 libsql:// · https:// · http://localhost:PORT
                               </p>
@@ -2827,57 +3657,6 @@
 
                             <!-- ── ClickHouse ─────────────────────────────── -->
                           {:else if dbType === "clickhouse"}
-                            <div>
-                              <label for="cn-ch-uri" class={lbl}
-                                >Connection string</label
-                              >
-                              <div class="flex gap-1.5">
-                                <Input
-                                  id="cn-ch-uri"
-                                  bind:value={connectionUri}
-                                  placeholder="clickhouse://user:pass@host:8123/db"
-                                  class={cn(inp, "font-mono text-ui-2xs")}
-                                  onpaste={() =>
-                                    requestAnimationFrame(applyConnectionUri)}
-                                  onkeydown={(e) =>
-                                    e.key === "Enter" &&
-                                    (e.preventDefault(), applyConnectionUri())}
-                                />
-                                <button
-                                  type="button"
-                                  onclick={applyConnectionUri}
-                                  disabled={!connectionUri.trim()}
-                                  class="h-8 shrink-0 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25"
-                                >
-                                  Parse
-                                </button>
-                              </div>
-                              {#if uriHint}
-                                <p
-                                  class={cn(
-                                    "mt-1 flex items-center gap-1 text-ui-3xs",
-                                    uriHint.includes("Could") ||
-                                      uriHint.includes("Expected")
-                                      ? "text-destructive"
-                                      : "text-success",
-                                  )}
-                                >
-                                  {#if uriHint.includes("Could") || uriHint.includes("Expected")}
-                                    <Icon
-                                      name="alert-circle"
-                                      class="size-2.5"
-                                    />
-                                  {:else}
-                                    <Icon
-                                      name="check-circle-2"
-                                      class="size-2.5"
-                                    />
-                                  {/if}
-                                  {uriHint}
-                                </p>
-                              {/if}
-                            </div>
-
                             <div class="grid grid-cols-[1fr_110px] gap-2">
                               <div>
                                 <label for="cn-ch-host" class={lbl}>Host</label>
@@ -2962,14 +3741,14 @@
                                 <button
                                   type="button"
                                   onclick={pickDuckdbFile}
-                                  class="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground"
+                                  class="field-surface inline-flex h-8 shrink-0 items-center gap-1 px-2.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
                                 >
                                   <Icon name="folder-open" class="size-3" />
                                   Browse
                                 </button>
                               </div>
                               <p
-                                class="mt-1 text-ui-3xs text-muted-foreground/30"
+                                class="mt-1 text-ui-3xs text-muted-foreground"
                               >
                                 A new file is created if it doesn't exist.
                               </p>
@@ -2986,7 +3765,7 @@
                                 Ephemeral in-memory DuckDB
                               </p>
                               <p
-                                class="text-ui-2xs leading-relaxed text-muted-foreground/45"
+                                class="text-ui-2xs leading-relaxed text-muted-foreground"
                               >
                                 A columnar analytical database that lives only
                                 for this session. Nothing is written to disk,
@@ -2996,57 +3775,6 @@
 
                             <!-- ── MS SQL Server ──────────────────────────── -->
                           {:else if dbType === "mssql"}
-                            <div>
-                              <label for="cn-mssql-uri" class={lbl}
-                                >Connection string</label
-                              >
-                              <div class="flex gap-1.5">
-                                <Input
-                                  id="cn-mssql-uri"
-                                  bind:value={connectionUri}
-                                  placeholder="sqlserver://sa:pass@host:1433/db"
-                                  class={cn(inp, "font-mono text-ui-2xs")}
-                                  onpaste={() =>
-                                    requestAnimationFrame(applyConnectionUri)}
-                                  onkeydown={(e) =>
-                                    e.key === "Enter" &&
-                                    (e.preventDefault(), applyConnectionUri())}
-                                />
-                                <button
-                                  type="button"
-                                  onclick={applyConnectionUri}
-                                  disabled={!connectionUri.trim()}
-                                  class="h-8 shrink-0 rounded-md border border-border/25 px-2.5 text-ui-2xs text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-25"
-                                >
-                                  Parse
-                                </button>
-                              </div>
-                              {#if uriHint}
-                                <p
-                                  class={cn(
-                                    "mt-1 flex items-center gap-1 text-ui-3xs",
-                                    uriHint.includes("Could") ||
-                                      uriHint.includes("Expected")
-                                      ? "text-destructive"
-                                      : "text-success",
-                                  )}
-                                >
-                                  {#if uriHint.includes("Could") || uriHint.includes("Expected")}
-                                    <Icon
-                                      name="alert-circle"
-                                      class="size-2.5"
-                                    />
-                                  {:else}
-                                    <Icon
-                                      name="check-circle-2"
-                                      class="size-2.5"
-                                    />
-                                  {/if}
-                                  {uriHint}
-                                </p>
-                              {/if}
-                            </div>
-
                             <div class="grid grid-cols-[1fr_110px] gap-2">
                               <div>
                                 <label for="cn-mssql-host" class={lbl}
@@ -3188,7 +3916,7 @@
                                 class={inpNum}
                               />
                               <p
-                                class="mt-1 text-ui-3xs text-muted-foreground/30"
+                                class="mt-1 text-ui-3xs text-muted-foreground"
                               >
                                 Logical database number (0-15).
                               </p>
@@ -3202,28 +3930,47 @@
                                 checked={secure}
                                 onCheckedChange={(v) => (secure = v === true)}
                               />
-                              <span class="text-ui-xs text-muted-foreground/70"
+                              <span class="text-ui-xs text-muted-foreground"
                                 >Use TLS</span
                               >
                             </label>
                           {/if}
                         </div>
                       {/key}
+                        </section>
 
-                      <!-- Advanced, full-width section at the bottom -->
-                      <div class="border-t border-border/40 pt-5">
-                        <p
-                          class="mb-4 flex items-center gap-1.5 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/45"
-                        >
-                          <Icon
-                            name="sliders-horizontal"
-                            class="size-3 shrink-0"
-                          />
-                          Advanced
-                        </p>
-                        {@render advancedFields()}
+                        <!-- ── 2 · Transport and name ──────────────────────────────────────
+                             Three checkboxes and one optional text field, which is one
+                             band of form between them - they had a rule and a section
+                             each, for four controls. Name still comes last in reading
+                             order: it is the only optional field on the page, and it
+                             used to hold the first and most prominent slot. -->
+                        <section class="border-t border-border/40 pt-3.5">
+                          <!-- Transport above, name below: at 42rem they are two
+                               bands in reading order rather than two columns, and
+                               Name stops floating off to the right of the SSH
+                               fields it has nothing to do with. -->
+                          <div class="flex flex-col gap-5">
+                            <div class="min-w-0">
+                              {@render advancedFields()}
+                            </div>
+                            <div class="min-w-0 max-w-[20rem]">
+                              <label for="cn-name" class={lbl}>
+                                Name
+                                <span class="font-normal text-muted-foreground"
+                                  >· optional</span
+                                >
+                              </label>
+                              <Input
+                                id="cn-name"
+                                bind:value={name}
+                                class={inp}
+                                placeholder={autoName}
+                              />
+                            </div>
+                          </div>
+                        </section>
                       </div>
-                    </div>
                     <!-- /manual column -->
                   {:else if isProvider}
                     <div class="mt-6 flex flex-col gap-4">
@@ -3280,7 +4027,7 @@
 
                       <details class="group">
                         <summary
-                          class="flex cursor-pointer list-none select-none items-center gap-1 text-ui-2xs text-muted-foreground/45 transition-colors hover:text-muted-foreground"
+                          class="flex cursor-pointer list-none select-none items-center gap-1 text-ui-2xs text-muted-foreground transition-colors hover:text-muted-foreground"
                         >
                           <Icon
                             name="chevron-right"
@@ -3333,6 +4080,76 @@
             </ScrollArea>
           {/if}
 
+          <!-- ── URL bar, above the footer and under the control that opens it ──
+               It was inline at the top of the form, opened by a button in the
+               header. On a form long enough to scroll that is a control at one
+               end of the page and its effect at the other: you press "Use URL"
+               and, as far as you can see, nothing happens. Here the bar rises
+               out of the footer the button sits in. -->
+          {#if step === "form" && entryMode === "manual" && hasFieldToggle && importOpen}
+            <div id="cn-url-bar" class="shrink-0 border-t border-border/15 bg-card/30 px-8 py-3">
+              <div class="flex items-stretch gap-2">
+                <div class="min-w-0 flex-1">
+                  <label for="cn-import-uri" class="sr-only">Connection URL</label>
+                  <Input
+                    id="cn-import-uri"
+                    bind:value={importUri}
+                    placeholder={uriPlaceholder}
+                    spellcheck="false"
+                    autocomplete="off"
+                    aria-describedby="cn-import-hint"
+                    aria-invalid={uriHint && (uriHint.includes("Could") || uriHint.includes("Expected")) ? "true" : undefined}
+                    class={cn(inp, "font-mono text-ui-2xs")}
+                    onkeydown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        runImport();
+                        return;
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        importOpen = false;
+                        importUri = "";
+                        uriHint = "";
+                      }
+                    }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={!importUri.trim()}
+                  onclick={runImport}
+                  class="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[10px] bg-primary px-3.5 text-ui-2xs font-medium text-primary-foreground outline-none transition-[opacity,transform] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40"
+                >
+                  Use URL
+                </button>
+              </div>
+              <p
+                id="cn-import-hint"
+                class={cn(
+                  "mt-1.5 flex items-start gap-1.5 text-ui-3xs leading-relaxed",
+                  !uriHint
+                    ? "text-muted-foreground"
+                    : uriHint.includes("Could") || uriHint.includes("Expected")
+                      ? "text-destructive"
+                      : "text-success",
+                )}
+              >
+                {#if uriHint}
+                  <Icon
+                    name={uriHint.includes("Could") || uriHint.includes("Expected") ? "alert-circle" : "check-circle-2"}
+                    class="mt-px size-3 shrink-0"
+                    aria-hidden="true"
+                  />
+                {/if}
+                <span class="min-w-0">
+                  {uriHint || "Fills the fields above, and switches the engine if the URL is for another one."}
+                </span>
+              </p>
+            </div>
+          {/if}
+
           <!-- ── Footer: inline error alert, status chip, then actions ── -->
           <div class="shrink-0 border-t border-border/15 px-8 py-4">
             <div class="mx-auto max-w-none">
@@ -3345,9 +4162,13 @@
                 <!-- Status chip + subtle target preview. Step 1 has no target yet,
                    so it shows nothing rather than "Ready" for a database nobody
                    has chosen. -->
-                <div class="flex min-w-0 flex-1 items-center gap-2 text-ui-2xs">
+                <div
+                  class="flex min-w-0 flex-1 items-center gap-2 text-ui-2xs"
+                  role="status"
+                  aria-live="polite"
+                >
                   {#if step === "pick"}
-                    <span class="text-ui-2xs text-muted-foreground/40">
+                    <span class="text-ui-2xs text-muted-foreground">
                       {saved.length === 0
                         ? "Everything stays on this machine"
                         : railOpen
@@ -3356,7 +4177,7 @@
                     </span>
                   {:else if connecting}
                     <span
-                      class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"
+                      class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground"
                       ><Icon
                         name="loader-2"
                         class="size-3 animate-spin"
@@ -3364,7 +4185,7 @@
                     >
                   {:else if testing}
                     <span
-                      class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground/70"
+                      class="flex shrink-0 items-center gap-1.5 font-medium text-muted-foreground"
                       ><Icon
                         name="loader-2"
                         class="size-3 animate-spin"
@@ -3377,7 +4198,7 @@
                       ></span>Failed</span
                     >
                     <span
-                      class="min-w-0 flex-1 truncate font-mono text-ui-3xs text-muted-foreground/50 select-text"
+                      class="min-w-0 flex-1 truncate font-mono text-ui-2xs text-muted-foreground select-text"
                       title={error}
                       data-studio-selectable="text">{error}</span
                     >
@@ -3395,7 +4216,7 @@
                     >
                   {:else}
                     <span
-                      class="flex shrink-0 items-center gap-1.5 text-muted-foreground/50"
+                      class="flex shrink-0 items-center gap-1.5 text-muted-foreground"
                       ><span
                         class="size-1.5 rounded-full bg-muted-foreground/30"
                       ></span>Ready</span
@@ -3403,7 +4224,7 @@
                   {/if}
                   {#if step !== "pick" && !error}
                     <span
-                      class="min-w-0 truncate font-mono text-ui-3xs text-muted-foreground/40"
+                      class="min-w-0 truncate font-mono text-ui-2xs text-muted-foreground"
                       title={statusTarget}>{statusTarget}</span
                     >
                   {/if}
@@ -3411,7 +4232,15 @@
 
                 <!-- Actions, shared Button variants (Resume ghost · Stop soft-destructive
                    · Test outline · Connect solid primary), one system app-wide. -->
-                <div class="ml-auto flex shrink-0 items-center gap-2">
+                <!-- Two groups, spaced apart rather than run together. Disconnect and
+                   Resume act on the live session; Test, Save and Connect act on the
+                   form in front of you. They read as one undifferentiated row of five
+                   buttons at a single gap, which is how "Resume" ends up looking like
+                   a peer of "Connect". 4px inside a group against 20px between them
+                   is the 1:5 ratio that makes the split legible without a divider. -->
+                <div class="ml-auto flex shrink-0 items-center gap-5">
+                  {#if activeConnectionName || (lastId && saved.find((c) => c.id === lastId))}
+                  <div class="flex min-w-0 items-center gap-1">
                   <!-- Ending the live session belongs next to resuming it: both act
                      on the current connection rather than on the form. -->
                   {#if activeConnectionName}
@@ -3448,6 +4277,9 @@
                       {/if}
                     </Button>
                   {/if}
+                  </div>
+                  {/if}
+                  <div class="flex shrink-0 items-center gap-2">
                   {#if isBusy}
                     <Button variant="destructive" onclick={stopOp}>
                       <Icon name="x" class="size-3.5" />Stop
@@ -3478,6 +4310,20 @@
                           class="size-3.5 text-success"
                         />Saved{:else}Save{/if}
                     </Button>
+                    {#if editingId}
+                      <!-- Connect without writing anything. The primary beside it
+                           saves the form first, which is what you want after an
+                           edit - this is for the other case: open the connection
+                           that is already on file and leave it alone. -->
+                      <Button
+                        variant="outline"
+                        disabled={isBusy}
+                        title="Connect without saving changes"
+                        onclick={() => void handleConnect({ save: false })}
+                      >
+                        Connect
+                      </Button>
+                    {/if}
                     <Button
                       class={cn(
                         "px-5",
@@ -3486,7 +4332,7 @@
                       )}
                       disabled={isBusy}
                       title="Connect (↵)"
-                      onclick={handleConnect}
+                      onclick={() => void handleConnect()}
                     >
                       {#if connecting === (editingId ?? "__new__")}
                         <Icon
@@ -3498,6 +4344,7 @@
                       {/if}
                     </Button>
                   {/if}
+                  </div>
                 </div>
               </div>
             </div>
@@ -3509,11 +4356,75 @@
       <button
         type="button"
         onclick={requestClose}
-        class="absolute right-4 top-4 inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground/40 transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.92] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        class="field-surface absolute right-4 top-5 inline-flex size-8 items-center justify-center text-muted-foreground transition-[color,background-color,scale] duration-150 ease-out hover:bg-accent hover:text-foreground active:scale-[0.96]"
       >
-        <Icon name="x" class="size-4" />
+        <Icon name="x" class="size-3.5" />
         <span class="sr-only">Close</span>
       </button>
+
+      <!-- Duplicate-target confirmation. Same shape as the discard prompt: this
+           is the other question the dialog can ask, and two different-looking
+           confirmations in one dialog is one design too many. -->
+      {#if duplicatePrompt}
+        <div
+          class="absolute inset-0 z-[60] flex items-center justify-center bg-black/65 p-6"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="cn-duplicate-title"
+          tabindex="-1"
+          use:focusTrap
+        >
+          <div class="w-full max-w-[26rem] rounded-[10px] border border-border/40 bg-background p-5 elevate-3-rim">
+            <div class="flex items-start gap-3">
+              <div class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning/10 text-warning">
+                <Icon name="alert-circle" class="size-4" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <!-- The name is data, not a heading. It used to be spliced into
+                     the title, and a saved connection named after its RDS
+                     endpoint turned one line into four before the question was
+                     even reached. Title states the fact; the name sits under it
+                     on its own line, clipped to two. -->
+                <h3 id="cn-duplicate-title" class="text-ui-sm font-semibold text-foreground">
+                  This database is already saved
+                </h3>
+                <p class="mt-1.5 line-clamp-2 break-all font-mono text-ui-2xs leading-snug text-foreground/70">
+                  {duplicatePrompt.existing.name || 'Unnamed'}
+                </p>
+                <p class="mt-2 text-ui-xs leading-relaxed text-muted-foreground">
+                  Same server, same database, same user. Save this one as well?
+                </p>
+              </div>
+            </div>
+            <div class="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                data-autofocus
+                onclick={() => {
+                  const existing = duplicatePrompt?.existing;
+                  duplicatePrompt = null;
+                  if (existing) resetForm(existing);
+                }}
+                class="field-surface inline-flex h-8 shrink-0 items-center px-3 text-ui-xs text-muted-foreground transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
+              >
+                Open it
+              </button>
+              <button
+                type="button"
+                onclick={() => {
+                  const proceed = duplicatePrompt?.proceed;
+                  duplicatePrompt = null;
+                  duplicateAck = true;
+                  proceed?.();
+                }}
+                class="inline-flex h-8 shrink-0 items-center rounded-lg bg-primary px-3.5 text-ui-xs font-semibold text-primary-foreground transition-[opacity,transform] duration-150 ease-out hover:opacity-90 active:scale-[0.97]"
+              >
+                Save anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      {/if}
 
       <!-- Discard-changes confirmation (styled, blocks close until answered) -->
       {#if confirmDiscardOpen}
@@ -3534,7 +4445,7 @@
                   Discard unsaved changes?
                 </h3>
                 <p
-                  class="mt-1 text-ui-xs leading-relaxed text-muted-foreground/70"
+                  class="mt-1 text-ui-xs leading-relaxed text-muted-foreground"
                 >
                   You have unsaved edits in this connection. Closing now will
                   lose them.
@@ -3545,7 +4456,7 @@
               <button
                 type="button"
                 onclick={() => (confirmDiscardOpen = false)}
-                class="inline-flex h-8 items-center rounded-lg border border-border/40 px-3.5 text-ui-xs text-muted-foreground/80 transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
+                class="field-surface inline-flex h-8 items-center px-3.5 text-ui-xs text-muted-foreground transition-[color,background-color,border-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.97]"
               >
                 Keep editing
               </button>

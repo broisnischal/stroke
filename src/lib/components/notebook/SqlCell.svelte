@@ -103,9 +103,9 @@
     >
       [{cellIndex + 1}] sql
     </span>
-    <span class="text-ui-3xs text-muted-foreground/25">⌘↵ run</span>
+    <span class="text-ui-3xs text-muted-foreground">⌘↵ run</span>
     {#if running}
-      <span class="flex items-center gap-1 text-ui-3xs text-muted-foreground/50">
+      <span class="flex items-center gap-1 text-ui-3xs text-muted-foreground">
         <Loader2 class="size-3 animate-spin" />running…
       </span>
     {/if}
@@ -113,19 +113,19 @@
       <button
         onclick={onmoveup}
         disabled={!canmoveup}
-        class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/30 opacity-0 transition-opacity group-hover/sql:opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
+        class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground opacity-0 transition-opacity group-hover/sql:opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
         title="Move up"
       >↑</button>
       <button
         onclick={onmovedown}
         disabled={!canmovedown}
-        class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground/30 opacity-0 transition-opacity group-hover/sql:opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
+        class="rounded px-1 py-0.5 text-ui-xs text-muted-foreground opacity-0 transition-opacity group-hover/sql:opacity-100 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-0"
         title="Move down"
       >↓</button>
       <button
         onclick={onremove}
         disabled={!canremove}
-        class="rounded p-0.5 text-muted-foreground/30 opacity-0 transition-opacity group-hover/sql:opacity-100 hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-0"
+        class="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover/sql:opacity-100 hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-0"
         title="Delete cell"
       >
         <Trash2 class="size-3" />
@@ -138,7 +138,7 @@
           'bg-primary/90 text-primary-foreground hover:bg-primary disabled:pointer-events-none disabled:opacity-40',
         )}
       >
-        <Play class="size-2.5" />Run
+        <Play class="size-3" />Run
       </button>
     </div>
   </div>
@@ -177,21 +177,21 @@
           class="flex min-w-0 flex-1 items-center gap-1.5 hover:opacity-80"
         >
           {#if resultsCollapsed}
-            <ChevronRight class="size-3 shrink-0 text-muted-foreground/50" />
+            <ChevronRight class="size-3 shrink-0 text-muted-foreground" />
           {:else}
-            <ChevronDown class="size-3 shrink-0 text-muted-foreground/50" />
+            <ChevronDown class="size-3 shrink-0 text-muted-foreground" />
           {/if}
 
           {#if hasError}
-            <span class="font-medium text-destructive/80">Error</span>
+            <span class="font-medium text-destructive">Error</span>
           {:else}
-            <span class="text-muted-foreground/60">Output</span>
+            <span class="text-muted-foreground">Output</span>
             {#if result?.columns.length}
-              <span class="text-muted-foreground/50">
+              <span class="text-muted-foreground">
                 {result.rows.length}{truncated ? '+' : ''} row{result.rows.length !== 1 ? 's' : ''}
               </span>
-              <span class="text-muted-foreground/25">·</span>
-              <span class="text-muted-foreground/40">{result.queryMs}ms</span>
+              <span class="text-muted-foreground">·</span>
+              <span class="text-muted-foreground">{result.queryMs}ms</span>
             {:else if result?.message}
               <span class="text-emerald-500/80">{result.message}</span>
             {/if}
@@ -201,7 +201,7 @@
         {#if !resultsCollapsed && result?.columns.length && !hasError}
           <button
             onclick={() => void exportCsv()}
-            class="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground/40 hover:bg-muted hover:text-foreground"
+            class="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
             title="Export CSV"
           >
             <Download class="size-3" />
@@ -213,7 +213,7 @@
       {#if !resultsCollapsed}
         {#if hasError}
           <div
-            class="mx-4 mb-3 rounded-md border border-destructive/20 bg-destructive/[0.04] px-4 py-3 font-mono text-ui-xs leading-relaxed text-destructive/80 whitespace-pre-wrap"
+            class="mx-4 mb-3 rounded-md border border-destructive/20 bg-destructive/[0.04] px-4 py-3 font-mono text-ui-xs leading-relaxed text-destructive whitespace-pre-wrap"
           >
             {result?.error}
           </div>
@@ -223,15 +223,15 @@
               <thead class="sticky top-0 z-10">
                 <tr class="bg-background/95 backdrop-blur-sm">
                   <th
-                    class="w-8 border-b border-r border-border/30 px-3 py-1.5 text-right font-normal text-muted-foreground/30 select-none"
+                    class="w-8 border-b border-r border-border/30 px-3 py-1.5 text-right font-normal text-muted-foreground select-none"
                   >#</th>
                   {#each result.columns as col}
                     <th
-                      class="border-b border-r border-border/30 px-4 py-1.5 text-left text-muted-foreground/70"
+                      class="border-b border-r border-border/30 px-4 py-1.5 text-left text-muted-foreground"
                     >
                       <span class="font-medium">{col.name}</span>
                       {#if col.dataType}
-                        <span class="ml-1.5 font-normal text-muted-foreground/35 text-ui-3xs"
+                        <span class="ml-1.5 font-normal text-muted-foreground text-ui-3xs"
                           >{col.dataType}</span
                         >
                       {/if}
@@ -248,12 +248,12 @@
                     )}
                   >
                     <td
-                      class="border-r border-border/20 px-3 py-1 text-right font-mono text-muted-foreground/20 text-ui-3xs select-none"
+                      class="border-r border-border/20 px-3 py-1 text-right font-mono text-muted-foreground text-ui-3xs select-none"
                     >{ri + 1}</td>
                     {#each row as cell}
                       <td class="max-w-[320px] border-r border-border/10 px-4 py-1 font-mono">
                         {#if cell === null}
-                          <span class="italic text-muted-foreground/25">NULL</span>
+                          <span class="italic text-muted-foreground">NULL</span>
                         {:else}
                           <span class="block truncate">{String(cell)}</span>
                         {/if}
@@ -265,7 +265,7 @@
                   <tr>
                     <td
                       colspan={result.columns.length + 1}
-                      class="px-4 py-2 text-center text-ui-xs italic text-muted-foreground/40"
+                      class="px-4 py-2 text-center text-ui-xs italic text-muted-foreground"
                     >
                       Showing first {MAX_DISPLAY_ROWS} of {result.rows.length} rows
                     </td>
@@ -275,7 +275,7 @@
             </table>
           </div>
         {:else if result?.message}
-          <div class="px-4 pb-3 text-ui-xs text-muted-foreground/60">{result.message}</div>
+          <div class="px-4 pb-3 text-ui-xs text-muted-foreground">{result.message}</div>
         {/if}
       {/if}
     </div>

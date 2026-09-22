@@ -10,6 +10,7 @@
   import Terminal from '@lucide/svelte/icons/terminal'
   import Sparkles from '@lucide/svelte/icons/sparkles'
   import LayoutTemplate from '@lucide/svelte/icons/layout-template'
+  import { cn } from '$lib/utils.js'
   import Command from '@lucide/svelte/icons/command'
   import Code2 from '@lucide/svelte/icons/code-2'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
@@ -21,10 +22,13 @@
   import GitCompare from '@lucide/svelte/icons/git-compare'
   import History from '@lucide/svelte/icons/history'
   import Plus from '@lucide/svelte/icons/plus'
-  import { createHotkey, createHotkeySequence } from '@tanstack/svelte-hotkeys'
+  import Search from '@lucide/svelte/icons/search'
+  import Gauge from '@lucide/svelte/icons/gauge'
+  import Network from '@lucide/svelte/icons/network'
+  import { createHotkey } from '@tanstack/svelte-hotkeys'
   import { IS_MAC } from '$lib/shortcuts.js'
   import { findSearchInput, isTypingTarget } from '$lib/focus-search.js'
-  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode, appAutoSaveQueries } from '$lib/stores/settings.js'
+  import { cycleTheme, restorePreviousTheme, isCurrentThemeDark, loadSettings, appPaginationMode, appVimMode, appAutoSaveQueries, increaseZoom, decreaseZoom, resetZoom } from '$lib/stores/settings.js'
   import { requireUnlock } from '$lib/stores/app-lock.js'
   import { isTextEntryTarget, setVimSubMode } from '$lib/vim/vim.js'
   import { normalizeColumn, columnType } from '$lib/column.js'
@@ -41,6 +45,7 @@
   import * as PaneTree from '$lib/pane-layout.js'
   import TabLoading from './TabLoading.svelte'
   import TableToolbar from './TableToolbar.svelte'
+  import ImportDataDialog from './ImportDataDialog.svelte'
   import DataTable from './DataTable.svelte'
   import RowDetailPanel from './RowDetailPanel.svelte'
   // TableJsonView / TableTextView are NOT imported here: both reach monaco-editor
@@ -60,7 +65,6 @@
   import CreateTableDialog from './CreateTableDialog.svelte'
   import CreateSchemaDialog from './CreateSchemaDialog.svelte'
   import GenerateSqlDialog from './GenerateSqlDialog.svelte'
-  import FindReplaceDialog from './FindReplaceDialog.svelte'
   import { genSelectStar } from '$lib/sql-generate.js'
   import { qualifiedTable } from '$lib/dml-preview.js'
   import { pluginState, pluginEnabledIn } from '$lib/stores/plugins.js'
@@ -111,9 +115,9 @@
   // This keeps those large libraries out of the startup bundle and idle memory.
   import { Button } from '$lib/components/ui/button/index.js'
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
-  import X from '@lucide/svelte/icons/x'
   import Lock from '@lucide/svelte/icons/lock'
   import WifiOff from '@lucide/svelte/icons/wifi-off'
+  import Unplug from '@lucide/svelte/icons/unplug'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import {
     disconnectPostgres,
@@ -129,8 +133,14 @@
     getIncomingForeignKeys,
     executeSql,
     executeSqlMulti,
+    txBegin,
+    txExecute,
+    txStatus,
+    txCommit,
+    txRollback,
     executeDdl,
     updateTableCell,
+    fetchCellValue,
     deleteTableRows,
     insertTableRow,
     toggleDevtools,
@@ -152,8 +162,10 @@
     createLogsTab,
     createInsightsTab,
     createAdvisorTab,
+    createGolfTab,
     findInsightsTab,
     findAdvisorTab,
+    findGolfTab,
     createObjectsTab,
     findObjectsTab,
     createRedisTab,
@@ -198,11 +210,6 @@
     cloneSqlTabState,
   } from '$lib/studio-tabs.js'
   import {
-    createNavStack, navCurrent, navCanGoBack, navCanGoForward,
-    navTransition, pushNav, navStepBack, navStepForward, resetNav,
-    NAV_PUSH, NAV_PUSH_TAB, NAV_REFRESH, NAV_FORGET_CELL,
-  } from '$lib/nav-history.js'
-  import {
     pendingChangesCount,
     clearPendingChanges,
     anyPendingChanges,
@@ -211,6 +218,8 @@
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import { humanizeDbError } from '$lib/ai.js'
+  import { formatByteSize } from '$lib/cell-value.js'
+  import { focusTrap } from '$lib/actions/focus-trap.js'
   import {
     MAX_PAGE_SIZE,
     fetchLimitFor,
@@ -243,7 +252,7 @@
     findForeignKeyForColumn,
     normalizeForeignKeys,
   } from '$lib/foreign-key-nav.js'
-  import { loadLayout, saveLayout } from '$lib/stores/layout.js'
+  import { loadLayout, saveLayout, sidebarSideStore, setSidebarSide } from '$lib/stores/layout.js'
   import {
     getLastConnection,
     getLastSchema,
@@ -252,6 +261,8 @@
     setConnectionGroup,
     setLastConnectionId,
     setLastSchema,
+    wasDisconnected,
+    setWasDisconnected,
     upsertConnection,
     engineFamily,
   } from '$lib/stores/connections.js'
@@ -295,12 +306,13 @@
   import { recordActivity } from '$lib/stores/activity-log.js'
   import { loadRecentTabs, pushRecentTab, removeRecentTab, clearRecentTabs } from '$lib/stores/recent-tabs.js'
   import { installInputShortcuts } from '$lib/input-shortcuts.js'
+  import Kbd from './Kbd.svelte'
   import TitleBar from './TitleBar.svelte'
   import { savedCharts, updateChart, switchChartsConnection } from '$lib/stores/saved-charts.js'
   import { switchDiagramsConnection } from '$lib/stores/saved-diagrams.js'
   import { dashboards, activeDashboardId, switchDashboardsConnection } from '$lib/stores/dashboards.js'
   import { buildOption } from '$lib/chart-utils.js'
-  import { isNetworkError } from '$lib/utils.js'
+  import { isNetworkError, connectionErrorKind } from '$lib/utils.js'
   import { get } from 'svelte/store'
   import { virtualColumnsStore } from '$lib/stores/virtual-columns.js'
 
@@ -381,7 +393,36 @@
     showConnectionModal = true
     try { await disconnectPostgres() } catch { /* nothing to tear down */ }
   }
+  /** Assigned by ObjectsPage so ⌘F can reach its search box. */
+  let objectsFocusSearch = $state(/** @type {() => void} */ (() => {}))
   let showConnectionModal = $state(false)
+  /** Engine chosen on the welcome screen - the modal opens straight into its form. */
+  let connectionModalEngine = $state('')
+  /** @type {HTMLElement | null} */
+  let welcomeConnectBtn = $state(null)
+
+  // The welcome screen has exactly one thing to do, so its button starts with
+  // focus: Enter opens the dialog, Tab walks the engine chips, and nobody has to
+  // reach for the mouse to get in. Skipped while a dialog owns the window.
+  $effect(() => {
+    if (connection || showConnectionModal || !welcomeConnectBtn) return
+    welcomeConnectBtn.focus({ preventScroll: true })
+  })
+
+  /**
+   * Open a link in the user's browser. In a Tauri window a plain anchor
+   * navigates the webview itself - away from the app - so every outbound link
+   * goes through the opener plugin, with `window.open` as the dev-server path.
+   * @param {string} url
+   */
+  async function openExternalUrl(url) {
+    try {
+      const { openUrl } = await import('@tauri-apps/plugin-opener')
+      await openUrl(url)
+    } catch {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+  }
   let showDockerModal = $state(false)
   let dockerInitialDb = $state(/** @type {string | null} */ (null))
   /** Bottom query-log console visibility. */
@@ -449,9 +490,12 @@
     saveLayout({ navSidebarPanel: p, navSidebarOpen: true })
   }
   /** Which side the navigation sidebar docks to. @type {'left' | 'right'} */
-  let sidebarSide = $state(loadLayout().navSidebarSide)
+  // Read through the store, not from the layout blob: the side can now be set
+  // from Settings → Appearance as well as the sidebar's own context menu, and
+  // both need to land in one place the shell can react to.
+  const sidebarSide = $derived($sidebarSideStore)
   /** @param {'left' | 'right'} s */
-  function moveSidebar(s) { sidebarSide = s; saveLayout({ navSidebarSide: s }) }
+  function moveSidebar(s) { setSidebarSide(s) }
   let aiSidebarOpen = $state(loadLayout().aiSidebarOpen)
   let aiSidebarEverOpened = $state(loadLayout().aiSidebarOpen)
   let statusBarVisible = $state(loadLayout().statusBarVisible)
@@ -535,44 +579,6 @@
     dragTabId = null
     dragGhost = null
     dropTarget = null
-  }
-
-  // ── Navigation history (back/forward) ─────────────────────────────────────
-  // Positions, not just tabs: an entry is a tab plus the focused cell, so going
-  // back lands on the row/column you left. The stack is deliberately NOT $state -
-  // it's refreshed as the cursor moves, and a reactive array there would churn
-  // the graph on every keystroke. Only these two booleans (which the title bar
-  // buttons read) are reactive, and they flip rarely. See lib/nav-history.js.
-  const _nav = createNavStack()
-  let canGoBack = $state(false)
-  let canGoForward = $state(false)
-  /** >0 while travelling to a history entry, so the arrival isn't recorded as a
-   *  new jump. A counter, not a flag: a restore spans an await and a frame. */
-  let _navRestore = 0
-  /**
-   * Bumped once per history step. A second Back pressed while the first is still
-   * resolving must win outright, so every await in gotoNavEntry re-checks this
-   * and a superseded travel stops instead of fighting the newer one for the
-   * cursor - otherwise holding Alt+← lands wherever the slowest fetch finished.
-   */
-  let _navTravel = 0
-  /**
-   * Set when the grid reports an aimed cursor move (a cell click), consumed by the
-   * recording effect below.
-   *
-   * Without it, moving around inside one table almost never records anything: the
-   * row-gap threshold only fires past NAV_ROW_GAP rows, so clicking between two
-   * nearby cells was unrecoverable and back/forward looked like it only worked
-   * across tabs. A click is aimed, so distance shouldn't decide - that threshold
-   * exists to stop *arrow-key roaming* filling the stack, and roaming still
-   * refreshes in place.
-   */
-  let _navJumpPending = false
-  function markNavJump() { _navJumpPending = true }
-
-  function syncNavFlags() {
-    canGoBack = navCanGoBack(_nav)
-    canGoForward = navCanGoForward(_nav)
   }
 
   /** @type {import('$lib/stores/recent-tabs.js').RecentTab[]} */
@@ -704,6 +710,7 @@
   let logsEverOpened = $state(false)
   let insightsEverOpened = $state(false)
   let advisorEverOpened = $state(false)
+  let golfEverOpened = $state(false)
   let objectsEverOpened = $state(false)
   let redisEverOpened = $state(false)
   let extensionsEverOpened = $state(false)
@@ -712,7 +719,7 @@
   let backupEverOpened = $state(false)
   let chartsEverOpened = $state(false)
   let dashboardEverOpened = $state(false)
-  let erdEverOpened     = $state(false)
+  let erdEverOpened = $state(false)
   let diagramsEverOpened = $state(false)
   let searchEverOpened = $state(false)
   let schemaTimelineEverOpened = $state(false)
@@ -750,7 +757,22 @@
   let savedTableViews = $state([])
   /** @type {string | null} */
   let activeTableViewId = $state(null)
-  let findReplaceOpen = $state(false)
+  /**
+   * Show find & replace. It is a sidebar panel now, not a dialog, so "open"
+   * means: make sure the sidebar is visible, switch it to that panel, and put
+   * the cursor in the Find field. `sidebarOpenFindReplace` is assigned by the
+   * Sidebar, which owns the tab state.
+   */
+  let sidebarOpenFindReplace = $state(/** @type {() => void} */ (() => {}))
+  /** Assigned by the Sidebar; puts its strip back on the Tables list. */
+  let sidebarShowTables = $state(/** @type {() => void} */ (() => {}))
+  function openFindReplacePanel() {
+    if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
+    // `setSidebarPanel` also opens the sidebar and persists the choice, which
+    // is what every other way of reaching a panel does.
+    if (navSidebarPanel !== 'tables' || !sidebarOpen) setSidebarPanel('tables')
+    void tick().then(() => sidebarOpenFindReplace())
+  }
 
   $effect(() => {
     void persistConnectionId
@@ -962,6 +984,7 @@
     if (activeTab?.kind === 'logs') logsEverOpened = true
     if (activeTab?.kind === 'insights') insightsEverOpened = true
     if (activeTab?.kind === 'advisor') advisorEverOpened = true
+    if (activeTab?.kind === 'golf') golfEverOpened = true
     if (activeTab?.kind === 'objects') objectsEverOpened = true
     if (activeTab?.kind === 'redis') redisEverOpened = true
     if (activeTab?.kind === 'extensions') extensionsEverOpened = true
@@ -1041,6 +1064,76 @@
   /** @type {Map<string, typeof columns>} */
   let tableColumnsCache = $state(new Map())
   let primaryKey = $state([])
+  /** Data-import dialog for the open table. */
+  let importDataOpen = $state(false)
+
+  // ── Explicit transactions ──────────────────────────────────────────────────
+  // One transaction per SQL tab: it holds a connection, so it belongs to the
+  // editor the user opened it from rather than to the app as a whole.
+  /** @type {Map<string, string>} tab id -> backend session id */
+  let sqlTxSessions = $state(new Map())
+  /** @type {Map<string, import('$lib/api.js').TxStatus>} tab id -> its status */
+  let sqlTxStatuses = $state(new Map())
+  let sqlTxBusy = $state(false)
+
+  const activeTxSession = $derived(activeTabId ? sqlTxSessions.get(activeTabId) ?? null : null)
+  const activeTxStatus = $derived(activeTabId ? sqlTxStatuses.get(activeTabId) ?? null : null)
+
+  /** @param {string} tabId @param {import('$lib/api.js').TxStatus|null} status */
+  function setTxStatus(tabId, status) {
+    const next = new Map(sqlTxStatuses)
+    if (status) next.set(tabId, status)
+    else next.delete(tabId)
+    sqlTxStatuses = next
+  }
+
+  async function beginSqlTransaction() {
+    if (!activeTabId || sqlTxBusy) return
+    const session = `tx-${activeTabId}`
+    sqlTxBusy = true
+    try {
+      const status = await txBegin(session)
+      sqlTxSessions = new Map(sqlTxSessions).set(activeTabId, session)
+      setTxStatus(activeTabId, status)
+      toast.info('Transaction open — nothing is saved until you commit')
+    } catch (e) {
+      toast.error('Could not start a transaction', { description: String(e) })
+    } finally {
+      sqlTxBusy = false
+    }
+  }
+
+  /** @param {'commit'|'rollback'} how */
+  async function endSqlTransaction(how) {
+    const tabId = activeTabId
+    if (!tabId || sqlTxBusy) return
+    const session = sqlTxSessions.get(tabId)
+    if (!session) return
+    sqlTxBusy = true
+    try {
+      const applied = sqlTxStatuses.get(tabId)?.rowsAffected ?? 0
+      if (how === 'commit') {
+        await txCommit(session)
+        toast.success(applied > 0 ? `Committed — ${formatCompactCount(applied)} row(s) written` : 'Committed')
+      } else {
+        await txRollback(session)
+        toast.info('Rolled back — the database is unchanged')
+      }
+      // Only forget the session once the backend has actually closed it;
+      // dropping it on failure would strand the held connection with no way
+      // left in the UI to reach it.
+      const next = new Map(sqlTxSessions)
+      next.delete(tabId)
+      sqlTxSessions = next
+      setTxStatus(tabId, null)
+    } catch (e) {
+      toast.error(how === 'commit' ? 'Could not commit' : 'Could not roll back', {
+        description: String(e),
+      })
+    } finally {
+      sqlTxBusy = false
+    }
+  }
   /** @type {ForeignKeyInfo[]} */
   let foreignKeys = $state([])
   /** Cache of incoming (reverse) FKs, keyed by "schema.table". Loaded once per table open. */
@@ -1096,6 +1189,8 @@
   let applyEdits = $state(() => {})
   /** @type {() => void} */
   let resetEdits = $state(() => {})
+  /** Copy the grid's staged changes as SQL (bound from DataTable). */
+  let copyEditsSql = $state(() => {})
   /** Bound from DataTable - stages the selected rows for deletion (red diff). */
   let stageDeleteSelectedRows = $state(() => {})
 
@@ -1187,6 +1282,7 @@
   let tableFocusCell = $state(() => {})
   /** @type {{ refresh: () => void } | null} */
   let securityPageRef = $state(null)
+  let dataDiffPageRef = $state(null)
   /** @type {{ sendMessage: (text: string) => void } | null} */
   let aiSidebarRef = $state(null)
 
@@ -1207,6 +1303,9 @@
 
   let total = $state(0)
   let queryMs = $state(0)
+  /** Columns the last page fetched as a preview instead of a value, with the
+   *  average size that earned it. Empty on every ordinary table. */
+  let previewColumns = $state(/** @type {{ name: string, avgBytes: number }[]} */ ([]))
   let loadingRows = $state(false)
   let loadingMore = $state(false)
   let page = $state(1)
@@ -1694,11 +1793,11 @@ let rowSearch = $state('')
    */
   const windowTitle = $derived.by(() => {
     const c = connection
-    if (!c) return 'studio'
+    if (!c) return 'Stroke'
     if (c.database) return c.database
     if (c.name) return c.name
     if (c.filePath) return c.filePath.split(/[\\/]/).pop() || c.filePath
-    return 'studio'
+    return 'Stroke'
   })
 
   // Keep MCP layer in sync with saved connections + active connection (no passwords sent).
@@ -1880,6 +1979,13 @@ let rowSearch = $state('')
       hiddenColumns: new Set(hiddenColumns),
       filterBarOpen,
       dataViewMode,
+      // Structure vs data is per tab, like every other thing on this list. It
+      // used to be one module-level `$state` shared by every open table, so
+      // opening a second tab reset the first one back to the grid - and the
+      // structure you were reading belonged to whichever table was last active.
+      tableViewMode,
+      structureColumns,
+      structureSearch,
       ...(() => { const s = tableGetScroll(); return { scrollLeft: s.left, scrollTop: s.top } })(),
       expandedRows: tableGetExpanded(),
     }
@@ -1902,6 +2008,7 @@ let rowSearch = $state('')
     // the state just restored above is the one this total belongs to.
     _totalSig = rowPredicateSig
     queryMs = s.queryMs
+    previewColumns = s.previewColumns ?? []
     loadingRows = !!s.loadingRows && isTabBusy(tabId)
     error = s.error
     selected = new Set(s.selected)
@@ -1915,6 +2022,13 @@ let rowSearch = $state('')
     filterBarOpen = s.filterBarOpen ?? false
     // Fresh tabs have no stored view mode - honor Settings → Database → Default view.
     dataViewMode = s.dataViewMode ?? /** @type {any} */ (loadSettings().defaultDataView)
+    // Tabs opened before this was per-tab have no stored value; the grid is the
+    // right default for them. The structure rows travel with the mode so a tab
+    // restored into structure paints its OWN columns rather than flashing the
+    // previous tab's while the auto-load effect refetches.
+    tableViewMode = s.tableViewMode ?? 'data'
+    structureColumns = /** @type {any} */ (s.structureColumns ?? [])
+    structureSearch = s.structureSearch ?? ''
     // Restore the grid scroll position for this tab. Defer one tick so that
     // if DataTable just remounted (switching from a non-table tab), the new
     // applyScroll binding is in place before we call it - otherwise the old
@@ -2002,6 +2116,7 @@ let rowSearch = $state('')
     rows = []
     total = 0
     queryMs = 0
+    previewColumns = []
     loadingRows = false
     error = ''
     selected = new Set()
@@ -2115,10 +2230,10 @@ let rowSearch = $state('')
     commandOpen = true
   })
 
-  // Ctrl/⌘+P - VSCode-style "Go to page" navigator. Registered as a capture-phase
-  // window listener (not createHotkey) so it beats the webview's native Print
-  // accelerator on WebKitGTK/WebView2 - otherwise the print dialog opens first
-  // and the handler never runs.
+  // Ctrl/⌘+P - table search. Registered as a capture-phase window listener (not
+  // createHotkey) so it beats the webview's native Print accelerator on
+  // WebKitGTK/WebView2 - otherwise the print dialog opens first and the handler
+  // never runs. ⌘⇧P is the page navigator, one modifier away.
   $effect(() => {
     /** @param {KeyboardEvent} e */
     function onKeyP(e) {
@@ -2128,7 +2243,7 @@ let rowSearch = $state('')
         // Only open+set page mode from a closed state - never yank the page mode
         // if the palette is already open mid-interaction.
         if (commandOpen) return
-        commandPage = 'pages'
+        commandPage = 'tables'
         commandOpen = true
       }
     }
@@ -2146,6 +2261,9 @@ let rowSearch = $state('')
 
   createHotkey('Mod+F', (e) => {
     if (commandOpen || showConnectionModal || showSettingsModal) return
+    // Find means "search what this page is showing", and on the objects page
+    // that is its own box. It used to mean nothing there at all.
+    if (activeTab?.kind === 'objects') { e.preventDefault(); objectsFocusSearch?.(); return }
     if (activeTab?.kind !== 'table' || !activeTable) return
     e.preventDefault()
     tableToolbar?.focusRowSearch?.()
@@ -2179,12 +2297,15 @@ let rowSearch = $state('')
     closeActiveTab()
   })
 
-  // Chord: Ctrl/⌘+K then W → close all tabs. (Mod+K opens the command palette;
-  // the W step dismisses it and closes everything.)
-  createHotkeySequence(['Mod+K', 'W'], (e) => {
+  // Close all tabs. This was the sequence `Mod+K` then `W`, which could not
+  // work: `Mod+K` is bound to the command palette, so the first step opened a
+  // dialog and moved focus into its search field - the `W` then went in as a
+  // character and never reached the document, and on the occasions it did, the
+  // palette had already flashed open and shut. A chord whose first key is
+  // already a command cannot be a prefix.
+  createHotkey('Mod+Shift+W', (e) => {
     if (!connection) return
     e.preventDefault()
-    commandOpen = false
     void closeAllTabs()
   })
 
@@ -2201,21 +2322,19 @@ let rowSearch = $state('')
     commandOpen = true
   })
 
-  createHotkey('Mod+Tab', (e) => {
-    if (!connection || tabs.length < 2) return
-    e.preventDefault()
-    cycleTab(1)
-  })
-
-  createHotkey('Mod+Shift+Tab', (e) => {
-    if (!connection || tabs.length < 2) return
-    e.preventDefault()
-    cycleTab(-1)
-  })
-
-  // Note: Mod+Tab / Mod+Shift+Tab above already map to Ctrl+Tab on Windows/Linux
-  // and Cmd+Tab on macOS. No additional Ctrl+Tab registration needed - duplicates
-  // cause the "[already registered]" warning from @tanstack/svelte-hotkeys.
+  // Tab cycling lives in onWindowKeydownCapture below, not here. Two reasons it
+  // cannot go through the hotkey layer:
+  //
+  //  - `Mod` is the wrong modifier for it. On macOS Mod is ⌘, and ⌘Tab is the
+  //    system app switcher: the keydown never reaches the webview, so the
+  //    binding was dead on that platform in both directions. Ctrl+Tab is what
+  //    every browser uses on all three platforms, and nothing above the app
+  //    claims it.
+  //  - Tab is a focus key. Anything between the focused element and `document`
+  //    that handles focus movement - the grid canvas, the Monaco editors, the
+  //    bits-ui overlays - can stop the chord before the document-level bubble
+  //    listener sees it. Capture on window is the only phase that is reliably
+  //    ahead of all of them.
 
   // ⌘B / Ctrl+B is bound in the CAPTURE phase on window, not through
   // createHotkey. The hotkey layer listens on `document` in the BUBBLE phase, so
@@ -2230,6 +2349,18 @@ let rowSearch = $state('')
   // on macOS: Ctrl+B is the emacs "move backward" binding that text fields there
   // still honour, and swallowing it would break caret movement in every input.
   function onWindowKeydownCapture(/** @type {KeyboardEvent} */ e) {
+    // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs on every platform - see the note
+    // above the ⌘B block for why this is Ctrl rather than Mod, and why it is
+    // captured on window rather than registered as a hotkey. Shift only picks
+    // the direction, so both directions are one binding and cannot drift apart.
+    if (e.key === 'Tab' && e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!connection || tabs.length < 2) return
+      e.preventDefault()
+      e.stopPropagation()
+      cycleTab(e.shiftKey ? -1 : 1)
+      return
+    }
+
     const modOnly = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey
     if (!modOnly || e.altKey || e.shiftKey) return
     if (e.key.toLowerCase() !== 'b') return
@@ -2283,11 +2414,117 @@ let rowSearch = $state('')
     })
   }
 
+  /** Flip the window in or out of full screen. Shared by F11 and the View menu. */
+  async function toggleFullscreen() {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      const win = getCurrentWindow()
+      await win.setFullscreen(!(await win.isFullscreen()))
+    } catch { /* not Tauri, or the window refused - nothing to fall back to */ }
+  }
+
+  /** Open another Stroke window (⌘⇧N and File ▸ New window). */
+  function openNewWindow() {
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke('open_new_window'))
+      .catch((err) => toast.error('Could not open a new window', { description: String(err) }))
+  }
+
+  /**
+   * What the menu bar can do, by name. Every entry is an action that already
+   * exists elsewhere in this component - the bar is a second door to them, not a
+   * second implementation.
+   */
+  const menuActions = $derived({
+    newTab: () => openWelcomeTab(),
+    newSql: () => openNewSqlTab(),
+    newWindow: openNewWindow,
+    openConnection: () => (showConnectionModal = true),
+    disconnect: () => { if (connection) showDisconnectDialog = true },
+    openSettings: () => (showSettingsModal = true),
+    closeTab: () => { if (activeTabId) void closeTab(activeTabId) },
+    closeAllTabs: () => void closeAllTabs(),
+
+    search: () => tableToolbar?.focusRowSearch?.(),
+    findReplace: () => openFindReplacePanel(),
+    findInDatabase: () => openSearchTab(),
+    applyEdits: () => void applyEdits(),
+    copyEditsSql: () => void copyEditsSql(),
+    resetEdits: () => resetEdits(),
+
+    toggleSidebar,
+    toggleChat: () => { if (aiMode) exitAiMode(); toggleAiSidebar() },
+    zoomIn: () => increaseZoom(),
+    zoomOut: () => decreaseZoom(),
+    zoomReset: () => resetZoom(),
+    fullscreen: () => void toggleFullscreen(),
+    commandPalette: () => { commandPage = 'root'; commandOpen = true },
+
+    objects: () => openObjectsTab(),
+    insights: () => openInsightsTab(),
+    schema: () => openSchemaTab(),
+    erd: () => openErdTab(),
+    dataDiff: () => openDataDiffTab(),
+    dashboard: () => openDashboardTab(),
+    logs: () => openLogsTab(),
+    extensions: () => openExtensionsTab(),
+
+    shortcuts: () => (showShortcutsModal = true),
+    changelog: () => void openExternalUrl('https://stroke.click/changelog?utm_source=stroke-app&utm_medium=menu&utm_campaign=changelog'),
+    reportIssue: () => (showReportIssueDialog = true),
+    checkUpdates: () => void updateDialog?.checkNow?.(),
+    about: () => (showAboutModal = true),
+  })
+
+  // A second Stroke window. Same process and the same connection - the backend
+  // holds one pool - so this is another view of the session, which is what makes
+  // "the table on one screen, the editor on the other" possible.
+  createHotkey('Mod+Shift+N', (e) => {
+    e.preventDefault()
+    openNewWindow()
+  })
+
+  // Staged grid changes: ⌘S writes them, ⌘⌥S copies the SQL. Both are guarded on
+  // there being staged changes AND a table tab being active, so the SQL editor's
+  // own ⌘S (save query) is untouched - the two never both apply.
+  createHotkey('Mod+S', (e) => {
+    if (activeTab?.kind !== 'table' || pendingEditCount === 0) return
+    e.preventDefault()
+    void applyEdits()
+  })
+  // Not ⌘⇧S: that already opens the SQL editor everywhere in the app, and a
+  // chord that means two things depending on whether a cell was edited is worse
+  // than one extra modifier.
+  createHotkey('Mod+Alt+S', (e) => {
+    if (activeTab?.kind !== 'table' || pendingEditCount === 0) return
+    e.preventDefault()
+    void copyEditsSql()
+  })
+  // Discard them: ⌘⌥⌫. Guarded the same way, and deliberately NOT a bare ⌘⌫ -
+  // that deletes the selected rows, and the two are the last pair in the app
+  // that should share a chord. Deletion of work in progress also earns a
+  // modifier more than applying it does.
+  // Discard every staged change. Alt+⌫ is what the Reset button advertises and
+  // what the hand reaches for; ⌘⌥⌫ stays bound because it shipped and someone's
+  // fingers know it.
+  for (const combo of ['Alt+Backspace', 'Mod+Alt+Backspace']) {
+    createHotkey(combo, (e) => {
+      if (activeTab?.kind !== 'table' || pendingEditCount === 0) return
+      // `input-shortcuts.js` shields the editing chords from this layer, but it
+      // resolves these to no editing mode and so lets them through. Alt+⌫ is
+      // also word-delete in a text field, and discarding every staged change
+      // because someone reached for that is not a trade worth making.
+      if (isTypingTarget(document.activeElement)) return
+      e.preventDefault()
+      resetEdits()
+    })
+  }
+
   // Find & replace in the current table - editor-style Ctrl/⌘+H.
   createHotkey('Mod+H', (e) => {
     if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
     e.preventDefault()
-    findReplaceOpen = true
+    openFindReplacePanel()
   })
 
   // Also bind Cmd/Ctrl+Alt+F (VS Code's macOS "replace" shortcut). On macOS the OS
@@ -2296,7 +2533,7 @@ let rowSearch = $state('')
   createHotkey('Mod+Alt+F', (e) => {
     if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
     e.preventDefault()
-    findReplaceOpen = true
+    openFindReplacePanel()
   })
 
   // Switch to saved database connection N (Mod+Alt+1..9) - plain digits, not
@@ -2311,7 +2548,7 @@ let rowSearch = $state('')
     })
   }
 
-  // Command palette - VS Code muscle-memory alias for Mod+K.
+  // Page navigator - the VS Code chord, one modifier off ⌘P's table search.
   createHotkey('Mod+Shift+P', (e) => {
     e.preventDefault()
     commandPage = 'pages'
@@ -2434,6 +2671,17 @@ let rowSearch = $state('')
     tableToolbar?.openColumnsMenu?.()
   })
 
+  // Switch connection. The shortcuts dialog has listed ⌘⇧C under Navigation for
+  // as long as it has existed, and nothing was bound to it - the quick-access
+  // tile now prints the chord, which is the wrong place to find out it does
+  // nothing.
+  createHotkey('Mod+Shift+C', (e) => {
+    e.preventDefault()
+    commandOpen = false
+    if (aiMode) exitAiMode()
+    showConnectionModal = true
+  })
+
   // Reset the active table tab to its unfiltered default (clears search, filters,
   // sort, hidden columns, custom view, and resets the data view + page). Works in
   // any table view mode, but not while typing in an input.
@@ -2481,7 +2729,9 @@ let rowSearch = $state('')
       el instanceof HTMLTextAreaElement ||
       (el instanceof HTMLElement && el.isContentEditable)
     ) return
-    if (activeTab?.kind !== 'table' || !activeTable || selected.size === 0) return
+    if (activeTab?.kind !== 'table' || !activeTable) return
+    // No checkbox selection is not "nothing to delete": the grid falls back to
+    // the focused row, which is the row the menu offers this chord on.
     e.preventDefault()
     stageDeleteSelectedRows()
   })
@@ -2490,6 +2740,51 @@ let rowSearch = $state('')
     if (!connection) return
     if (commandOpen || showConnectionModal || showSettingsModal) return
     e.preventDefault()
+    void handleModRefresh()
+  })
+
+  // Alt+X empties the table search from anywhere in the tab - the ✕ and Escape
+  // both want the caret already in the box, and the point of a search you are
+  // done with is that you have moved on to the rows.
+  createHotkey('Alt+X', (e) => {
+    if (!connection) return
+    if (commandOpen || showConnectionModal || showSettingsModal) return
+    if (activeTab?.kind !== 'table' || !activeTable) return
+    if (!rowSearch.trim()) return
+    e.preventDefault()
+    tableToolbar?.clearRowSearch?.()
+  })
+
+  // Alt+N stages a new row, the same thing the toolbar's Add does. It joins the
+  // Alt family the grid already uses for what is in front of you - Alt+F filter
+  // by this value, Alt+E exclude it, Alt+D duplicate this row - and it appends,
+  // so holding it out for three rows is three rows. Mod+Escape clears the band.
+  createHotkey('Alt+N', (e) => {
+    if (!connection) return
+    if (commandOpen || showConnectionModal || showSettingsModal) return
+    if (activeTab?.kind !== 'table' || !activeTable) return
+    // The typing guard keeps Alt+N out of the search box and every other field,
+    // but the staged band is the one place you are typing AND want another row -
+    // "again for another" is the whole point of it, and it is not a chord any
+    // text field claims.
+    const typingIn = document.activeElement
+    if (isTypingTarget(typingIn) && !(typingIn instanceof HTMLElement && typingIn.closest('[data-new-row]'))) return
+    e.preventDefault()
+    dtBeginInsertRow?.()
+  })
+
+  // F5 reloads what you are looking at, not the app.
+  //
+  // It was bound to nothing, so the webview took it and reloaded the document -
+  // which tears down the session, redials the connection, re-reads the catalog
+  // and refetches every list, for what anyone pressing F5 over a table means:
+  // fetch these rows again. It is `handleModRefresh` now, the same contextual
+  // refresh ⌘R runs, and it is always prevented so the reload cannot happen by
+  // accident with unsaved edits staged.
+  createHotkey('F5', (e) => {
+    e.preventDefault()
+    if (!connection) return
+    if (commandOpen || showConnectionModal || showSettingsModal) return
     void handleModRefresh()
   })
 
@@ -2512,13 +2807,6 @@ let rowSearch = $state('')
         el instanceof HTMLTextAreaElement ||
         (el instanceof HTMLElement && el.isContentEditable)
       ) return
-
-      // Alt+Left/Right (no Ctrl/Cmd) → Go Back / Go Forward, as in an editor.
-      if (e.altKey && !mod) {
-        if (e.key === 'ArrowLeft') { e.preventDefault(); void navBack(); return }
-        if (e.key === 'ArrowRight') { e.preventDefault(); void navForward(); return }
-        return
-      }
 
       // Ctrl/Cmd+Alt+Left/Right → scroll grid to the first / last column.
       if (e.altKey) {
@@ -2570,13 +2858,11 @@ let rowSearch = $state('')
     return () => document.removeEventListener('keydown', onArrowKey)
   })
 
-  // The mouse's dedicated back/forward buttons → Go Back / Go Forward, same two
-  // actions as Alt+Left/Right.
-  //
-  // They arrive as `mousedown`/`auxclick` with `button` 3 and 4. The default must
-  // be suppressed even when there is nowhere to go: left alone, the webview acts
-  // on them itself and walks its *document* history, which in a Tauri window means
-  // navigating away from the app's own page.
+  // The mouse's dedicated back/forward buttons are swallowed, and do nothing
+  // else. There is no in-app history to walk any more, but the default still has
+  // to be suppressed: left alone, the webview acts on them itself and walks its
+  // *document* history, which in a Tauri window means navigating away from the
+  // app's own page.
   //
   // Registered in the capture phase so a handler that stops propagation on its own
   // subtree (the grid canvas has several) can't swallow the button first.
@@ -2585,9 +2871,6 @@ let rowSearch = $state('')
     function onMouseNav(e) {
       if (e.button !== 3 && e.button !== 4) return
       e.preventDefault()
-      if (commandOpen || showConnectionModal || showSettingsModal) return
-      if (e.button === 3) void navBack()
-      else void navForward()
     }
     /** Swallow the paired auxclick/mouseup so the webview can't act on them either. */
     function swallowAux(/** @type {MouseEvent} */ e) {
@@ -2613,12 +2896,7 @@ let rowSearch = $state('')
       const isMacFullscreen = e.key === 'f' && e.metaKey && e.ctrlKey && !e.shiftKey && !e.altKey
       if (!isF11 && !isMacFullscreen) return
       e.preventDefault()
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        const win = getCurrentWindow()
-        const current = await win.isFullscreen()
-        await win.setFullscreen(!current)
-      } catch { /* ignore */ }
+      await toggleFullscreen()
     }
     document.addEventListener('keydown', onFullscreenKey)
     return () => document.removeEventListener('keydown', onFullscreenKey)
@@ -2704,6 +2982,12 @@ let rowSearch = $state('')
     }
     if (activeTab?.kind === 'security') {
       securityPageRef?.refresh()
+      return
+    }
+    if (activeTab?.kind === 'data-diff') {
+      // Re-lists the source/target pickers. Mod+R means "reload what this page is
+      // showing" everywhere else, and on this page what it shows IS those lists.
+      await dataDiffPageRef?.refresh()
       return
     }
     if (activeTab?.kind === 'dashboard') {
@@ -2891,8 +3175,6 @@ let rowSearch = $state('')
     _busyJobs.clear()
     _busyTick += 1
     // Every tab id in the history just died with the tab list.
-    resetNav(_nav)
-    syncNavFlags()
     clearTableEditor()
     sqlText = 'SELECT 1;'
     sqlColumns = []
@@ -3047,6 +3329,11 @@ let rowSearch = $state('')
 
   function openAdvisorTab() {
     openSingletonTab({ find: findAdvisorTab, create: createAdvisorTab })
+  }
+
+  /** The hidden game. Reached only by typing its word into a table's search. */
+  function openGolfTab() {
+    openSingletonTab({ find: findGolfTab, create: createGolfTab })
   }
 
   function openObjectsTab() {
@@ -3218,6 +3505,39 @@ let rowSearch = $state('')
   // on initial open, so this never fights it. Small tabs are left untouched.
   const TAB_ROWS_MRU_MAX = 3
   const TAB_EVICT_ROW_THRESHOLD = 5_000
+  // Row count alone is the wrong unit. A table with a pgvector column decodes to
+  // ~17KB per row, so 500 rows of embeddings cost more than 5,000 rows of
+  // integers and were never evicted however cold the tab got - three of those
+  // parked in the background is a quarter of a gigabyte held for tabs nobody is
+  // looking at. Size is what matters, so size is what gets measured.
+  const TAB_EVICT_BYTE_THRESHOLD = 8 * 1024 * 1024
+  const PAYLOAD_SAMPLE_ROWS = 8
+
+  /**
+   * Rough byte cost of a result set, from a sample rather than the whole thing:
+   * stringifying a million rows to decide whether to drop them would cost more
+   * than keeping them. Rows are uniform enough that a handful extrapolates well,
+   * and the decision only needs the right order of magnitude.
+   * @param {unknown[][] | undefined} rowsArr
+   */
+  function estimateRowsBytes(rowsArr) {
+    if (!Array.isArray(rowsArr) || rowsArr.length === 0) return 0
+    const step = Math.max(1, Math.floor(rowsArr.length / PAYLOAD_SAMPLE_ROWS))
+    let sampled = 0
+    let bytes = 0
+    for (let i = 0; i < rowsArr.length && sampled < PAYLOAD_SAMPLE_ROWS; i += step) {
+      const row = rowsArr[i]
+      if (!row) continue // windowed sets are sparse
+      try {
+        bytes += JSON.stringify(row)?.length ?? 0
+      } catch {
+        bytes += 256 // circular or otherwise unserialisable: assume small
+      }
+      sampled += 1
+    }
+    if (sampled === 0) return 0
+    return Math.round((bytes / sampled) * rowsArr.length)
+  }
   let _tabRowsMru = /** @type {string[]} */ ([])
   function evictColdTabRows(activeId) {
     // Trim to the window we actually read - entries past it are never consulted,
@@ -3233,20 +3553,32 @@ let rowSearch = $state('')
       if (t.kind !== 'table' || t.id === activeId || keep.has(t.id)) return false
       const st = /** @type {TableTabState} */ (t.state)
       if (!st) return false
-      if (Array.isArray(st.rows) && st.rows.length > TAB_EVICT_ROW_THRESHOLD) return true
       // Windowed tabs keep their (huge, sparse) array outside the reactive tree,
-      // so `st.rows` is empty and the check above can't see them. Measure the
-      // cached array instead, or an open million-row table would be retained for
-      // the whole session however cold it got.
+      // so `st.rows` is empty and has to be measured from the cache instead, or
+      // an open million-row table would be retained for the whole session
+      // however cold it got.
       const cached = _liveRowsByTab.get(t.id)
-      return Array.isArray(cached) && cached.length > TAB_EVICT_ROW_THRESHOLD
+      const rowsArr = Array.isArray(st.rows) && st.rows.length > 0 ? st.rows : cached
+      if (!Array.isArray(rowsArr) || rowsArr.length === 0) return false
+      if (rowsArr.length > TAB_EVICT_ROW_THRESHOLD) return true
+      // Cheap enough to run on every switch: a sample of eight rows, and only
+      // for tabs that survived the row-count test.
+      return estimateRowsBytes(rowsArr) > TAB_EVICT_BYTE_THRESHOLD
     }
-    // Most switches evict nothing. Test first so the common path doesn't rebuild
-    // the tabs array - that write invalidates every consumer of `tabs` (tab strip,
-    // panes, tabsById) for no change at all.
-    if (!tabs.some(evictable)) return
+    // Most switches evict nothing. Decided in ONE pass so the common path does
+    // not rebuild the tabs array - that write invalidates every consumer of
+    // `tabs` (tab strip, panes, tabsById) for no change at all.
+    //
+    // The verdicts are collected rather than recomputed: this used to run
+    // `tabs.some(evictable)` and then `evictable(t)` again for every tab inside
+    // the map, so the row sampling and its `JSON.stringify` were paid twice on
+    // any switch that evicted anything.
+    /** @type {Set<string>} */
+    const doomed = new Set()
+    for (const t of tabs) if (evictable(t)) doomed.add(t.id)
+    if (doomed.size === 0) return
     tabs = tabs.map((t) => {
-      if (!evictable(t)) return t
+      if (!doomed.has(t.id)) return t
       _liveRowsByTab.delete(t.id)
       const st = /** @type {TableTabState} */ (t.state)
       // windowedHead cleared too: with the array gone the tab has to refetch, and
@@ -3263,148 +3595,6 @@ let rowSearch = $state('')
     const tab = tabs.find((t) => t.id === id)
     if (tab) await applyTabToEditor(tab)
   }
-
-  /** Keep the current entry level with the live cursor. O(1), no allocation. */
-  function refreshNavCurrent() {
-    const cur = navCurrent(_nav)
-    if (!cur || cur.tabId !== activeTabId || focusedRow === null) return
-    cur.row = focusedRow
-    cur.col = focusedCol
-    cur.page = page
-  }
-
-  /**
-   * Record where the cursor goes.
-   *
-   * Every route into a tab ends up assigning `activeTabId` - some through
-   * activateTab, some (openTableTab, closeTab's fallback, the pane splits) by
-   * hand - so watching the signal here catches all of them instead of asking a
-   * dozen call sites to remember.
-   *
-   * The cost per keystroke is this effect's own comparisons: roaming refreshes
-   * the current entry in place, and only a real jump (another tab, another page,
-   * or NAV_ROW_GAP rows away) touches the array.
-   */
-  $effect(() => {
-    const tabId = activeTabId
-    const row = focusedRow
-    const col = focusedCol
-    const pg = page
-    // Consumed unconditionally, before the guards below, so a click that lands
-    // mid-travel can't leave the flag set and turn the next roam into a jump.
-    const aimed = _navJumpPending
-    _navJumpPending = false
-    if (!tabId) return
-    // Mid-travel: the cursor is being parked on an entry we already have.
-    if (_navRestore > 0) return
-    const cur = navCurrent(_nav)
-    // An aimed move inside the current tab is always a position worth keeping -
-    // unless it didn't actually move, which would just stack duplicates.
-    const aimedJump =
-      aimed && cur !== null && cur.tabId === tabId && row !== null && row !== cur.row
-    switch (aimedJump ? NAV_PUSH : navTransition(cur, { tabId, row, col, page: pg })) {
-      case NAV_PUSH:
-        pushNav(_nav, { tabId, row, col, page: pg })
-        syncNavFlags()
-        break
-      case NAV_PUSH_TAB:
-        // Land with no cell yet - row/col right now still describe the tab we
-        // left. refreshNavCurrent fills them in once the snapshot applies.
-        pushNav(_nav, { tabId, row: null, col: null, page: null })
-        syncNavFlags()
-        break
-      case NAV_REFRESH:
-        refreshNavCurrent()
-        break
-      case NAV_FORGET_CELL:
-        if (cur) {
-          cur.row = null
-          cur.col = null
-          cur.page = pg
-        }
-        break
-    }
-  })
-
-  /** @param {import('$lib/nav-history.js').NavEntry} entry */
-  async function gotoNavEntry(entry) {
-    const travel = ++_navTravel
-    const superseded = () => travel !== _navTravel
-    _navRestore += 1
-    try {
-      if (entry.tabId !== activeTabId) await activateTab(entry.tabId)
-      if (superseded()) return
-      if (entry.page != null && entry.page !== page && activeTab?.kind === 'table') {
-        page = entry.page
-        await loadRows()
-        if (superseded()) return
-      }
-      if (entry.row === null) return
-      // A tab whose rows were evicted - or that was never cached - refetches on
-      // activation, and the grid refuses to focus a cell while it holds none. So
-      // the restore has to wait for that fetch, or it quietly lands on nothing
-      // and the tab opens at the top: the failure people hit once more than
-      // TAB_ROWS_MRU_MAX tables are open. The guard is held across the wait, so
-      // the rows arriving can't be mistaken for a new jump.
-      await awaitTabFetch(entry.tabId)
-      if (superseded()) return
-      focusedRow = entry.row
-      focusedCol = entry.col
-      await tick()
-      if (superseded()) return
-      const { row, col } = entry
-      // Deferred a frame so this beats the tab snapshot's own scroll restore,
-      // which lands on the same frame - otherwise a position from deeper in the
-      // history loses to the tab's last-known offset. The guard is held across
-      // the frame (hence the counter) so that if the grid clamps a stale row to
-      // the loaded range, that resolves into this entry instead of recording a
-      // brand new jump and wiping the forward branch.
-      _navRestore += 1
-      requestAnimationFrame(() => {
-        if (!superseded()) {
-          tableFocusCell(row, col)
-          refreshNavCurrent()
-        }
-        _navRestore -= 1
-      })
-    } finally {
-      _navRestore -= 1
-    }
-  }
-
-  /** Does this history entry still point at an open tab? */
-  const _navTabAlive = (/** @type {string} */ id) => tabs.some((t) => t.id === id)
-
-  /** Set while a coalesced travel is waiting for its frame. */
-  let _navStepQueued = false
-
-  /**
-   * Walk the history one step and travel there.
-   *
-   * A burst of presses - key repeat on Alt+←, an impatient click - should walk
-   * the stack and travel *once*, to wherever it lands. Visiting every entry on
-   * the way costs a snapshot save, a tab activation and possibly a refetch each,
-   * which is what made holding the shortcut crawl. Stepping the index stays
-   * synchronous so the buttons and the next press see the truth immediately;
-   * only the travel is deferred a frame and coalesced.
-   *
-   * @param {-1 | 1} dir
-   */
-  function navStepBy(dir) {
-    const moved = dir === -1 ? navStepBack(_nav, _navTabAlive) : navStepForward(_nav, _navTabAlive)
-    syncNavFlags()
-    if (!moved || _navStepQueued) return
-    _navStepQueued = true
-    requestAnimationFrame(() => {
-      _navStepQueued = false
-      const target = navCurrent(_nav)
-      if (target) void gotoNavEntry(target)
-    })
-  }
-
-  function navBack() { navStepBy(-1) }
-
-  function navForward() { navStepBy(1) }
 
   /**
    * Guard: closing a tab discards its unsaved edits/deletes - ask first when it
@@ -3794,8 +3984,12 @@ let rowSearch = $state('')
     // ERD inspector), where re-activating the existing tab would be a no-op.
     const existing = duplicate ? null : findTableTab(tabs, schema, table)
     if (existing) {
-      tableViewMode = 'data'
-      structureColumns = []
+      // No view reset here. These two lines used to force the grid on, because
+      // `tableViewMode` was shared by every tab and re-activating one would
+      // otherwise inherit the last tab's mode. It is part of the tab's snapshot
+      // now, so clicking a table that is already open in the structure editor
+      // returns you to the structure editor - which is what "the tab kept my
+      // place" means everywhere else in this app.
       await activateTab(existing.id)
       if (filters || search !== null) {
         if (resetQuery) {
@@ -3808,8 +4002,23 @@ let rowSearch = $state('')
           filterBarOpen = filters.length > 0
         }
         page = 1
+        // This query supersedes whatever `activateTab` may have started for the
+        // tab: the filters just changed, so that in-flight page is the wrong
+        // one. Waiting for it first keeps the two from writing out of order.
+        await _tabFetches.get(existing.id)
         await loadRows()
-      } else if (activeTable === table && columns.length === 0) {
+      } else if (
+        activeTable === table &&
+        columns.length === 0 &&
+        // …and nothing is already fetching this tab's rows. `activateTab` above
+        // ends in `applyTabToEditor`, which starts that fetch for a tab whose
+        // rows were evicted (or never cached) and deliberately does not await
+        // it. `columns` is therefore still empty here, which this branch read as
+        // "nothing loaded" - so clicking an already-open table fired the same
+        // full-page query twice, decoded both and kept whichever landed last.
+        !fetchingTabIds.has(existing.id) &&
+        !_tabFetches.has(existing.id)
+      ) {
         await loadRows()
       }
       return
@@ -3943,7 +4152,7 @@ let rowSearch = $state('')
         const filters = buildForeignKeyFilters(detail.fk, columns, detail.row)
         if (!filters) return { columns: [], rows: [], error: 'FK value is NULL' }
         const refSchema = detail.fk.referencedSchema || detail.fk.referenced_schema || activeSchema
-        const refTable  = detail.fk.referencedTable  || detail.fk.referenced_table  || ''
+        const refTable = detail.fk.referencedTable  || detail.fk.referenced_table  || ''
         if (!refTable) return { columns: [], rows: [], error: 'No referenced table' }
         const data = await getTableRows(refSchema, refTable, 50, 0, { filters: filtersForApi(filters) })
         return { columns: data.columns ?? [], rows: data.rows ?? [] }
@@ -3959,8 +4168,12 @@ let rowSearch = $state('')
     }
   }
 
-  /** @param {{ rowIdx: number, colIdx: number, reverseRel?: any, row?: unknown[] }} detail */
-  async function handleFollowForeignKey({ rowIdx, colIdx, reverseRel, row: detailRow }) {
+  /**
+   * @param {{ rowIdx: number, colIdx: number, reverseRel?: any, row?: unknown[], newTab?: boolean }} detail
+   *   `newTab` forces a second tab even when the target table is already open,
+   *   which is what Shift+Enter in the grid asks for.
+   */
+  async function handleFollowForeignKey({ rowIdx, colIdx, reverseRel, row: detailRow, newTab = false }) {
     // Reverse FK: navigate to the referencing table with the correct filter
     if (reverseRel?.fromTable) {
       const row = detailRow ?? rows[rowIdx]
@@ -3971,7 +4184,7 @@ let rowSearch = $state('')
         toast.error('Cannot open reference', { description: 'Could not build filter.' })
         return
       }
-      await openTableTab(fromSchema, reverseRel.fromTable, { filters: filtersForApi(revFilters), resetQuery: true })
+      await openTableTab(fromSchema, reverseRel.fromTable, { filters: filtersForApi(revFilters), resetQuery: true, duplicate: newTab })
       return
     }
     // Forward FK: standard navigation
@@ -3989,7 +4202,7 @@ let rowSearch = $state('')
       return
     }
     const refSchema = fk.referencedSchema || activeSchema
-    await openTableTab(refSchema, fk.referencedTable, { filters, resetQuery: true })
+    await openTableTab(refSchema, fk.referencedTable, { filters, resetQuery: true, duplicate: newTab })
   }
 
   /**
@@ -4053,9 +4266,9 @@ let rowSearch = $state('')
     loadingStructure = true
     const mySeq = ++_structureSeq
     const targetSchema = activeSchema
-    const targetTable  = activeTable
-    const connAtCall   = persistConnectionId
-    const driver       = dbType  // 'postgres' | 'mysql' | 'sqlite' | 'd1'
+    const targetTable = activeTable
+    const connAtCall = persistConnectionId
+    const driver = dbType  // 'postgres' | 'mysql' | 'sqlite' | 'd1'
     try {
       const s = targetSchema.replace(/'/g, "''")
       const t = targetTable.replace(/'/g, "''")
@@ -4085,8 +4298,8 @@ let rowSearch = $state('')
             (
               SELECT rn.nspname || '.' || rc.relname || '.' || ra.attname
               FROM pg_catalog.pg_constraint  pc
-              JOIN pg_catalog.pg_class        rc ON rc.oid  = pc.confrelid
-              JOIN pg_catalog.pg_namespace    rn ON rn.oid  = rc.relnamespace
+              JOIN pg_catalog.pg_class        rc ON rc.oid = pc.confrelid
+              JOIN pg_catalog.pg_namespace    rn ON rn.oid = rc.relnamespace
               JOIN pg_catalog.pg_attribute    ra ON ra.attrelid = rc.oid AND ra.attnum = pc.confkey[1]
               WHERE pc.contype = 'f' AND pc.conrelid = a.attrelid AND pc.conkey[1] = a.attnum
               LIMIT 1
@@ -4142,7 +4355,7 @@ let rowSearch = $state('')
         for (const fkRow of fkR?.rows ?? []) {
           const fromCol = String(fkRow[3] ?? '')
           const toTable = String(fkRow[2] ?? '')
-          const toCol   = String(fkRow[4] ?? '')
+          const toCol = String(fkRow[4] ?? '')
           if (fromCol && !fkMap.has(fromCol)) fkMap.set(fromCol, `${toTable}.${toCol}`)
         }
         rows = (colR?.rows ?? []).map((row) => [
@@ -4432,11 +4645,22 @@ let rowSearch = $state('')
 
   /** @param {string} value */
   function handleRowSearchChange(value) {
+    const cleared = !String(value ?? '').trim()
     rowSearch = value
     page = 1
     rawOffset = null
     _keysetCursor = null
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+    // Clearing is not a keystroke. The toolbar debounces typing for 250ms and
+    // then this debounced it again, so emptying the box sat for another 150ms
+    // while the search that was already in flight painted its rows - which is
+    // the search carrying on after you cancelled it. An empty box means "show
+    // me the table", and there is nothing left to coalesce, so it runs now.
+    if (cleared) {
+      void loadRows()
+      return
+    }
     searchDebounceTimer = setTimeout(() => {
       searchDebounceTimer = null
       void loadRows()
@@ -4579,16 +4803,11 @@ let rowSearch = $state('')
     return trackBusy(tabId, p)
   }
 
-  /** Resolve once nothing is fetching rows for `tabId`. @param {string} tabId */
-  async function awaitTabFetch(tabId) {
-    await _tabFetches.get(tabId)
-  }
-
   /**
    * Fetch rows for any tab in the background.
    * Writes results into that tab's state; if the tab is still active when the
    * fetch resolves, also syncs to the global editor state so the UI updates.
-   * Callers should go through startTabFetch so history travel can wait on it.
+   * Callers should go through startTabFetch, which owns the tab-strip spinner.
    * @param {string} tabId
    */
   async function fetchRowsForTab(tabId) {
@@ -5421,7 +5640,10 @@ let rowSearch = $state('')
    * belongs to the tab that asked for it: it lands in that tab's state and only
    * touches the visible total while that tab is still in front.
    * @param {string | null} tabId @param {number} seq @param {string} schema
-   * @param {string} table @param {{ search?: string, searchIsRegex?: boolean, filters?: any[] }} query
+   * @param {string} table
+   * @param {{ search?: string, searchIsRegex?: boolean, searchCaseSensitive?: boolean, filters?: any[] }} query
+   *   The SAME object the rows query used - a count taken under a different
+   *   predicate is a total that disagrees with the page it labels.
    */
   async function refreshRowCount(tabId, seq, schema, table, query, sig = '', viewKey = '') {
     if (!table) return
@@ -5624,7 +5846,17 @@ let rowSearch = $state('')
     let ranError = ''
     let ranRowCount = 0
     try {
-      const results = await executeSqlMulti(sqlRan, queryId)
+      // A tab with an open transaction runs on that transaction's connection,
+      // so its statements stay invisible until the user commits. Everything
+      // below is identical - only the executor differs.
+      const txSession = runTabId ? sqlTxSessions.get(runTabId) : null
+      let results
+      if (txSession) {
+        results = [await txExecute(txSession, sqlRan)]
+        if (runTabId) setTxStatus(runTabId, await txStatus(txSession))
+      } else {
+        results = await executeSqlMulti(sqlRan, queryId)
+      }
       const data = results.length > 0 ? results[results.length - 1] : {}
       const cols = data.columns ?? []
       const rws = data.rows ?? []
@@ -5673,6 +5905,7 @@ let rowSearch = $state('')
 
   async function onConnected(conn, savedId) {
     recordActivity({ type: 'connect', title: `Connected to ${conn.name ?? conn.database ?? conn.filePath ?? 'database'}`, success: true })
+    setWasDisconnected(false)
     connection = conn
     savedConnections = loadSavedConnections()
     tableReadonly = savedConnections.find(c => c.id === savedId)?.readOnly ?? conn.readOnly ?? false
@@ -5711,8 +5944,6 @@ let rowSearch = $state('')
     _autoRefreshTick += 1
     _busyJobs.clear()
     _busyTick += 1
-    resetNav(_nav)
-    syncNavFlags()
     // Redis has no relational catalog: skip schema/table loading entirely and
     // open the keyspace workspace instead of the welcome tab + tables sidebar.
     const connIsRedis = engineFamily(conn.type) === 'redis'
@@ -5878,6 +6109,13 @@ let rowSearch = $state('')
     const last = getLastConnection()
     if (!last) { showConnectionModal = true; return }
 
+    // Disconnect is a decision, and it survives a restart. Coming back connected
+    // to the database someone deliberately stepped away from - on a reload, or
+    // the next morning - is the one outcome that command exists to prevent, so
+    // this launch stays on the welcome screen. The connection is still saved and
+    // still the highlighted one; reconnecting is a click.
+    if (wasDisconnected()) return
+
     // Respect the "auto reconnect on startup" setting - if disabled, go straight
     // to the connection modal instead of re-connecting silently.
     if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; return }
@@ -6016,6 +6254,16 @@ let rowSearch = $state('')
   function requestDatabaseSwitch(/** @type {{ key: string, label: string }} */ entry) {
     pendingDbSwitch = entry
     showSwitchDbDialog = true
+  }
+
+  /** Double-click a database: switch straight there, no confirm step. The dialog
+   *  exists because switching drops the open tabs, but once you have done it a
+   *  few times the confirm is just a second click - so the second click IS the
+   *  confirmation. Single click still asks. */
+  function switchDatabaseNow(/** @type {{ key: string, label: string }} */ entry) {
+    pendingDbSwitch = entry
+    showSwitchDbDialog = false
+    commitDatabaseSwitch()
   }
 
   /** Same three dispatch paths the status-bar switcher uses, by engine. */
@@ -6167,6 +6415,7 @@ let rowSearch = $state('')
     // Remember where the user was so reconnecting restores this schema.
     if (persistConnectionId && activeSchema) setLastSchema(persistConnectionId, activeSchema)
     recordActivity({ type: 'disconnect', title: `Disconnected from ${connection?.name ?? 'database'}`, success: true })
+    setWasDisconnected(true)
     try { await disconnectPostgres() } catch { /* ignore */ }
     try { await mcpStop() } catch { /* ignore */ }
     mcpRunning = false
@@ -6265,6 +6514,13 @@ let rowSearch = $state('')
     try {
       await connectByType(conn)
       await onConnected(conn, conn.id)
+      // The switch landed, so the sidebar goes back to the tables of the
+      // database you are now in. Every route into a switch - the Databases tab,
+      // the status bar, the command palette, a context menu, another saved
+      // connection - comes through here, so this is the one place that has to
+      // say it. The list left on screen belongs to a database nobody is looking
+      // at any more, and the Databases tab is a switcher, not a destination.
+      sidebarShowTables()
     } catch (e) {
       error = String(e)
       showConnectionModal = true
@@ -6293,6 +6549,30 @@ let rowSearch = $state('')
       return false
     }
   }
+  /** Drives the spinner on the error state's Retry / Reconnect button. */
+  let retryingLoad = $state(false)
+  /**
+   * Retry whatever the table view failed at. A dropped pool needs rebuilding
+   * first - retrying the same query against a closed pool just reprints the
+   * same error.
+   */
+  async function retryTableLoad() {
+    if (retryingLoad) return
+    const dropped = connectionErrorKind(error) === 'dropped' || connectionLost
+    retryingLoad = true
+    try {
+      error = ''
+      showRawError = false
+      if (dropped) await reconnectPool()
+      // No table selected means the failure came from the catalog, not a row
+      // fetch, so retry what actually broke.
+      if (activeTable) await loadRows()
+      else await loadTables({ force: true })
+    } finally {
+      retryingLoad = false
+    }
+  }
+
   /** Rate-limited silent reconnect + quiet refetch, for background triggers. */
   async function silentReconnect() {
     if (_reconnecting || !connection) return
@@ -6572,6 +6852,82 @@ let rowSearch = $state('')
     }
   }
 
+  /**
+   * Load one capped cell in full, for the dock.
+   *
+   * A browse page fetches wide columns as a preview - the whole point of that
+   * is not moving half a megabyte per row for a grid that draws forty
+   * characters - so reading one is an explicit, per-row request.
+   * @param {{ rowIdx: number, colIdx: number }} detail
+   */
+  async function handleFetchCellValue(detail, maxBytes = DOCK_VALUE_MAX) {
+    if (!activeTable) throw new Error('No table is open')
+    const col = columns[detail.colIdx]
+    if (!col) throw new Error('That column is gone')
+    const pk = primaryKeyForRow(detail.rowIdx)
+    if (!pk) throw new Error('This table has no primary key, so a single row cannot be addressed')
+    return await fetchCellValue(activeSchema, activeTable, pk, col.name, maxBytes)
+  }
+
+  /**
+   * What a load will hold, in the dock and in the cell alike. The fetch command
+   * can return far more, but a `<textarea>` in a webview cannot lay out tens of
+   * megabytes - 8MB is already past anything anyone reads and is the point where
+   * the panel stays usable.
+   *
+   * The cell used to stop at 1MB on the theory that its value is what the canvas
+   * formats and the search walks. It is, but neither reads more than the forty
+   * characters a cell is wide: the drawn text is cut to 400 chars and cached per
+   * row, the highlighter matches that same cut string, and the row search runs
+   * in SQL. A 1.2MB resume refusing to load into the cell it belongs to was that
+   * theory charging for a cost it was not paying.
+   */
+  const DOCK_VALUE_MAX = 8 * 1024 * 1024
+  const CELL_VALUE_MAX = DOCK_VALUE_MAX
+  /**
+   * Above this, a loaded JSON value stays the text it arrived as rather than
+   * being parsed into an object. Drawing an object means stringifying it, so a
+   * parsed 6MB payload is a 6MB parse on the way in and a 6MB serialize on the
+   * way out, both blocking, to show forty characters - and it retains both
+   * copies. As text it is a slice. The dock reads JSON out of text perfectly
+   * well, so nothing downstream loses anything.
+   */
+  const CELL_PARSE_MAX = 1024 * 1024
+
+  /**
+   * Load one capped cell and put it in the row, for the grid's in-cell button.
+   * Only that cell: the rest of the column keeps its size stand-in, because one
+   * value being read is not a reason to pull a half-megabyte column back into
+   * the page.
+   * @param {{ rowIdx: number, colIdx: number }} detail
+   */
+  async function handleLoadCellValue(detail) {
+    const col = columns[detail.colIdx]
+    if (!col) return
+    const res = await handleFetchCellValue(detail, CELL_VALUE_MAX)
+    if (res.truncated) {
+      // A cut value in a cell is worse than the size it replaces: it reads as
+      // the value and is not one. Past this size nothing loads whole anywhere,
+      // so the dock is the honest answer - it pages through what it has.
+      toast.info('Too large to load whole', {
+        description: `${col.name} is ${formatByteSize(res.bytes)}, past the ${formatByteSize(CELL_VALUE_MAX)} this loads in one piece. Open it with Shift+Space to read it in pages.`,
+      })
+      return
+    }
+    // A JSON column renders from a parsed value, the way an under-cap row in the
+    // same column already arrives; anything else is text. Past CELL_PARSE_MAX it
+    // stays text too - see the constant.
+    const type = String(col.dataType ?? col.data_type ?? '').toLowerCase()
+    /** @type {unknown} */
+    let next = res.text
+    if ((type === 'json' || type === 'jsonb') && res.text.length <= CELL_PARSE_MAX) {
+      try { next = JSON.parse(res.text) } catch { /* leave it as text */ }
+    }
+    rows[detail.rowIdx] = rows[detail.rowIdx].map((cell, j) => (j === detail.colIdx ? next : cell))
+    // rows is $state.raw, so the assignment above does not notify the canvas.
+    dataVersion++
+  }
+
   /** @param {{ rowIdx: number, colIdx: number, value: unknown }} detail */
   async function handleSaveCell(detail) {
     if (!activeTable || !primaryKey.length) return
@@ -6665,6 +7021,7 @@ let rowSearch = $state('')
 <Onboarding bind:open={showOnboarding} onconnect={() => (showConnectionModal = true)} onsample={handleSampleConnect} />
 <ConnectionModal
   bind:open={showConnectionModal}
+  bind:initialEngine={connectionModalEngine}
   onconnected={(conn, id) => onConnected(conn, id)}
   maxConnections={$hasPro ? Infinity : FREE_CONNECTION_LIMIT}
   activeConnectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''}
@@ -6733,13 +7090,6 @@ let rowSearch = $state('')
   dialect={dbType}
   onopeninsql={(sql) => { if (aiMode) exitAiMode(); void openQueryInEditor(sql) }}
 />
-<FindReplaceDialog
-  bind:open={findReplaceOpen}
-  {columns}
-  {rows}
-  tableName={activeTable}
-  onapply={handleFindReplaceApply}
-/>
 <DockerLaunchModal
   bind:open={showDockerModal}
   initialDbType={dockerInitialDb}
@@ -6757,6 +7107,15 @@ let rowSearch = $state('')
   onopenlicense={() => openLicenseTab()}
 />
 
+<ImportDataDialog
+  bind:open={importDataOpen}
+  schema={activeSchema}
+  table={activeTable ?? ''}
+  {columns}
+  {primaryKey}
+  onimported={() => reloadTableFromQuery(false)}
+/>
+
 <AiSettingsDialog bind:open={showAiModelSettings} />
 
 <KeyboardShortcutsDialog bind:open={showShortcutsModal} />
@@ -6771,14 +7130,14 @@ let rowSearch = $state('')
     <Dialog.Overlay class="fixed inset-0 z-50 bg-black/65" />
     <Dialog.Content class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border/60 bg-background p-5 elevate-3-rim outline-none">
       <div class="mb-5 flex size-10 items-center justify-center rounded-lg border border-warning/20 bg-warning/10">
-        <Lock class="size-5 text-warning/80" />
+        <Lock class="size-5 text-warning" />
       </div>
       <h2 class="mb-1.5 text-ui-sm font-semibold text-foreground">Stroke Pro required</h2>
       <p class="mb-5 text-ui-xs leading-relaxed text-muted-foreground">This feature is not available on the free plan. Upgrade to Stroke Pro to unlock AI, dashboards, ORM runner, schema explorer, and more.</p>
       <div class="flex items-center gap-2">
         <button
           onclick={() => (showProGate = false)}
-          class="flex h-8 flex-1 items-center justify-center rounded-lg border border-border/60 bg-muted/50 px-4 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          class= "field-surface flex h-8 flex-1 items-center justify-center bg-muted/50 px-4 text-ui-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           Back
         </button>
@@ -6896,7 +7255,7 @@ let rowSearch = $state('')
       </p>
       <button
         type="button"
-        class="mt-3 text-ui-2xs text-muted-foreground/40 underline underline-offset-4 transition-colors hover:text-foreground"
+        class="mt-3 text-ui-2xs text-muted-foreground underline underline-offset-4 transition-colors hover:text-foreground"
         onclick={() => void cancelAutoConnect()}
       >
         Cancel
@@ -6909,17 +7268,12 @@ let rowSearch = $state('')
 <div class="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
 <TitleBar
   title={windowTitle}
-  {sidebarOpen}
   connected={!!connection}
   {aiMode}
   {aiSidebarOpen}
-  {canGoBack}
-  {canGoForward}
-  ontogglesidebar={toggleSidebar}
   ontoggleaimode={() => { if (aiMode) exitAiMode(); else openAiTab() }}
   ontoggleaisidebar={() => { if (aiMode) exitAiMode(); toggleAiSidebar() }}
-  ongoback={() => void navBack()}
-  ongoforward={() => void navForward()}
+  {menuActions}
 />
 <div class="flex min-h-0 flex-1 overflow-hidden">
   {#if connection}
@@ -6940,7 +7294,7 @@ let rowSearch = $state('')
       <svelte:boundary>
         {#snippet failed(err, reset)}
           <div class="flex h-full w-[220px] shrink-0 flex-col items-center justify-center gap-3 border-r border-border/50 bg-sidebar p-4 text-center">
-            <AlertTriangle class="size-5 text-destructive/60" />
+            <AlertTriangle class="size-5 text-destructive" />
             <p class="text-ui-xs font-medium text-muted-foreground">Sidebar error</p>
             <button
               type="button"
@@ -6950,6 +7304,21 @@ let rowSearch = $state('')
           </div>
         {/snippet}
       <Sidebar
+        bind:openFindReplace={sidebarOpenFindReplace}
+        bind:showTablesTab={sidebarShowTables}
+        frColumns={columns}
+        frRows={rows}
+        frPrimaryKey={primaryKey}
+        frForeignKeys={foreignKeys}
+        frTableName={activeTable}
+        frEnabled={findReplaceEnabled && !!activeTable && columns.length > 0}
+        onfindreplaceapply={handleFindReplaceApply}
+        onrevealcell={(rowIdx, colIdx) => {
+          // A match is a cell, and the point of the panel living beside the grid
+          // is that clicking one takes you to it.
+          if (dataViewMode !== 'table') dataViewMode = 'table'
+          void tick().then(() => tableFocusCell(rowIdx, colIdx))
+        }}
         connectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''}
         {navSidebarPanel}
         connections={savedConnections}
@@ -6975,6 +7344,7 @@ let rowSearch = $state('')
         onrefresh={handleRefresh}
         {connection}
         onswitchdatabase={requestDatabaseSwitch}
+        onswitchdatabasenow={switchDatabaseNow}
         onnewdatabase={() => (showCreateDbDialog = true)}
         onrenamedatabase={({ name, existing }) => openDbNameDialog({ mode: 'rename', name, existing })}
         onduplicatedatabase={({ name, existing }) => openDbNameDialog({ mode: 'duplicate', name, existing })}
@@ -7024,7 +7394,7 @@ let rowSearch = $state('')
   <main class="flex min-h-0 min-w-0 flex-1 flex-col bg-panel" data-studio-region="main">
     {#snippet tabError(/** @type {unknown} */ error, /** @type {() => void} */ reset)}
       <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-        <AlertTriangle class="size-8 text-destructive/60" />
+        <AlertTriangle class="size-8 text-destructive" />
         <div class="flex flex-col gap-1">
           <p class="text-ui-sm font-medium text-foreground">This view hit an error</p>
           <p class="max-w-md break-words font-mono text-ui-xs text-muted-foreground">
@@ -7061,13 +7431,22 @@ let rowSearch = $state('')
           </p>
         </div>
 
-        <!-- Supported engines, real brand marks -->
+        <!-- Supported engines, real brand marks. Each one is the shortcut into
+             its own form: naming the engine IS the first step of the wizard, so
+             a chip that only sat there was asking to be clicked and doing
+             nothing. -->
         <div class="relative flex flex-wrap items-center justify-center gap-2">
           {#each [['postgres','PostgreSQL'],['mysql','MySQL'],['sqlite','SQLite'],['clickhouse','ClickHouse'],['d1','Cloudflare D1']] as [id, label]}
-            <span class="inline-flex items-center gap-2 rounded-full border border-border/50 bg-muted/20 py-1.5 pl-2.5 pr-3.5 text-ui-xs font-medium text-muted-foreground/85 transition-colors hover:border-border hover:text-foreground">
-              <DbIcon {id} class="size-4 text-muted-foreground/70" />
+            <button
+              type="button"
+              title="New {label} connection"
+              aria-label="New {label} connection"
+              class="inline-flex items-center gap-2 rounded-full border border-border/50 bg-muted/20 py-1.5 pl-2.5 pr-3.5 text-ui-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted/40 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              onclick={() => { connectionModalEngine = id; showConnectionModal = true }}
+            >
+              <DbIcon {id} class="size-4 shrink-0 text-muted-foreground" />
               {label}
-            </span>
+            </button>
           {/each}
         </div>
 
@@ -7075,17 +7454,29 @@ let rowSearch = $state('')
           <Button
             type="button"
             class="h-9 rounded-lg px-5 text-ui-sm font-semibold"
+            bind:ref={welcomeConnectBtn}
             onclick={() => (showConnectionModal = true)}
           >
             <Plus class="size-4" />
             Add connection
           </Button>
-          <p class="flex items-center gap-1.5 text-ui-xs text-muted-foreground/70">
+          <p class="flex items-center gap-1.5 text-ui-xs text-muted-foreground">
             or press
-            <kbd>⌘K</kbd>
+            <Kbd combo="Mod+K" size="md" />
             for the command menu
           </p>
         </div>
+
+        <p class="relative mt-2 text-ui-xs text-muted-foreground">
+          made with care by
+          <a
+            href="https://nischal-dahal.com.np"
+            target="_blank"
+            rel="noreferrer"
+            class="text-foreground/80 underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            onclick={(e) => { e.preventDefault(); void openExternalUrl('https://nischal-dahal.com.np') }}
+          >@broisnees</a>
+        </p>
       </div>
     {:else}
       <!-- Full-window AI chat, kept mounted after first open so state is preserved -->
@@ -7143,6 +7534,7 @@ let rowSearch = $state('')
             onreopenclosed={reopenLastClosedTab}
             canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
+            onnewsql={() => { if (aiMode) exitAiMode(); openNewSqlTab() }}
           />
         {/if}
         {@render sharedContent()}
@@ -7163,6 +7555,7 @@ let rowSearch = $state('')
             onreopenclosed={reopenLastClosedTab}
             canreopenclosed={closedTabStack.length > 0}
             onpintoggle={toggleTabPin}
+            onnewsql={() => { if (aiMode) exitAiMode(); openNewSqlTab() }}
             ondragtabstart={(id) => beginTabDrag(id)}
             ondragtabmove={(x, y) => moveTabDrag(x, y)}
             ondragtabend={() => endTabDrag()}
@@ -7267,6 +7660,21 @@ let rowSearch = $state('')
         </div>
       {/if}
 
+      <!-- VACUUM. Lazy like every other page, so an easter egg nobody has found
+           costs nothing in the bundle they downloaded. -->
+      {#if golfEverOpened}
+        <div
+          class={activeTab?.kind === 'golf' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+          inert={activeTab?.kind !== 'golf' || undefined}
+        >
+          <svelte:boundary failed={tabError}>
+            {#await import('./VacuumGame.svelte')}<TabLoading />{:then { default: VacuumGame }}
+              <VacuumGame />
+            {/await}
+          </svelte:boundary>
+        </div>
+      {/if}
+
       <!-- Advisor tab - mount once, keep alive. Teardown-eligible: it re-scans on
            reopen, so nothing the user typed is lost by unmounting it. -->
       {#if advisorEverOpened}
@@ -7290,7 +7698,12 @@ let rowSearch = $state('')
         >
           <svelte:boundary failed={tabError}>
             {#await import('./ObjectsPage.svelte')}<TabLoading />{:then { default: ObjectsPage }}
-              <ObjectsPage active={activeTab?.kind === 'objects'} connectionType={connection?.type ?? null} />
+              <ObjectsPage
+                bind:focusSearch={objectsFocusSearch}
+                active={activeTab?.kind === 'objects'}
+                connectionType={connection?.type ?? null}
+                onopen={({ schema, name }) => void openTableTab(schema || activeSchema, name)}
+              />
             {/await}
           </svelte:boundary>
         </div>
@@ -7528,6 +7941,7 @@ let rowSearch = $state('')
           <svelte:boundary failed={tabError}>
             {#await import('./DataDiffPage.svelte')}<TabLoading />{:then { default: DataDiffPage }}
               <DataDiffPage
+                bind:this={dataDiffPageRef}
                 {schemas}
                 {tables}
                 activeSchema={activeSchema}
@@ -7582,6 +7996,12 @@ let rowSearch = $state('')
           <SqlConsole
             bind:this={sqlConsoleRef}
             active={activeTab?.kind === 'sql'}
+            engine={dbType}
+            txStatus={activeTxSession ? activeTxStatus : null}
+            txBusy={sqlTxBusy}
+            onbegintransaction={() => void beginSqlTransaction()}
+            oncommittransaction={() => void endSqlTransaction('commit')}
+            onrollbacktransaction={() => void endSqlTransaction('rollback')}
             bind:sql={sqlText}
             bind:queryHistoryVisible
             {queryHistory}
@@ -7620,68 +8040,85 @@ let rowSearch = $state('')
       {/if}
 
       {#if activeTab?.kind === 'table'}
+        <!-- The failure outranks the empty state: an error raised while the tab
+             has no table selected still has to be readable, and it carries the
+             only control that clears it. -->
         {#if error}
-          {#if isNetworkError(error)}
-            <!-- ── Network / offline error, full-area friendly state ── -->
-            <div class="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-              <WifiOff class="size-8 text-muted-foreground/20" />
-              <div class="space-y-1">
-                <p class="font-mono text-ui font-medium text-foreground/70">Cannot reach database</p>
-                <p class="font-mono text-ui-xs text-muted-foreground/50">Check your internet connection or whether the server is reachable.</p>
-              </div>
-              <button
-                type="button"
-                class="flex items-center gap-1.5 rounded-md border border-border/30 bg-muted/30 px-3 py-1.5 font-mono text-ui-xs text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground"
-                onclick={() => { error = ''; connectionLost = false; void loadRows() }}
-              >
-                <RefreshCw class="size-3" />
-                Retry
-              </button>
-            </div>
-          {:else}
-            <!-- ── SQL / application error, compact banner ── -->
-            <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
-              <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive/70" />
+          <!-- ── Load failure, stated where the grid would be ────────────────
+               A banner pinned to the top over an empty grid made the reader
+               look in two places and left them with "dismiss to continue" as
+               the only way forward. One centred state instead: what broke, why,
+               and the action that fixes it - reconnect for a dropped pool,
+               retry for everything else. -->
+          {@const kind = connectionErrorKind(error)}
+          {@const humanized = humanizeDbError(error)}
+          <div
+            class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center"
+            role="alert"
+          >
+            {#if kind === 'unreachable'}
+              <WifiOff class="size-8 shrink-0 text-muted-foreground" />
+            {:else if kind === 'dropped'}
+              <Unplug class="size-8 shrink-0 text-muted-foreground" />
+            {:else}
+              <AlertTriangle class="size-8 shrink-0 text-destructive" />
+            {/if}
+
+            <div class="flex max-w-md flex-col gap-1">
+              <p class="text-ui-sm font-medium text-foreground">
+                {#if kind === 'unreachable'}Cannot reach database
+                {:else if kind === 'dropped'}Connection dropped
+                {:else}This table failed to load{/if}
+              </p>
               <!-- Drivers wrap the cause in transport noise - D1 returns its whole
                    HTTP envelope around a five-word message. Show the cause; the
                    raw text stays one click away and in the query log. -->
-              <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive/90">
-                {humanizeDbError(error)}
-                {#if humanizeDbError(error) !== error.replace(/^Error:\s*/, '').trim()}
-                  <button
-                    type="button"
-                    class="ml-1.5 align-baseline text-ui-3xs text-destructive/45 underline-offset-2 transition-colors hover:text-destructive hover:underline"
-                    onclick={() => (showRawError = !showRawError)}
-                  >{showRawError ? 'hide raw' : 'raw'}</button>
-                  {#if showRawError}
-                    <span class="mt-1 block break-all text-ui-3xs text-destructive/45">{error}</span>
-                  {/if}
-                {/if}
+              <p class="break-words font-mono text-ui-xs leading-relaxed {kind ? 'text-muted-foreground' : 'text-destructive'}">
+                {#if kind === 'unreachable'}Check your internet connection, or whether the server is still accepting connections.
+                {:else if kind === 'dropped'}The pool for this connection closed. Reconnecting rebuilds it and reloads the table.
+                {:else}{humanized}{/if}
               </p>
+              {#if showRawError}
+                <p class="mt-1 max-h-40 overflow-auto break-all text-left font-mono text-ui-3xs text-muted-foreground">{error}</p>
+              {/if}
+            </div>
+
+            <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="mt-px shrink-0 text-destructive/40 transition-colors hover:text-destructive"
-                onclick={() => (error = '')}
-                title="Dismiss"
+                data-autofocus
+                disabled={retryingLoad}
+                class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+                onclick={() => void retryTableLoad()}
               >
-                <X class="size-3.5" />
+                <RefreshCw class="size-3.5 shrink-0 {retryingLoad ? 'animate-spin' : ''}" />
+                {kind === 'dropped' || connectionLost ? 'Reconnect' : 'Retry'}
               </button>
+              {#if !kind}
+                <button
+                  type="button"
+                  class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+                  onclick={() => { error = ''; showRawError = false }}
+                >Dismiss</button>
+              {/if}
             </div>
-          {/if}
-        {/if}
 
-        {#if !activeTable}
+            {#if humanized !== error.replace(/^Error:\s*/, '').trim()}
+              <button
+                type="button"
+                class="text-ui-3xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                onclick={() => (showRawError = !showRawError)}
+              >{showRawError ? 'Hide raw error' : 'Show raw error'}</button>
+            {/if}
+          </div>
+        {:else if !activeTable}
           <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
             <p class="font-mono text-ui text-muted-foreground">
               Select a table from the sidebar or press
-              <kbd>⌘K</kbd>
+              <Kbd combo="Mod+K" size="md" />
             </p>
           </div>
-        {:else if error && !isNetworkError(error)}
-          <div class="flex flex-1 items-center justify-center">
-            <p class="font-mono text-ui-sm text-muted-foreground/40">Dismiss the error above to continue.</p>
-          </div>
-        {:else if !error}
+        {:else}
           {#if tableViewMode === 'structure' && canShowStructure}
             {#if tableToolbarVisible}
             <TableToolbar
@@ -7739,6 +8176,7 @@ let rowSearch = $state('')
 
             {sidebarOpen}
             {queryMs}
+            {previewColumns}
             {page}
             {pageSize}
             offset={currentOffset}
@@ -7778,9 +8216,10 @@ let rowSearch = $state('')
             onsaveview={saveCurrentTableView}
             ondeleteview={deleteSavedView}
             {findReplaceEnabled}
-            onfindreplace={() => (findReplaceOpen = true)}
+            onfindreplace={() => openFindReplacePanel()}
             ondeleteselected={() => stageDeleteSelectedRows()}
             onexport={handleExport}
+            onimport={() => (importDataOpen = true)}
             onexportdiagram={(kind) => erdPane?.exportDiagram?.(kind)}
             onexportchart={(kind) => chartPane?.exportChart?.(kind)}
             onaddrow={() => {
@@ -7789,6 +8228,7 @@ let rowSearch = $state('')
               void tick().then(() => dtBeginInsertRow?.())
             }}
             onopeninsql={openTableInSqlEditor}
+            onmagicword={openGolfTab}
             readonly={tableReadonly}
             {hiddenColumns}
             virtualColCount={vcolCount}
@@ -7826,8 +8266,11 @@ let rowSearch = $state('')
                 {rows}
                 {primaryKey}
                 {foreignKeys}
+                rowNumberOffset={infiniteScroll ? 0 : currentOffset}
                 {incomingForeignKeys}
                 onfetchrelatedrows={handleFetchRelatedRows}
+                onfetchcellvalue={dbType === 'postgres' ? handleFetchCellValue : null}
+                onloadcellvalue={dbType === 'postgres' ? handleLoadCellValue : null}
                 schema={activeSchema}
                 tableName={activeTable ?? ''}
                 connectionId={persistConnectionId}
@@ -7851,11 +8294,11 @@ let rowSearch = $state('')
                 bind:selected
                 bind:focusedRow
                 bind:focusedCol
-                onjump={markNavJump}
                 bind:inspectorRow
                 bind:editingCell
                 bind:pendingEditCount
                 bind:applyEdits
+                bind:copyEditsSql
                 bind:resetEdits
                 bind:scrollToTop={scrollTableTop}
                 bind:scrollToBottom={scrollTableBottom}
@@ -7871,6 +8314,7 @@ let rowSearch = $state('')
                 {rowSort}
                 {rowSortMore}
                 searchQuery={rowSearch}
+                {searchOptions}
                 onsortchange={(s) => void handleRowSortChange(s)}
                 onhidecolumn={(colName) => {
                   const next = new Set(hiddenColumns)
@@ -7983,7 +8427,10 @@ let rowSearch = $state('')
       {/if}
 
       {#if !activeTab || activeTab.kind === 'welcome'}
-        {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
+        <!-- One platform test for the whole app: `IS_MAC` comes from `detectOs()`,
+             which reads the Tauri platform. `navigator.platform` is deprecated,
+             and a second source of truth is a second answer waiting to happen. -->
+        {@const isMac = IS_MAC}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
         <!-- Tile chrome. Every tile is the same fixed height with the icon row
              pinned to the top and the label to the bottom, so labels stay on a
@@ -7996,9 +8443,9 @@ let rowSearch = $state('')
         {@const cell = 'group relative flex min-h-[5.25rem] min-w-0 flex-col justify-between overflow-hidden rounded-lg border border-border/60 bg-card/50 p-2.5 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 ease-[var(--ease-out)] hover:border-border hover:bg-accent/40 hover:shadow-sm active:scale-[0.98]'}
         {@const proCell = 'group relative flex min-h-[5.25rem] min-w-0 cursor-not-allowed flex-col justify-between overflow-hidden rounded-lg border border-border/40 bg-card/30 p-2.5 text-left transition-[background-color,border-color] duration-150 hover:border-warning/30 hover:bg-warning/[0.04]'}
         {@const iconCls = 'size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'}
-        {@const proIconCls = 'size-4 shrink-0 text-muted-foreground/50'}
+        {@const proIconCls = 'size-4 shrink-0 text-muted-foreground'}
         {@const labelCls = 'text-ui-2xs font-medium leading-[1.25] text-foreground/85 transition-colors group-hover:text-foreground [overflow-wrap:anywhere]'}
-        {@const proLabelCls = 'text-ui-2xs font-medium leading-[1.25] text-muted-foreground/60 [overflow-wrap:anywhere]'}
+        {@const proLabelCls = 'text-ui-2xs font-medium leading-[1.25] text-muted-foreground [overflow-wrap:anywhere]'}
 
         <!-- Shift is spelled out off macOS: the bundled UI/mono webfonts have no
              U+21E7, so "Ctrl⇧E" fell back mid-word and rendered as garbage.
@@ -8006,115 +8453,181 @@ let rowSearch = $state('')
              this size. -->
         {@const shiftKey = isMac ? '⇧' : 'Shift'}
         {#snippet chord(/** @type {string[]} */ keys)}
-          <span class="flex shrink-0 items-center gap-1 font-mono text-ui-3xs leading-none text-muted-foreground/70 transition-colors group-hover:text-muted-foreground">
-            {#each keys as k (k)}<span>{k}</span>{/each}
-          </span>
+          <Kbd {keys} wrap />
         {/snippet}
 
-        {#snippet tile(/** @type {any} */ Icon, /** @type {string} */ label, /** @type {() => void} */ onclick, /** @type {{ pro?: boolean, keys?: string[], hint?: string }} */ opts = {})}
+        <!-- The tile grid, back to the shape it had: icon pinned top, label and
+             chord anchored bottom, every tile the same size. What changed is the
+             count - five actions instead of sixteen - so the grid is a shortlist
+             you take in at a glance rather than a wall you have to read. -->
+        {#snippet row(/** @type {any} */ Icon, /** @type {string} */ label, /** @type {string} */ _desc, /** @type {() => void} */ onclick, /** @type {{ pro?: boolean, keys?: string[] }} */ opts = {})}
           {@const locked = !!opts.pro && !$hasPro}
           <button
             type="button"
             {onclick}
-            title={opts.hint ? `${opts.hint}${locked ? ' - Pro' : ''}` : locked ? `${label} - Pro` : label}
-            class={locked ? proCell : cell}
+            title={locked ? `${label} - ${_desc} - Pro` : `${label} - ${_desc}`}
+            class={cn(
+              // min-h, not h: a label that wraps to two lines in a narrow pane grows
+              // the tile instead of spilling out of it.
+              // The focus ring is the app's own: `outline-2 outline-ring`, the
+              // same one every Button draws. These tiles are the first thing Tab
+              // reaches on a fresh tab and they drew nothing at all.
+              "group flex min-h-[5.25rem] min-w-0 flex-col justify-between gap-2 overflow-hidden rounded-xl border p-2.5 text-left transition-[background-color,border-color,transform] duration-150 ease-[var(--ease-out)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              locked
+                ? "cursor-not-allowed border-border/40 bg-card/30 hover:border-warning/30 hover:bg-warning/[0.04]"
+                : "border-border/60 bg-card/50 hover:border-border hover:bg-accent/40 active:scale-[0.98]",
+            )}
           >
-            <span class="flex w-full items-center justify-between gap-1.5">
-              <Icon class={locked ? proIconCls : iconCls} />
-              {#if locked}<Lock class="size-2.5 shrink-0 text-muted-foreground/30" />{/if}
+            <span class="flex w-full items-start justify-between gap-1.5">
+              <Icon class="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+              {#if locked}<Lock class="size-3 shrink-0 text-warning" aria-label="Pro feature" />{/if}
             </span>
-            <!-- Label + chord anchored to the bottom. The chord row is always
-                 present (empty when a tile has no shortcut) so every label in a
-                 row lands on the same baseline, wrapped or not. -->
-            <span class="mt-auto flex w-full min-w-0 flex-col gap-1">
-              <span class={locked ? proLabelCls : labelCls}>{label}</span>
-              <!-- A chord is a hint, not the point of the tile: when the column
-                   is too narrow for "Ctrl Shift E" it clips here rather than
-                   printing across the neighbouring tile. -->
-              <span class="flex h-[0.85rem] min-w-0 items-center overflow-hidden">
+            <span class="flex w-full min-w-0 flex-col gap-1">
+              <span class="truncate text-ui-2xs font-medium leading-[1.25] text-foreground">{label}</span>
+              <!-- The chord row is always present, empty or not, so every label in a
+                   row lands on the same baseline whether or not it wrapped. -->
+              <span class="flex min-h-[1em] min-w-0 flex-wrap items-center">
                 {#if opts.keys && !locked}{@render chord(opts.keys)}{/if}
               </span>
             </span>
           </button>
         {/snippet}
 
+        <!-- A second-tier destination: one line, no border, no chord. It has to
+             read as subordinate to the tiles at a glance, which is what keeps
+             the page a shortlist rather than a menu. -->
+        {#snippet jump(/** @type {any} */ Icon, /** @type {string} */ label, /** @type {() => void} */ onclick)}
+          <button
+            type="button"
+            {onclick}
+            class="group flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-left text-muted-foreground outline-none transition-colors duration-150 hover:bg-accent/40 hover:text-foreground focus-visible:bg-accent/40 focus-visible:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          >
+            <Icon class="size-3.5 shrink-0" />
+            <span class="truncate text-ui-2xs font-medium">{label}</span>
+          </button>
+        {/snippet}
+
         <!-- Scroll container keeps top/bottom padding reachable when the content
              outgrows the viewport (e.g. at high zoom); inner wrapper centers when it fits. -->
         <div class="min-h-0 flex-1 overflow-auto">
-          <div class="flex min-h-full flex-col items-center justify-center gap-7 px-6 py-10 sm:gap-9 sm:py-12">
+          <!-- Everything on this page hangs off ONE leading edge, and the block
+               itself is centred in the pane. It used to centre each band on its
+               own axis: a centred logo over a centred label over a centred meta
+               line over a left-aligned grid, so nothing lined up with anything
+               and the tiles read as off-centre against the text above them.
+               `max-w-lg` is the grid's width, so the header, the list and the
+               footer now all start where the first tile starts. -->
+          <div class="mx-auto flex min-h-full w-full max-w-lg flex-col justify-center gap-7 px-6 py-10 sm:gap-9 sm:py-12">
 
           <!-- Header -->
-          <div class="flex flex-col items-center gap-3">
+          <div class="flex flex-col items-start gap-3">
             <div class="flex size-11 items-center justify-center rounded-lg border border-border bg-muted">
               <Logo class="size-6" />
             </div>
             <p class="text-ui-3xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Quick access</p>
             {#if connection}
-              <div class="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-ui-sm">
-                <span class="flex items-center gap-2 font-mono font-medium text-foreground">
-                  <span class="size-1.5 shrink-0 rounded-full bg-success"></span>
-                  {connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}
+              <div class="flex w-full min-w-0 flex-col gap-1.5">
+                <span class="flex min-w-0 items-center gap-2 font-mono text-ui-sm font-medium text-foreground">
+                  <span class="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true"></span>
+                  <span class="truncate">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}</span>
                 </span>
-                <span class="text-ui-xs text-muted-foreground/60">·</span>
-                <span class="text-ui-xs capitalize text-muted-foreground">{dbType}</span>
-                {#if tables.length > 0}
-                  <span class="text-ui-xs text-muted-foreground/60">·</span>
-                  <span class="text-ui-xs tabular-nums text-muted-foreground">{tables.length} {tables.length === 1 ? 'table' : 'tables'}</span>
-                {/if}
+                <!-- The facts a fresh tab actually needs before it runs anything:
+                     which engine, which schema the next query resolves against,
+                     and where the server is. The schema was the one missing, and
+                     it is the one that silently changes what an unqualified table
+                     name means. `dl` because these are label/value pairs; the
+                     labels stay visible rather than living in a tooltip. -->
+                <dl class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 font-mono text-ui-2xs text-muted-foreground">
+                  <div class="flex min-w-0 items-center gap-1.5">
+                    <dt class="shrink-0 text-muted-foreground/60">engine</dt>
+                    <dd class="truncate capitalize text-foreground/80">{dbType}</dd>
+                  </div>
+                  {#if schemas.length > 0 && activeSchema}
+                    <div class="flex min-w-0 items-center gap-1.5">
+                      <dt class="shrink-0 text-muted-foreground/60">schema</dt>
+                      <dd class="truncate text-foreground/80">{activeSchema}</dd>
+                    </div>
+                  {/if}
+                  <div class="flex min-w-0 items-center gap-1.5">
+                    <dt class="shrink-0 text-muted-foreground/60">tables</dt>
+                    <dd class="tabular-nums text-foreground/80">{tables.length.toLocaleString('en-US')}</dd>
+                  </div>
+                  {#if connection.host}
+                    <div class="flex min-w-0 items-center gap-1.5">
+                      <dt class="shrink-0 text-muted-foreground/60">host</dt>
+                      <dd class="truncate text-foreground/80">{connection.host}{connection.port ? `:${connection.port}` : ''}</dd>
+                    </div>
+                  {:else if connection.filePath}
+                    <div class="flex min-w-0 items-center gap-1.5">
+                      <dt class="shrink-0 text-muted-foreground/60">file</dt>
+                      <dd class="truncate text-foreground/80" title={connection.filePath}>{connection.filePath}</dd>
+                    </div>
+                  {/if}
+                  {#if connection.user}
+                    <div class="flex min-w-0 items-center gap-1.5">
+                      <dt class="shrink-0 text-muted-foreground/60">user</dt>
+                      <dd class="truncate text-foreground/80">{connection.user}</dd>
+                    </div>
+                  {/if}
+                </dl>
               </div>
             {/if}
           </div>
-
-          <!-- Action grid, max-w-md keeps all sections aligned. Column COUNT is
-               derived from the space available rather than fixed at 4: the pane
-               narrows whenever the sidebar is dragged wider, and four columns of
-               a 28rem grid squeezed into half that width is what pushed labels
-               and chords outside their tiles. At full width the track floor
-               still resolves to the same four columns. -->
-          <div class="grid w-full max-w-md grid-cols-[repeat(auto-fill,minmax(6.5rem,1fr))] gap-2">
-
+          <!-- Five tiles, not sixteen. Sixteen equal-weight tiles asked you to read
+               the whole grid to find the one you wanted; these five are what a tab
+               opens for. The rest are not gone - they sit in the quieter "Jump to"
+               list below, and in ⌘K. -->
+          <!-- Column count comes from the space available, not a fixed number: the
+                 pane narrows whenever the sidebar is dragged wider. At full width
+                 the five tiles resolve to one clean row. -->
+            <!-- Four columns, not five. At five the tiles came out ~96px wide and
+                 "Extensions" truncated to "Extensio…" - a launcher whose labels do
+                 not fit is not a launcher. The fifth tile was Shortcuts, which the
+                 footer below already offers, so dropping it cost nothing and left
+                 an exact row. -->
+            <div class="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
             {#if isRedis}
-              {@render tile(KeyRound, 'Keyspace', openRedisTab, {})}
+              {@render row(KeyRound, "Keyspace", "Browse keys and values", openRedisTab, {})}
             {:else}
-              {@render tile(Terminal, 'SQL', openSqlTab, { keys: [mod, 'T'] })}
-              {@render tile(LayoutDashboard, 'Dashboard', openDashboardTab, { pro: true })}
+              <!-- ⌘T opens the command palette on its tables page; the SQL view
+                   is ⌘⇧S. The tile printed a chord that went somewhere else. -->
+              {@render row(Terminal, "SQL", "Write and run a query", openSqlTab, { keys: [mod, shiftKey, "S"] })}
+              {@render row(Sparkles, "AI", "Ask about this database", openAiTab, { pro: true, keys: [mod, shiftKey, "E"] })}
             {/if}
-
-            {@render tile(Sparkles, 'AI', openAiTab, { pro: true, keys: [mod, shiftKey, 'E'] })}
-
-            {#if !isRedis}
-              {@render tile(Code2, 'ORM', openOrmTab, { pro: true, keys: [mod, shiftKey, 'O'] })}
-            {/if}
-
-            {#if hasSchemaExplorer}
-              {@render tile(LayoutTemplate, 'Schema', openSchemaTab, { pro: true })}
-            {/if}
-
-            {#if hasSecurity}
-              {@render tile(ShieldCheck, 'Security', openSecurityTab, { pro: true })}
-            {/if}
-
-            {@render tile(ScrollText, 'Logs', openLogsTab, { pro: true })}
-
-            {#if !isRedis}
-              {@render tile(Database, 'Insights', openInsightsTab, {})}
-              <!-- Advisor is reachable from ⌘K and the page navigator only. Quick
-                   access is the short list, not every page. -->
-              {@render tile(Boxes, 'Objects', openObjectsTab, {})}
-              {@render tile(FileCode2, 'Codegen', openOrmSchemaTab, { pro: true, hint: 'Codegen - schema as Prisma or Drizzle code' })}
-              {@render tile(BarChart2, 'Charts', openChartsTab, { pro: true })}
-              {@render tile(GitBranch, 'Diagrams', openDiagramsTab, { pro: true })}
-              {@render tile(History, 'Timeline', openSchemaTimelineTab, { pro: true })}
-              {@render tile(GitCompare, 'Data Diff', openDataDiffTab, { pro: true })}
-              {@render tile(Blocks, 'Extensions', openExtensionsTab, { pro: true })}
-            {/if}
-
-            {@render tile(Database, 'Connect', () => (showConnectionModal = true), {})}
+            {@render row(Blocks, "Extensions", "Add and manage extensions", openExtensionsTab, { pro: true, keys: [mod, shiftKey, "X"] })}
+            {@render row(Database, "Connect", "Switch or add a connection", () => (showConnectionModal = true), { keys: [mod, shiftKey, "C"] })}
           </div>
+
+          {#if connection && !isRedis}
+            <!-- Second tier, and deliberately quieter than the tiles above.
+                 The pages worth reaching from a fresh tab outnumber the five a
+                 shortlist can hold, but promoting them all to equal-weight tiles
+                 is what turned this page into a wall the last time. A plain
+                 two-column list of icon + label reads in one sweep, costs a
+                 third of the height per item, and leaves the tiles carrying the
+                 weight. Same max width as the grid above, so both blocks sit on
+                 one alignment edge. -->
+            <div class="flex w-full flex-col gap-2">
+              <p class="text-ui-3xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Jump to</p>
+              <!-- Two columns of four. Three columns left an orphan row of two
+                   hanging under a full one, which is the shape that reads as
+                   "unfinished" no matter how the items are ordered. -->
+              <div class="grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2">
+                {@render jump(Plus, "New query editor", openNewSqlTab)}
+                {@render jump(Search, "Find in database", openSearchTab)}
+                {@render jump(Boxes, "Database objects", openObjectsTab)}
+                {@render jump(GitBranch, "Schema explorer", openSchemaTab)}
+                {@render jump(Gauge, "Instance insights", openInsightsTab)}
+                {@render jump(GitCompare, "Data diff", openDataDiffTab)}
+                {@render jump(Network, "ER diagram", () => openErdTab())}
+                {@render jump(LayoutDashboard, "Dashboard", openDashboardTab)}
+              </div>
+            </div>
+          {/if}
 
 
           <!-- Footer -->
-          <div class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-ui-3xs text-muted-foreground/80">
+          <div class="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 text-ui-3xs text-muted-foreground">
             <button
               type="button"
               onclick={() => showShortcutsModal = true}
@@ -8123,12 +8636,12 @@ let rowSearch = $state('')
               <Command class="size-3 shrink-0" />
               <span>Shortcuts</span>
             </button>
-            <span class="text-muted-foreground/40">·</span>
+            <span class="text-muted-foreground">·</span>
             <span class="flex items-center gap-1.5">
               {@render chord([mod, 'B'])}
               <span>sidebar</span>
             </span>
-            <span class="text-muted-foreground/40">·</span>
+            <span class="text-muted-foreground">·</span>
             <span class="flex items-center gap-1.5">
               {@render chord([mod, 'W'])}
               <span>close tab</span>
@@ -8161,10 +8674,10 @@ let rowSearch = $state('')
           {#snippet failed(err, reset)}
             <div class="flex h-full min-h-0 shrink-0 flex-col items-center justify-center gap-3 border-l border-border/50 bg-background p-4 text-center"
               style="width: {aiSidebarFallbackWidth}px; min-width: {aiSidebarFallbackWidth}px; max-width: {aiSidebarFallbackWidth}px">
-              <AlertTriangle class="size-5 text-destructive/60" />
+              <AlertTriangle class="size-5 text-destructive" />
               <div class="space-y-1">
                 <p class="text-ui-xs font-medium text-foreground">AI sidebar error</p>
-                <p class="font-mono text-ui-3xs text-muted-foreground/60 break-words">{err instanceof Error ? err.message : String(err)}</p>
+                <p class="font-mono text-ui-3xs text-muted-foreground break-words">{err instanceof Error ? err.message : String(err)}</p>
               </div>
               <button
                 type="button"
@@ -8208,6 +8721,7 @@ let rowSearch = $state('')
   applying={savingCell || deletingRows || insertingRow}
   onapplyedits={() => void applyEdits()}
   onresetedits={() => resetEdits()}
+  oncopyeditssql={() => void copyEditsSql()}
   showTableNav={activeTab?.kind === 'table'}
   onscrolltabletop={() => scrollTableTop()}
   onscrolltablebottom={() => scrollTableBottom()}
@@ -8260,24 +8774,32 @@ let rowSearch = $state('')
 {#if confirmDialog}
   <div
     class="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4"
-    role="dialog"
+    role="alertdialog"
     aria-modal="true"
+    aria-labelledby="confirm-dialog-message"
     onclick={(e) => { if (e.target === e.currentTarget) resolveConfirm(false) }}
-    onkeydown={(e) => { if (e.key === 'Escape') resolveConfirm(false); if (e.key === 'Enter') resolveConfirm(true) }}
+    onkeydown={(e) => {
+      if (e.key === 'Escape') { e.preventDefault(); resolveConfirm(false); return }
+      // Enter on a focused button is the button's own job - this only covers the
+      // case where focus is parked on the shell itself.
+      if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); resolveConfirm(true) }
+    }}
     tabindex="-1"
+    use:focusTrap
   >
     <div class="w-full max-w-sm rounded-2xl border border-border/60 bg-background p-5 elevate-3-rim">
-      <p class="text-ui-sm text-foreground">{confirmDialog.message}</p>
+      <p id="confirm-dialog-message" class="text-ui-sm text-foreground">{confirmDialog.message}</p>
       <div class="mt-4 flex justify-end gap-2">
         <button
           type="button"
           onclick={() => resolveConfirm(false)}
-          class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
         >Cancel</button>
         <button
           type="button"
+          data-autofocus
           onclick={() => resolveConfirm(true)}
-          class="inline-flex h-8 items-center rounded-md bg-destructive px-3 text-ui-xs font-medium text-destructive-foreground hover:opacity-90"
+          class="inline-flex h-8 items-center rounded-md bg-destructive px-3 text-ui-xs font-medium text-destructive-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
         >{confirmDialog.confirmLabel}</button>
       </div>
     </div>

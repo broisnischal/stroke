@@ -77,6 +77,25 @@ describe('buildQuickFilter', () => {
     expect(distinctGroup.items.find((i) => i.value === 'pro').active).toBe(true)
   })
 
+  it('near-unique text column does not build a distinct group', () => {
+    // Under the 20-value cap, but 18 distinct names across 20 rows is a column of
+    // names, not a grouping - listing them is the column reprinted as a menu.
+    const col = { name: 'team', dataType: 'text' }
+    const rows = [
+      ...Array.from({ length: 18 }, (_, i) => `Team ${i}`),
+      'Team 0',
+      'Team 1',
+    ]
+    const qf = buildQuickFilter(col, 'Team 0', rows)
+    expect(qf.groups.find((g) => g.title === 'Values in view')).toBeUndefined()
+  })
+
+  it('a short page of repeats is not enough to call a column categorical', () => {
+    const col = { name: 'status', dataType: 'text' }
+    const qf = buildQuickFilter(col, 'open', ['open', 'open', 'closed'])
+    expect(qf.groups.find((g) => g.title === 'Values in view')).toBeUndefined()
+  })
+
   it('high-cardinality text column does not build a distinct group', () => {
     const col = { name: 'email', dataType: 'text' }
     const rows = Array.from({ length: 50 }, (_, i) => `user${i}@x.com`)

@@ -7,6 +7,6 @@
   "entry": "main.js",
   "description": "Colours latency, score and percentage columns green, amber or red.",
   "author": "Stroke",
-  "homepage": "https://github.com/broisnischal/stroke-app",
+  "homepage": "https://github.com/stroke-app/stroke",
   "permissions": ["cells:read"]
 }

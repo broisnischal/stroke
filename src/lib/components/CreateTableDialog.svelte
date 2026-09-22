@@ -137,7 +137,7 @@
     }
   }
 
-  const inputClass = 'h-7 w-full min-w-0 rounded-lg border-2 border-border bg-background/60 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/40 outline-none transition-colors focus:border-ring'
+  const inputClass = 'h-7 w-full min-w-0 rounded-lg border-2 border-border bg-background/60 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground outline-none transition-colors focus:border-ring'
   const selectClass = 'h-7 w-full min-w-0 cursor-pointer appearance-none rounded border border-border bg-background/60 px-2 font-mono text-ui-sm text-foreground outline-none transition-colors focus:border-ring'
 </script>
 
@@ -171,16 +171,16 @@
       <div class="flex flex-col gap-2">
         <div class="flex items-center gap-2">
           <span class="text-ui-xs font-medium text-muted-foreground">Columns</span>
-          <span class="font-mono text-ui-2xs text-muted-foreground/50">{cols.filter(c => c.name.trim()).length}</span>
+          <span class="font-mono text-ui-2xs text-muted-foreground">{cols.filter(c => c.name.trim()).length}</span>
         </div>
 
         <!-- Column header -->
         <div class="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_2rem_2rem_minmax(0,1fr)_1.5rem] items-center gap-x-1.5 px-1">
-          <span class="text-ui-2xs text-muted-foreground/60">Name</span>
-          <span class="text-ui-2xs text-muted-foreground/60">Type</span>
-          <span class="text-center text-ui-2xs text-muted-foreground/60">PK</span>
-          <span class="text-center text-ui-2xs text-muted-foreground/60">NN</span>
-          <span class="text-ui-2xs text-muted-foreground/60">Default</span>
+          <span class="text-ui-2xs text-muted-foreground">Name</span>
+          <span class="text-ui-2xs text-muted-foreground">Type</span>
+          <span class="text-center text-ui-2xs text-muted-foreground">PK</span>
+          <span class="text-center text-ui-2xs text-muted-foreground">NN</span>
+          <span class="text-ui-2xs text-muted-foreground">Default</span>
           <span></span>
         </div>
 
@@ -228,7 +228,7 @@
               />
               <button
                 type="button"
-                class="flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                class="flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                 onclick={() => removeCol(col.id)}
                 title="Remove column"
                 disabled={cols.length === 1}
@@ -252,7 +252,7 @@
       <!-- SQL preview -->
       {#if sql}
         <div class="flex flex-col gap-1.5">
-          <span class="text-ui-xs font-medium text-muted-foreground/60">SQL preview</span>
+          <span class="text-ui-xs font-medium text-muted-foreground">SQL preview</span>
           <pre class="overflow-x-auto rounded-md border border-border bg-muted/40 px-3 py-2.5 font-mono text-ui-2xs leading-relaxed text-muted-foreground whitespace-pre-wrap break-all">{sql}</pre>
         </div>
       {/if}

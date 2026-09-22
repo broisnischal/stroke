@@ -9,6 +9,7 @@
    */
   import Icon from './Icon.svelte'
   import * as Dialog from '$lib/components/ui/dialog/index.js'
+  import { Button } from '$lib/components/ui/button/index.js'
   import { cn } from '$lib/utils.js'
 
   let {
@@ -99,24 +100,24 @@
     showCloseButton={false}
     {onkeydown}
     {onOpenAutoFocus}
-    class="w-[min(440px,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0"
+    class="w-[min(32.5rem,calc(100vw-2rem))] sm:max-w-none gap-0 overflow-hidden p-0"
   >
     <div class="flex items-start gap-3.5 px-5 pt-5 pb-4">
       <div class="mt-px shrink-0 rounded-lg bg-muted/50 p-2">
         <Icon
           name={icon}
-          class={cn('size-3.5', variant === 'destructive' ? 'text-destructive/80' : 'text-muted-foreground/70')}
+          class={cn('size-3.5', variant === 'destructive' ? 'text-destructive' : 'text-muted-foreground')}
         />
       </div>
       <div class="min-w-0 flex-1">
         <Dialog.Title class="text-ui-sm font-semibold text-foreground">{title}</Dialog.Title>
         {#if body}
-          <div class="mt-0.5 text-ui-xs leading-[1.5] text-muted-foreground/70">{@render body()}</div>
+          <div class="mt-1 text-ui-xs leading-[1.5] text-muted-foreground">{@render body()}</div>
         {:else if description}
-          <p class="mt-0.5 text-ui-xs leading-[1.5] text-muted-foreground/70">{description}</p>
+          <p class="mt-1 text-ui-xs leading-[1.5] text-muted-foreground">{description}</p>
         {/if}
         {#if note}
-          <p class="mt-2 text-ui-xs leading-[1.5] text-muted-foreground/55">{note}</p>
+          <p class="mt-2 text-ui-xs leading-[1.5] text-muted-foreground">{note}</p>
         {/if}
       </div>
     </div>
@@ -126,32 +127,26 @@
     {/if}
 
     <div class="flex items-center justify-end gap-2 border-t border-border/25 px-5 py-3">
-      <button
-        type="button"
-        class="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        onclick={cancel}
-      >
-        <Icon name="x" class="size-3.5 shrink-0" />
-        {cancelLabel}
-      </button>
-      <button
-        type="button"
+      <!-- Both buttons come out of the same component, so the pair is one
+           system by construction: same height, same corner, same focus. They
+           used to be two hand-rolled buttons that happened to sit next to each
+           other, and it showed - one carried an icon and a boxed kbd chip, the
+           other an ✕ that said nothing "Cancel" did not already say. -->
+      <Button variant="outline" onclick={cancel}>{cancelLabel}</Button>
+      <Button
+        variant={variant === 'destructive' ? 'destructive' : 'default'}
         {disabled}
-        class={cn(
-          'inline-flex h-8 items-center gap-1.5 rounded-md px-3.5 text-ui-sm font-medium transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-50',
-          variant === 'destructive'
-            ? 'bg-destructive text-destructive-foreground'
-            : 'bg-primary text-primary-foreground',
-        )}
         onclick={confirm}
       >
         {#if confirmIcon}<Icon name={confirmIcon} class="size-3.5 shrink-0" />{/if}
         {confirmLabel}
-        <!-- Says the key out loud, so the shortcut is discoverable rather than folklore. -->
+        <!-- Says the key out loud, so the shortcut is discoverable rather than
+             folklore. A plain glyph, not a boxed kbd: a rectangle inside a pill
+             is the shape mismatch that made this pair look assembled. -->
         {#if confirmOnEnter}
-          <kbd class="ml-0.5 -mr-0.5 rounded border border-current/25 px-1 font-sans text-ui-3xs leading-[1.4] opacity-60">↵</kbd>
+          <span class="ml-0.5 font-mono text-ui-2xs opacity-60" aria-hidden="true">↵</span>
         {/if}
-      </button>
+      </Button>
     </div>
   </Dialog.Content>
 </Dialog.Root>

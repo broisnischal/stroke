@@ -39,8 +39,38 @@ pub async fn connect(cfg: &MssqlConfig) -> Result<MssqlClient, String> {
                 .await
                 .map_err(|e| format!("MS SQL connection failed: {e}"))
         }
-        Err(e) => Err(format!("MS SQL connection failed: {e}")),
+        Err(e) => Err(explain_connect_error(cfg, &e.to_string())),
     }
+}
+
+/// Turn a driver error into something that says what to do about it.
+///
+/// One case earns its own sentence. Against a server with a self-signed
+/// certificate - SQL Server 2022's default, and every dev container - a
+/// connection with Encrypt on fails inside the TLS handshake even with
+/// "Trust server certificate" on, and the rustls backend reports
+/// `invalid peer certificate: Other(UnsupportedCertVersion)`. That names
+/// neither the cause nor the one setting that avoids it.
+///
+/// Verified: reproducible with `encrypt: true` against the
+/// `docker/dialects.yml` fixture, and gone with `encrypt: false`, which still
+/// encrypts the login packet - the driver logs a TLS handshake either way. The
+/// certificate is not reachable with `openssl s_client`, because TDS wraps TLS
+/// inside its own pre-login exchange, so the error's own wording is as far as
+/// this has been pinned down; treat the version as the driver's account of it
+/// rather than something confirmed against the certificate.
+fn explain_connect_error(cfg: &MssqlConfig, err: &str) -> String {
+    if cfg.encrypt && err.contains("UnsupportedCertVersion") {
+        return format!(
+            "MS SQL connection failed: this client will not complete an \
+             encrypted handshake with the server's certificate, even with \
+             \"Trust server certificate\" on - it reports the certificate in a \
+             format it does not accept. Turn Encrypt off for this connection \
+             (the login is still encrypted), or install a CA-issued \
+             certificate on the server. ({err})"
+        );
+    }
+    format!("MS SQL connection failed: {err}")
 }
 
 fn build_config(cfg: &MssqlConfig) -> Config {
@@ -216,10 +246,15 @@ async fn fetch_rows(handle: &MssqlHandle, sql: &str) -> Result<Vec<Row>, String>
 pub async fn list_schemas(handle: &MssqlHandle) -> Result<Vec<String>, String> {
     let rows = fetch_rows(
         handle,
+        // `sys` and `INFORMATION_SCHEMA` are real schemas worth browsing, so they
+        // come back and the UI decides whether to show them (it hides system
+        // schemas behind a toggle). The fixed database roles stay out: those are
+        // permission principals that happen to own a schema, and there is never
+        // anything in them.
         "SELECT name FROM sys.schemas WHERE name NOT IN \
-         ('sys','INFORMATION_SCHEMA','guest','db_owner','db_accessadmin','db_securityadmin', \
+         ('guest','db_owner','db_accessadmin','db_securityadmin', \
           'db_ddladmin','db_backupoperator','db_datareader','db_datawriter','db_denydatareader','db_denydatawriter') \
-         ORDER BY name",
+         ORDER BY CASE WHEN name IN ('sys','INFORMATION_SCHEMA') THEN 1 ELSE 0 END, name",
     )
     .await?;
     Ok(rows.iter().filter_map(|r| r.try_get::<&str, _>(0).ok().flatten().map(String::from)).collect())
@@ -419,6 +454,8 @@ pub async fn get_table_rows(
     let result = execute_sql(handle, &data_sql).await?;
 
     Ok(TableRows {
+        // Preview fetching is a Postgres path (pg_stats + pg_column_size).
+        preview_columns: Vec::new(),
         columns: result.columns,
         rows: result.rows,
         total,

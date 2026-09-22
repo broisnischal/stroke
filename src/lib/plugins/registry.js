@@ -146,17 +146,27 @@ export function annotatorEnabled() {
 
 /**
  * Transforms applicable to a given cell value, from enabled transform extensions.
+ *
+ * `informational` rides along because the caller decides what to do with the
+ * result from it: a transform that yields a replacement value is staged as an
+ * edit, one that yields a report about the value is copied and shown.
  * @param {unknown} value @param {string} type @param {string} name
  */
 export function transformsFor(value, type, name) {
-  /** @type {{ id: string, label: string, run: (v: unknown) => string }[]} */
+  /** @type {{ id: string, label: string, columnOnly: boolean, informational: boolean, run: (v: unknown) => string }[]} */
   const out = []
   for (const ext of EXTENSIONS) {
     if (ext.kind !== 'transforms' || !isPluginEnabled(ext.id)) continue
     for (const t of ext.transforms) {
       try {
         if (t.appliesTo(value, type, name)) {
-          out.push({ id: t.id, label: t.label, columnOnly: !!t.columnOnly, run: (v) => t.run(v, type, name) })
+          out.push({
+            id: t.id,
+            label: t.label,
+            columnOnly: !!t.columnOnly,
+            informational: !!t.informational,
+            run: (v) => t.run(v, type, name),
+          })
         }
       } catch {}
     }

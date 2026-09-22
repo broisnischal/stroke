@@ -64,13 +64,30 @@
     }
   }
 
-  const text = $derived.by(() => {
+  /**
+   * How many rows the on-screen text is built from.
+   *
+   * This view serialises the whole page into ONE string and hands it to Monaco,
+   * which then holds a second copy in its model - so a page of 200k rows costs
+   * the row array, a multi-megabyte string, and Monaco's own buffer, all built
+   * synchronously on the main thread. Nobody reads 200k rows of CSV by eye; the
+   * cap keeps the view instant and Copy/Download still use the full page, which
+   * is what those are for.
+   */
+  const PREVIEW_ROWS = 5000
+  const truncated = $derived(rows.length > PREVIEW_ROWS)
+  const previewRows = $derived(truncated ? rows.slice(0, PREVIEW_ROWS) : rows)
+
+  /** @param {unknown[][]} src */
+  function serialise(src) {
     if (columns.length === 0) return ''
-    if (format === 'tsv') return rowsToTsv(columns, rows)
-    if (format === 'md') return rowsToMarkdown(columns, rows)
-    if (format === 'jsonl') return rowsToJsonl(columns, rows)
-    return rowsToCsv(columns, rows)
-  })
+    if (format === 'tsv') return rowsToTsv(columns, src)
+    if (format === 'md') return rowsToMarkdown(columns, src)
+    if (format === 'jsonl') return rowsToJsonl(columns, src)
+    return rowsToCsv(columns, src)
+  }
+
+  const text = $derived(serialise(previewRows))
 
   const language = $derived(FORMATS.find((f) => f.id === format)?.lang ?? 'plaintext')
 
@@ -83,7 +100,8 @@
   })
 
   function handleCopy() {
-    navigator.clipboard.writeText(text).then(() => {
+    // The full page, not the capped preview: copying is the point of this view.
+    navigator.clipboard.writeText(truncated ? serialise(rows) : text).then(() => {
       copied = true
       if (copiedTimer) clearTimeout(copiedTimer)
       copiedTimer = setTimeout(() => {
@@ -93,7 +111,11 @@
   }
 
   function handleDownload() {
-    void saveExportFile(text, buildExportFilename(tableName, format), format)
+    void saveExportFile(
+      truncated ? serialise(rows) : text,
+      buildExportFilename(tableName, format),
+      format,
+    )
   }
 </script>
 
@@ -106,7 +128,7 @@
     <div
       role="group"
       aria-label="Text format"
-      class="inline-flex h-7 shrink-0 items-center gap-0.5 rounded-lg border border-border/50 bg-muted/20 p-0.5"
+      class= "field-surface inline-flex h-7 shrink-0 items-center gap-0.5 bg-muted/20 p-0.5"
     >
       {#each FORMATS as f (f.id)}
         <button
@@ -166,9 +188,21 @@
   <!-- Monaco text body (⌘F to search) -->
   {#if columns.length === 0}
     <div class="flex min-h-0 flex-1 items-center justify-center bg-panel">
-      <p class="font-mono text-ui-sm text-muted-foreground/40">No data to display</p>
+      <p class="font-mono text-ui-sm text-muted-foreground">No data to display</p>
     </div>
   {:else}
+    {#if truncated}
+      <!-- Says what was cut and what still isn't: silently showing the first
+           5,000 rows of 200,000 would read as "this is the page". -->
+      <p
+        class="flex shrink-0 items-center gap-2 border-b border-border/40 bg-warning/[0.06] px-3 py-1.5 text-ui-2xs text-muted-foreground"
+        role="status"
+      >
+        <Icon name="alert-triangle" class="size-3.5 shrink-0 text-warning" />
+        Previewing the first {PREVIEW_ROWS.toLocaleString()} of
+        {rows.length.toLocaleString()} rows. Copy and Download use all of them.
+      </p>
+    {/if}
     <MonacoTextView {text} {language} />
   {/if}
 </div>

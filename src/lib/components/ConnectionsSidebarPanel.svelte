@@ -168,7 +168,7 @@
           <Icon name="folder-open" class="size-3.5" />
         </PopoverTrigger>
         <PopoverContent align="end" sideOffset={4} class="min-w-56 p-1.5 text-ui-xs">
-          <div class="px-1.5 py-1 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/50">
+          <div class="px-1.5 py-1 text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground">
             Group
           </div>
           {#each groupNames as g (g)}
@@ -251,14 +251,14 @@
     <Icon name={collapsed[name] ? "chevron-right" : "chevron-down"} class="size-3.5 shrink-0" />
     <Icon name="folder-open" class="size-3.5 shrink-0" />
     <span class="min-w-0 flex-1 truncate text-left font-medium">{name}</span>
-    <span class="shrink-0 tabular-nums text-muted-foreground/60">{count}</span>
+    <span class="shrink-0 tabular-nums text-muted-foreground">{count}</span>
   </button>
 {/snippet}
 
 <div class="flex min-h-0 flex-1 flex-col">
   <!-- Sticky header -->
   <div class="flex h-9 shrink-0 items-center gap-1 px-2.5">
-    <span class="min-w-0 flex-1 truncate text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground/50">
+    <span class="min-w-0 flex-1 truncate text-ui-3xs font-medium uppercase tracking-wider text-muted-foreground">
       Connections
     </span>
     <button
@@ -276,7 +276,7 @@
   <div class="app-scroll min-h-0 w-full flex-1 overflow-y-auto overscroll-y-contain px-1.5 pb-2">
     {#if connections.length === 0}
       <div class="flex flex-col items-center gap-2 px-4 py-10 text-center">
-        <Icon name="database" class="size-5 text-muted-foreground/40" />
+        <Icon name="database" class="size-5 text-muted-foreground" />
         <p class="text-ui-xs text-muted-foreground">No saved connections</p>
         <button
           type="button"

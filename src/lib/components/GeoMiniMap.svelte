@@ -295,7 +295,7 @@
         title={b.offline ? 'Offline outline - no network requests' : `Tiles from ${b.attribution}`}
         class={cn(
           'inline-flex h-5 items-center rounded px-1.5 text-ui-3xs transition-colors',
-          basemapId === b.id ? 'bg-muted text-foreground' : 'text-muted-foreground/70 hover:text-foreground',
+          basemapId === b.id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
         )}
       >{b.label}</button>
     {/each}
@@ -328,7 +328,7 @@
       {cursor ? formatLonLat(cursor.lon, cursor.lat) : 'drag to pan · scroll to zoom'}
     </span>
     {#if !basemap.offline}
-      <span class="truncate rounded bg-background/70 px-1.5 py-0.5 text-ui-3xs text-muted-foreground/60 backdrop-blur-sm">
+      <span class="truncate rounded bg-background/70 px-1.5 py-0.5 text-ui-3xs text-muted-foreground backdrop-blur-sm">
         {basemap.attribution}
       </span>
     {/if}

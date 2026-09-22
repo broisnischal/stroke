@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
-use sqlx::{Column, Decode, Row, TypeInfo, ValueRef};
+use sqlx::{Column, Row, TypeInfo};
 use tauri::{AppHandle, Emitter, State};
 
 use super::connection::{require_conn, ActiveConnection, DbState};
@@ -38,6 +38,10 @@ pub struct ExportResult {
     pub sql: String,
     pub table_count: usize,
     pub row_count: usize,
+    /// True when the run stopped at a cancel request, so `sql` covers only the
+    /// objects reached before it. The script is a partial dump and must not be
+    /// offered as a usable backup.
+    pub cancelled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,6 +49,11 @@ pub struct ExportResult {
 pub struct ImportResult {
     pub statements_ok: usize,
     pub statements_err: usize,
+    /// Statements never attempted because the run was cancelled. Counting these
+    /// as failures (the old `total - ok`) reported a restore stopped after 10 of
+    /// 1000 statements as "990 failed" with no errors to show for it.
+    pub statements_skipped: usize,
+    pub cancelled: bool,
     pub errors: Vec<String>,
 }
 
@@ -105,16 +114,39 @@ pub async fn backup_export(
 ) -> Result<ExportResult, String> {
     let opts = options.unwrap_or_default();
     reset_cancel();
-    match require_conn(&state)? {
-        ActiveConnection::Sqlite(pool) => export_sqlite(&app, &pool, tables.as_deref(), &opts).await,
-        ActiveConnection::Postgres(pool) => export_postgres(&app, &pool, schema.as_deref(), tables.as_deref(), &opts).await,
-        ActiveConnection::Mysql(pool) => export_mysql(&app, &pool, schema.as_deref(), tables.as_deref(), &opts).await,
-        ActiveConnection::D1(cfg) => export_d1(&app, &cfg, tables.as_deref(), &opts).await,
+    let result = export_one(&app, &state, schema, tables, &opts).await?;
+    if result.cancelled {
+        // A cancelled export stops at whatever object it had reached, so the
+        // script is a prefix of the real dump. Say so in the file itself: it
+        // may well outlive this window, and a truncated backup that looks
+        // complete is worse than no backup at all.
+        emit_log(&app, "backup-log", "warn", "Cancelled - this dump is incomplete");
+        let mut sql = String::with_capacity(result.sql.len() + 128);
+        sql.push_str("-- !! INCOMPLETE BACKUP - cancelled before it finished. Do not restore from this file. !!\n");
+        sql.push_str(&result.sql);
+        sql.push_str("\n-- !! END OF INCOMPLETE BACKUP - objects after this point were never exported. !!\n");
+        return Ok(ExportResult { sql, ..result });
+    }
+    Ok(result)
+}
+
+async fn export_one(
+    app: &AppHandle,
+    state: &State<'_, DbState>,
+    schema: Option<String>,
+    tables: Option<Vec<String>>,
+    opts: &ExportOptions,
+) -> Result<ExportResult, String> {
+    match require_conn(state)? {
+        ActiveConnection::Sqlite(pool) => export_sqlite(app, &pool, tables.as_deref(), opts).await,
+        ActiveConnection::Postgres(pool) => export_postgres(app, &pool, schema.as_deref(), tables.as_deref(), opts).await,
+        ActiveConnection::Mysql(pool) => export_mysql(app, &pool, schema.as_deref(), tables.as_deref(), opts).await,
+        ActiveConnection::D1(cfg) => export_d1(app, &cfg, tables.as_deref(), opts).await,
         ActiveConnection::LibSql(_) => Err("Backup export is not supported for LibSQL/Turso connections".to_string()),
         ActiveConnection::Clickhouse(_) => Err("Backup export is not supported for ClickHouse connections".to_string()),
         ActiveConnection::Redis(_) => Err("Backup is not supported on Redis".to_string()),
-        ActiveConnection::Duckdb(h) => export_duckdb(&app, &h).await,
-        ActiveConnection::Mssql(h) => export_mssql(&app, &h).await,
+        ActiveConnection::Duckdb(h) => export_duckdb(app, &h).await,
+        ActiveConnection::Mssql(h) => export_mssql(app, &h).await,
     }
 }
 
@@ -156,24 +188,62 @@ fn truncate_chars(s: &str, max: usize) -> &str {
     }
 }
 
+/// Build and log the result of a finished restore.
+///
+/// `total` is how many statements the script held; anything neither applied nor
+/// failed was never attempted, which only happens when the user cancelled.
+fn finish_import(app: &AppHandle, total: usize, ok: usize, errors: Vec<String>) -> ImportResult {
+    let cancelled = is_cancelled();
+    let failed = errors.len();
+    let skipped = total.saturating_sub(ok + failed);
+    let msg = if cancelled {
+        format!("Restore cancelled: {ok} applied, {failed} failed, {skipped} not run")
+    } else {
+        format!("Restore complete: {ok} ok, {failed} failed")
+    };
+    let level = if cancelled || failed > 0 { "warn" } else { "ok" };
+    emit_log(app, "restore-log", level, &msg);
+    ImportResult { statements_ok: ok, statements_err: failed, statements_skipped: skipped, cancelled, errors }
+}
+
 /// True when byte offset `i` sits at the start of a line (only whitespace since
 /// the previous newline). Used to recognise line-level directives like `DELIMITER`.
 fn at_line_start(chars: &[char], i: usize) -> bool {
     chars[..i].iter().rev().take_while(|c| **c != '\n').all(|c| c.is_whitespace())
 }
 
+/// How a dialect escapes a quote inside a single-quoted string literal.
+///
+/// This has to be explicit: the two rules are mutually incompatible. Under
+/// `Standard`, `'a\'` is a complete string whose contents end in a backslash;
+/// under `Backslash` the same text is an unterminated string. Guessing wrong in
+/// either direction splits a statement in the middle of a literal and corrupts
+/// every statement after it in the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Escapes {
+    /// SQL standard: only a doubled `''` embeds a quote, and a backslash is an
+    /// ordinary character. Postgres (with `standard_conforming_strings = on`,
+    /// the default since 9.1), SQLite, D1, DuckDB and SQL Server.
+    Standard,
+    /// MySQL's default (`NO_BACKSLASH_ESCAPES` off): `\'`, `\\` and friends
+    /// escape, alongside `''`. This is what our own `mysql_val` emits.
+    Backslash,
+}
+
 /// Split a SQL script into individual statements.
 ///
 /// Beyond simple `;` splitting this understands the constructs our exporters
 /// emit, so bodies containing embedded semicolons survive a round-trip:
-///   - single-quoted strings (`'…''…'`)
+///   - single-quoted strings (`'…''…'`, plus `\'` when `esc` is `Backslash`)
 ///   - double-quoted (`"…"`) and backtick (`` `…` ``) identifiers
 ///   - PostgreSQL dollar-quoted strings (`$$ … $$`, `$tag$ … $tag$`) - used by
 ///     `pg_get_functiondef`, trigger defs, and enum `DO $$ … $$` blocks
-///   - line comments (`-- …`, stripped)
+///   - line comments (`-- …`, stripped) and block comments (`/* … */`,
+///     stripped, nesting like Postgres); mysqldump's executable comments
+///     (`/*!40000 … */`) are dropped with them, which only skips tuning hints
 ///   - MySQL `DELIMITER` directives (change the active terminator, e.g. `//`),
 ///     so routine/trigger bodies aren't split at their internal `;`
-fn split_statements(sql: &str) -> Vec<String> {
+fn split_statements(sql: &str, esc: Escapes) -> Vec<String> {
     let chars: Vec<char> = sql.chars().collect();
     let n = chars.len();
     let mut stmts: Vec<String> = Vec::new();
@@ -222,12 +292,20 @@ fn split_statements(sql: &str) -> Vec<String> {
         }
 
         match ch {
-            // Single-quoted string literal ('' escapes an embedded quote).
+            // Single-quoted string literal ('' escapes an embedded quote, and
+            // under Backslash rules so does \').
             '\'' => {
                 current.push(ch); i += 1;
                 while i < n {
-                    current.push(chars[i]);
-                    if chars[i] == '\'' {
+                    let c = chars[i];
+                    current.push(c);
+                    // A backslash consumes whatever follows it, so an escaped
+                    // quote can't be mistaken for the end of the literal.
+                    if esc == Escapes::Backslash && c == '\\' {
+                        if let Some(&next) = chars.get(i + 1) { current.push(next); i += 2; } else { i += 1; }
+                        continue;
+                    }
+                    if c == '\'' {
                         if chars.get(i + 1) == Some(&'\'') { current.push('\''); i += 2; continue; }
                         i += 1; break;
                     }
@@ -281,6 +359,19 @@ fn split_statements(sql: &str) -> Vec<String> {
             '-' if chars.get(i + 1) == Some(&'-') => {
                 while i < n && chars[i] != '\n' { i += 1; }
                 current.push('\n');
+            }
+            // Block comment - stripped. Its contents are not SQL, so a `;` in
+            // there must not end the statement. Postgres nests these; the depth
+            // counter is harmless for the dialects that don't.
+            '/' if chars.get(i + 1) == Some(&'*') => {
+                let mut depth = 1usize;
+                i += 2;
+                while i < n && depth > 0 {
+                    if chars[i] == '/' && chars.get(i + 1) == Some(&'*') { depth += 1; i += 2; }
+                    else if chars[i] == '*' && chars.get(i + 1) == Some(&'/') { depth -= 1; i += 2; }
+                    else { i += 1; }
+                }
+                current.push(' ');
             }
             _ => { current.push(ch); i += 1; }
         }
@@ -355,22 +446,41 @@ async fn export_sqlite(
         for table in &tables_to_dump {
             if is_cancelled() { break; }
             emit_log(app, "backup-log", "info", format!("  → {table}"));
-            let q = format!("SELECT * FROM \"{}\"", table.replace('"', "\"\""));
+            let table_esc = table.replace('"', "\"\"");
+
+            // Column names first, so the value query can ask SQLite to render
+            // each one as a SQL literal.
+            let col_names: Vec<String> = sqlx::query_scalar::<_, String>(
+                &format!("SELECT name FROM pragma_table_info('{}')", table.replace('\'', "''"))
+            ).fetch_all(pool).await.map_err(|e| e.to_string())?;
+            if col_names.is_empty() { continue; }
+
+            // `quote()` is SQLite's own value-to-literal function: it returns
+            // X'…' for a blob, an escaped 'string' for text, a bare number, or
+            // the four characters NULL. Letting the engine do this removes the
+            // guesswork a Rust-side decoder would need - and with it the chance
+            // of a value it doesn't recognise quietly becoming NULL.
+            let select_list = col_names.iter()
+                .map(|c| format!("quote(\"{}\")", c.replace('"', "\"\"")))
+                .collect::<Vec<_>>().join(", ");
+            let col_list = col_names.iter()
+                .map(|c| format!("\"{}\"", c.replace('"', "\"\"")))
+                .collect::<Vec<_>>().join(", ");
+            let q = format!("SELECT {select_list} FROM \"{table_esc}\"");
+
             // Stream rows one at a time - avoids loading the entire table into memory.
             let mut stream = sqlx::query(&q).fetch(pool);
             let mut n = 0usize;
-            let mut col_list = String::new();
-            let table_esc = table.replace('"', "\"\"");
             while let Some(row) = stream.try_next().await.map_err(|e| e.to_string())? {
-                if n == 0 {
-                    let cols: Vec<String> = row.columns().iter()
-                        .map(|c| format!("\"{}\"", c.name().replace('"', "\"\"")))
-                        .collect();
-                    col_list = cols.join(", ");
-                    out.push('\n');
-                }
+                if n == 0 { out.push('\n'); }
                 n += 1;
-                let vals: Vec<String> = (0..row.len()).map(|i| sqlite_val(&row, i)).collect();
+                let mut vals: Vec<String> = Vec::with_capacity(col_names.len());
+                for (i, name) in col_names.iter().enumerate() {
+                    let lit: Option<String> = row.try_get(i).map_err(|e| {
+                        format!("Could not read {table}.\"{name}\" at row {n}: {e}")
+                    })?;
+                    vals.push(lit.unwrap_or_else(|| "NULL".to_string()));
+                }
                 out.push_str(&format!(
                     "INSERT OR REPLACE INTO \"{table_esc}\" ({col_list}) VALUES ({});\n",
                     vals.join(", ")
@@ -381,35 +491,18 @@ async fn export_sqlite(
         }
         out.push_str("\nCOMMIT;\nPRAGMA foreign_keys=ON;\n");
         emit_log(app, "backup-log", "ok", format!("Export complete: {} tables, {} rows", tables_to_dump.len(), total_rows));
-        Ok(ExportResult { sql: out, table_count: tables_to_dump.len(), row_count: total_rows })
+        Ok(ExportResult { sql: out, table_count: tables_to_dump.len(), row_count: total_rows, cancelled: is_cancelled() })
     } else {
         out.push_str("\nCOMMIT;\nPRAGMA foreign_keys=ON;\n");
         emit_log(app, "backup-log", "ok", format!("Export complete: {} tables (schema only)", tables_to_dump.len()));
-        Ok(ExportResult { sql: out, table_count: tables_to_dump.len(), row_count: 0 })
+        Ok(ExportResult { sql: out, table_count: tables_to_dump.len(), row_count: 0, cancelled: is_cancelled() })
     }
-}
-
-fn sqlite_val(row: &sqlx::sqlite::SqliteRow, idx: usize) -> String {
-    if let Ok(v) = row.try_get::<Option<i64>, _>(idx) {
-        return v.map_or_else(|| "NULL".into(), |n| n.to_string());
-    }
-    if let Ok(v) = row.try_get::<Option<f64>, _>(idx) {
-        // SQLite has no literal for NaN/Infinity (they read back as NULL anyway).
-        return v.map_or_else(|| "NULL".into(), |n| if n.is_finite() { n.to_string() } else { "NULL".into() });
-    }
-    if let Ok(v) = row.try_get::<Option<String>, _>(idx) {
-        return v.map_or_else(|| "NULL".into(), |s| format!("'{}'", s.replace('\'', "''")));
-    }
-    if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
-        return v.map_or_else(|| "NULL".into(), |b| format!("X'{}'", hex::encode(b)));
-    }
-    "NULL".into()
 }
 
 // ── SQLite import ─────────────────────────────────────────────────────────────
 
 async fn import_sqlite(app: &AppHandle, pool: &sqlx::SqlitePool, sql: &str) -> Result<ImportResult, String> {
-    let stmts = split_statements(sql);
+    let stmts = split_statements(sql, Escapes::Standard);
     let total = stmts.len();
     emit_log(app, "restore-log", "info", format!("Starting restore: {} statements…", total));
     let mut ok = 0usize;
@@ -425,13 +518,7 @@ async fn import_sqlite(app: &AppHandle, pool: &sqlx::SqlitePool, sql: &str) -> R
         }
     }
 
-    let msg = format!("Restore complete: {} ok, {} failed", ok, total - ok);
-    if errors.is_empty() {
-        emit_log(app, "restore-log", "ok", &msg);
-    } else {
-        emit_log(app, "restore-log", "warn", &msg);
-    }
-    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+    Ok(finish_import(app, total, ok, errors))
 }
 
 // ── PostgreSQL export ─────────────────────────────────────────────────────────
@@ -676,7 +763,7 @@ async fn export_postgres(
 
     out.push_str("SET session_replication_role = DEFAULT;\n");
     emit_log(app, "backup-log", "ok", format!("Export complete: {total_tables} tables, {total_rows} rows"));
-    Ok(ExportResult { sql: out, table_count: total_tables, row_count: total_rows })
+    Ok(ExportResult { sql: out, table_count: total_tables, row_count: total_rows, cancelled: is_cancelled() })
 }
 
 async fn pg_dump_table(
@@ -693,7 +780,9 @@ async fn pg_dump_table(
             format_type(a.atttypid, a.atttypmod),
             NOT a.attnotnull AS nullable,
             pg_get_expr(d.adbin, d.adrelid) AS col_default,
-            a.attidentity IN ('a','d') AS is_identity
+            a.attidentity IN ('a','d') AS is_identity,
+            a.attgenerated <> '' AS is_generated,
+            format_type(a.atttypid, NULL) AS base_type
         FROM pg_catalog.pg_attribute a
         LEFT JOIN pg_catalog.pg_attrdef d
             ON d.adrelid = a.attrelid AND d.adnum = a.attnum
@@ -727,13 +816,24 @@ async fn pg_dump_table(
         let nullable: bool = row.try_get(2).unwrap_or(true);
         let default: Option<String> = row.try_get(3).ok().flatten();
         let is_identity: bool = row.try_get(4).unwrap_or(false);
+        let is_generated: bool = row.try_get(5).unwrap_or(false);
 
         let mut def = format!("    \"{}\" {}", name, typ);
-        if !nullable { def.push_str(" NOT NULL"); }
-        if is_identity {
-            def.push_str(" GENERATED BY DEFAULT AS IDENTITY");
-        } else if let Some(d) = &default {
-            def.push_str(&format!(" DEFAULT {}", d));
+        if is_generated {
+            // A generated column computes itself. Emitting its expression as a
+            // DEFAULT instead would make the column writable and leave the
+            // restored table holding whatever the dump inserted.
+            if let Some(d) = &default {
+                def.push_str(&format!(" GENERATED ALWAYS AS ({d}) STORED"));
+            }
+            if !nullable { def.push_str(" NOT NULL"); }
+        } else {
+            if !nullable { def.push_str(" NOT NULL"); }
+            if is_identity {
+                def.push_str(" GENERATED BY DEFAULT AS IDENTITY");
+            } else if let Some(d) = &default {
+                def.push_str(&format!(" DEFAULT {}", d));
+            }
         }
         col_defs.push(def);
     }
@@ -769,11 +869,63 @@ async fn pg_dump_table(
         return Ok((out, 0));
     }
 
-    let data_sql = format!("SELECT * FROM \"{schema}\".\"{table}\"");
+    // Columns to write rows for. A generated column rejects an explicit value,
+    // so listing it would make every INSERT in the dump fail.
+    let data_cols: Vec<(String, String)> = col_rows
+        .iter()
+        .filter(|r| !r.try_get::<bool, _>(5).unwrap_or(false))
+        .map(|r| {
+            (
+                r.try_get::<String, _>(0).unwrap_or_default(),
+                r.try_get::<String, _>(6).unwrap_or_default(),
+            )
+        })
+        .collect();
+
+    if data_cols.is_empty() {
+        out.push('\n');
+        return Ok((out, 0));
+    }
+
+    // Render every value with a server-side `::text` cast rather than decoding
+    // each Postgres type in Rust. sqlx speaks the binary protocol, so the old
+    // per-type decoder silently fell through to NULL for everything it had no
+    // arm for - uuid, timestamptz, date, interval, arrays, enums, inet - and
+    // the dump then carried NULL where real data had been. That is the worst
+    // way for a backup to fail: it looks like it worked, and the restore dies
+    // on the first NOT NULL column. A cast has an arm for every type there is,
+    // including ones a user defined after this code was written.
+    let select_list = data_cols
+        .iter()
+        .map(|(name, base)| {
+            if base.eq_ignore_ascii_case("money") {
+                // `money::text` is locale-formatted ("$1,234.56"), which only
+                // reads back under the same lc_monetary. numeric is portable.
+                format!("(\"{name}\"::numeric)::text")
+            } else {
+                format!("\"{name}\"::text")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let col_list = data_cols
+        .iter()
+        .map(|(name, _)| format!("\"{name}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let data_sql = format!("SELECT {select_list} FROM \"{schema}\".\"{table}\"");
+
+    // One connection for the whole table so the float setting below applies to
+    // the query that follows it. `extra_float_digits = 3` asks for the shortest
+    // representation that reads back bit-identical (the default on PostgreSQL
+    // 12+, but not before it).
+    let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
+    sqlx::query("SET extra_float_digits = 3").execute(&mut *conn).await.ok();
+
     // Stream rows one at a time to avoid loading an entire table into memory.
-    let mut stream = sqlx::query(&data_sql).fetch(pool);
+    let mut stream = sqlx::query(&data_sql).fetch(&mut *conn);
     let mut row_count = 0usize;
-    let mut col_list = String::new();
     let conflict_target = if pk_cols.is_empty() {
         "DO NOTHING".to_string()
     } else {
@@ -782,15 +934,23 @@ async fn pg_dump_table(
     };
 
     while let Some(row) = stream.try_next().await.map_err(|e| e.to_string())? {
-        if row_count == 0 {
-            col_list = row.columns().iter()
-                .map(|c| format!("\"{}\"", c.name()))
-                .collect::<Vec<_>>()
-                .join(", ");
-            out.push('\n');
-        }
+        if row_count == 0 { out.push('\n'); }
         row_count += 1;
-        let vals: Vec<String> = (0..row.len()).map(|i| pg_val(&row, i)).collect();
+
+        let mut vals: Vec<String> = Vec::with_capacity(data_cols.len());
+        for (i, (name, _)) in data_cols.iter().enumerate() {
+            // Every column arrives as text or NULL. A decode error here is a
+            // real failure, not a NULL: report it instead of writing a hole
+            // into the backup.
+            let cell: Option<String> = row.try_get(i).map_err(|e| {
+                format!("Could not read {schema}.{table}.\"{name}\" at row {row_count}: {e}")
+            })?;
+            vals.push(match cell {
+                None => "NULL".to_string(),
+                Some(text) => format!("'{}'", text.replace('\'', "''")),
+            });
+        }
+
         out.push_str(&format!(
             "INSERT INTO \"{schema}\".\"{table}\" ({col_list}) VALUES ({}) ON CONFLICT {conflict_target};\n",
             vals.join(", ")
@@ -801,72 +961,10 @@ async fn pg_dump_table(
     Ok((out, row_count))
 }
 
-/// Format a float for SQL output. Non-finite values have no bare literal form,
-/// so emit the quoted spellings PostgreSQL accepts (`'NaN'`, `'Infinity'`).
-fn fmt_pg_float(finite_str: String, is_finite: bool, is_nan: bool, is_sign_positive: bool) -> String {
-    if is_finite { finite_str }
-    else if is_nan { "'NaN'".into() }
-    else if is_sign_positive { "'Infinity'".into() }
-    else { "'-Infinity'".into() }
-}
-
-fn pg_val(row: &sqlx::postgres::PgRow, idx: usize) -> String {
-    let col = row.column(idx);
-    let type_name = col.type_info().name();
-
-    if let Ok(raw) = row.try_get_raw(idx) {
-        if raw.is_null() { return "NULL".into(); }
-    } else {
-        return "NULL".into();
-    }
-
-    match type_name {
-        "BOOL" => return row.try_get::<bool, _>(idx)
-            .map(|b| if b { "TRUE" } else { "FALSE" }.into())
-            .unwrap_or_else(|_| "NULL".into()),
-        // sqlx decoders are width-strict: an INT2 column won't decode as i64,
-        // so each integer width must be requested explicitly (otherwise the
-        // value silently exported as NULL).
-        "INT2" => return row.try_get::<i16, _>(idx)
-            .map(|n| n.to_string()).unwrap_or_else(|_| "NULL".into()),
-        "INT4" => return row.try_get::<i32, _>(idx)
-            .map(|n| n.to_string()).unwrap_or_else(|_| "NULL".into()),
-        "INT8" | "OID" => return row.try_get::<i64, _>(idx)
-            .map(|n| n.to_string()).unwrap_or_else(|_| "NULL".into()),
-        "FLOAT4" => return row.try_get::<f32, _>(idx)
-            .map(|n| fmt_pg_float(n.to_string(), n.is_finite(), n.is_nan(), n.is_sign_positive()))
-            .unwrap_or_else(|_| "NULL".into()),
-        "FLOAT8" => return row.try_get::<f64, _>(idx)
-            .map(|n| fmt_pg_float(n.to_string(), n.is_finite(), n.is_nan(), n.is_sign_positive()))
-            .unwrap_or_else(|_| "NULL".into()),
-        // Decode NUMERIC as an exact decimal to preserve precision/scale (f64
-        // would round high-scale values). NaN numerics fall through to NULL.
-        "NUMERIC" => return row.try_get::<sqlx::types::Decimal, _>(idx)
-            .map(|d| d.to_string()).unwrap_or_else(|_| "NULL".into()),
-        "MONEY" => return row.try_get::<sqlx::postgres::types::PgMoney, _>(idx)
-            .map(|m| m.to_decimal(2).to_string()).unwrap_or_else(|_| "NULL".into()),
-        "JSON" | "JSONB" => return row.try_get::<serde_json::Value, _>(idx)
-            .map(|v| format!("'{}'", v.to_string().replace('\'', "''")))
-            .unwrap_or_else(|_| "NULL".into()),
-        "BYTEA" => return row.try_get::<Vec<u8>, _>(idx)
-            .map(|b| format!("'\\x{}'", hex::encode(b)))
-            .unwrap_or_else(|_| "NULL".into()),
-        _ => {}
-    }
-
-    if let Ok(raw) = row.try_get_raw(idx) {
-        if let Ok(text) = <String as Decode<sqlx::Postgres>>::decode(raw) {
-            return format!("'{}'", text.replace('\'', "''"));
-        }
-    }
-
-    "NULL".into()
-}
-
 // ── PostgreSQL import ─────────────────────────────────────────────────────────
 
 async fn import_postgres(app: &AppHandle, pool: &sqlx::PgPool, sql: &str) -> Result<ImportResult, String> {
-    let stmts = split_statements(sql);
+    let stmts = split_statements(sql, Escapes::Standard);
     let total = stmts.len();
     emit_log(app, "restore-log", "info", format!("Starting restore: {} statements…", total));
 
@@ -905,15 +1003,17 @@ async fn import_postgres(app: &AppHandle, pool: &sqlx::PgPool, sql: &str) -> Res
     }
 
     sqlx::query("SET session_replication_role = DEFAULT").execute(&mut *tx).await.ok();
+    if is_cancelled() {
+        // Everything so far is inside this transaction, so cancelling can still
+        // undo it in full. Committing here would leave the database holding an
+        // arbitrary prefix of the dump - the one outcome a cancel must not have.
+        tx.rollback().await.map_err(|e| e.to_string())?;
+        emit_log(app, "restore-log", "warn", "Cancelled - rolled back, the database is unchanged");
+        return Ok(finish_import(app, total, 0, errors));
+    }
     tx.commit().await.map_err(|e| e.to_string())?;
 
-    let msg = format!("Restore complete: {} ok, {} failed", ok, total - ok);
-    if errors.is_empty() {
-        emit_log(app, "restore-log", "ok", &msg);
-    } else {
-        emit_log(app, "restore-log", "warn", &msg);
-    }
-    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+    Ok(finish_import(app, total, ok, errors))
 }
 
 // ── MySQL export ──────────────────────────────────────────────────────────────
@@ -1069,7 +1169,7 @@ async fn export_mysql(
 
     out.push_str("\nSET FOREIGN_KEY_CHECKS=1;\nSET UNIQUE_CHECKS=1;\nCOMMIT;\n");
     emit_log(app, "backup-log", "ok", format!("Export complete: {total_tables} tables, {total_rows} rows"));
-    Ok(ExportResult { sql: out, table_count: total_tables, row_count: total_rows })
+    Ok(ExportResult { sql: out, table_count: total_tables, row_count: total_rows, cancelled: is_cancelled() })
 }
 
 fn mysql_val(row: &sqlx::mysql::MySqlRow, idx: usize) -> String {
@@ -1122,7 +1222,7 @@ fn mysql_val(row: &sqlx::mysql::MySqlRow, idx: usize) -> String {
 // ── MySQL import ──────────────────────────────────────────────────────────────
 
 async fn import_mysql(app: &AppHandle, pool: &sqlx::MySqlPool, sql: &str) -> Result<ImportResult, String> {
-    let stmts = split_statements(sql);
+    let stmts = split_statements(sql, Escapes::Backslash);
     let total = stmts.len();
     emit_log(app, "restore-log", "info", format!("Starting restore: {} statements…", total));
     let mut ok = 0usize;
@@ -1150,13 +1250,7 @@ async fn import_mysql(app: &AppHandle, pool: &sqlx::MySqlPool, sql: &str) -> Res
         }
     }
 
-    let msg = format!("Restore complete: {} ok, {} failed", ok, total - ok);
-    if errors.is_empty() {
-        emit_log(app, "restore-log", "ok", &msg);
-    } else {
-        emit_log(app, "restore-log", "warn", &msg);
-    }
-    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+    Ok(finish_import(app, total, ok, errors))
 }
 
 // ── D1 export ─────────────────────────────────────────────────────────────────
@@ -1264,7 +1358,7 @@ async fn export_d1(
 
     out.push_str("\nCOMMIT;\nPRAGMA foreign_keys=ON;\n");
     emit_log(app, "backup-log", "ok", format!("Export complete: {} tables, {total_rows} rows", tables_to_dump.len()));
-    Ok(ExportResult { sql: out, table_count: tables_to_dump.len(), row_count: total_rows })
+    Ok(ExportResult { sql: out, table_count: tables_to_dump.len(), row_count: total_rows, cancelled: is_cancelled() })
 }
 
 fn json_to_sql_val(v: &serde_json::Value) -> String {
@@ -1292,7 +1386,7 @@ fn json_to_sql_val(v: &serde_json::Value) -> String {
 // ── D1 import ────────────────────────────────────────────────────────────────
 
 async fn import_d1(app: &AppHandle, cfg: &super::connection::D1Config, sql: &str) -> Result<ImportResult, String> {
-    let stmts = split_statements(sql);
+    let stmts = split_statements(sql, Escapes::Standard);
     let total = stmts.len();
     emit_log(app, "restore-log", "info", format!("Starting restore: {} statements…", total));
     let mut ok = 0usize;
@@ -1313,13 +1407,7 @@ async fn import_d1(app: &AppHandle, cfg: &super::connection::D1Config, sql: &str
         }
     }
 
-    let msg = format!("Restore complete: {} ok, {} failed", ok, total - ok);
-    if errors.is_empty() {
-        emit_log(app, "restore-log", "ok", &msg);
-    } else {
-        emit_log(app, "restore-log", "warn", &msg);
-    }
-    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+    Ok(finish_import(app, total, ok, errors))
 }
 
 // ── DuckDB export / import ────────────────────────────────────────────────────
@@ -1362,7 +1450,7 @@ async fn export_duckdb(
     out.push_str(&format!("IMPORT DATABASE '{dir_esc}';\n"));
 
     emit_log(app, "backup-log", "ok", format!("Export complete: {table_count} tables → {dir_str}"));
-    Ok(ExportResult { sql: out, table_count, row_count: 0 })
+    Ok(ExportResult { sql: out, table_count, row_count: 0, cancelled: is_cancelled() })
 }
 
 /// Path of the current DuckDB database file (`None` for an in-memory database).
@@ -1415,7 +1503,7 @@ async fn import_duckdb(
     handle: &super::connection::DuckdbHandle,
     sql: &str,
 ) -> Result<ImportResult, String> {
-    let stmts = split_statements(sql);
+    let stmts = split_statements(sql, Escapes::Standard);
     let total = stmts.len();
     emit_log(app, "restore-log", "info", format!("Starting restore: {} statements…", total));
     let mut ok = 0usize;
@@ -1431,13 +1519,7 @@ async fn import_duckdb(
         }
     }
 
-    let msg = format!("Restore complete: {} ok, {} failed", ok, total - ok);
-    if errors.is_empty() {
-        emit_log(app, "restore-log", "ok", &msg);
-    } else {
-        emit_log(app, "restore-log", "warn", &msg);
-    }
-    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+    Ok(finish_import(app, total, ok, errors))
 }
 
 // ── MS SQL Server export / import ─────────────────────────────────────────────
@@ -1477,7 +1559,7 @@ async fn export_mssql(
     out.push_str(&format!("RESTORE DATABASE [{db_ident}] FROM DISK = N'{path_esc}' WITH REPLACE;\n"));
 
     emit_log(app, "backup-log", "ok", format!("Backup complete: [{db}] → {bak_file}"));
-    Ok(ExportResult { sql: out, table_count, row_count: 0 })
+    Ok(ExportResult { sql: out, table_count, row_count: 0, cancelled: is_cancelled() })
 }
 
 /// Name of the database the active MS SQL connection is currently using.
@@ -1506,7 +1588,7 @@ async fn import_mssql(
     handle: &super::connection::MssqlHandle,
     sql: &str,
 ) -> Result<ImportResult, String> {
-    let stmts = split_statements(sql);
+    let stmts = split_statements(sql, Escapes::Standard);
     let total = stmts.len();
     emit_log(app, "restore-log", "info", format!("Starting restore: {} statements…", total));
     let mut ok = 0usize;
@@ -1520,30 +1602,27 @@ async fn import_mssql(
         }
     }
 
-    let msg = format!("Restore complete: {} ok, {} failed", ok, total - ok);
-    if errors.is_empty() {
-        emit_log(app, "restore-log", "ok", &msg);
-    } else {
-        emit_log(app, "restore-log", "warn", &msg);
-    }
-    Ok(ImportResult { statements_ok: ok, statements_err: total - ok, errors })
+    Ok(finish_import(app, total, ok, errors))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
-    use super::{split_statements, truncate_chars};
+    use super::{split_statements, truncate_chars, Escapes};
+
+    /// Most dialects we export to use standard string rules.
+    fn split(sql: &str) -> Vec<String> { split_statements(sql, Escapes::Standard) }
 
     #[test]
     fn splits_basic_statements() {
-        let s = split_statements("SELECT 1; SELECT 2;");
+        let s = split("SELECT 1; SELECT 2;");
         assert_eq!(s, vec!["SELECT 1".to_string(), "SELECT 2".to_string()]);
     }
 
     #[test]
     fn ignores_semicolons_inside_strings() {
-        let s = split_statements("INSERT INTO t VALUES ('a;b', 'c''d;e');");
+        let s = split("INSERT INTO t VALUES ('a;b', 'c''d;e');");
         assert_eq!(s.len(), 1);
         assert!(s[0].contains("'a;b'"));
     }
@@ -1552,7 +1631,7 @@ mod tests {
     fn keeps_dollar_quoted_body_intact() {
         // A Postgres enum DO-block: internal semicolons must not split it.
         let sql = "DO $$ BEGIN\n  CREATE TYPE \"s\" AS ENUM ('a','b');\nEXCEPTION WHEN duplicate_object THEN NULL;\nEND $$;\nSELECT 1;";
-        let s = split_statements(sql);
+        let s = split(sql);
         assert_eq!(s.len(), 2, "got: {s:?}");
         assert!(s[0].starts_with("DO $$"));
         assert!(s[0].contains("EXCEPTION"));
@@ -1562,7 +1641,7 @@ mod tests {
     #[test]
     fn handles_tagged_dollar_quotes() {
         let sql = "CREATE FUNCTION f() RETURNS int AS $func$ BEGIN RETURN 1; END; $func$ LANGUAGE plpgsql;";
-        let s = split_statements(sql);
+        let s = split(sql);
         assert_eq!(s.len(), 1, "got: {s:?}");
         assert!(s[0].contains("RETURN 1;"));
     }
@@ -1570,7 +1649,7 @@ mod tests {
     #[test]
     fn respects_mysql_delimiter() {
         let sql = "DELIMITER //\nCREATE TRIGGER t BEFORE INSERT ON x FOR EACH ROW BEGIN INSERT INTO log VALUES (1); UPDATE c SET n=n+1; END//\nDELIMITER ;\nSELECT 1;";
-        let s = split_statements(sql);
+        let s = split(sql);
         assert_eq!(s.len(), 2, "got: {s:?}");
         assert!(s[0].starts_with("CREATE TRIGGER"));
         assert!(s[0].contains("UPDATE c SET n=n+1"));
@@ -1579,7 +1658,7 @@ mod tests {
 
     #[test]
     fn strips_line_comments() {
-        let s = split_statements("SELECT 1; -- a trailing note\nSELECT 2;");
+        let s = split("SELECT 1; -- a trailing note\nSELECT 2;");
         assert_eq!(s, vec!["SELECT 1".to_string(), "SELECT 2".to_string()]);
     }
 
@@ -1589,5 +1668,69 @@ mod tests {
         let s = "😀😀😀😀";
         assert_eq!(truncate_chars(s, 2), "😀😀");
         assert_eq!(truncate_chars(s, 10), s);
+    }
+
+    // ── Regressions ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn mysql_backslash_escaped_quote_does_not_end_the_literal() {
+        // Exactly what `mysql_val` emits for the value `it's; and \`. Read with
+        // standard rules the literal ends at `it\'`, the `;` then splits the
+        // row in half and every later statement inherits the damage.
+        let sql = "INSERT INTO t VALUES ('it\\'s; and \\\\');\nSELECT 1;";
+        let s = split_statements(sql, Escapes::Backslash);
+        assert_eq!(s.len(), 2, "got: {s:?}");
+        assert!(s[0].starts_with("INSERT INTO t"), "got: {s:?}");
+        assert!(s[0].contains("it\\'s; and"), "got: {s:?}");
+        assert_eq!(s[1], "SELECT 1");
+    }
+
+    #[test]
+    fn standard_dialects_treat_a_trailing_backslash_as_data() {
+        // The mirror image: in Postgres `'a\'` is a complete string. Applying
+        // MySQL's rule here would swallow the terminator and join statements.
+        let s = split("INSERT INTO t VALUES ('a\\');\nSELECT 1;");
+        assert_eq!(s.len(), 2, "got: {s:?}");
+        assert!(s[0].contains("'a\\'"));
+        assert_eq!(s[1], "SELECT 1");
+    }
+
+    #[test]
+    fn strips_block_comments_including_their_semicolons() {
+        let s = split("SELECT 1; /* a note; with a semicolon */ SELECT 2;");
+        assert_eq!(s.len(), 2, "got: {s:?}");
+        assert_eq!(s[0], "SELECT 1");
+        assert!(s[1].contains("SELECT 2"), "got: {s:?}");
+        assert!(!s[1].contains("a note"), "comment leaked into the statement: {s:?}");
+    }
+
+    #[test]
+    fn strips_nested_block_comments() {
+        // Postgres nests these; stopping at the first `*/` would leave
+        // `still a comment */` sitting in front of the next statement.
+        let s = split("SELECT 1; /* outer /* inner; */ still a comment */ SELECT 2;");
+        assert_eq!(s.len(), 2, "got: {s:?}");
+        assert!(!s[1].contains("comment"), "got: {s:?}");
+    }
+
+    #[test]
+    fn keeps_a_block_comment_inside_a_string_literal() {
+        let s = split("INSERT INTO t VALUES ('/* not a comment; */');");
+        assert_eq!(s.len(), 1, "got: {s:?}");
+        assert!(s[0].contains("/* not a comment; */"));
+    }
+
+    #[test]
+    fn drops_mysqldump_executable_comments() {
+        let sql = "/*!40101 SET NAMES utf8 */;\nINSERT INTO t VALUES (1);";
+        let s = split_statements(sql, Escapes::Backslash);
+        assert_eq!(s, vec!["INSERT INTO t VALUES (1)".to_string()], "got: {s:?}");
+    }
+
+    #[test]
+    fn division_is_not_a_block_comment() {
+        let s = split("SELECT a/b FROM t; SELECT 2;");
+        assert_eq!(s.len(), 2, "got: {s:?}");
+        assert!(s[0].contains("a/b"));
     }
 }

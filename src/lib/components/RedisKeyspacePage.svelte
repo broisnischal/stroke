@@ -6,6 +6,7 @@
   import { readOnlyMode, guardWrite, READ_ONLY_HINT } from '$lib/stores/read-only.js'
   import { tick, onDestroy } from 'svelte'
   import ResizeHandle from './ResizeHandle.svelte'
+  import { getAppScale } from '$lib/app-zoom.js'
   import Search from '@lucide/svelte/icons/search'
   import X from '@lucide/svelte/icons/x'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
@@ -116,6 +117,8 @@
   }
   let keysWidth = $state(loadKeysWidth())
   let resizeStartWidth = 0
+  /** App scale sampled at drag start - `dx` is screen px, `keysWidth` is px at 100%. */
+  let resizeScale = 1
 
   // ── Key list state ──────────────────────────────────────────────────────────
   let keys = $state(/** @type {string[]} */ ([]))
@@ -811,22 +814,22 @@
         <span class="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono uppercase tracking-wide">{stats.mode}</span>
       {/if}
       <span class="shrink-0 tabular-nums">
-        <KeyRound class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/70" />{totalKeys} keys
+        <KeyRound class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground" />{totalKeys} keys
       </span>
       {#if stats.memory}
         <span class="shrink-0 font-mono tabular-nums" title={stats.memoryPeak ? `peak ${stats.memoryPeak}` : undefined}>
-          <HardDrive class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/70" />{stats.memory}
+          <HardDrive class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground" />{stats.memory}
         </span>
       {/if}
       <span class="shrink-0 font-mono tabular-nums">
-        <Users class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/70" />{stats.clients}
+        <Users class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground" />{stats.clients}
       </span>
       <span class="shrink-0 font-mono tabular-nums">
-        <Activity class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/70" />{stats.ops}/s
+        <Activity class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground" />{stats.ops}/s
       </span>
       {#if stats.hitRate != null}
         <span class="shrink-0 font-mono tabular-nums" title="Keyspace hit rate">
-          <Gauge class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/70" />{stats.hitRate}%
+          <Gauge class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground" />{stats.hitRate}%
         </span>
       {/if}
       {#if stats.uptime}
@@ -846,7 +849,7 @@
 
   <div class="flex min-h-0 flex-1 overflow-hidden">
     <!-- ── Key list ─────────────────────────────────────────────────────── -->
-    <div class="flex shrink-0 flex-col border-r border-border bg-panel" style:width="{keysWidth}px">
+    <div class="flex shrink-0 flex-col border-r border-border bg-panel" style:width="calc({keysWidth}px * var(--app-scale, 1))">
       <!-- Header -->
       <div class="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3">
         <KeyRound class="size-4 shrink-0 text-muted-foreground" />
@@ -897,7 +900,7 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class= "field-surface h-7 w-full bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground outline-none transition-colors"
           />
           <div class="flex flex-wrap gap-1">
             {#each CREATABLE as t (t)}
@@ -924,7 +927,7 @@
               placeholder="field"
               spellcheck="false"
               autocomplete="off"
-              class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+              class= "field-surface h-7 w-full bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground outline-none transition-colors"
             />
           {:else if nkType === 'zset'}
             <input
@@ -933,7 +936,7 @@
               placeholder="score (e.g. 1)"
               spellcheck="false"
               autocomplete="off"
-              class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+              class= "field-surface h-7 w-full bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground outline-none transition-colors"
             />
           {/if}
           <input
@@ -943,7 +946,7 @@
             spellcheck="false"
             autocomplete="off"
             onkeydown={(e) => e.key === 'Enter' && void createKey()}
-            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class= "field-surface h-7 w-full bg-input/30 px-2 font-mono text-ui-sm text-foreground placeholder:text-muted-foreground outline-none transition-colors"
           />
           {#if newKeyError}
             <p class="font-mono text-ui-3xs text-destructive">{newKeyError}</p>
@@ -974,7 +977,7 @@
       <!-- Filter -->
       <div class="shrink-0 border-b border-border/50 p-2">
         <div class="relative flex h-7 items-center">
-          <Search class="pointer-events-none absolute left-2 size-3.5 shrink-0 text-muted-foreground/50" />
+          <Search class="pointer-events-none absolute left-2 size-3.5 shrink-0 text-muted-foreground" />
           <input
             type="text"
             bind:value={filter}
@@ -982,12 +985,12 @@
             spellcheck="false"
             autocapitalize="off"
             autocomplete="off"
-            class="h-7 w-full rounded-lg border-2 border-border bg-input/30 pl-7 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground/45 outline-none transition-colors focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+            class= "field-surface h-7 w-full bg-input/30 pl-7 pr-7 text-ui-sm text-foreground placeholder:text-muted-foreground outline-none transition-colors"
           />
           {#if filter}
             <button
               type="button"
-              class="absolute right-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted/70 hover:text-foreground"
+              class="absolute right-1 inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
               aria-label="Clear filter"
               onclick={() => (filter = '')}
             >
@@ -996,7 +999,7 @@
           {/if}
         </div>
         {#if (filter.trim() && !keysLoading) || typesTruncated}
-          <p class="mt-1.5 px-0.5 font-mono text-ui-3xs text-muted-foreground/60">
+          <p class="mt-1.5 px-0.5 font-mono text-ui-3xs text-muted-foreground">
             {#if filter.trim() && !keysLoading}{filteredKeys.length} of {totalKeys} match{/if}
             {#if typesTruncated}{filter.trim() && !keysLoading ? ' · ' : ''}types shown for first {TYPE_CAP}{/if}
           </p>
@@ -1016,7 +1019,7 @@
           </div>
         {:else if !keysLoading && filteredKeys.length === 0}
           <div class="flex h-full flex-col items-center justify-center gap-3 py-16 text-center">
-            <KeyRound class="size-10 text-muted-foreground/20" />
+            <KeyRound class="size-10 text-muted-foreground" />
             <p class="text-ui-xs text-muted-foreground">
               {filter.trim() ? 'No matching keys' : 'No keys in this database'}
             </p>
@@ -1030,9 +1033,9 @@
                 class="flex w-full items-center gap-1.5 px-2 py-1 text-left transition-colors hover:bg-accent/50"
                 onclick={() => toggleGroup(group.name)}
               >
-                <ChevronRight class={cn('size-3.5 shrink-0 text-muted-foreground/45 transition-transform', !isCollapsed && 'rotate-90')} />
+                <ChevronRight class={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', !isCollapsed && 'rotate-90')} />
                 <span class="min-w-0 flex-1 truncate font-mono text-ui-xs font-medium text-muted-foreground">{group.name}</span>
-                <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground/45">{group.items.length}</span>
+                <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground">{group.items.length}</span>
               </button>
               {#if !isCollapsed}
                 {#each group.items as key (key)}
@@ -1075,8 +1078,8 @@
     <ResizeHandle
       axis="x"
       edge="end"
-      onresizestart={() => (resizeStartWidth = keysWidth)}
-      onresize={(dx) => (keysWidth = clampKeysWidth(resizeStartWidth + dx))}
+      onresizestart={() => { resizeStartWidth = keysWidth; resizeScale = getAppScale() }}
+      onresize={(dx) => (keysWidth = clampKeysWidth(resizeStartWidth + dx / resizeScale))}
       onresizeend={() => {
         resizeStartWidth = keysWidth
         try {
@@ -1089,7 +1092,7 @@
     <div class="flex min-w-0 flex-1 flex-col overflow-hidden bg-panel">
       {#if !selectedKey}
         <div class="flex h-full flex-col items-center justify-center gap-3 text-center">
-          <Database class="size-10 text-muted-foreground/20" />
+          <Database class="size-10 text-muted-foreground" />
           <p class="text-ui-sm text-muted-foreground">Select a key to inspect</p>
         </div>
       {:else}
@@ -1099,7 +1102,7 @@
             {@const Glyph = TYPE_META[selectedType].icon}
             <Glyph class={cn('size-4 shrink-0', TYPE_META[selectedType].color)} />
           {:else}
-            <KeyRound class="size-4 shrink-0 text-muted-foreground/50" />
+            <KeyRound class="size-4 shrink-0 text-muted-foreground" />
           {/if}
           <span class="min-w-0 flex-1 truncate font-mono text-ui-sm font-medium text-foreground" title={selectedKey}>{selectedKey}</span>
 
@@ -1172,7 +1175,7 @@
           {/if}
           {#if keyMemory != null}
             <span class="shrink-0 tabular-nums" title="Memory used by this key">
-              <HardDrive class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground/60" />{humanBytes(keyMemory)}
+              <HardDrive class="mr-1 inline size-3 shrink-0 align-[-2px] text-muted-foreground" />{humanBytes(keyMemory)}
             </span>
           {/if}
           {#if keyEncoding}
@@ -1192,7 +1195,7 @@
                     if (e.key === 'Enter') { e.preventDefault(); void applyTtl(false) }
                     else if (e.key === 'Escape') editingTtl = false
                   }}
-                  class="h-6 w-24 rounded-lg border-2 border-border bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground/45 outline-none focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+                  class= "field-surface h-6 w-24 bg-input/30 px-1.5 text-ui-2xs tabular-nums text-foreground placeholder:text-muted-foreground outline-none"
                 />
                 <button
                   type="button"
@@ -1234,7 +1237,7 @@
               >
                 <Timer class="size-3 shrink-0" />
                 <span class="tabular-nums">{ttlLabel || 'no expiry'}</span>
-                <Pencil class="size-2.5 shrink-0 opacity-0 transition-opacity group-hover/ttl:opacity-70" />
+                <Pencil class="size-3 shrink-0 opacity-0 transition-opacity group-hover/ttl:opacity-70" />
               </button>
             {/if}
           </div>
@@ -1266,7 +1269,7 @@
                       onclick={() => (jsonView = false)}
                     >Raw</button>
                   </div>
-                  <span class="font-mono text-ui-3xs text-muted-foreground/50">valid JSON</span>
+                  <span class="font-mono text-ui-3xs text-muted-foreground">valid JSON</span>
                 {/if}
                 {#if !editingString}
                   <button
@@ -1321,8 +1324,8 @@
               <table class="w-full border-collapse text-ui-sm">
                 <thead>
                   <tr class="sticky top-0 z-10 bg-panel">
-                    <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/70">{isZset ? 'member' : 'field'}</th>
-                    <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/70">{isZset ? 'score' : 'value'}</th>
+                    <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground">{isZset ? 'member' : 'field'}</th>
+                    <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground">{isZset ? 'score' : 'value'}</th>
                     <th class="w-16 border-b border-border/50"></th>
                   </tr>
                 </thead>
@@ -1366,9 +1369,9 @@
                 <thead>
                   <tr class="sticky top-0 z-10 bg-panel">
                     {#if isList}
-                      <th class="w-14 border-b border-border/50 px-3 py-1.5 text-right font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/60">#</th>
+                      <th class="w-14 border-b border-border/50 px-3 py-1.5 text-right font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground">#</th>
                     {/if}
-                    <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/70">{isList ? 'value' : 'member'}</th>
+                    <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground">{isList ? 'value' : 'member'}</th>
                     <th class="w-16 border-b border-border/50"></th>
                   </tr>
                 </thead>
@@ -1376,7 +1379,7 @@
                   {#each valueData.items as item, i (i)}
                     <tr class="group/row border-b border-border/50 last:border-0 hover:bg-accent/40">
                       {#if isList}
-                        <td class="w-14 px-3 py-1.5 text-right align-top font-mono text-ui-xs tabular-nums text-muted-foreground/45">{i}</td>
+                        <td class="w-14 px-3 py-1.5 text-right align-top font-mono text-ui-xs tabular-nums text-muted-foreground">{i}</td>
                       {/if}
                       <td class="px-3 py-1.5 align-top font-mono [overflow-wrap:anywhere] text-foreground/85" title={item}>{item}</td>
                       <td class="w-16 px-1 align-top">
@@ -1412,15 +1415,15 @@
               <table class="w-full border-collapse text-ui-sm">
                 <thead>
                   <tr class="sticky top-0 z-10 bg-panel">
-                    <th class="w-14 border-b border-border/50 px-3 py-1.5 text-right font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/60">#</th>
-                    <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground/70">entry (id · fields)</th>
+                    <th class="w-14 border-b border-border/50 px-3 py-1.5 text-right font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground">#</th>
+                    <th class="border-b border-border/50 px-3 py-1.5 text-left font-mono text-ui-2xs font-semibold uppercase tracking-wide text-muted-foreground">entry (id · fields)</th>
                     <th class="w-9 border-b border-border/50"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {#each valueData.entries as entry, i (i)}
                     <tr class="group/row border-b border-border/50 last:border-0 hover:bg-accent/40">
-                      <td class="w-14 px-3 py-1.5 text-right align-top font-mono text-ui-xs tabular-nums text-muted-foreground/45">{i + 1}</td>
+                      <td class="w-14 px-3 py-1.5 text-right align-top font-mono text-ui-xs tabular-nums text-muted-foreground">{i + 1}</td>
                       <td class="px-3 py-1.5 align-top font-mono [overflow-wrap:anywhere] text-foreground/85" title={entry}>{entry}</td>
                       <td class="w-9 px-1 align-top">
                         <button type="button" class={cn(iconBtn, 'size-6 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100')} title="Copy entry" aria-label="Copy entry" onclick={() => copyText(entry, `row-${i}`)}>
@@ -1430,7 +1433,7 @@
                     </tr>
                   {/each}
                   {#if valueData.entries.length === 0}
-                    <tr><td colspan="3" class="px-3 py-6 text-center text-ui-xs text-muted-foreground/50">Empty stream</td></tr>
+                    <tr><td colspan="3" class="px-3 py-6 text-center text-ui-xs text-muted-foreground">Empty stream</td></tr>
                   {/if}
                 </tbody>
               </table>
@@ -1455,9 +1458,9 @@
         class="flex min-w-0 flex-1 items-center gap-1.5 text-left"
         onclick={() => (consoleOpen = !consoleOpen)}
       >
-        <TerminalIcon class="size-3.5 shrink-0 text-muted-foreground/70" />
+        <TerminalIcon class="size-3.5 shrink-0 text-muted-foreground" />
         <span class="text-ui-xs font-medium text-foreground/80">Console</span>
-        <span class="font-mono text-ui-3xs text-muted-foreground/45">redis-cli</span>
+        <span class="font-mono text-ui-3xs text-muted-foreground">redis-cli</span>
       </button>
       {#if consoleOpen && scrollback.length > 0}
         <button
@@ -1483,7 +1486,7 @@
     {#if consoleOpen}
       <div bind:this={scrollbackEl} class="app-scroll min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-ui-xs leading-relaxed" data-studio-selectable="text">
         {#if scrollback.length === 0}
-          <div class="space-y-1 text-muted-foreground/50">
+          <div class="space-y-1 text-muted-foreground">
             <p>
               Type a Redis command and press
               <span class="rounded bg-muted/60 px-1 py-0.5 text-foreground/70">Enter</span>, e.g.
@@ -1499,11 +1502,11 @@
           {#each scrollback as entry, i (i)}
             <div class="mb-1.5">
               <div class="flex items-start gap-1.5">
-                <span class="shrink-0 select-none text-muted-foreground/40">&gt;</span>
+                <span class="shrink-0 select-none text-muted-foreground">&gt;</span>
                 <span class="min-w-0 flex-1 [overflow-wrap:anywhere] text-foreground/90">{entry.cmd}</span>
               </div>
               {#if entry.pending}
-                <div class="pl-3.5 text-muted-foreground/40">…</div>
+                <div class="pl-3.5 text-muted-foreground">…</div>
               {:else}
                 {#each entry.lines as line, j (j)}
                   <div class={cn('select-text whitespace-pre-wrap [overflow-wrap:anywhere] pl-3.5', entry.isError ? 'text-destructive' : 'text-muted-foreground')}>{line}</div>
@@ -1515,7 +1518,7 @@
       </div>
 
       <div class="flex h-9 shrink-0 items-center gap-1.5 border-t border-border/50 bg-background/40 px-3">
-        <span class="shrink-0 select-none font-mono text-ui-sm text-muted-foreground/50">&gt;</span>
+        <span class="shrink-0 select-none font-mono text-ui-sm text-muted-foreground">&gt;</span>
         <input
           type="text"
           bind:value={consoleInput}
@@ -1524,7 +1527,7 @@
           spellcheck="false"
           autocapitalize="off"
           autocomplete="off"
-          class="h-7 min-w-0 flex-1 bg-transparent font-mono text-ui-sm text-foreground placeholder:text-muted-foreground/40 focus:outline-none"
+          class="no-focus-ring h-7 min-w-0 flex-1 bg-transparent font-mono text-ui-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
         />
         <button
           type="button"

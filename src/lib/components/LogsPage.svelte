@@ -187,12 +187,12 @@
     <!-- Search -->
     <div class="relative min-w-0 flex-1">
       <Search
-        class="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground/60"
+        class="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
       />
       <input
         type="text"
         placeholder="Search logs…"
-        class="h-7 w-full rounded-lg border-2 border-border bg-background/40 pl-7 pr-2.5 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground/40 transition-colors hover:bg-background/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15"
+        class= "field-surface h-7 w-full bg-background/40 pl-7 pr-2.5 font-mono text-ui-xs text-foreground outline-none placeholder:text-muted-foreground transition-colors hover:bg-background/60"
         bind:this={searchEl}
         bind:value={search}
       />
@@ -208,7 +208,7 @@
     </div>
     <!-- Type filter chips -->
     <div
-      class="inline-flex h-7 shrink-0 items-center rounded-md border border-border/60 bg-muted/40 p-0.5 ring-1 ring-inset ring-border/40"
+    class= "field-surface inline-flex h-7 shrink-0 items-center bg-muted/40 p-0.5 ring-1 ring-inset ring-border/40"
     >
       {#each FILTERS as f (f.id)}
         <button
@@ -233,11 +233,11 @@
       <div
         class="flex h-full flex-col items-center justify-center gap-3 text-center"
       >
-        <ScrollText class="size-10 text-muted-foreground/20" />
+        <ScrollText class="size-10 text-muted-foreground" />
         <p class="font-mono text-ui text-muted-foreground">
           {entries.length === 0 ? "No activity yet" : "No entries match"}
         </p>
-        <p class="text-ui-xs text-muted-foreground/60">
+        <p class="text-ui-xs text-muted-foreground">
           {entries.length === 0
             ? "Operations will appear here as you use the app"
             : "Try a different filter"}
@@ -270,7 +270,7 @@
               <XCircle class="size-3.5 shrink-0 text-destructive" />
             {:else}
               <CheckCircle2
-                class="size-3.5 shrink-0 text-muted-foreground/20"
+                class="size-3.5 shrink-0 text-muted-foreground"
               />
             {/if}
 
@@ -281,7 +281,7 @@
                 chipClass(entry),
               )}
             >
-              <Icon class="size-2.5" />
+              <Icon class="size-3" />
               {TYPE_LABEL[entry.type] ?? entry.type}
             </span>
 
@@ -303,7 +303,7 @@
             <!-- Row count -->
             {#if entry.rowCount != null}
               <span
-                class="shrink-0 font-mono text-ui-2xs tabular-nums text-muted-foreground/60"
+                class="shrink-0 font-mono text-ui-2xs tabular-nums text-muted-foreground"
                 >{entry.rowCount.toLocaleString()}r</span
               >
             {/if}
@@ -311,14 +311,14 @@
             <!-- Duration -->
             {#if entry.durationMs != null}
               <span
-                class="w-12 shrink-0 text-right font-mono text-ui-2xs tabular-nums text-muted-foreground/50"
+                class="w-12 shrink-0 text-right font-mono text-ui-2xs tabular-nums text-muted-foreground"
                 >{entry.durationMs}ms</span
               >
             {/if}
 
             <!-- Time -->
             <span
-              class="w-[58px] shrink-0 text-right font-mono text-ui-2xs tabular-nums text-muted-foreground/40"
+              class="w-[58px] shrink-0 text-right font-mono text-ui-2xs tabular-nums text-muted-foreground"
               >{fmtTime(entry.timestamp)}</span
             >
 
@@ -326,7 +326,7 @@
             {#if hasDetail}
               <ChevronRight
                 class={cn(
-                  "size-3 shrink-0 text-muted-foreground/40 transition-transform",
+                  "size-3 shrink-0 text-muted-foreground transition-transform",
                   isExpanded && "rotate-90",
                 )}
               />
@@ -339,7 +339,7 @@
           {#if isExpanded}
             <div class="mx-2 mb-2 rounded-md border border-border/50 bg-card">
               <div
-                class="flex items-center gap-3 border-b border-border/40 px-3 py-1.5 font-mono text-ui-2xs text-muted-foreground/60"
+                class="flex items-center gap-3 border-b border-border/40 px-3 py-1.5 font-mono text-ui-2xs text-muted-foreground"
               >
                 <span>{new Date(entry.timestamp).toLocaleString()}</span>
                 {#if entry.durationMs != null}<span>{entry.durationMs}ms</span
@@ -370,11 +370,11 @@
     <div
       class="flex shrink-0 items-center gap-3 border-t border-border/40 bg-panel px-3 py-1"
     >
-      <span class="font-mono text-ui-2xs text-muted-foreground/50 tabular-nums"
+      <span class="font-mono text-ui-2xs text-muted-foreground tabular-nums"
         >{filtered.length} of {entries.length} events</span
       >
       {#if avgMs !== null}
-        <span class="font-mono text-ui-2xs text-muted-foreground/40"
+        <span class="font-mono text-ui-2xs text-muted-foreground"
           >avg {avgMs}ms</span
         >
       {/if}

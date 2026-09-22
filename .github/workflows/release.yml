@@ -1,8 +1,9 @@
 # Build Stroke for Linux, Windows, and macOS and publish to GitHub Releases.
 #
 # Releases, the updater's latest.json and the Scoop bucket all live in THIS
-# repo. Every URL baked into a shipped app points at github.com/broisnischal/
-# stroke, so that name has to keep resolving here — see RELEASES_REPO below.
+# repo. Builds shipped before the move to the stroke-app org point at
+# github.com/broisnischal/stroke, which GitHub redirects here. That redirect is
+# what keeps their updater working, so that repo name must never be reused.
 #
 # Create a release:
 #   git tag v0.1.0
@@ -81,10 +82,10 @@ jobs:
 
           \`\`\`sh
           # macOS
-          brew install --cask broisnischal/tap/stroke
+          brew install --cask stroke-app/tap/stroke
 
           # Windows
-          scoop bucket add stroke https://github.com/broisnischal/stroke
+          scoop bucket add stroke https://github.com/stroke-app/stroke
           scoop install stroke
           \`\`\`
 
@@ -400,7 +401,7 @@ jobs:
           add('linux-x86_64',   'sig-linux/updater.sig',         `${BASE}/stroke_amd64.AppImage.tar.gz`)
           add('windows-x86_64', 'sig-windows/updater.sig',       `${BASE}/stroke_x64-setup.nsis.zip`)
 
-          const notes = extractChangelog(VERSION) || `See https://github.com/broisnischal/stroke/releases/tag/v${VERSION}`
+          const notes = extractChangelog(VERSION) || `See https://github.com/stroke-app/stroke/releases/tag/v${VERSION}`
 
           const out = {
             version: VERSION,
@@ -422,7 +423,7 @@ jobs:
         run: gh release upload "$TAG" --repo "$RELEASES_REPO" latest.json --clobber
 
 # ── 4. Refresh the Scoop manifest ────────────────────────────────────────────
-#      `scoop bucket add stroke https://github.com/broisnischal/stroke` clones
+#      `scoop bucket add stroke https://github.com/stroke-app/stroke` clones
 #      THIS repo anonymously and reads bucket/stroke.json, so the manifest is
 #      committed straight to the default branch.
   update-scoop:
@@ -442,7 +443,7 @@ jobs:
         run: |
           VERSION="${TAG#v}"
           EXE="stroke_${VERSION}_x64-setup.exe"
-          URL="https://github.com/broisnischal/stroke/releases/download/${TAG}/${EXE}"
+          URL="https://github.com/stroke-app/stroke/releases/download/${TAG}/${EXE}"
 
           # Hash the published installer so the manifest is always accurate.
           curl -fsSL -o "$EXE" "$URL"
@@ -455,11 +456,11 @@ jobs:
           const manifest = {
             version: VERSION,
             description: 'Fast desktop database client for PostgreSQL, MySQL, SQLite, and Cloudflare D1',
-            homepage: 'https://github.com/broisnischal/stroke',
+            homepage: 'https://github.com/stroke-app/stroke',
             license: 'Freeware',
             architecture: {
               '64bit': {
-                url: `https://github.com/broisnischal/stroke/releases/download/v${VERSION}/stroke_${VERSION}_x64-setup.exe#/dl.7z`,
+                url: `https://github.com/stroke-app/stroke/releases/download/v${VERSION}/stroke_${VERSION}_x64-setup.exe#/dl.7z`,
                 hash: HASH,
               },
             },
@@ -468,7 +469,7 @@ jobs:
             checkver: 'github',
             autoupdate: {
               architecture: {
-                '64bit': { url: 'https://github.com/broisnischal/stroke/releases/download/v$version/stroke_$version_x64-setup.exe#/dl.7z' },
+                '64bit': { url: 'https://github.com/stroke-app/stroke/releases/download/v$version/stroke_$version_x64-setup.exe#/dl.7z' },
               },
             },
           }
@@ -497,7 +498,7 @@ jobs:
             echo "No TAP_DISPATCH_TOKEN — tap will self-update on its schedule."
             exit 0
           fi
-          gh workflow run update-cask.yml -R broisnischal/homebrew-tap || \
+          gh workflow run update-cask.yml -R stroke-app/homebrew-tap || \
             echo "Tap dispatch failed — tap will self-update on schedule."
 
 # ── 5. Publish the release (un-draft) — ONLY after everything succeeded ───────

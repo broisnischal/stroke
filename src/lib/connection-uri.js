@@ -211,14 +211,177 @@ export function parseSqliteUri(uri) {
 }
 
 /**
- * @param {'postgres'|'sqlite'|'mysql'|'mssql'|'clickhouse'} type
+ * @param {'postgres'|'sqlite'|'mysql'|'mssql'|'clickhouse'|'redis'|'libsql'} type
  * @param {string} uri
- * @returns {ParsedPostgresUri | ParsedSqliteUri | { error: string } | null}
+ * @returns {ParsedPostgresUri | ParsedSqliteUri | Record<string, any> | { error: string } | null}
  */
 export function parseConnectionUri(type, uri) {
   if (type === 'sqlite') return parseSqliteUri(uri)
   if (type === 'mysql') return parseMysqlUri(uri)
   if (type === 'mssql') return parseMssqlUri(uri)
   if (type === 'clickhouse') return parseClickhouseUri(uri)
+  if (type === 'redis') return parseRedisUri(uri)
+  if (type === 'libsql') return parseLibsqlUri(uri)
   return parsePostgresUri(uri)
+}
+
+/**
+ * Which engine a pasted connection string is for.
+ *
+ * `parseConnectionUri` needs the engine told to it, which is right when the
+ * form is already on one - but the fastest way to connect is to paste what your
+ * hosting provider or `.env` gave you and be put on the right form. A URI
+ * already names its engine in the scheme (and, for a few providers, in the
+ * host), so asking the user to pick it first is asking them to repeat
+ * themselves.
+ *
+ * Returns the app's own `DbType` id, plus the provider when the host identifies
+ * one (the caller can then offer that provider's own sign-in instead of raw
+ * credentials), or null when nothing in the string says.
+ *
+ * @param {string} uri
+ * @returns {{ type: string, provider?: string, uriType: 'postgres'|'sqlite'|'mysql'|'mssql'|'clickhouse' } | null}
+ */
+export function detectConnectionUri(uri) {
+  const s = String(uri ?? '').trim()
+  if (!s) return null
+
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(s)?.[1]?.toLowerCase() ?? ''
+  const host = hostOf(s)
+
+  // Providers first: a Neon or Supabase string is a Postgres string, and saying
+  // so lets the caller offer the account flow rather than a bare host/port form.
+  if (host) {
+    if (/\.neon\.(tech|build)$/i.test(host)) return { type: 'postgres', provider: 'neon', uriType: 'postgres' }
+    if (/\.supabase\.(co|com)$/i.test(host) || /\bpooler\.supabase\.com$/i.test(host)) {
+      return { type: 'postgres', provider: 'supabase', uriType: 'postgres' }
+    }
+    if (/\.prisma-data\.(net|com)$/i.test(host) || scheme === 'prisma' || scheme === 'prisma+postgres') {
+      return { type: 'postgres', provider: 'prisma-postgres', uriType: 'postgres' }
+    }
+    if (/\.psdb\.cloud$/i.test(host) || /\.planetscale\.(com|sh)$/i.test(host)) {
+      return { type: 'mysql', provider: 'planetscale', uriType: 'mysql' }
+    }
+    if (/\.turso\.io$/i.test(host)) return { type: 'libsql', provider: 'turso', uriType: 'postgres' }
+  }
+
+  switch (scheme) {
+    case 'postgres':
+    case 'postgresql':
+      return { type: 'postgres', uriType: 'postgres' }
+    case 'cockroachdb':
+      return { type: 'cockroachdb', uriType: 'postgres' }
+    case 'mysql':
+      return { type: 'mysql', uriType: 'mysql' }
+    case 'mariadb':
+      return { type: 'mariadb', uriType: 'mysql' }
+    case 'sqlserver':
+    case 'mssql':
+      return { type: 'mssql', uriType: 'mssql' }
+    case 'clickhouse':
+    case 'clickhouses':
+      return { type: 'clickhouse', uriType: 'clickhouse' }
+    case 'redis':
+    case 'rediss':
+      return { type: 'redis', uriType: 'postgres' }
+    case 'libsql':
+      return { type: 'libsql', uriType: 'postgres' }
+    case 'duckdb':
+      return { type: 'duckdb', uriType: 'sqlite' }
+    case 'sqlite':
+    case 'file':
+      return { type: 'sqlite', uriType: 'sqlite' }
+    default:
+      break
+  }
+
+  // `jdbc:postgresql://…` - the prefix a JDBC console hands out.
+  const jdbc = /^jdbc:([a-z0-9]+):/i.exec(s)?.[1]?.toLowerCase()
+  if (jdbc) {
+    const inner = detectConnectionUri(s.slice(5))
+    if (inner) return inner
+  }
+
+  if (s === ':memory:') return { type: 'sqlite-memory', uriType: 'sqlite' }
+  // A bare path to a database file, which is what a SQLite "connection string"
+  // usually is in practice.
+  if (/\.(db|sqlite3?|duckdb)$/i.test(s) && !/\s/.test(s)) {
+    return { type: /\.duckdb$/i.test(s) ? 'duckdb' : 'sqlite', uriType: 'sqlite' }
+  }
+  return null
+}
+
+/** Host of a URI, without credentials or port. Empty when it has none. */
+function hostOf(/** @type {string} */ uri) {
+  const m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(uri)
+  if (!m) return ''
+  const authority = m[1]
+  const afterCreds = authority.includes('@') ? authority.slice(authority.lastIndexOf('@') + 1) : authority
+  // Strip a port, and the brackets an IPv6 literal carries.
+  const bare = afterCreds.replace(/^\[([^\]]+)\](?::\d+)?$/, '$1').replace(/:\d+$/, '')
+  return bare.toLowerCase()
+}
+
+/**
+ * `redis://` / `rediss://`, into the fields the Redis form holds.
+ *
+ * Redis puts the logical database in the path (`/0`) and, unusually, allows a
+ * password with no username (`redis://:pw@host`), which is why this cannot go
+ * through the Postgres parser - that one reads `:pw` as a username and loses the
+ * database index.
+ * @param {string} uri
+ * @returns {{ host: string, port: string, db: string, user: string, password: string, tls: boolean } | { error: string } | null}
+ */
+export function parseRedisUri(uri) {
+  const trimmed = uri.trim()
+  if (!trimmed) return null
+  if (!/^rediss?:\/\//i.test(trimmed)) {
+    return { error: 'Expected a redis:// or rediss:// URL' }
+  }
+  let url
+  try {
+    url = new URL(trimmed)
+  } catch {
+    return { error: 'Could not read that Redis URL' }
+  }
+  const tls = url.protocol.toLowerCase() === 'rediss:'
+  const path = url.pathname.replace(/^\//, '')
+  // `/0` is the database index; anything non-numeric is not one.
+  const db = /^\d+$/.test(path) ? path : ''
+  return {
+    host: url.hostname || '127.0.0.1',
+    port: url.port || '6379',
+    db: db || '0',
+    user: decodeURIComponent(url.username || ''),
+    password: decodeURIComponent(url.password || ''),
+    tls,
+  }
+}
+
+/**
+ * `libsql://` / Turso `https://`, into the URL + token the LibSQL form holds.
+ *
+ * A Turso string often carries the token as `?authToken=`, which belongs in its
+ * own field rather than in the URL the driver is handed.
+ * @param {string} uri
+ * @returns {{ url: string, authToken: string } | { error: string } | null}
+ */
+export function parseLibsqlUri(uri) {
+  const trimmed = uri.trim()
+  if (!trimmed) return null
+  if (!/^(libsql|wss?|https?):\/\//i.test(trimmed)) {
+    return { error: 'Expected a libsql://, wss:// or https:// URL' }
+  }
+  let url
+  try {
+    url = new URL(trimmed)
+  } catch {
+    return { error: 'Could not read that LibSQL URL' }
+  }
+  const token =
+    url.searchParams.get('authToken') ?? url.searchParams.get('auth_token') ?? ''
+  url.searchParams.delete('authToken')
+  url.searchParams.delete('auth_token')
+  // `toString()` re-appends a bare `?` once the params are gone.
+  return { url: url.toString().replace(/\?$/, ''), authToken: token }
 }

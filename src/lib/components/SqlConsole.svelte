@@ -45,6 +45,7 @@
     extractSqlParams,
     missingSqlParams,
     substituteSqlParams,
+    dialectForEngine,
     loadStoredParamValues,
     saveStoredParamValues,
   } from "$lib/sql-params.js";
@@ -61,6 +62,8 @@
   let {
     /** Whether the SQL tab is the active/visible tab - gates global hotkeys. */
     active = true,
+    /** Connection family, so parameter values are quoted the way this engine reads them. */
+    engine = "postgres",
     sql = $bindable("SELECT 1;"),
     columns = [],
     rows = [],
@@ -76,6 +79,12 @@
     schemaHints = /** @type {SqlSchemaHints} */ ({}),
     /** Run SQL - receives a single-statement override, or undefined to run the whole buffer. */
     onrun = (/** @type {string | undefined} */ statementSql) => {},
+    /** Open transaction for this tab, or null when running in autocommit. */
+    txStatus = null,
+    txBusy = false,
+    onbegintransaction = () => {},
+    oncommittransaction = () => {},
+    onrollbacktransaction = () => {},
     onmodk = undefined,
     onmods = undefined,
     onmodi = undefined,
@@ -150,7 +159,7 @@
         return
       }
       lastRanStatement = single ?? null
-      onrun(substituteSqlParams(target, paramValues))
+      onrun(substituteSqlParams(target, paramValues, dialectForEngine(engine)))
       return
     }
     lastRanStatement = single ?? null
@@ -516,6 +525,62 @@
         Stop
       </Button>
     {:else}
+      {#if txStatus?.open}
+        <!-- An open transaction changes what Run means, so it is said next to
+             Run, and its two exits sit beside it.
+             -
+             The state and the actions are separate controls now. They were one
+             amber pill with a neutral Commit and a red Roll back inside it:
+             three semantic colours in a 28px box, with the destructive red
+             measuring 4.80:1 against the amber wash it sat on - technically
+             legible, and still two alarm hues arguing inside one chip. The chip
+             now carries one hue and says one thing; the actions are ordinary
+             `h-7` toolbar buttons with real hit areas, and red appears on the
+             one control that destroys work, on hover, where it means something.
+             (Measured on --panel in the dark theme: warning text on the wash
+             8.69:1, the count 6.68:1.) -->
+        <div class="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-warning/25 bg-warning/10 px-2">
+          <span class="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true"></span>
+          <span class="whitespace-nowrap text-ui-2xs font-medium text-warning">In transaction</span>
+          <span class="whitespace-nowrap font-mono text-ui-2xs tabular-nums text-muted-foreground">
+            {txStatus.statements}<span class="ml-0.5">{txStatus.statements === 1 ? 'stmt' : 'stmts'}</span>
+          </span>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-7 shrink-0"
+          disabled={txBusy}
+          onclick={() => oncommittransaction()}
+          title={tipText('Commit', `Save everything this transaction has done: ${txStatus.statements} statement(s), ${txStatus.rowsAffected} row(s) changed.`)}
+        >
+          Commit
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-7 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
+          disabled={txBusy}
+          onclick={() => onrollbacktransaction()}
+          title={tipText('Roll back', 'Undo everything this transaction has done.')}
+        >
+          Roll back
+        </Button>
+      {:else}
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-7 shrink-0"
+          disabled={txBusy}
+          onclick={() => onbegintransaction()}
+          title={tipText(
+            'Begin transaction',
+            'Run statements without saving them, then commit or roll back.',
+          )}
+        >
+          Begin
+        </Button>
+      {/if}
       <!-- Split button: one wrapper owns the radius + shadow; the halves are
            plain buttons (the Button component's transparent border,
            bg-clip-padding and elevate shadow would each paint a seam). -->
@@ -544,32 +609,32 @@
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="start" class="min-w-72 text-ui-sm">
             <DropdownMenu.Item onSelect={() => handleRun(undefined)}>
-              <Play class="size-3.5 shrink-0 text-muted-foreground/60" />
+              <Play class="size-3.5 shrink-0 text-muted-foreground" />
               <span class="whitespace-nowrap">Run all statements</span>
-              <DropdownMenu.Shortcut>{mod}↵</DropdownMenu.Shortcut>
+              <DropdownMenu.Shortcut combo="Mod+Enter" />
             </DropdownMenu.Item>
             <DropdownMenu.Item
               class="items-start"
               disabled={!cursorStmtPreview}
               onSelect={() => handleRun(cursorStmtPreview)}
             >
-              <TextCursorInput class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+              <TextCursorInput class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
               <div class="flex w-full min-w-0 flex-col gap-0.5">
                 <span class="flex w-full items-center whitespace-nowrap">
                   Run statement at cursor
-                  <DropdownMenu.Shortcut>{mod}R</DropdownMenu.Shortcut>
+                  <DropdownMenu.Shortcut combo="Mod+R" />
                 </span>
                 {#if cursorStmtPreview}
-                  <span class="truncate font-mono text-ui-2xs leading-4 text-muted-foreground/55">{clipSql(cursorStmtPreview)}</span>
+                  <span class="truncate font-mono text-ui-2xs leading-4 text-muted-foreground">{clipSql(cursorStmtPreview)}</span>
                 {/if}
               </div>
             </DropdownMenu.Item>
             {#if selectionPreview}
               <DropdownMenu.Item class="items-start" onSelect={() => handleRun(selectionPreview)}>
-                <TextSelect class="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+                <TextSelect class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                 <div class="flex w-full min-w-0 flex-col gap-0.5">
                   <span class="whitespace-nowrap">Run selection</span>
-                  <span class="truncate font-mono text-ui-2xs leading-4 text-muted-foreground/55">{clipSql(selectionPreview)}</span>
+                  <span class="truncate font-mono text-ui-2xs leading-4 text-muted-foreground">{clipSql(selectionPreview)}</span>
                 </div>
               </DropdownMenu.Item>
             {/if}
@@ -671,11 +736,11 @@
         </DropdownMenu.Trigger>
         <DropdownMenu.Content align="start" class="min-w-44">
           <DropdownMenu.Item class="gap-2 whitespace-nowrap font-mono text-ui-xs" onclick={() => copyAsOrm('drizzle')}>
-            <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" />
+            <Code2 class="size-3.5 shrink-0 text-muted-foreground" />
             Copy as Drizzle
           </DropdownMenu.Item>
           <DropdownMenu.Item class="gap-2 whitespace-nowrap font-mono text-ui-xs" onclick={() => copyAsOrm('prisma')}>
-            <Code2 class="size-3.5 shrink-0 text-muted-foreground/50" />
+            <Code2 class="size-3.5 shrink-0 text-muted-foreground" />
             Copy as Prisma
           </DropdownMenu.Item>
         </DropdownMenu.Content>
@@ -686,15 +751,15 @@
   {#if paramsPanelOpen && sqlParams.length > 0}
     <div class="shrink-0 border-b border-border/60 bg-panel px-3 py-2">
       <div class="flex w-full max-w-2xl items-center gap-1.5 pb-1.5">
-        <Variable class="size-3 text-muted-foreground/50" />
-        <span class="select-none text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground/55">Parameters</span>
+        <Variable class="size-3 text-muted-foreground" />
+        <span class="select-none text-ui-3xs font-medium uppercase tracking-[0.08em] text-muted-foreground">Parameters</span>
         <span
-          class="select-none text-ui-3xs text-muted-foreground/35"
+          class="select-none text-ui-3xs text-muted-foreground"
           title="Auto detects numbers, booleans and NULL, everything else runs as a quoted string."
         >· Enter runs</span>
         <button
           type="button"
-          class="ml-auto inline-flex size-5 items-center justify-center rounded text-muted-foreground/60 transition-[background-color,color] hover:bg-accent hover:text-foreground"
+          class="ml-auto inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-[background-color,color] hover:bg-accent hover:text-foreground"
           aria-label="Close parameters"
           onclick={() => (paramsPanelOpen = false)}
         >
@@ -708,7 +773,7 @@
             <span
               class="justify-self-start truncate rounded bg-muted/50 px-1.5 py-0.5 font-mono text-ui-2xs text-foreground/75"
               title=":{p.name}"
-            ><span class="text-muted-foreground/50">:</span>{p.name}</span>
+            ><span class="text-muted-foreground">:</span>{p.name}</span>
             <div class="relative">
               <FieldSelect
                 size="sm"
@@ -730,7 +795,7 @@
               disabled={v.mode === 'null'}
               placeholder={v.mode === 'null' ? 'NULL' : v.mode === 'raw' ? 'now(), inserted verbatim' : 'value'}
               aria-label="Value for {p.name}"
-              class="h-7 w-full min-w-0 rounded-md border border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground/30 hover:border-border/60 focus:border-ring/55 focus:ring-2 focus:ring-ring/15 focus:outline-none disabled:opacity-40"
+              class= "field-surface h-7 w-full min-w-0 border-transparent bg-input/30 px-2 font-mono text-ui-xs text-foreground transition-colors placeholder:text-muted-foreground hover: focus:outline-none disabled:opacity-40"
               oninput={(e) => setParam(p.name, { ...v, value: e.currentTarget.value })}
               onkeydown={(e) => { if (e.key === 'Enter') handleRun(undefined) }}
             />
@@ -806,7 +871,7 @@
             onclick={() => { activeResultIdx = i; resultSort = null; selected = new Set() }}
             class={cn(
               'relative flex items-center border-b-2 px-2.5 font-mono text-ui-xs transition-colors',
-              rsActive ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground/50 hover:text-muted-foreground',
+              rsActive ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-muted-foreground',
             )}
           >
             Result {i + 1}
@@ -839,10 +904,10 @@
             class={cn(
               'flex size-7 items-center justify-center rounded transition-colors',
               locked
-                ? 'cursor-not-allowed opacity-40 text-muted-foreground/30'
+                ? 'cursor-not-allowed opacity-40 text-muted-foreground'
                 : isError
-                  ? tabActive ? 'bg-muted/70 text-destructive' : 'text-destructive/70 hover:bg-muted/40 hover:text-destructive'
-                  : tabActive ? 'bg-muted/70 text-foreground' : 'text-muted-foreground/50 hover:bg-muted/40 hover:text-muted-foreground',
+                  ? tabActive ? 'bg-muted/70 text-destructive' : 'text-destructive hover:bg-muted/40 hover:text-destructive'
+                  : tabActive ? 'bg-muted/70 text-foreground' : 'text-muted-foreground hover:bg-muted/40 hover:text-muted-foreground',
             )}
             title="{tab.label} view{locked ? ' · Stroke Pro' : ''}"
           >
@@ -867,29 +932,29 @@
         {#if outputVisible && currentDisplay.rows.length > 0}
           <DropdownMenu.Root>
             <DropdownMenu.Trigger
-              class="flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+              class="flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
               title="Export results"
             >
               <Download class="size-3.5" />
             </DropdownMenu.Trigger>
             <DropdownMenu.Content align="end" class="min-w-36">
               <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('csv')}>
-                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />CSV
+                <Download class="size-3.5 shrink-0 text-muted-foreground" />CSV
               </DropdownMenu.Item>
               <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('json')}>
-                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />JSON
+                <Download class="size-3.5 shrink-0 text-muted-foreground" />JSON
               </DropdownMenu.Item>
               <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('sql')}>
-                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />SQL (INSERT)
+                <Download class="size-3.5 shrink-0 text-muted-foreground" />SQL (INSERT)
               </DropdownMenu.Item>
               <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('tsv')}>
-                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />TSV
+                <Download class="size-3.5 shrink-0 text-muted-foreground" />TSV
               </DropdownMenu.Item>
               <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('md')}>
-                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />Markdown
+                <Download class="size-3.5 shrink-0 text-muted-foreground" />Markdown
               </DropdownMenu.Item>
               <DropdownMenu.Item class="gap-2 font-mono text-ui-xs" onclick={() => exportAs('jsonl')}>
-                <Download class="size-3.5 shrink-0 text-muted-foreground/50" />JSON Lines
+                <Download class="size-3.5 shrink-0 text-muted-foreground" />JSON Lines
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>
@@ -898,7 +963,7 @@
         <button
           type="button"
           onclick={toggleOutput}
-          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+          class="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
           title={tipText(outputVisible ? 'Hide results' : 'Show results', 'Collapse the results panel to give the editor the full height.', [mod, 'J'])}
         >
           <ChevronDown class={cn('size-3.5 transition-transform duration-150', outputVisible ? '' : 'rotate-180')} />
@@ -912,8 +977,8 @@
           {#if outputView === 'error'}
             {#if isNetworkError(error)}
               <div class="flex h-full flex-col items-center justify-center gap-2.5 px-6 text-center">
-                <WifiOff class="size-6 text-muted-foreground/25" />
-                <p class="font-mono text-ui-sm text-muted-foreground/70">Cannot reach database, check your connection and try again.</p>
+                <WifiOff class="size-6 text-muted-foreground" />
+                <p class="font-mono text-ui-sm text-muted-foreground">Cannot reach database, check your connection and try again.</p>
               </div>
             {:else}
               <!-- SQL error as a console pane (VS Code / Postman feel): neutral
@@ -925,9 +990,9 @@
                 <!-- Console toolbar, neutral chrome, ghost actions -->
                 <div class="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5 select-none">
                   <span class="size-1.5 shrink-0 rounded-full bg-destructive"></span>
-                  <span class="text-ui-2xs font-semibold uppercase tracking-[0.08em] text-destructive/90">Error</span>
+                  <span class="text-ui-2xs font-semibold uppercase tracking-[0.08em] text-destructive">Error</span>
                   {#if currentDisplay.queryMs > 0}
-                    <span class="text-ui-2xs tabular-nums text-muted-foreground/45">· {currentDisplay.queryMs}ms</span>
+                    <span class="text-ui-2xs tabular-nums text-muted-foreground">· {currentDisplay.queryMs}ms</span>
                   {/if}
                   <div class="ml-auto flex shrink-0 items-center gap-1">
                     <button
@@ -935,7 +1000,7 @@
                       onclick={copyError}
                       title="Copy error"
                       aria-label="Copy error"
-                      class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted/60 hover:text-foreground"
+                      class="inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                     >
                       {#if errorCopied}<Check class="size-3 shrink-0" />{:else}<Copy class="size-3 shrink-0" />{/if}
                     </button>
@@ -945,7 +1010,7 @@
                         onclick={fixWithAi}
                         class="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-2 py-1 text-ui-2xs font-medium text-muted-foreground transition-[background-color,border-color,color,transform] duration-150 hover:border-border hover:bg-muted/60 hover:text-foreground active:scale-[0.97]"
                       >
-                        <Wand2 class="size-2.5 shrink-0" />
+                        <Wand2 class="size-3 shrink-0" />
                         Fix with AI
                       </button>
                     {/if}
@@ -959,13 +1024,13 @@
                   <div class="border-l-2 border-destructive/40 pl-3">
                     <pre class="select-text whitespace-pre-wrap [overflow-wrap:anywhere] text-ui-xs leading-relaxed text-foreground/85">{error}</pre>
                     {#if /statement timeout|canceling statement due to/i.test(error)}
-                      <p class="mt-3 text-ui-2xs leading-relaxed text-muted-foreground/60">
+                      <p class="mt-3 text-ui-2xs leading-relaxed text-muted-foreground">
                         The query timed out. If this table has large JSON/text columns, select just the
                         columns you need instead of <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">*</code>, or add a smaller
                         <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">LIMIT</code>.
                       </p>
                     {:else if /relation "[^"]*" does not exist|column "[^"]*" does not exist/i.test(error)}
-                      <p class="mt-3 text-ui-2xs leading-relaxed text-muted-foreground/60">
+                      <p class="mt-3 text-ui-2xs leading-relaxed text-muted-foreground">
                         PostgreSQL folds unquoted names to lowercase, so a table like
                         <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">Products</code> only matches when quoted -
                         <code class="rounded bg-muted/60 px-1 py-px text-foreground/70">SELECT * FROM "Products"</code>. Pick the table from
@@ -981,14 +1046,14 @@
               <TableLoading />
             {:else if explainError}
               <div class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-                <p class="font-mono text-ui-xs text-destructive/70">{explainError}</p>
+                <p class="font-mono text-ui-xs text-destructive">{explainError}</p>
               </div>
             {:else if explainResult}
               <ExplainPlan result={explainResult} />
             {:else}
               <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
-                <ScanSearch class="size-6 text-muted-foreground/20" />
-                <p class="font-mono text-ui-sm text-muted-foreground/50">Click Explain to analyze the query plan</p>
+                <ScanSearch class="size-6 text-muted-foreground" />
+                <p class="font-mono text-ui-sm text-muted-foreground">Click Explain to analyze the query plan</p>
               </div>
             {/if}
           {:else if currentDisplay.columns.length > 0}
@@ -1017,8 +1082,8 @@
             <TableLoading />
           {:else}
             <div class="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <Play class="size-6 text-muted-foreground/20" />
-              <p class="font-mono text-ui-sm text-muted-foreground/50">Run a query to see results</p>
+              <Play class="size-6 text-muted-foreground" />
+              <p class="font-mono text-ui-sm text-muted-foreground">Run a query to see results</p>
             </div>
           {/if}
         {/key}

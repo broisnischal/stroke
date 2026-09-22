@@ -18,6 +18,6 @@
   aria-live="polite"
   aria-busy="true"
 >
-  <Loader class="size-5 animate-spin text-muted-foreground/50" />
-  <span class="mt-2 text-ui-xs text-muted-foreground/60">{message}</span>
+  <Loader class="size-5 animate-spin text-muted-foreground" />
+  <span class="mt-2 text-ui-xs text-muted-foreground">{message}</span>
 </div>
