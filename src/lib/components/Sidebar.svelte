@@ -1853,7 +1853,9 @@
 
             <!-- ── Pinned ─────────────────────────────────────────── -->
             {#if showPins && filteredPinnedTables.length > 0 && connectionName}
-              <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
+              <!-- `pb-1.5`, because the action row is 20px tall now and 4px of
+                   air put it on top of the first pin. -->
+              <div class="flex w-full items-center gap-1.5 px-2.5 pt-2 pb-1.5">
                 <Icon name="pin" class="size-3 shrink-0 text-muted-foreground" />
                 <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Pinned</span>
                 {@render countBadge(filteredPinnedTables.length, visiblePinnedTables.length, true)}
@@ -1863,12 +1865,19 @@
                      did not land on a row, and the header is not a row - so
                      "select all" selected seven tables and the same click
                      deselected them again before the frame was out. -->
-                <div class="ml-auto flex shrink-0 items-center gap-1">
+                <!-- `size-5` with `gap-1.5`, not `size-4` with `gap-1`:
+                     `hit-area` gives each of these a 24px target whatever their
+                     visual size, and 16px buttons 4px apart put those targets
+                     20px apart - overlapping by 4px, so a click near the edge
+                     of one landed on the other. 20px buttons 6px apart clear
+                     each other, and a hover surface makes them read as buttons
+                     rather than as two glyphs in the heading. -->
+                <div class="ml-auto flex shrink-0 items-center gap-1.5">
                   <button
                     type="button"
                     aria-pressed={allPinnedSelected}
                     class={cn(
-                      'hit-area inline-flex size-4 items-center justify-center rounded transition-colors hover:text-foreground',
+                      'hit-area inline-flex size-5 items-center justify-center rounded-md transition-colors hover:bg-muted/50 hover:text-foreground',
                       allPinnedSelected ? 'text-primary' : 'text-muted-foreground',
                     )}
                     onclick={(e) => { e.stopPropagation(); toggleSelectAllPinned() }}
@@ -1876,20 +1885,25 @@
                       ? `Deselect all ${filteredPinnedTables.length} pinned tables`
                       : `Select all ${filteredPinnedTables.length} pinned tables`}
                   >
-                    <Icon name={allPinnedSelected ? 'check-circle-2' : 'check'} class="size-3" />
+                    <Icon name={allPinnedSelected ? 'check-circle-2' : 'check'} class="size-3.5" />
                   </button>
                   <button
                     type="button"
-                    class="hit-area inline-flex size-4 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
+                    class="hit-area inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
                     onclick={(e) => { e.stopPropagation(); openAllPinned() }}
                     title="Open all {filteredPinnedTables.length} pinned tables in tabs"
                   >
-                    <Icon name="external-link" class="size-3" />
+                    <Icon name="external-link" class="size-3.5" />
                   </button>
                   {#if pinnedTables.length > 5}
+                    <!-- A hairline before the destructive one. It is a word
+                         among glyphs and the only action here that throws
+                         something away, so it gets its own side of a rule
+                         rather than sitting flush against "open all". -->
+                    <span class="h-3 w-px shrink-0 bg-border/50" aria-hidden="true"></span>
                     <button
                       type="button"
-                      class="font-mono text-ui-2xs text-muted-foreground transition-colors hover:text-destructive"
+                      class="hit-area inline-flex h-5 items-center rounded-md px-1 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
                       onclick={(e) => { e.stopPropagation(); clearAllPins() }}
                       title="Clear all pinned tables"
                     >Clear all</button>
