@@ -20,6 +20,8 @@
 
 - **Disconnect survives a restart.** Auto-reconnect read the last-connection id as "resume this", so quitting while disconnected came back connected.
 
+- **The staged rows sit on their columns at any scroll offset.** The insert band worked out its own geometry instead of reading the canvas's: it summed the gutters by hand and left the row-number one out, and its horizontal pin was a sticky box whose behaviour depends on how wide it is, so how well it held varied with the table. Dragging a wide table sideways slid the band against the grid under it. Every x and width now comes from the same `geom` the canvas draws from, and the band shares the canvas's sticky anchor, so the two measure the viewport's left edge from one box. Tab inside the band scrolls the column into view, which a pinned band cannot ask the browser to do for it.
+
 - **The search highlight follows how the search matched.** It ran `indexOf` over a lowercased copy of the text, so with match-case on it highlighted `Aarav` for a search that returned nothing containing it, and a regex search marked the pattern's literal characters.
 
 - **`F5` refreshes the table, not the app.** It was bound to nothing, so the webview reloaded the document - tearing down the session, redialling the connection and re-reading the catalog.
