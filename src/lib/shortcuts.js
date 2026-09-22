@@ -151,6 +151,7 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Alt+Shift+R', desc: 'Reset table view (clear filters/sort/search)' },
       { combo: 'Alt+F', desc: 'Filter by the focused cell\'s value' },
       { combo: 'Alt+E', desc: 'Exclude the focused cell\'s value' },
+      { combo: 'Alt+X', desc: 'Clear the table search (Escape inside the box does too)' },
       { combo: 'Alt+N', desc: 'Stage a new row (again for another)' },
       { combo: 'Alt+D', desc: 'Copy the focused row into the insert draft' },
       { combo: 'Mod+Escape', desc: 'Discard every staged row' },

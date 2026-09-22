@@ -2743,6 +2743,18 @@ let rowSearch = $state('')
     void handleModRefresh()
   })
 
+  // Alt+X empties the table search from anywhere in the tab - the ✕ and Escape
+  // both want the caret already in the box, and the point of a search you are
+  // done with is that you have moved on to the rows.
+  createHotkey('Alt+X', (e) => {
+    if (!connection) return
+    if (commandOpen || showConnectionModal || showSettingsModal) return
+    if (activeTab?.kind !== 'table' || !activeTable) return
+    if (!rowSearch.trim()) return
+    e.preventDefault()
+    tableToolbar?.clearRowSearch?.()
+  })
+
   // Alt+N stages a new row, the same thing the toolbar's Add does. It joins the
   // Alt family the grid already uses for what is in front of you - Alt+F filter
   // by this value, Alt+E exclude it, Alt+D duplicate this row - and it appends,
@@ -8282,6 +8294,7 @@ let rowSearch = $state('')
                 {rowSort}
                 {rowSortMore}
                 searchQuery={rowSearch}
+                {searchOptions}
                 onsortchange={(s) => void handleRowSortChange(s)}
                 onhidecolumn={(colName) => {
                   const next = new Set(hiddenColumns)

@@ -184,6 +184,15 @@
   }
 
   function onSearchKeydown(e) {
+    // Escape empties the box. It is what the key means in every search field
+    // there is, and reaching for the ✕ with a hand already on the keyboard is
+    // the kind of small friction that adds up over a day.
+    if (e.key === "Escape" && localSearch) {
+      e.preventDefault();
+      e.stopPropagation();
+      clearSearch();
+      return;
+    }
     const opt = searchOptionHotkey(e);
     if (!opt || !searchOptionsSupport[opt]) return;
     e.preventDefault();
@@ -841,7 +850,8 @@
           <button
             type="button"
             class="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground transition-[background-color,color] duration-150 ease-out hover:bg-muted/70 hover:text-foreground"
-            aria-label="Clear search"
+            aria-label="Clear search (Escape, or {IS_MAC ? '⌥X' : 'Alt+X'})"
+            title="Clear search (Esc)"
             onclick={clearSearch}
           >
             <Icon name="x" class="size-3" />

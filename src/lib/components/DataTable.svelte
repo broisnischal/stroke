@@ -360,6 +360,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     /** Active row-search query (toolbar search). Matched substrings are
      *  highlighted in the drawn cell text. */
     searchQuery = '',
+    /**
+     * How that query matched, so the highlight agrees with the rows.
+     * @type {{ matchCase?: boolean, wholeWord?: boolean, regex?: boolean }}
+     */
+    searchOptions = {},
   } = $props();
 
   /**
@@ -1355,8 +1360,31 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // this paints where each match falls inside the visible cell text. Matching
   // runs only while a search is active, on the already-truncated display
   // string, so the scroll hot path stays free of extra work otherwise.
-  const _searchLower = $derived(String(searchQuery ?? '').trim().toLowerCase());
-  $effect(() => { void _searchLower; scheduleDraw(); });
+  /**
+   * The matcher the highlight paints with, built from the same query and the
+   * same options the rows were fetched under.
+   *
+   * It used to be `indexOf` on a lowercased haystack, which contradicted the
+   * result it was drawn on: with match-case on, a search for `aarav` returned
+   * nothing containing `Aarav` and then highlighted `Aarav` anyway, and a regex
+   * search highlighted the pattern's literal characters. Null when there is
+   * nothing to paint, which keeps the scroll path free of this entirely.
+   * @type {RegExp | null}
+   */
+  const _searchMatcher = $derived.by(() => {
+    const q = String(searchQuery ?? '').trim();
+    if (!q) return null;
+    const flags = `g${searchOptions?.matchCase ? '' : 'i'}`;
+    const body = searchOptions?.regex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = searchOptions?.wholeWord ? `\\b(?:${body})\\b` : body;
+    try {
+      return new RegExp(pattern, flags);
+    } catch {
+      // A half-typed regex is not an error here - it just has nothing to mark.
+      return null;
+    }
+  });
+  $effect(() => { void _searchMatcher; scheduleDraw(); });
 
   const MAX_CELL_MATCH_HIGHLIGHTS = 8;
   /**
@@ -1364,20 +1392,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {number} textX @param {number} ry @param {number} rh @param {any} c
    */
   function drawSearchHighlights(ctx, drawn, textX, ry, rh, c) {
-    const q = _searchLower;
-    const hay = drawn.toLowerCase();
-    let from = 0, n = 0;
+    const re = _searchMatcher;
+    if (!re) return;
     const hh = Math.min(rh - 4, Math.round(17 * canvasZoom));
     const hy = ry + (rh - hh) / 2;
     ctx.fillStyle = withAlpha(c.AMBER, 0.3);
-    while (n < MAX_CELL_MATCH_HIGHLIGHTS) {
-      const at = hay.indexOf(q, from);
-      if (at === -1) break;
+    // `lastIndex` survives a call on a /g/ regex, and this instance is shared by
+    // every cell on screen - resetting it per cell is what stops the second cell
+    // in a row from being searched from the first one's offset.
+    re.lastIndex = 0;
+    let n = 0;
+    /** @type {RegExpExecArray | null} */
+    let m;
+    while (n < MAX_CELL_MATCH_HIGHLIGHTS && (m = re.exec(drawn)) !== null) {
+      // A pattern that can match nothing (`a*`) would otherwise spin here.
+      if (m[0] === '') { re.lastIndex++; continue; }
+      const at = m.index;
       const x0 = textX + (at > 0 ? ctx.measureText(drawn.slice(0, at)).width : 0);
-      const mw = ctx.measureText(drawn.slice(at, at + q.length)).width;
+      const mw = ctx.measureText(m[0]).width;
       roundRect(ctx, x0 - 1, hy, mw + 2, hh, 3);
       ctx.fill();
-      from = at + q.length;
       n++;
     }
   }
@@ -2360,7 +2394,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // Every column takes a value now, including generated ones, so Tab must
       // be able to reach them - initial focus still skips them (see beginInsertRow),
       // because overriding a sequence is the exception rather than the flow.
-      const editableCols = columns
+      // Visible ones only: Tab cannot land on a field the band does not draw.
+      const editableCols = visibleColumns
       if (!editableCols.length) return
       const curIdx = editableCols.findIndex(c => c.name === newRowFocusCol)
       if (e.shiftKey) {
@@ -3753,8 +3788,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     canScrollHorizontally = totalContentWidth > _viewportWidth + 1
   })
   // Insert row spans ALL columns (including hidden) so every field can be filled.
+  /**
+   * The band's width, from the same columns the canvas draws.
+   *
+   * It used to span every column, hidden ones included, which is a different
+   * width and a different set of x positions than the grid underneath - so one
+   * hidden column slid every staged cell after it out of line with its header,
+   * and the drift was widest at the far end where the relationship columns sit.
+   * A hidden column takes the database's default; unhide it to type into it.
+   */
   const insertRowTotalWidth = $derived(
-    gutterWidth + columns.reduce((acc, c) => acc + widthForColumn(c.name, c.dataType ?? c.data_type ?? ''), 0)
+    gutterWidth + visibleColumns.reduce((acc, c) => acc + widthForColumn(c.name, c.dataType ?? c.data_type ?? ''), 0)
   )
 
   /**
@@ -4684,12 +4728,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
-    // Anything typed inside the staged-row band belongs to the band, which has
-    // its own handler. First thing checked, because the grid's chords sit above
-    // this in the function and ⌘A among them was selecting every row in the
-    // table while the caret was in a draft field - where it means "select this
-    // value". Mod+Escape is the band's too (it clears the whole thing).
-    if (e.target instanceof HTMLElement && e.target.closest('[data-new-row]')) return
+    // A keystroke aimed at a field is the field's.
+    //
+    // The grid's chords are bound on the scroll container, so everything typed
+    // into anything inside it - the staged-row band, the inline cell editor, a
+    // picker's search box - bubbles up here. ⌘A was the one that showed: it
+    // selected every row in the table while the caret sat in a draft field,
+    // where it means "select this value". Checked first, because the chords sit
+    // above this in the function, and by element rather than by state so a field
+    // added later is covered without anyone remembering to come back here.
+    const keyTarget = e.target
+    if (
+      keyTarget instanceof HTMLElement &&
+      (keyTarget.closest('[data-new-row]') ||
+        keyTarget.isContentEditable ||
+        keyTarget instanceof HTMLInputElement ||
+        keyTarget instanceof HTMLTextAreaElement ||
+        keyTarget instanceof HTMLSelectElement)
+    ) {
+      return
+    }
     // Every move from here is a keyboard move, so the cursor may scroll itself
     // into view. Set before the branches rather than in each of them.
     _focusFromKey = true
@@ -5453,7 +5511,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       editingCell, focusedRow, hoveredRow, hoveredColName, focusColName, selectedCols,
       hasPendingEdits, pendingEdits, editedRowSet: _editedRowSet,
       colStats: _colStats, extActive: _extActive, colTransformFns: _colTransformFns,
-      searchLower: _searchLower, nullishOn: _nullishOn, rows,
+      searchMatcher: _searchMatcher, nullishOn: _nullishOn, rows,
       alignAll: $appTableAlign === 'right',
     }
 
@@ -6122,7 +6180,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const drawX = alignRight
         ? textX + Math.max(0, textMaxW - textWidth(ctx, drawn))
         : textX
-      if (c.searchLower && !isNull) drawSearchHighlights(ctx, drawn, drawX, ry, rh, c)
+      if (c.searchMatcher && !isNull) drawSearchHighlights(ctx, drawn, drawX, ry, rh, c)
       ctx.fillStyle = textColor
       ctx.fillText(drawn, drawX, cy + 0.5)
       if (dir?.link) {
@@ -7503,7 +7561,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                      One band per staged row, stacked under the header in the order
                      they were added. `top` walks down by a row height each time,
                      and `z-index` descends so an earlier row's ring is never drawn
-                     over by the one below it. -->
+                     over by the one below it.
+                     -
+                     Horizontally it is pinned (`left:0`) and translated by the
+                     same `_scrollLeft` the canvas draws with, exactly like the
+                     canvas's own sticky wrapper. Left to native scroll it moved
+                     the instant the wheel did while the columns behind it
+                     repainted on the next frame, and the two slid past each other
+                     - the parallax you see dragging a wide table sideways. -->
                 <div
                   role="none"
                   data-new-row={di}
@@ -7517,12 +7582,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     // pushed onto everything the band renders - a staged row has
                     // to line up with the rows under it, and those are drawn at
                     // the grid's own font size, not at a rung of the UI scale.
-                    'cell-fields sticky flex bg-panel [&_button]:text-[length:inherit] [&_input]:text-[length:inherit] [&_span]:text-[length:inherit]',
+                    'cell-fields sticky flex overflow-hidden bg-panel [&_button]:text-[length:inherit] [&_input]:text-[length:inherit] [&_span]:text-[length:inherit]',
                     di === draftCount - 1
                       ? 'border-b-2 border-success/35'
                       : 'border-b border-border/30',
                   )}
-                  style="top:{HEADER_H + di * ROW_HEIGHT}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px; z-index:{20 - Math.min(di, 9)}; font-size:{gridMetrics.cellPx}px"
+                  style="top:{HEADER_H + di * ROW_HEIGHT}px; left:0; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px; z-index:{20 - Math.min(di, 9)}; font-size:{gridMetrics.cellPx}px; transform:translateX({-_scrollLeft}px)"
                   onkeydown={(e) => onNewRowKeydown(e, di)}
                 >
                   {#if showRowExpand}
@@ -7557,7 +7622,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       </button>
                     </div>
                   {/if}
-                  {#each columns as col (col.name)}
+                  {#each visibleColumns as col (col.name)}
                     {@const dt = col.dataType ?? col.data_type ?? ''}
                     {@const omit = insertOmitBehaviour(col, primaryKey)}
                     {@const isAuto = omit === 'auto'}
@@ -7603,30 +7668,45 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                           oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
                           onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
                         />
-                      {:else if enumValues}
-                        <InsertValuePicker
-                          colName={col.name}
-                          options={enumValues}
-                          value={rowDraft[col.name] ?? ''}
-                          emptyLabel={blankLabel}
-                          placeholder={blankLabel}
-                          placeholderClass={blankClass}
-                          disabled={insertSaving}
-                          onchange={(v) => setNewRowDraft(di, col.name, v)}
-                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
-                        />
-                      {:else if isBoolean}
-                        <InsertValuePicker
-                          colName={col.name}
-                          options={['true', 'false']}
-                          value={rowDraft[col.name] ?? ''}
-                          emptyLabel={blankLabel}
-                          placeholder={blankLabel}
-                          placeholderClass={blankClass}
-                          disabled={insertSaving}
-                          onchange={(v) => setNewRowDraft(di, col.name, v)}
-                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
-                        />
+                      {:else if enumValues || isBoolean}
+                        <!-- The same searchable menu the inline cell editor uses
+                             for an enum, so picking a value is one control in the
+                             app rather than two takes on it. The blank row stays
+                             first and says what leaving the field alone does -
+                             `default`, `NULL` or `Required` - which is the one
+                             thing an insert needs that an edit never does. -->
+                        {@const opts = enumValues ?? ['true', 'false']}
+                        {@const picked = rowDraft[col.name] ?? ''}
+                        <SearchableMenu
+                          items={[{ value: '', label: blankLabel }, ...opts.map((o) => ({ value: o, label: o }))]}
+                          placeholder="Search values…"
+                          contentClass="w-56"
+                          align="start"
+                          onselect={(it) => setNewRowDraft(di, col.name, it.value ?? '')}
+                        >
+                          {#snippet trigger(props)}
+                            <button
+                              {...props}
+                              data-new-row-input={col.name}
+                              type="button"
+                              disabled={insertSaving}
+                              aria-label="{col.name} value"
+                              class="flex h-full w-full min-w-0 items-center gap-1 bg-transparent text-left font-mono text-[length:inherit] outline-none disabled:opacity-50"
+                              onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
+                            >
+                              <span class={cn('min-w-0 flex-1 truncate', picked ? 'text-foreground' : blankClass.replace(/placeholder:/g, ''))}>
+                                {picked || blankLabel}
+                              </span>
+                              <Icon name="chevron-down" class="size-3 shrink-0 opacity-50" />
+                            </button>
+                          {/snippet}
+                          {#snippet item(it)}
+                            <span class="min-w-0 flex-1 truncate">{it.label}</span>
+                            {#if picked === it.value}
+                              <Icon name="check" class="size-3.5 shrink-0 text-primary" />
+                            {/if}
+                          {/snippet}
+                        </SearchableMenu>
                       {:else if isDateTime || isDateOnly}
                         <!-- The same shape the inline cell editor uses: calendar
                              on the trailing edge, value at the grid's type size,
