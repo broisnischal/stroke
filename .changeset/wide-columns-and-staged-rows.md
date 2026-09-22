@@ -20,6 +20,12 @@
 
 - **Disconnect survives a restart.** Auto-reconnect read the last-connection id as "resume this", so quitting while disconnected came back connected.
 
+- **A field inside the grid gets the keys a field gets.** The grid's undo/redo/copy listener is bound on `window`, so it ran before every other capture handler in the app - including the one that gives inputs their undo stack and their word deletion. ⌘Z with the caret in a staged row undid a cell edit somewhere else in the table and took the field's own ⌘Z with it. It now stands down for anything you type into, and Alt+Backspace deletes a word on Linux and Windows as well as macOS, which also stops the global "discard staged changes" binding from throwing the row away mid-sentence.
+
+- **A large value loads into the cell it belongs to.** The in-cell load stopped at 1MB on the grounds that a cell's value is what the canvas formats and the search walks - but the canvas cuts the drawn text to 400 characters and caches it, the highlighter matches that same cut string, and the row search runs in SQL. A 1.2MB resume was being refused for a cost nobody was paying. The ceiling is now the dock's 8MB, and past 1MB a JSON value stays the text it arrived as rather than being parsed and re-serialized to show forty characters of itself.
+
+- **The Add button names its shortcut.** Its tooltip read "Insert row (Add)", which is the label, not a chord. It says `Alt+N` now, and `Alt+N` works from inside the staged band too - "again for another" is exactly where you are already typing.
+
 - **The staged rows sit on their columns at any scroll offset.** The insert band worked out its own geometry instead of reading the canvas's: it summed the gutters by hand and left the row-number one out, and its horizontal pin was a sticky box whose behaviour depends on how wide it is, so how well it held varied with the table. Dragging a wide table sideways slid the band against the grid under it. Every x and width now comes from the same `geom` the canvas draws from, and the band shares the canvas's sticky anchor, so the two measure the viewport's left edge from one box. Tab inside the band scrolls the column into view, which a pinned band cannot ask the browser to do for it.
 
 - **The search highlight follows how the search matched.** It ran `indexOf` over a lowercased copy of the text, so with match-case on it highlighted `Aarav` for a search that returned nothing containing it, and a regex search marked the pattern's literal characters.

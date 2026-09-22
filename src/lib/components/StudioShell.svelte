@@ -6870,16 +6870,29 @@ let rowSearch = $state('')
   }
 
   /**
-   * What the dock will hold. The fetch command can return far more, but a
-   * `<textarea>` in a webview cannot lay out tens of megabytes - 8MB is already
-   * past anything anyone reads and is the point where the panel stays usable.
+   * What a load will hold, in the dock and in the cell alike. The fetch command
+   * can return far more, but a `<textarea>` in a webview cannot lay out tens of
+   * megabytes - 8MB is already past anything anyone reads and is the point where
+   * the panel stays usable.
+   *
+   * The cell used to stop at 1MB on the theory that its value is what the canvas
+   * formats and the search walks. It is, but neither reads more than the forty
+   * characters a cell is wide: the drawn text is cut to 400 chars and cached per
+   * row, the highlighter matches that same cut string, and the row search runs
+   * in SQL. A 1.2MB resume refusing to load into the cell it belongs to was that
+   * theory charging for a cost it was not paying.
    */
   const DOCK_VALUE_MAX = 8 * 1024 * 1024
+  const CELL_VALUE_MAX = DOCK_VALUE_MAX
   /**
-   * What a grid cell will hold. Far lower, because this value goes into the row
-   * the canvas formats and the search walks, on every frame and every keystroke.
+   * Above this, a loaded JSON value stays the text it arrived as rather than
+   * being parsed into an object. Drawing an object means stringifying it, so a
+   * parsed 6MB payload is a 6MB parse on the way in and a 6MB serialize on the
+   * way out, both blocking, to show forty characters - and it retains both
+   * copies. As text it is a slice. The dock reads JSON out of text perfectly
+   * well, so nothing downstream loses anything.
    */
-  const CELL_VALUE_MAX = 1024 * 1024
+  const CELL_PARSE_MAX = 1024 * 1024
 
   /**
    * Load one capped cell and put it in the row, for the grid's in-cell button.
@@ -6894,18 +6907,20 @@ let rowSearch = $state('')
     const res = await handleFetchCellValue(detail, CELL_VALUE_MAX)
     if (res.truncated) {
       // A cut value in a cell is worse than the size it replaces: it reads as
-      // the value and is not one. The dock holds more and says what it holds.
-      toast.info('Too large for a cell', {
-        description: `${col.name} is ${formatByteSize(res.bytes)}. Open it with Shift+Space and load it there.`,
+      // the value and is not one. Past this size nothing loads whole anywhere,
+      // so the dock is the honest answer - it pages through what it has.
+      toast.info('Too large to load whole', {
+        description: `${col.name} is ${formatByteSize(res.bytes)}, past the ${formatByteSize(CELL_VALUE_MAX)} this loads in one piece. Open it with Shift+Space to read it in pages.`,
       })
       return
     }
     // A JSON column renders from a parsed value, the way an under-cap row in the
-    // same column already arrives; anything else is text.
+    // same column already arrives; anything else is text. Past CELL_PARSE_MAX it
+    // stays text too - see the constant.
     const type = String(col.dataType ?? col.data_type ?? '').toLowerCase()
     /** @type {unknown} */
     let next = res.text
-    if (type === 'json' || type === 'jsonb') {
+    if ((type === 'json' || type === 'jsonb') && res.text.length <= CELL_PARSE_MAX) {
       try { next = JSON.parse(res.text) } catch { /* leave it as text */ }
     }
     rows[detail.rowIdx] = rows[detail.rowIdx].map((cell, j) => (j === detail.colIdx ? next : cell))
