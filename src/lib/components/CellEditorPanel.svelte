@@ -27,6 +27,7 @@
    * @property {unknown} value
    * @property {string} [sourceHint] Small context hint, e.g. "row 12".
    * @property {boolean} [readOnly]
+   * @property {boolean} [detached] Showing a value with no cell behind it.
    * @property {(next: string) => void} oncommit
    */
   import Pencil from '@lucide/svelte/icons/pencil'
@@ -36,6 +37,8 @@
   import { cn } from '$lib/utils.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import Kbd from './Kbd.svelte'
+  import JsonTree from './JsonTree.svelte'
+  import Braces from '@lucide/svelte/icons/braces'
   import { resetInputHistory } from '$lib/input-shortcuts.js'
 
   let {
@@ -45,6 +48,7 @@
     value = null,
     sourceHint = '',
     readOnly = false,
+    detached = false,
     oncommit = /** @type {(next: string) => void} */ (() => {}),
   } = $props()
 
@@ -81,7 +85,7 @@
   // Focus is taken on open only. Following the cursor must not pull focus out of
   // the grid, or the arrow key that moved it would be the last one that worked.
   $effect(() => {
-    const cell = `${colName}\u0000${sourceHint}`
+    const cell = `${colName}\u0000${sourceHint}\u0000${detached ? 'd' : ''}`
     const text = toText(value)
     if (!open) { wasOpen = false; seededCell = ''; return }
     if (wasOpen && cell === seededCell) return
@@ -109,11 +113,35 @@
   const dirty = $derived(draft !== original)
   const isNull = $derived(value === null || value === undefined)
 
-  /** Structured values get a preview pane; plain text does not need one. */
+  /** Structured values get a tree pane; plain text does not need one. */
   const parsed = $derived.by(() => {
     const t = draft.trim()
     if (!t || (t[0] !== '{' && t[0] !== '[')) return null
     try { return { ok: true, value: JSON.parse(t) } } catch (e) { return { ok: false, error: String(e) } }
+  })
+  const isTreeable = $derived(!!parsed?.ok)
+
+  /**
+   * Whether the raw text sits beside the tree.
+   *
+   * A JSON cell opens as the tree alone, because that is what you came to do -
+   * read the shape of it. The raw pane is one click away and is where editing
+   * happens. Plain text has no tree, so it is always the raw pane and this
+   * never applies.
+   *
+   * Latched on `isTreeable` rather than set from the seed effect: the dock
+   * follows the cell cursor, and re-deciding this on every move would override
+   * a choice made two rows ago. It flips only when the cursor crosses between a
+   * structured value and a flat one, which is when the old choice stops
+   * meaning anything.
+   */
+  let rawOpen = $state(false)
+  let _lastTreeable = /** @type {boolean | null} */ (null)
+  $effect(() => {
+    const t = isTreeable
+    if (t === _lastTreeable) return
+    _lastTreeable = t
+    rawOpen = !t
   })
 
   const lines = $derived(draft ? draft.split('\n').length : 0)
@@ -231,7 +259,9 @@
       <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">NULL</span>
     {/if}
     {#if readOnly}
-      <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">read-only</span>
+      <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">
+        {detached ? 'inside a row · read-only' : 'read-only'}
+      </span>
     {/if}
     <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground">
       {lines.toLocaleString()}L · {chars.toLocaleString()}c
@@ -241,6 +271,25 @@
     {/if}
 
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
+      {#if isTreeable}
+        <!-- The tree is the default for a structured value and the raw text is
+             one click away, which is the other way round from how this started:
+             the pane beside the editor was a `<pre>` of the very same
+             pretty-printed JSON, so the dock showed one value twice. -->
+        <button
+          type="button"
+          aria-pressed={rawOpen}
+          class={cn(
+            'inline-flex h-7 items-center gap-1.5 rounded px-2 font-mono text-ui-2xs transition-colors hover:bg-muted/40 hover:text-foreground',
+            rawOpen ? 'bg-muted/40 text-foreground' : 'text-muted-foreground',
+          )}
+          onclick={() => (rawOpen = !rawOpen)}
+          title={rawOpen ? 'Hide the raw text' : 'Show the raw text, which is where editing happens'}
+        >
+          <Braces class="size-3.5 shrink-0" />
+          Raw
+        </button>
+      {/if}
       <button
         type="button"
         aria-pressed={wrap}
@@ -291,7 +340,7 @@
   <div class="flex min-h-0 flex-1">
     <!-- Line numbers, on the same 20px baseline grid as the text. Padded top by
          the same 8px the textarea is, so line 1 lines up with line 1. -->
-    {#if !wrap}
+    {#if !wrap && rawOpen}
       <div
         bind:this={gutterEl}
         aria-hidden="true"
@@ -301,7 +350,11 @@
         {#each lineNumbers as n (n)}<div class="px-2">{n}</div>{/each}
       </div>
     {/if}
+    <!-- `hidden`, not unmounted: the textarea holds the draft, the undo history
+         and the caret. Tearing it down to show the tree would discard all three
+         and re-seed the value on the way back. -->
     <textarea
+      class:hidden={!rawOpen}
       bind:this={area}
       bind:value={draft}
       readonly={readOnly}
@@ -323,16 +376,37 @@
       placeholder={isNull ? 'NULL' : ''}
     ></textarea>
     {#if parsed}
-      <div class="flex min-h-0 w-1/2 shrink-0 flex-col border-l border-border/40">
+      <!-- A tree, not a second copy of the text. This is also what a JSON cell
+           opens into now: it used to open a modal that instantiated Monaco -
+           a ~4MB chunk, its workers and a full editor - to display a 300-byte
+           object, which is the whole of the lag. `JsonTree` mounts only the
+           nodes that are expanded and pages long arrays, so a click costs
+           nothing and there is no dialog over the rows the value came from. -->
+      <div
+        class={cn(
+          'flex min-h-0 flex-col',
+          rawOpen ? 'w-1/2 shrink-0 border-l border-border/40' : 'flex-1',
+        )}
+      >
         <div class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/30 px-2.5">
-          <span class="text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Preview</span>
+          <span class="text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            {parsed.ok ? 'Tree' : 'Preview'}
+          </span>
           {#if !parsed.ok}
             <span class="truncate font-mono text-ui-3xs text-destructive">invalid JSON</span>
           {/if}
         </div>
-        <div class="app-scroll min-h-0 flex-1 overflow-auto px-2.5 py-2">
+        <div class="app-scroll min-h-0 flex-1 overflow-auto px-2 py-1.5">
           {#if parsed.ok}
-            <pre class="whitespace-pre-wrap break-words font-mono text-ui-3xs leading-relaxed text-foreground/80">{JSON.stringify(parsed.value, null, 2)}</pre>
+            <JsonTree
+              value={parsed.value}
+              defaultDepth={2}
+              oncopy={(v) => {
+                const text = typeof v === 'string' ? v : JSON.stringify(v, null, 2)
+                void navigator.clipboard?.writeText(text)
+                toast.success('Copied')
+              }}
+            />
           {:else}
             <p class="font-mono text-ui-3xs leading-relaxed text-destructive/90">{parsed.error}</p>
           {/if}

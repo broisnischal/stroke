@@ -120,15 +120,19 @@ describe('JSON word wrap reaches every JSON view', () => {
     expect(settings).toMatch(/setStore\(appJsonWordWrap/)
   })
 
-  it('is honoured by all five JSON surfaces', () => {
-    // The app shows JSON in five places, each with its own editor. A wrap
+  it('is honoured by every JSON surface', () => {
+    // The app shows JSON in several places, each with its own editor. A wrap
     // preference that only some of them read is worse than none: the switch
     // appears to do nothing depending on where you are looking. RowExpandViewer
     // in particular used to keep its own localStorage key for this.
+    //
+    // `JsonCellLightbox` was the sixth and is gone: a JSON cell opens in the
+    // bottom dock now (`CellEditorPanel`), which is a cell editor rather than a
+    // JSON viewer - its wrap covers prose and stack traces too, so it keeps its
+    // own Alt+Z toggle instead of following the JSON preference.
     for (const file of [
       'JsonViewer',
       'JsonViewerPage',
-      'JsonCellLightbox',
       'TableJsonView',
       'RowExpandViewer',
     ]) {

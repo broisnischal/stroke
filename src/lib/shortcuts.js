@@ -149,6 +149,7 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Alt+Shift+C', desc: 'Open columns menu' },
       { combo: 'Alt+Shift+R', desc: 'Reset table view (clear filters/sort/search)' },
       { combo: 'Mod+E', desc: 'Expand / collapse the focused row' },
+      { combo: 'Shift+Space', desc: 'Preview the focused cell in the bottom dock' },
       { combo: 'Enter', desc: 'Edit cell' },
       { combo: 'F2', desc: 'Edit cell' },
       { combo: 'Escape', desc: 'Cancel edit' },

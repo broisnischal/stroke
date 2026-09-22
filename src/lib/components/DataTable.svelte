@@ -37,6 +37,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import Braces from "@lucide/svelte/icons/braces";
   import CheckSquare from "@lucide/svelte/icons/check-square";
   import PanelRight from "@lucide/svelte/icons/panel-right";
+  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import Pin from "@lucide/svelte/icons/pin";
   import PinOff from "@lucide/svelte/icons/pin-off";
   import Table2 from "@lucide/svelte/icons/table-2";
@@ -116,7 +117,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import GeometryCellViewer from "./GeometryCellViewer.svelte";
   import { isGeometryType, geometrySummary } from "$lib/geometry-cell.js";
   import FkSubviewPanel from "./FkSubviewPanel.svelte";
-  // JsonCellLightbox (Monaco-based) is imported lazily at its render site below.
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Check from "@lucide/svelte/icons/check";
   import Loader from "@lucide/svelte/icons/loader";
@@ -793,27 +793,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Lightbox (click-to-open image / PDF) ──────────────────────────────────
   /** @type {string | null} */
   let lightboxUrl = $state(null);
-
-  /** @type {{ value: unknown, colName: string } | null} */
-  let jsonLightbox = $state(null)
-
-  /** @param {unknown} value @param {string} colName @param {MouseEvent} e */
-  function openJsonLightbox(value, colName, e) {
-    e.stopPropagation()
-    void prefetchJsonLightbox() // ensure the chunk is loading even if hover didn't warm it
-    jsonLightbox = { value, colName }
-  }
-
-  // The JSON lightbox loads Monaco lazily (kept out of startup memory). To avoid a
-  // first-open jank - importing/parsing the ~4MB Monaco chunk + creating the editor
-  // on the main thread while the canvas is mid-interaction - we warm the module the
-  // moment the pointer hovers a JSON cell, a beat before the click actually opens it.
-  let _lightboxWarmed = false
-  function prefetchJsonLightbox() {
-    if (_lightboxWarmed) return
-    _lightboxWarmed = true
-    return import('./JsonCellLightbox.svelte')
-  }
 
   /** @type {'image' | 'pdf'} */
   let lightboxType = $state("image");
@@ -2337,6 +2316,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let cellEditorName = $state("");
   let cellEditorType = $state("");
   let cellEditorValue = $state(/** @type {unknown} */ (null));
+  /**
+   * True when the dock is showing a value that has no cell behind it - a node
+   * picked out of an expanded row, say. It cannot follow the cursor (there is
+   * nothing to follow) and it cannot be staged (there is nowhere to write it),
+   * so it is read-only and the follow effect leaves it alone.
+   */
+  let cellEditorDetached = $state(false);
 
   /**
    * Open the focused cell at full size. A 28px row is the wrong surface for a
@@ -2346,8 +2332,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    */
   function openCellEditor(rowIdx, colIdx) {
     if (!seedCellEditor(rowIdx, colIdx)) return;
+    cellEditorDetached = false;
     // One dock at a time. Both live along the bottom edge, and stacking them
     // leaves the grid a couple of rows tall.
+    fkSubview = null;
+    cellEditorOpen = true;
+  }
+
+  /**
+   * Show a value in the dock that did not come from a cell - a node inside an
+   * expanded row. Same surface, same tree, read-only.
+   * @param {unknown} value @param {string} label
+   */
+  function openValueInDock(value, label) {
+    cellEditorRow = -1;
+    cellEditorCol = -1;
+    cellEditorName = label || 'value';
+    cellEditorType = '';
+    cellEditorValue = value;
+    cellEditorDetached = true;
     fkSubview = null;
     cellEditorOpen = true;
   }
@@ -2385,7 +2388,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * would otherwise re-enter on.
    */
   $effect(() => {
-    if (!cellEditorOpen) return;
+    if (!cellEditorOpen || cellEditorDetached) return;
     const r = focusedRow;
     const cv = focusedCol;
     if (r === null || cv === null) return;
@@ -6391,7 +6394,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (relX >= copy.x - /** @type {number} */ (t.drawnX) && relX <= copy.x - /** @type {number} */ (t.drawnX) + copy.w) {
           void copyCellValue(idx, actualIdx); return
         }
-        if (isJson) { openJsonLightbox(value, t.col.name, e); return }
+        // A JSON cell opens in the bottom dock, tree-first. It used to open a
+        // modal that instantiated Monaco - a ~4MB chunk, its workers and a full
+        // code editor - to show what is usually a few hundred bytes of object,
+        // and the dialog then sat over the rows the value came from. The dock
+        // renders it with `JsonTree`, follows the cell cursor, and costs nothing
+        // to open.
+        if (isJson) { e.stopPropagation(); openCellEditor(idx, actualIdx); return }
 
         // Forward FK: Ctrl/Cmd = full navigation; plain click = inline sub-view
         const fk = cached?.fk ?? null
@@ -6553,12 +6562,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (t.kind === 'cell') {
       hoveredRow = /** @type {number} */ (t.idx)
       hoveredColName = t.col.name
-      // Hovering a JSON (object) cell → preload the lightbox/Monaco chunk so the
-      // click-to-expand is instant. Gated by the warm flag so it runs at most once.
-      if (!_lightboxWarmed) {
-        const v = effectiveCellValue(/** @type {number} */ (t.idx), /** @type {number} */ (t.actualIdx))
-        if (v !== null && v !== undefined && typeof v === 'object') void prefetchJsonLightbox()
-      }
     } else {
       hoveredRow = t.kind === 'row-expand' || t.kind === 'row-select' ? /** @type {number} */ (t.idx ?? null) : null
       hoveredColName = null
@@ -6964,10 +6967,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                   rowLabel={"row " + (exIdx + 1)}
                   indent={gutterWidth}
                   onclose={() => toggleRowExpand(exIdx)}
-                  onopenjson={(value, label) => {
-                    void prefetchJsonLightbox()
-                    jsonLightbox = { value, colName: label }
-                  }}
+                  onopenjson={(value, label) => openValueInDock(value, label)}
                 />
               {/snippet}
               {#each [...expandedRows] as exIdx (exIdx)}
@@ -7572,7 +7572,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       {:else}
         <ContextMenu.Item onSelect={() => runMenuAction(() => openInInspector(contextRowIdx))}>
           <PanelRight />
-          Open
+          Open row
+        </ContextMenu.Item>
+        <!-- The cell, full size, in the bottom dock. It had a keyboard binding
+             and no way to ask for it with the pointer, which is the hand that is
+             already on a cell when you find out 28px was not enough of it. -->
+        <ContextMenu.Item onSelect={() => runMenuAction(() => openCellEditor(contextRowIdx, contextColIdx))}>
+          <PanelBottom />
+          Preview cell
+          <ContextMenu.Shortcut combo="Shift+Space" />
         </ContextMenu.Item>
         {#if menuForeignKey}
           <ContextMenu.Item
@@ -7898,7 +7906,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       colType={cellEditorType}
       value={cellEditorValue}
       sourceHint={cellEditorRow >= 0 ? `row ${cellEditorRow + 1}` : ''}
-      readOnly={readonly || !canEditColumn(cellEditorCol)}
+      detached={cellEditorDetached}
+      readOnly={readonly || cellEditorDetached || !canEditColumn(cellEditorCol)}
       oncommit={commitCellEditor}
     />
   </div>
@@ -7957,17 +7966,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     lightboxUrl = null;
   }}
 />
-
-<!-- Lazy: only loads Monaco the first time a JSON cell is expanded, keeping the
-     editor out of the startup bundle/memory for plain table browsing. -->
-{#if jsonLightbox}
-  {#await import('./JsonCellLightbox.svelte') then { default: JsonCellLightbox }}
-    <JsonCellLightbox
-      data={jsonLightbox}
-      onclose={() => { jsonLightbox = null }}
-    />
-  {/await}
-{/if}
 
 <VectorCellViewer
   bind:open={vectorViewerOpen}
