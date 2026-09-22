@@ -218,6 +218,7 @@
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import { humanizeDbError } from '$lib/ai.js'
+  import { formatByteSize } from '$lib/cell-value.js'
   import { focusTrap } from '$lib/actions/focus-trap.js'
   import {
     MAX_PAGE_SIZE,
@@ -6798,14 +6799,26 @@ let rowSearch = $state('')
    * characters - so reading one is an explicit, per-row request.
    * @param {{ rowIdx: number, colIdx: number }} detail
    */
-  async function handleFetchCellValue(detail) {
+  async function handleFetchCellValue(detail, maxBytes = DOCK_VALUE_MAX) {
     if (!activeTable) throw new Error('No table is open')
     const col = columns[detail.colIdx]
     if (!col) throw new Error('That column is gone')
     const pk = primaryKeyForRow(detail.rowIdx)
     if (!pk) throw new Error('This table has no primary key, so a single row cannot be addressed')
-    return await fetchCellValue(activeSchema, activeTable, pk, col.name)
+    return await fetchCellValue(activeSchema, activeTable, pk, col.name, maxBytes)
   }
+
+  /**
+   * What the dock will hold. The fetch command can return far more, but a
+   * `<textarea>` in a webview cannot lay out tens of megabytes - 8MB is already
+   * past anything anyone reads and is the point where the panel stays usable.
+   */
+  const DOCK_VALUE_MAX = 8 * 1024 * 1024
+  /**
+   * What a grid cell will hold. Far lower, because this value goes into the row
+   * the canvas formats and the search walks, on every frame and every keystroke.
+   */
+  const CELL_VALUE_MAX = 1024 * 1024
 
   /**
    * Load one capped cell and put it in the row, for the grid's in-cell button.
@@ -6817,7 +6830,15 @@ let rowSearch = $state('')
   async function handleLoadCellValue(detail) {
     const col = columns[detail.colIdx]
     if (!col) return
-    const res = await handleFetchCellValue(detail)
+    const res = await handleFetchCellValue(detail, CELL_VALUE_MAX)
+    if (res.truncated) {
+      // A cut value in a cell is worse than the size it replaces: it reads as
+      // the value and is not one. The dock holds more and says what it holds.
+      toast.info('Too large for a cell', {
+        description: `${col.name} is ${formatByteSize(res.bytes)}. Open it with Shift+Space and load it there.`,
+      })
+      return
+    }
     // A JSON column renders from a parsed value, the way an under-cap row in the
     // same column already arrives; anything else is text.
     const type = String(col.dataType ?? col.data_type ?? '').toLowerCase()
@@ -6829,11 +6850,6 @@ let rowSearch = $state('')
     rows[detail.rowIdx] = rows[detail.rowIdx].map((cell, j) => (j === detail.colIdx ? next : cell))
     // rows is $state.raw, so the assignment above does not notify the canvas.
     dataVersion++
-    if (res.truncated) {
-      toast.info('Loaded as much as fits', {
-        description: `${col.name} is larger than this view can hold - the tail is not shown.`,
-      })
-    }
   }
 
   /** @param {{ rowIdx: number, colIdx: number, value: unknown }} detail */

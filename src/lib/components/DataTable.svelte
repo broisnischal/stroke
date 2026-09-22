@@ -6742,6 +6742,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         }
         if (editingCell) cancelEdit()
 
+        // Shift+click previews the cell in the dock - the pointer half of
+        // Shift+Space. A cell you have to squint at is the reason the dock
+        // exists, and reaching for a chord to open it is a step.
+        if (e.shiftKey) {
+          e.stopPropagation()
+          focusedRow = idx
+          const vis = actualToVisColIdx(actualIdx)
+          if (vis >= 0) focusedCol = vis
+          openCellEditor(idx, actualIdx)
+          return
+        }
+
         clearCellRange() // plain click collapses any rectangular range
         focusedRow = idx
         const vi = actualToVisColIdx(actualIdx)

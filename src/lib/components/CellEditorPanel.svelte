@@ -70,13 +70,25 @@
     oncommit = /** @type {(next: string) => void} */ (() => {}),
   } = $props()
 
-  /** The value as text, pretty-printed when it is JSON. */
+  /**
+   * The value as text, pretty-printed when it is JSON and small enough to be
+   * worth it.
+   *
+   * Indentation is not free. A jsonb holding a file as an array of byte
+   * integers pretty-prints to one number per line: 16MB of compact JSON became
+   * 41.8MB across three million lines, and that is a textarea the webview
+   * cannot lay out. Past the line, the text stays exactly as it arrived.
+   */
   function toText(/** @type {unknown} */ v) {
     if (v === null || v === undefined) return ''
     if (typeof v === 'object') {
-      try { return JSON.stringify(v, null, 2) } catch { return String(v) }
+      try {
+        const compact = JSON.stringify(v)
+        return compact.length > PRETTY_PRINT_LIMIT ? compact : JSON.stringify(v, null, 2)
+      } catch { return String(v) }
     }
     const s = String(v)
+    if (s.length > PRETTY_PRINT_LIMIT) return s
     // A JSON string stored in a text column is still JSON to the person reading
     // it, so it opens formatted rather than as one 4,000-character line.
     const t = s.trim()
@@ -85,6 +97,9 @@
     }
     return s
   }
+
+  /** Past this many characters, formatting costs more than it gives back. */
+  const PRETTY_PRINT_LIMIT = 512 * 1024
 
   let draft = $state('')
   let original = $state('')

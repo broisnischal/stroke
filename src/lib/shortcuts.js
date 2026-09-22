@@ -152,7 +152,7 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Alt+E', desc: 'Exclude the focused cell\'s value' },
       { combo: 'Alt+D', desc: 'Copy the focused row into the insert draft' },
       { combo: 'Mod+E', desc: 'Expand / collapse the focused row' },
-      { combo: 'Shift+Space', desc: 'Preview the focused cell in the bottom dock' },
+      { combo: 'Shift+Space', desc: 'Preview the focused cell in the bottom dock (or Shift+click it)' },
       { combo: 'Enter', desc: 'Edit cell' },
       { combo: 'F2', desc: 'Edit cell' },
       { combo: 'Escape', desc: 'Cancel edit' },
