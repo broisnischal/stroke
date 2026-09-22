@@ -16,6 +16,7 @@ mod dialect_matrix;
 mod query;
 mod schema;
 pub mod sql_util;
+pub mod wide_columns;
 pub mod sqlite;
 pub mod ssh_tunnel;
 pub mod local_scan;
@@ -39,7 +40,7 @@ pub use geo::{geo_features, geo_overview, GeoBbox, GeoFeatures, GeoOverview};
 pub use ssh_tunnel::TunnelState;
 pub use query::{
     delete_table_row, delete_table_rows, execute_ddl, execute_sql, execute_sql_multi, execute_sql_on_conn,
-    get_column_stats, get_table_rows, count_table_rows, insert_table_row, update_table_cell, ping_connection,
+    fetch_cell_value, CellValueResult, get_column_stats, get_table_rows, count_table_rows, insert_table_row, update_table_cell, ping_connection,
     ColumnStats, InsertRowResult, KeysetCursor, RowFilter, SortSpec, SqlResult, TableRows,
 };
 pub use schema::{

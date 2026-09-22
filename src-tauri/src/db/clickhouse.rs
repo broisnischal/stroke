@@ -322,6 +322,8 @@ pub async fn get_table_rows(
     let result = data_res?;
 
     Ok(TableRows {
+        // Preview fetching is a Postgres path (pg_stats + pg_column_size).
+        preview_columns: Vec::new(),
         columns: result.columns,
         rows: result.rows,
         total,

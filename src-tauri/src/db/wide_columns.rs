@@ -1,0 +1,377 @@
+//! Wide columns: preview in SQL, value on demand.
+//!
+//! A `jsonb` column holding an uploaded file averages half a megabyte per row.
+//! `SELECT *` over a 200-row page then detoasts ~100MB, hands it to sqlx,
+//! serialises it across the IPC bridge and parses it again in the webview - for
+//! a grid that can draw about forty characters of it. The 256KB cap in
+//! `sql_util` trims that payload, but only after every byte has already crossed
+//! the network: it protects the UI, not the fetch.
+//!
+//! So the cap moves into the query. Columns whose average width is over
+//! `WIDE_COLUMN_AVG_BYTES` are selected as a stand-in instead of a value:
+//!
+//! ```sql
+//! CASE WHEN pg_column_size("resume") > 262144
+//!   THEN jsonb_build_object('__strokeOversize', true, 'dataType', 'jsonb', 'bytes', pg_column_size("resume"))
+//!   ELSE jsonb_build_object('__strokeInline', to_jsonb("resume"))
+//! END AS "resume"
+//! ```
+//!
+//! Note what the oversize branch does NOT do: build a preview. The first cut of
+//! this shipped `left(col::text, 16384)` in that branch and the page still took
+//! eleven seconds, because `left` cannot take a prefix of a compressed
+//! out-of-line value - it detoasts and decompresses the whole thing first, per
+//! row. At 600KB a row that is most of a gigabyte of server-side work for text
+//! nobody reads until they open the cell. So an over-cap value reports its size
+//! and nothing else: `pg_column_size` reads the varlena header and touches no
+//! TOAST chunk at all, and the text arrives through `fetch_cell_value` when
+//! someone actually opens the cell.
+//!
+//! Rows under the cap come back whole (`__strokeInline` is unwrapped here, so
+//! the frontend never sees it); rows over it come back as the sentinel the UI
+//! already knows how to render, and `fetch_cell_value` loads the real value when
+//! someone actually asks for it.
+//!
+//! Which columns are wide is measured, not assumed - and NOT taken from
+//! `pg_stats.avg_width`, which is the obvious answer and the wrong one. ANALYZE
+//! measures the datum as it sits in the tuple, so a column whose values are all
+//! pushed out to TOAST reports the width of the 18-byte pointer. On the table
+//! this was written for, `resume` averages 601KB and `pg_stats` says 18.
+//!
+//! So: the catalog names the candidates (a toastable type, or an inline width
+//! already over the line), and one sampling query settles it -
+//! `avg(pg_column_size(col))` over the first 500 rows. `pg_column_size` reads
+//! the stored size out of the varlena header and does not fetch the value, so
+//! the sample costs about half a millisecond and a few dozen buffers. The
+//! answer is cached per table.
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
+use serde_json::Value;
+
+use super::sql_util::CELL_VALUE_CAP;
+
+/// Average bytes per value past which a column is fetched as a preview.
+///
+/// 32KB is the point where one column outweighs a whole page of ordinary ones:
+/// at 200 rows it is 6.4MB on the wire for a single column. Below it, shipping
+/// the value is cheaper than the round trip to fetch it later.
+pub const WIDE_COLUMN_AVG_BYTES: i64 = 32 * 1024;
+
+/// Types that can hold a value worth capping and survive `::text` / `to_jsonb`
+/// without changing meaning. Deliberately not `bytea` - it has its own hex path
+/// through `cell_to_json`, and re-encoding it here would change what the grid
+/// receives for the small rows too.
+const WIDE_TYPES: &[&str] = &["json", "jsonb", "text", "varchar", "bpchar", "xml"];
+
+/// Rows read to measure a candidate column. `pg_column_size` reads the stored
+/// size from the varlena header rather than fetching the value, so this is a
+/// few dozen buffers and under a millisecond even on the table that motivated
+/// the feature.
+const SAMPLE_ROWS: i64 = 500;
+
+/// Below this much TOAST there is nowhere for a large value to be hiding, so
+/// the sample is skipped entirely - which is the path almost every table takes.
+const TOAST_SAMPLE_FLOOR: i64 = 1024 * 1024;
+
+#[derive(Clone, Debug)]
+pub struct WideColumn {
+    pub name: String,
+    /// Average bytes per value, from `pg_stats`.
+    pub avg_width: i64,
+    /// The column's declared type. The stand-in returns `jsonb` whatever the
+    /// column is, so the real name has to travel with it or a wide `text`
+    /// column would reach the grid claiming to be JSON.
+    pub type_name: String,
+}
+
+/// The wide columns and the SELECT list they produce, cached together: the
+/// column list a projection is built from is itself a round trip, and on a
+/// server 80ms away one avoided round trip is worth more than the query it
+/// replaces.
+type CacheEntry = (Instant, Vec<WideColumn>, Option<String>);
+static WIDE_CACHE: OnceLock<std::sync::Mutex<HashMap<String, CacheEntry>>> = OnceLock::new();
+/// Stats move when ANALYZE runs, which is not something a browsing session has
+/// to see within the minute.
+const WIDE_CACHE_TTL: Duration = Duration::from_secs(300);
+
+fn cache_key(pool: &sqlx::PgPool, schema: &str, table: &str) -> String {
+    let opts = pool.connect_options();
+    format!(
+        "{}:{}/{}\u{0}{schema}.{table}",
+        opts.get_host(),
+        opts.get_port(),
+        opts.get_database().unwrap_or_default()
+    )
+}
+
+/// The wide columns of a table, newest-stats-first and cached for five minutes.
+/// An unanalyzed table (or a stats read that fails) reports none, which is the
+/// pre-existing `SELECT *` behaviour.
+pub async fn wide_columns(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    table: &str,
+) -> Vec<WideColumn> {
+    let key = cache_key(pool, schema, table);
+    let cache = WIDE_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    {
+        if let Ok(map) = cache.lock() {
+            if let Some((at, cols, _)) = map.get(&key) {
+                if at.elapsed() < WIDE_CACHE_TTL {
+                    return cols.clone();
+                }
+            }
+        }
+    }
+
+    // Candidates: a toastable type, plus whatever the catalog already knows
+    // about their inline width and the table's TOAST relation. One round trip.
+    let candidates = sqlx::query(
+        r#"
+        SELECT
+            a.attname::text,
+            t.typname::text,
+            COALESCE(s.avg_width, 0)::bigint,
+            COALESCE(pg_total_relation_size(c.reltoastrelid), 0)::bigint
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        LEFT JOIN pg_catalog.pg_stats s
+               ON s.schemaname = n.nspname AND s.tablename = c.relname AND s.attname = a.attname
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
+          AND t.typname = ANY($3)
+        ORDER BY a.attnum
+        "#,
+    )
+    .bind(schema)
+    .bind(table)
+    .bind(WIDE_TYPES)
+    .fetch_all(pool)
+    .await;
+
+    let candidates = candidates.unwrap_or_default();
+    let mut cols: Vec<WideColumn> = Vec::new();
+    let mut to_sample: Vec<(String, String)> = Vec::new();
+    let mut toast_size = 0_i64;
+    for r in &candidates {
+        use sqlx::Row;
+        let (Ok(name), Ok(type_name), Ok(avg_width)) = (
+            r.try_get::<String, _>(0),
+            r.try_get::<String, _>(1),
+            r.try_get::<i64, _>(2),
+        ) else {
+            continue;
+        };
+        toast_size = toast_size.max(r.try_get::<i64, _>(3).unwrap_or(0));
+        if avg_width > WIDE_COLUMN_AVG_BYTES {
+            // Wide without leaving the tuple - no sample needed to know.
+            cols.push(WideColumn { name, avg_width, type_name });
+        } else {
+            to_sample.push((name, type_name));
+        }
+    }
+
+    // Only sample when there is somewhere for the bytes to hide. A table with no
+    // TOAST relation (or a trivial one) cannot be holding half-megabyte values,
+    // and that is almost every table - so almost every table pays one catalog
+    // query and nothing else.
+    if !to_sample.is_empty() && toast_size > TOAST_SAMPLE_FLOOR {
+        let selects: Vec<String> = to_sample
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| {
+                format!(
+                    "avg(pg_column_size(s.\"{}\"))::bigint AS c{i}",
+                    name.replace('"', "\"\"")
+                )
+            })
+            .collect();
+        let cols_list: Vec<String> = to_sample
+            .iter()
+            .map(|(name, _)| format!("\"{}\"", name.replace('"', "\"\"")))
+            .collect();
+        let sql = format!(
+            r#"SELECT {} FROM (SELECT {} FROM "{}"."{}" LIMIT {}) s"#,
+            selects.join(", "),
+            cols_list.join(", "),
+            schema.replace('"', "\"\""),
+            table.replace('"', "\"\""),
+            SAMPLE_ROWS,
+        );
+        if let Ok(Some(row)) = sqlx::query(&sql).fetch_optional(pool).await {
+            use sqlx::Row;
+            for (i, (name, type_name)) in to_sample.into_iter().enumerate() {
+                let avg = row.try_get::<Option<i64>, _>(i).ok().flatten().unwrap_or(0);
+                if avg > WIDE_COLUMN_AVG_BYTES {
+                    cols.push(WideColumn { name, avg_width: avg, type_name });
+                }
+            }
+        }
+    }
+
+    if let Ok(mut map) = cache.lock() {
+        if map.len() > 256 {
+            map.clear();
+        }
+        map.insert(key, (Instant::now(), cols.clone(), None));
+    }
+    cols
+}
+
+/// The SELECT list for a page of this table, and the columns it stands in for.
+/// `None` when nothing is wide - which is the answer for almost every table,
+/// and the one that leaves `SELECT *` alone.
+///
+/// Cached whole: after the first page, deciding what to select costs nothing.
+pub async fn page_projection(
+    pool: &sqlx::PgPool,
+    schema: &str,
+    table: &str,
+) -> (Option<String>, Vec<WideColumn>) {
+    let key = cache_key(pool, schema, table);
+    {
+        if let Some(cache) = WIDE_CACHE.get() {
+            if let Ok(map) = cache.lock() {
+                if let Some((at, cols, sql)) = map.get(&key) {
+                    // A cached entry with no SQL yet still has to build one; a
+                    // cached entry with no WIDE COLUMNS is already the answer.
+                    if at.elapsed() < WIDE_CACHE_TTL && (sql.is_some() || cols.is_empty()) {
+                        return (sql.clone(), cols.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    let cols = wide_columns(pool, schema, table).await;
+    if cols.is_empty() {
+        return (None, cols);
+    }
+    let ordinal = super::query::fetch_table_column_names(pool, schema, table)
+        .await
+        .unwrap_or_default();
+    let sql = projection(&ordinal, &cols);
+    if let Some(cache) = WIDE_CACHE.get() {
+        if let Ok(mut map) = cache.lock() {
+            map.insert(key, (Instant::now(), cols.clone(), sql.clone()));
+        }
+    }
+    (sql, cols)
+}
+
+/// Forget the cached stats for a table - after an ANALYZE, or a schema change
+/// that could have changed what is wide.
+pub fn invalidate(pool: &sqlx::PgPool, schema: &str, table: &str) {
+    if let Some(cache) = WIDE_CACHE.get() {
+        if let Ok(mut map) = cache.lock() {
+            map.remove(&cache_key(pool, schema, table));
+        }
+    }
+}
+
+/// The SELECT list for a page, or `None` when no column is wide enough to be
+/// worth rewriting the query for (the overwhelmingly common case, which keeps
+/// the plain `SELECT *` path untouched).
+///
+/// `all_columns` must be in ordinal order - the grid's column order is the
+/// result set's order.
+pub fn projection(all_columns: &[String], wide: &[WideColumn]) -> Option<String> {
+    if wide.is_empty() || all_columns.is_empty() {
+        return None;
+    }
+    let mut any = false;
+    let parts: Vec<String> = all_columns
+        .iter()
+        .map(|name| {
+            let quoted = format!("\"{}\"", name.replace('"', "\"\""));
+            if wide.iter().any(|w| &w.name == name) {
+                any = true;
+                let col_type = wide
+                    .iter()
+                    .find(|w| &w.name == name)
+                    .map(|w| w.type_name.replace('\'', "''"))
+                    .unwrap_or_default();
+                format!(
+                    "CASE WHEN pg_column_size({quoted}) > {cap} \
+                     THEN jsonb_build_object('__strokeOversize', true, 'dataType', '{col_type}', \
+                     'bytes', pg_column_size({quoted})) \
+                     ELSE jsonb_build_object('__strokeInline', to_jsonb({quoted})) END AS {quoted}",
+                    cap = CELL_VALUE_CAP,
+                )
+            } else {
+                quoted
+            }
+        })
+        .collect();
+    any.then(|| parts.join(", "))
+}
+
+/// Unwrap the `__strokeInline` envelope a stand-in column wraps small values in.
+/// Anything else - a real value, or the oversize sentinel - passes through.
+pub fn unwrap_inline(v: Value) -> Value {
+    match v {
+        Value::Object(ref map) if map.len() == 1 => match map.get("__strokeInline") {
+            Some(inner) => inner.clone(),
+            None => v,
+        },
+        _ => v,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wide(name: &str) -> WideColumn {
+        WideColumn { name: name.into(), avg_width: 529 * 1024, type_name: "jsonb".into() }
+    }
+
+    #[test]
+    fn no_wide_columns_means_no_rewrite() {
+        assert!(projection(&["id".into(), "name".into()], &[]).is_none());
+    }
+
+    #[test]
+    fn wide_column_becomes_a_stand_in_and_the_rest_stay_themselves() {
+        let sql = projection(
+            &["id".into(), "resume".into(), "status".into()],
+            &[wide("resume")],
+        )
+        .expect("a projection");
+        assert!(sql.starts_with("\"id\", CASE WHEN pg_column_size(\"resume\")"));
+        assert!(sql.contains("'__strokeOversize', true"));
+        assert!(sql.contains("'dataType', 'jsonb'"));
+        // No preview: building one would detoast every over-cap value on the page.
+        assert!(!sql.contains("left("));
+        assert!(sql.contains("AS \"resume\""));
+        assert!(sql.ends_with(", \"status\""));
+        // Every column is still selected, in order.
+        assert_eq!(sql.matches(" AS ").count(), 1);
+    }
+
+    #[test]
+    fn a_quote_in_a_column_name_cannot_escape_the_identifier() {
+        let sql = projection(&["we\"ird".into()], &[wide("we\"ird")]).expect("a projection");
+        assert!(sql.contains("\"we\"\"ird\""));
+    }
+
+    #[test]
+    fn inline_values_unwrap_and_everything_else_passes_through() {
+        let inline = serde_json::json!({ "__strokeInline": { "a": 1 } });
+        assert_eq!(unwrap_inline(inline), serde_json::json!({ "a": 1 }));
+
+        let null_inline = serde_json::json!({ "__strokeInline": null });
+        assert_eq!(unwrap_inline(null_inline), Value::Null);
+
+        let sentinel = serde_json::json!({ "__strokeOversize": true, "bytes": 9 });
+        assert_eq!(unwrap_inline(sentinel.clone()), sentinel);
+
+        let plain = serde_json::json!({ "__strokeInline": 1, "other": 2 });
+        assert_eq!(unwrap_inline(plain.clone()), plain);
+    }
+}

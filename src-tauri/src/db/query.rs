@@ -232,6 +232,21 @@ pub struct TableRows {
     /// When a COUNT(*) is also run, the row SELECT and the COUNT are joined with
     /// a newline (row SELECT first).
     pub sql: String,
+    /// Columns this page fetched as a preview rather than as a value, with the
+    /// average size that earned them the treatment. Empty on every ordinary
+    /// table. The UI says so out loud - a column quietly showing `287 KB`
+    /// instead of its contents is a bug report waiting to happen.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub preview_columns: Vec<PreviewColumn>,
+}
+
+/// A column fetched as a preview, and why.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewColumn {
+    pub name: String,
+    /// Average bytes per value, from `pg_stats`.
+    pub avg_bytes: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1764,7 +1779,19 @@ pub async fn get_table_rows(
             order_by
         );
     }
-    let mut data_sql = format!("SELECT * {data_tail}");
+    // ── Wide columns ship as a preview, not a value ─────────────────────────
+    // A `jsonb` column holding an uploaded file averages half a megabyte a row,
+    // and `SELECT *` over a 200-row page moves ~100MB of it for a grid that can
+    // draw forty characters. `pg_stats` already knows which columns are like
+    // that, so those come back as the oversize sentinel (or, under the cap, as
+    // the value itself) and the bytes never leave the server. Nothing wide =>
+    // no rewrite, and the plain `SELECT *` path is untouched.
+    let (wide_projection, wide) = super::wide_columns::page_projection(&pool, &schema, &table).await;
+    let wide_names: Vec<String> = wide.iter().map(|w| w.name.clone()).collect();
+    let mut data_sql = match &wide_projection {
+        Some(list) => format!("SELECT {list} {data_tail}"),
+        None => format!("SELECT * {data_tail}"),
+    };
     let data_query = bind_page(&data_sql, &where_clause.binds, keyset_bind.as_ref(), limit, offset);
 
     // Kick the catalog-metadata queries (enums/nullable/pk/fk) off NOW so they run
@@ -1934,6 +1961,15 @@ pub async fn get_table_rows(
             .collect()
     };
 
+    // A stand-in column is a `CASE … END`, so the result set reports it as
+    // `jsonb` whatever the column really is. Put the declared type back, or a
+    // wide `text` column would arrive claiming to hold JSON.
+    for w in &wide {
+        if let Some(info) = columns.iter_mut().find(|c| c.name == w.name) {
+            info.data_type = pg_type_label(&w.type_name);
+        }
+    }
+
     // A re-read page reports its cast columns as `text`. Restore the real type
     // names so the header, the type filters and the cell viewers still see a
     // `raster`/`box2d` column rather than a string one.
@@ -1948,6 +1984,23 @@ pub async fn get_table_rows(
         .iter()
         .map(|row| (0..row.len()).map(|i| cell_to_json(row, i)).collect())
         .collect();
+    if wide_projection.is_some() {
+        // A stand-in wraps a small value so the CASE can return one type for
+        // both branches; unwrap it here so nothing downstream knows.
+        let wide_idx: Vec<usize> = columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| wide_names.iter().any(|n| n == &c.name))
+            .map(|(i, _)| i)
+            .collect();
+        for row in data.iter_mut() {
+            for &i in &wide_idx {
+                if let Some(v) = row.get_mut(i) {
+                    *v = super::wide_columns::unwrap_inline(std::mem::replace(v, Value::Null));
+                }
+            }
+        }
+    }
     // Backward keyset page was fetched in reverse order - flip it back to the
     // table's display order.
     if keyset_reverse {
@@ -1985,6 +2038,15 @@ pub async fn get_table_rows(
         primary_key,
         foreign_keys,
         sql,
+        // Only what this page actually rewrote - a table with wide columns that
+        // were all hidden or filtered out of the projection reports none.
+        preview_columns: if wide_projection.is_some() {
+            wide.iter()
+                .map(|w| PreviewColumn { name: w.name.clone(), avg_bytes: w.avg_width })
+                .collect()
+        } else {
+            Vec::new()
+        },
     })
 }
 
@@ -3410,6 +3472,8 @@ async fn get_table_rows_remote<C: RemoteSqlite>(
         primary_key,
         foreign_keys,
         sql: format!("{rows_sql}\n{count_sql}"),
+        // Remote SQLite (D1 / libSQL) ships whole values.
+        preview_columns: Vec::new(),
     })
 }
 
@@ -3591,6 +3655,142 @@ pub struct ColumnStats {
     pub min: Option<Value>,
     pub max: Option<Value>,
     pub avg: Option<f64>,
+}
+
+/// One cell's full value, fetched on demand.
+///
+/// `bytes` is what the column actually holds; `text` is what fits under the
+/// caller's ceiling. A browse page never carries a value this size - wide
+/// columns arrive as a preview (see `wide_columns`) - so this is the one path
+/// that can produce the whole thing, and it only runs when someone asks for it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CellValueResult {
+    pub text: String,
+    pub bytes: i64,
+    /// The value was longer than the ceiling and `text` stops early.
+    pub truncated: bool,
+}
+
+/// Hard ceiling on a single fetched value, whatever the caller asks for. Past
+/// this, a webview is not the right place to read it.
+const CELL_FETCH_HARD_MAX: i64 = 16 * 1024 * 1024;
+/// What the dock asks for when it does not say.
+const CELL_FETCH_DEFAULT_MAX: i64 = 4 * 1024 * 1024;
+
+pub async fn fetch_cell_value(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    primary_key: HashMap<String, Value>,
+    column: String,
+    max_bytes: Option<i64>,
+) -> Result<CellValueResult, String> {
+    match require_conn(&state)? {
+        ActiveConnection::Postgres(_) => {}
+        _ => {
+            return Err(
+                "Loading a capped value is only available on PostgreSQL so far. Read it with a SQL query instead."
+                    .into(),
+            )
+        }
+    }
+    let pool = require_pool(&state)?;
+    validate_ident(&schema)?;
+    validate_ident(&table)?;
+    validate_ident(&column)?;
+
+    if primary_key.is_empty() {
+        return Err("Cannot load this value: the table has no primary key to address the row by".into());
+    }
+    let pk_columns = fetch_primary_key(&pool, &schema, &table).await?;
+    if pk_columns.is_empty() {
+        return Err("Cannot load this value: the table has no primary key to address the row by".into());
+    }
+
+    // Types for the primary-key columns, so each one binds as itself rather than
+    // as text - a `uuid = $1::text` predicate cannot use the primary key index,
+    // which on a large table turns a point lookup into a sequential scan.
+    let meta_rows = sqlx::query(
+        r#"
+        SELECT
+            a.attname::text,
+            CASE WHEN t.typtype IN ('e','c','d') THEN 'USER-DEFINED' ELSE t.typname::text END,
+            tn.nspname::text,
+            t.typname::text
+        FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+        JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
+        WHERE n.nspname = $1 AND c.relname = $2
+          AND a.attnum > 0 AND NOT a.attisdropped
+        "#,
+    )
+    .bind(&schema)
+    .bind(&table)
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| format!("Failed to load column metadata: {e}"))?;
+
+    let mut column_meta: HashMap<String, PgColumnMeta> = HashMap::new();
+    for row in &meta_rows {
+        if let Ok(name) = row.try_get::<String, _>(0) {
+            column_meta.insert(
+                name,
+                PgColumnMeta {
+                    data_type: row.try_get(1).unwrap_or_default(),
+                    udt_schema: row.try_get(2).ok(),
+                    udt_name: row.try_get(3).ok(),
+                },
+            );
+        }
+    }
+    if !column_meta.contains_key(&column) {
+        return Err(format!("Unknown column: {column}"));
+    }
+
+    let ceiling = max_bytes
+        .unwrap_or(CELL_FETCH_DEFAULT_MAX)
+        .clamp(1024, CELL_FETCH_HARD_MAX);
+
+    let mut where_parts = Vec::new();
+    for (i, pk_col) in pk_columns.iter().enumerate() {
+        validate_ident(pk_col)?;
+        where_parts.push(format!(r#""{pk_col}" = ${}"#, i + 2));
+    }
+    // One extra character is read so a value sitting exactly on the ceiling can
+    // be told apart from one that was cut.
+    let sql = format!(
+        r#"SELECT pg_column_size("{column}")::bigint, left("{column}"::text, $1) FROM "{schema}"."{table}" WHERE {} LIMIT 1"#,
+        where_parts.join(" AND ")
+    );
+
+    let mut q = sqlx::query(&sql).bind((ceiling + 1) as i32);
+    for pk_col in &pk_columns {
+        let pk_val = primary_key
+            .get(pk_col)
+            .ok_or_else(|| format!("Missing primary key column: {pk_col}"))?;
+        let pk_meta = column_meta
+            .get(pk_col)
+            .ok_or_else(|| format!("Missing primary key metadata: {pk_col}"))?;
+        q = bind_typed_value(q, &pk_meta.data_type, pk_val)?;
+    }
+
+    let row = q
+        .fetch_optional(&pool)
+        .await
+        .map_err(|e| format!("Failed to load the value: {e}"))?
+        .ok_or_else(|| "That row is no longer in the table".to_string())?;
+
+    let bytes: i64 = row.try_get(0).unwrap_or(0);
+    let mut text: String = row.try_get::<Option<String>, _>(1).ok().flatten().unwrap_or_default();
+    let truncated = (text.len() as i64) > ceiling;
+    if truncated {
+        text.truncate(ceiling as usize);
+    }
+
+    Ok(CellValueResult { text, bytes, truncated })
 }
 
 pub async fn get_column_stats(

@@ -981,6 +981,25 @@ export async function updateTableCell(schema, table, primaryKey, column, value) 
 }
 
 /**
+ * Load one cell in full.
+ *
+ * A browse page deliberately does not fetch wide columns - they arrive as a
+ * preview with the real size attached - so this is how the whole value is read
+ * when someone asks for it. Postgres only for now; other engines answer with a
+ * message that says so.
+ *
+ * @param {string} schema
+ * @param {string} table
+ * @param {Record<string, unknown>} primaryKey
+ * @param {string} column
+ * @param {number} [maxBytes] ceiling on the text returned (default 4MB, hard max 16MB)
+ * @returns {Promise<{ text: string, bytes: number, truncated: boolean }>}
+ */
+export async function fetchCellValue(schema, table, primaryKey, column, maxBytes) {
+  return inv('pg_fetch_cell_value', { schema, table, primaryKey, column, maxBytes: maxBytes ?? null })
+}
+
+/**
  * @param {string} schema
  * @param {string} table
  * @param {Record<string, unknown>} primaryKey

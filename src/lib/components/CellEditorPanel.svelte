@@ -28,6 +28,13 @@
    * @property {string} [sourceHint] Small context hint, e.g. "row 12".
    * @property {boolean} [readOnly]
    * @property {boolean} [detached] Showing a value with no cell behind it.
+   * @property {() => Promise<void>} [onloadfull] Fetch the whole value for a
+   *   capped cell. The parent replaces `value` with it, which is what clears
+   *   `oversize` and turns the preview back into an ordinary value.
+   * @property {{ bytes: number, dataType: string } | null} [oversize] Set when
+   *   only a preview of the cell was loaded: the backend caps a cell at 256KB
+   *   and ships the first 16KB, so what is on screen is a slice of the value,
+   *   not the value.
    * @property {(next: string) => void} oncommit
    */
   import Pencil from '@lucide/svelte/icons/pencil'
@@ -52,6 +59,10 @@
     sourceHint = '',
     readOnly = false,
     detached = false,
+    /** @type {{ bytes: number, dataType: string } | null} */
+    oversize = null,
+    /** @type {null | (() => Promise<void>)} */
+    onloadfull = null,
     oncommit = /** @type {(next: string) => void} */ (() => {}),
   } = $props()
 
@@ -90,7 +101,10 @@
   // Focus is taken on open only. Following the cursor must not pull focus out of
   // the grid, or the arrow key that moved it would be the last one that worked.
   $effect(() => {
-    const cell = `${colName}\u0000${sourceHint}\u0000${detached ? 'd' : ''}`
+    // The oversize flag is part of the identity: loading the full value swaps
+    // what this cell holds without moving the cursor, and the draft has to
+    // follow it.
+    const cell = `${colName}\u0000${sourceHint}\u0000${detached ? 'd' : ''}\u0000${oversize ? 'preview' : 'full'}`
     const text = toText(value)
     if (!open) { wasOpen = false; seededCell = ''; return }
     if (wasOpen && cell === seededCell) return
@@ -128,8 +142,42 @@
   const parsed = $derived.by(() => {
     const t = draft.trim()
     if (!t || (t[0] !== '{' && t[0] !== '[')) return null
+    // A capped cell ships its first 16KB, which for a JSON value stops
+    // mid-token: parsing it can only ever fail, and reporting that failure as
+    // "invalid JSON" sent people looking for a corrupt row that does not exist.
+    // Name what actually happened instead.
+    if (oversize) {
+      const loaded = new Blob([draft]).size
+      return {
+        ok: false,
+        truncated: true,
+        error: loaded
+          ? `Showing the first ${formatBytes(loaded)} of ${formatBytes(oversize.bytes)}. The page fetched a preview of this column instead of the value - that is what keeps a table of half-megabyte cells openable at all.`
+          : `This cell holds ${formatBytes(oversize.bytes)}. The page fetched its size, not its contents: reading a column like this for every row on screen is what makes a table take ten seconds to open. It is one click away.`,
+      }
+    }
     try { return { ok: true, value: JSON.parse(t) } } catch (e) { return { ok: false, error: String(e) } }
   })
+
+  let loadingFull = $state(false)
+  async function loadFull() {
+    if (!onloadfull || loadingFull) return
+    loadingFull = true
+    try {
+      await onloadfull()
+    } catch (e) {
+      toast.error('Could not load the value', { description: String(e?.message ?? e) })
+    } finally {
+      loadingFull = false
+    }
+  }
+
+  /** @param {number} n */
+  function formatBytes(n) {
+    if (n < 1024) return `${n} B`
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`
+    return `${(n / 1024 / 1024).toFixed(1)} MB`
+  }
   const isTreeable = $derived(!!parsed?.ok)
 
   /**
@@ -433,6 +481,12 @@
     <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground">
       {lines.toLocaleString()}L · {chars.toLocaleString()}c
     </span>
+    {#if oversize}
+      <span
+        class="shrink-0 rounded-[3px] border border-warning/30 bg-warning/10 px-1.5 py-px font-mono text-ui-3xs text-warning"
+        title="A wide column reports its size per row instead of its contents - the value is not loaded and cannot be edited until it is"
+      >{formatBytes(oversize.bytes)} · not loaded</span>
+    {/if}
     {#if dirty && !readOnly}
       <span class="shrink-0 text-ui-3xs text-primary">edited</span>
     {/if}
@@ -441,7 +495,16 @@
       <!-- Find. Always here rather than behind a toggle: the dock exists to
            read one value, and finding something in it is the second thing you
            do after opening it. -->
-      <div class="flex h-7 items-center gap-1 rounded-md border border-border/50 bg-input/30 px-1.5 focus-within:border-ring/60">
+      <!-- The frame every field in this app wears: `--field-border-width` (2px)
+           in `--field-border`. At `border/50` this one was a hairline against
+           the dock's own surface and read as a gap between the icon and the
+           text rather than as a control. The input inside opts out with
+           `no-focus-ring`, which is exactly the case app.css documents: the
+           container carries the frame. -->
+      <div
+        class="flex h-7 items-center gap-1 bg-input/30 px-1.5 focus-within:border-ring/60"
+        style="border-radius: var(--radius-field); border: var(--field-border-width) solid var(--field-border)"
+      >
         <Search class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
         <input
           bind:this={findEl}
@@ -630,7 +693,9 @@
           <span class="text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
             {parsed.ok ? 'Tree' : 'Preview'}
           </span>
-          {#if !parsed.ok}
+          {#if parsed.truncated}
+            <span class="truncate font-mono text-ui-3xs text-warning">truncated value</span>
+          {:else if !parsed.ok}
             <span class="truncate font-mono text-ui-3xs text-destructive">invalid JSON</span>
           {/if}
         </div>
@@ -653,7 +718,25 @@
               }}
             />
           {:else}
-            <p class="font-mono text-ui-3xs leading-relaxed text-destructive/90">{parsed.error}</p>
+            <p class={cn('whitespace-pre-wrap font-mono text-ui-3xs leading-relaxed', parsed.truncated ? 'text-muted-foreground' : 'text-destructive/90')}>{parsed.error}</p>
+            {#if parsed.truncated && onloadfull}
+              <button
+                type="button"
+                disabled={loadingFull}
+                class="mt-2.5 inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 font-mono text-ui-3xs font-medium text-primary-foreground transition-[opacity,transform] hover:opacity-90 active:scale-[0.97] disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                onclick={() => void loadFull()}
+              >
+                {#if loadingFull}
+                  <span class="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent"></span>
+                  Loading {formatBytes(oversize?.bytes ?? 0)}…
+                {:else}
+                  Load {formatBytes(oversize?.bytes ?? 0)}
+                {/if}
+              </button>
+              <p class="mt-1.5 font-mono text-ui-3xs text-muted-foreground/70">
+                Fetched for this row only - the page stays light.
+              </p>
+            {/if}
           {/if}
         </div>
       </div>

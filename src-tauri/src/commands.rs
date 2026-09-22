@@ -335,7 +335,7 @@ use crate::db::{
     list_schemas, list_tables, list_indexes, list_enums, list_functions, list_triggers, list_sequences, ping_connection, table_row_counts,
     truncate_table, drop_table, get_table_column_structure, get_schema_column_structure, get_incoming_foreign_keys, get_table_ddl as db_get_table_ddl,
     test_clickhouse_connection, test_connection, test_d1_connection, test_duckdb_connection, test_libsql_connection, test_mssql_connection, test_mysql_connection, test_redis_connection, test_sqlite_connection,
-    update_table_cell, ConnectionConfig, D1Config, DbState, EnumInfo, FunctionInfo, ExplainResult, IndexInfo, LibSqlConfig,
+    update_table_cell, fetch_cell_value, ConnectionConfig, D1Config, DbState, EnumInfo, FunctionInfo, ExplainResult, IndexInfo, LibSqlConfig,
     SqlResult, SqliteConfig, TableInfo, TableRowCount, TableRows, TriggerInfo, SequenceInfo,
     ColumnStructureRow, TableColumnStructure, IncomingForeignKey, InsertRowResult, TunnelState,
     explain_pg, explain_mysql, explain_sqlite, explain_from_text_lines, explain_from_sqlite_plan,
@@ -1034,6 +1034,19 @@ pub async fn pg_update_table_cell(
     value: Value,
 ) -> Result<(), String> {
     update_table_cell(state, schema, table, primary_key, column, value).await
+}
+
+/// Load one cell in full - the value a browse page deliberately did not fetch.
+#[tauri::command]
+pub async fn pg_fetch_cell_value(
+    state: State<'_, DbState>,
+    schema: String,
+    table: String,
+    primary_key: HashMap<String, Value>,
+    column: String,
+    max_bytes: Option<i64>,
+) -> Result<crate::db::CellValueResult, String> {
+    fetch_cell_value(state, schema, table, primary_key, column, max_bytes).await
 }
 
 #[tauri::command]

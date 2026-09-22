@@ -522,6 +522,7 @@ pub fn run() {
             commands::list_tables_on_connection,
             commands::pg_execute_ddl,
             commands::pg_update_table_cell,
+            commands::pg_fetch_cell_value,
             commands::pg_delete_table_row,
             commands::pg_delete_table_rows,
             commands::pg_insert_table_row,

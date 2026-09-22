@@ -44,6 +44,11 @@ export function formatByteSize(bytes) {
  * @param {OversizeCellInfo} over
  */
 export function oversizeCellText(over) {
+  // No preview is the normal case now: a page reports a wide value's size and
+  // nothing else, because reading the first 16KB of a compressed out-of-line
+  // value costs a full detoast of it. The cell says what is there and how big;
+  // the dock loads it when someone opens it.
+  if (!over.preview) return `${formatByteSize(over.bytes)} ${over.dataType || 'value'}`
   const head = over.preview.length > 200 ? over.preview.slice(0, 200) + '…' : over.preview
   return `[${over.dataType || 'value'} · ${formatByteSize(over.bytes)}, truncated] ${head}`
 }
