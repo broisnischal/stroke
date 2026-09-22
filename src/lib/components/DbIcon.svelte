@@ -14,11 +14,16 @@
   } = $props()
 
   const resolvedId = $derived(MARK_ALIASES[id] ?? id)
-  const path = $derived(BRAND_MARKS[resolvedId]?.d ?? FALLBACK_MARK)
+  const mark = $derived(BRAND_MARKS[resolvedId])
+  const path = $derived(mark?.d ?? FALLBACK_MARK)
+  // Marks are 24-grid unless they say otherwise: a logo taken from its vendor
+  // (MySQL's dolphin is authored at 128) keeps its own viewBox rather than being
+  // re-plotted, and `size-*` on the element does the scaling either way.
+  const viewBox = $derived(mark?.vb ?? '0 0 24 24')
 </script>
 
 <svg
-  viewBox="0 0 24 24"
+  {viewBox}
   fill="currentColor"
   aria-hidden="true"
   class={cn('shrink-0', className)}
