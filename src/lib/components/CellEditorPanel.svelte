@@ -38,6 +38,8 @@
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import Kbd from './Kbd.svelte'
   import JsonTree from './JsonTree.svelte'
+  import Search from '@lucide/svelte/icons/search'
+  import { searchJson, matchOffsets } from '$lib/json-search.js'
   import Braces from '@lucide/svelte/icons/braces'
   import { resetInputHistory } from '$lib/input-shortcuts.js'
 
@@ -72,6 +74,8 @@
   let original = $state('')
   /** @type {HTMLTextAreaElement | null} */
   let area = $state(null)
+  /** @type {HTMLElement | null} */
+  let root = $state(null)
 
   /** The cell the draft was seeded from - `colName` plus the row hint. */
   let seededCell = ''
@@ -106,7 +110,13 @@
     // into the value of a cell you have already left.
     queueMicrotask(() => {
       resetInputHistory(area)
-      if (justOpened) area?.focus()
+      // Focus the textarea on open, because editing is what the raw pane is
+      // for - but only then. A JSON cell opens on the tree, and taking focus
+      // there would cost the thing that makes this a dock rather than a
+      // dialog: the grid keeps the cursor, arrow keys still move it, and the
+      // panel follows. Escape from the grid closes the dock through the grid's
+      // own handler; Escape from inside the dock goes through `onRootKey`.
+      if (justOpened && rawOpen) area?.focus()
     })
   })
 
@@ -143,6 +153,52 @@
     _lastTreeable = t
     rawOpen = !t
   })
+
+  // ── Find, inside the value ────────────────────────────────────────────────
+  //
+  // A tree is the one shape you cannot scan: what you are looking for is behind
+  // a chevron three levels down. Typing here opens exactly the branches that
+  // lead to a hit and leaves the rest closed, and highlights the run that
+  // matched. In the raw pane the same query steps the caret from match to
+  // match, because a textarea cannot be highlighted but it can be selected.
+  let query = $state('')
+  /** @type {HTMLInputElement | null} */
+  let findEl = $state(null)
+  let hit = $state(0)
+
+  const treeSearch = $derived(
+    isTreeable && query ? searchJson(parsed?.value, query) : null,
+  )
+  const rawHits = $derived(query ? matchOffsets(draft, query) : [])
+  /** What the counter says: tree rows while the tree is what you are reading. */
+  const hitCount = $derived(rawOpen && !isTreeable ? rawHits.length : (treeSearch?.count ?? rawHits.length))
+
+  // A query that no longer matches anything should not leave the step index
+  // pointing past the end of the list.
+  $effect(() => {
+    const n = rawHits.length
+    if (hit >= n) hit = n ? n - 1 : 0
+  })
+
+  /** Select the nth match in the raw pane and scroll it into view. */
+  function stepRaw(/** @type {number} */ dir) {
+    if (!rawHits.length || !area) return
+    hit = (hit + dir + rawHits.length) % rawHits.length
+    const at = rawHits[hit]
+    if (!rawOpen) rawOpen = true
+    area.focus()
+    area.setSelectionRange(at, at + query.length)
+    // `blur`/`focus` is what makes a textarea scroll to the selection in WebKit.
+    const before = area.scrollTop
+    area.blur()
+    area.focus()
+    if (area.scrollTop === before) area.scrollTop = before
+  }
+
+  function clearFind() {
+    query = ''
+    hit = 0
+  }
 
   const lines = $derived(draft ? draft.split('\n').length : 0)
   const chars = $derived(draft.length)
@@ -195,21 +251,59 @@
   }
 
   /** @param {KeyboardEvent} e */
+  function onFindKey(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      // First Escape gives up the search, second closes the dock - the same
+      // order a browser's find bar uses.
+      if (query) { clearFind(); return }
+      open = false
+      return
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      e.stopPropagation()
+      if (rawHits.length) stepRaw(e.shiftKey ? -1 : 1)
+      return
+    }
+  }
+
+  /**
+   * Escape, from anywhere in the dock.
+   *
+   * It used to live on the textarea alone, which was fine while the textarea
+   * was the only thing in here and always had focus. It is not: a JSON cell
+   * opens on the tree with the textarea hidden, `focus()` on a hidden element
+   * does nothing, and a click on a tree row or a bar button leaves focus on
+   * something with no handler - so Escape went nowhere. On the root it catches
+   * the key whichever child it bubbled from.
+   *
+   * @param {KeyboardEvent} e
+   */
+  function onRootKey(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      open = false
+      return
+    }
+    // ⌘F / Ctrl+F puts the caret in the find field, as it does everywhere else.
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+      e.preventDefault()
+      e.stopPropagation()
+      findEl?.focus()
+      findEl?.select()
+      return
+    }
+  }
+
+  /** @param {KeyboardEvent} e */
   function onKey(e) {
     // Cmd/Ctrl+Enter applies, matching every other multi-line editor in the app.
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault()
       apply()
-      return
-    }
-    // Escape closes from inside the field. It is stopped here because the shell
-    // runs a document-level Escape chain that closes whatever it knows about,
-    // and it does not know about this dock - so it was swallowing the key on
-    // its way out.
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      open = false
       return
     }
     // Alt+Z toggles wrap, as it does in VS Code and every editor that copied it.
@@ -242,7 +336,17 @@
 <!-- Docked bottom panel, fills the dock's height (flex column). The dock
      container provides the top border + resize handle, exactly as it does for
      the related-rows panel. -->
-<div class="flex h-full min-h-0 w-full flex-col bg-background">
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<!-- `tabindex=-1` so the panel itself can hold focus when the raw textarea is
+     hidden, which is what gives Escape somewhere to land. -->
+<div
+  bind:this={root}
+  tabindex="-1"
+  role="group"
+  aria-label="{colName} value"
+  class="flex h-full min-h-0 w-full flex-col bg-background outline-none"
+  onkeydown={onRootKey}
+>
 
   <!-- One bar, not a header and a footer: the counts and the two actions fit
        beside the name, and a 28px row of value did not need 92px of chrome. -->
@@ -270,7 +374,36 @@
       <span class="shrink-0 text-ui-3xs text-primary">edited</span>
     {/if}
 
-    <div class="ml-auto flex shrink-0 items-center gap-0.5">
+    <div class="ml-auto flex shrink-0 items-center gap-1.5">
+      <!-- Find. Always here rather than behind a toggle: the dock exists to
+           read one value, and finding something in it is the second thing you
+           do after opening it. -->
+      <div class="flex h-7 items-center gap-1 rounded-md border border-border/50 bg-input/30 px-1.5 focus-within:border-ring/60">
+        <Search class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <input
+          bind:this={findEl}
+          bind:value={query}
+          type="text"
+          aria-label="Find in this value"
+          placeholder="Find"
+          spellcheck="false"
+          class="no-focus-ring h-6 w-24 min-w-0 bg-transparent font-mono text-ui-2xs text-foreground outline-none placeholder:text-muted-foreground"
+          onkeydown={onFindKey}
+        />
+        {#if query}
+          <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground">
+            {hitCount ? (rawOpen && rawHits.length ? `${hit + 1}/${rawHits.length}` : hitCount) : 'none'}{treeSearch?.truncated ? '+' : ''}
+          </span>
+          <button
+            type="button"
+            class="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+            onclick={clearFind}
+            aria-label="Clear the search"
+          >
+            <X class="size-3" />
+          </button>
+        {/if}
+      </div>
       {#if isTreeable}
         <!-- The tree is the default for a structured value and the raw text is
              one click away, which is the other way round from how this started:
@@ -397,10 +530,17 @@
           {/if}
         </div>
         <div class="app-scroll min-h-0 flex-1 overflow-auto px-2 py-1.5">
-          {#if parsed.ok}
+          {#if parsed.ok && query && !treeSearch?.count}
+            <p class="px-1 py-1 font-mono text-ui-3xs text-muted-foreground">
+              No match for <span class="text-foreground/80">{query}</span> in this value.
+            </p>
+          {:else if parsed.ok}
             <JsonTree
               value={parsed.value}
               defaultDepth={2}
+              {query}
+              matchPaths={treeSearch?.paths ?? null}
+              openPaths={treeSearch?.open ?? null}
               oncopy={(v) => {
                 const text = typeof v === 'string' ? v : JSON.stringify(v, null, 2)
                 void navigator.clipboard?.writeText(text)
