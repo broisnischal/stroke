@@ -111,6 +111,7 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Mod+I', desc: 'Toggle AI sidebar' },
       { combo: 'Mod+Shift+L', desc: 'Activity log' },
       { combo: 'Mod+R', desc: 'Refresh current view' },
+      { combo: 'F5', desc: 'Refresh current view (the table, not the app)' },
       { combo: 'Mod+Shift+V', desc: 'Cycle table data view' },
       { combo: 'Alt+1-5', desc: 'Table / JSON / Record / Text / Chart view' },
     ],

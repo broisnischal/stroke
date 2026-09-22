@@ -2738,6 +2738,21 @@ let rowSearch = $state('')
     void handleModRefresh()
   })
 
+  // F5 reloads what you are looking at, not the app.
+  //
+  // It was bound to nothing, so the webview took it and reloaded the document -
+  // which tears down the session, redials the connection, re-reads the catalog
+  // and refetches every list, for what anyone pressing F5 over a table means:
+  // fetch these rows again. It is `handleModRefresh` now, the same contextual
+  // refresh ⌘R runs, and it is always prevented so the reload cannot happen by
+  // accident with unsaved edits staged.
+  createHotkey('F5', (e) => {
+    e.preventDefault()
+    if (!connection) return
+    if (commandOpen || showConnectionModal || showSettingsModal) return
+    void handleModRefresh()
+  })
+
   // Ctrl+Arrow (Windows/Linux) or Cmd+Arrow (Mac) for pagination and scroll.
   // Uses a raw listener instead of createHotkey because:
   //   1. macOS intercepts Ctrl+Arrow at the OS level for Mission Control.
