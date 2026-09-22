@@ -4412,11 +4412,40 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     })
   });
 
+  /**
+   * Is this keystroke aimed at something you type into?
+   *
+   * The grid's chords are bound on the scroll container, so everything typed
+   * into anything inside it - the staged-row band, the inline cell editor, a
+   * picker's search box - reaches the grid's handlers too. ⌘A was the one that
+   * showed: it selected every row in the table while the caret sat in a draft
+   * field, where it means "select this value". By element rather than by state,
+   * so a field added later is covered without anyone remembering to come back
+   * here, and `[data-new-row]` covers the band's non-input controls as well.
+   * @param {EventTarget | null} t
+   */
+  function isFieldTarget(t) {
+    return (
+      t instanceof HTMLElement &&
+      (!!t.closest('[data-new-row]') ||
+        t.isContentEditable ||
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement)
+    )
+  }
+
   // Document-level capture so undo/redo fires even during the brief window between
   // editingCell being cleared and the container div regaining focus.
   $effect(() => {
     function onCapture(/** @type {KeyboardEvent} */ e) {
       if (!isTableFocused || editingCell) return;
+      // This listener is on `window`, so it runs before every other capture
+      // handler in the app - including the one that gives inputs their undo
+      // stack and their word deletion. Undoing a cell edit because the caret
+      // was in a staged row and you pressed ⌘Z is the grid reaching into a
+      // field it does not own, and it took the field's own ⌘Z with it.
+      if (isFieldTarget(e.target)) return;
       if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "z" || e.key === "Z")) {
         e.preventDefault();
         e.shiftKey ? void redoEdit() : void undoEdit();
@@ -4776,26 +4805,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
-    // A keystroke aimed at a field is the field's.
-    //
-    // The grid's chords are bound on the scroll container, so everything typed
-    // into anything inside it - the staged-row band, the inline cell editor, a
-    // picker's search box - bubbles up here. ⌘A was the one that showed: it
-    // selected every row in the table while the caret sat in a draft field,
-    // where it means "select this value". Checked first, because the chords sit
-    // above this in the function, and by element rather than by state so a field
-    // added later is covered without anyone remembering to come back here.
-    const keyTarget = e.target
-    if (
-      keyTarget instanceof HTMLElement &&
-      (keyTarget.closest('[data-new-row]') ||
-        keyTarget.isContentEditable ||
-        keyTarget instanceof HTMLInputElement ||
-        keyTarget instanceof HTMLTextAreaElement ||
-        keyTarget instanceof HTMLSelectElement)
-    ) {
-      return
-    }
+    // A keystroke aimed at a field is the field's. Checked first, because the
+    // chords sit above this in the function.
+    if (isFieldTarget(e.target)) return
     // Every move from here is a keyboard move, so the cursor may scroll itself
     // into view. Set before the branches rather than in each of them.
     _focusFromKey = true
