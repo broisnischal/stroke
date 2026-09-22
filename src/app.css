@@ -169,6 +169,24 @@ html[data-theme="light"] {
 html[data-icon-style="light"] svg.lucide { stroke-width: 1.5px; }
 html[data-icon-style="bold"]  svg.lucide { stroke-width: 2.5px; }
 
+/* ── Tailwind v4's outline variable, and why the focus rings were invisible ──
+   v4 compiles every `outline-*` utility to `outline-style: var(--tw-outline-style)`,
+   and `outline-none` sets that variable to `none` ON THE ELEMENT. The pattern
+   this app uses in ~40 places - `outline-none` in the base class list plus
+   `focus-visible:outline-2 outline-ring` for the ring - therefore applied a
+   2px-wide outline whose style was still `none`, and drew nothing at all: the
+   button primitive, the welcome tiles, the dialog buttons and the connection
+   rows all had a focus ring in the markup and none on screen.
+
+   Restoring the style for the focused element is the whole fix. It is only the
+   variable, so anything that sets `outline-style: none` literally (`outline-none`
+   with no focus utility, or an explicit `focus:outline-none`) still wins and
+   stays ringless. Unlayered so it beats the utilities layer. */
+:focus,
+:focus-visible {
+  --tw-outline-style: solid;
+}
+
 /* ── Focus ring - one premium treatment for every text field, app-wide ───────
    Unlayered on purpose: unlayered CSS beats Tailwind's layered `ring-1
    ring-ring` utilities, so this overrides the ~40 per-component focus styles
