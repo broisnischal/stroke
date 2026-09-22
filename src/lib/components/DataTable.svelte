@@ -283,6 +283,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
      * @type {null | ((detail: { rowIdx: number, colIdx: number }) => Promise<{ text: string, bytes: number, truncated: boolean }>)}
      */
     onfetchcellvalue = null,
+    /**
+     * Fetch one capped cell AND write it into the row, for the in-cell Load
+     * button. Separate from `onfetchcellvalue`, which hands the text back for
+     * the dock to show without touching the page.
+     * @type {null | ((detail: { rowIdx: number, colIdx: number }) => Promise<void>)}
+     */
+    onloadcellvalue = null,
     /** Called when the user confirms the new row draft. Receives the validated values. */
     oninsertrow = /** @type {(values: Record<string, unknown>) => Promise<void>} */ (async () => {}),
     /**
@@ -580,7 +587,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     })
   }
 
-  onDestroy(() => { if (_fkFollowTimer) clearTimeout(_fkFollowTimer) })
+  onDestroy(() => {
+    if (_fkFollowTimer) clearTimeout(_fkFollowTimer)
+    if (_spinRaf) cancelAnimationFrame(_spinRaf)
+  })
 
   // ── Related-rows dock (bottom panel) ────────────────────────────────────────
   // The FK sub-view renders docked below the scroll container - a fixed-height
@@ -2489,6 +2499,49 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let cellEditorName = $state("");
   let cellEditorType = $state("");
   let cellEditorValue = $state(/** @type {unknown} */ (null));
+  /**
+   * Cells with a fetch in flight, keyed `row:col`. A plain Set, not reactive:
+   * the canvas is what renders it, and the draw loop is already running while
+   * the spinner turns.
+   * @type {Set<string>}
+   */
+  let _loadingCells = new Set()
+  let _spinRaf = 0
+  /** Keep repainting while anything is loading, so the spinner actually spins. */
+  function tickSpinner() {
+    if (_spinRaf) return
+    const step = () => {
+      _spinRaf = 0
+      if (_loadingCells.size === 0) return
+      scheduleDraw()
+      _spinRaf = requestAnimationFrame(step)
+    }
+    _spinRaf = requestAnimationFrame(step)
+  }
+
+  /**
+   * Fetch one capped cell and put the value in the row. The grid keeps its
+   * preview for every other row: one cell being read is not a reason to pull the
+   * column back into the page.
+   * @param {number} rowIdx @param {number} colIdx
+   */
+  async function loadCellInline(rowIdx, colIdx) {
+    if (!onloadcellvalue) return
+    const key = `${rowIdx}:${colIdx}`
+    if (_loadingCells.has(key)) return
+    _loadingCells.add(key)
+    scheduleDraw()
+    tickSpinner()
+    try {
+      await onloadcellvalue({ rowIdx, colIdx })
+    } catch (e) {
+      toast.error('Could not load the value', { description: String(e?.message ?? e) })
+    } finally {
+      _loadingCells.delete(key)
+      scheduleDraw()
+    }
+  }
+
   /** Set when the dock holds a 16KB preview of a capped cell, not the value. */
   let cellEditorOversize = $state(/** @type {{ bytes: number, dataType: string } | null} */ (null));
   /**
@@ -4768,13 +4821,46 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * Must stay in step with the draw pass below - this is the click target for
    * what that paints.
    */
-  function cellButtonRects(cellX, w, ry, rh, { alignRight = false }) {
+  /** True when a cell holds the "this is N bytes" stand-in rather than a value. */
+  function isOversizeValue(v) {
+    return !!v && typeof v === 'object' && /** @type {any} */ (v).__strokeOversize === true
+  }
+
+  /**
+   * The per-cell Load control: a download arrow that becomes a spinner while the
+   * value is on its way. Drawn rather than mounted - it lives in a canvas cell,
+   * and the spinner's angle comes from the frame clock so it costs one arc.
+   * @param {CanvasRenderingContext2D} ctx @param {number} x @param {number} cy
+   * @param {boolean} busy @param {any} c
+   */
+  function drawCellLoad(ctx, x, cy, busy, c) {
+    if (!busy) {
+      drawIcon(ctx, 'download', x, cy - 7, 14, withAlpha(c.cPrimary, 0.9), 1.8)
+      return
+    }
+    const r = 6
+    ctx.save()
+    ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
+    ctx.lineWidth = 1.8
+    ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.arc(x + 7, cy, r, c.spinAngle, c.spinAngle + Math.PI * 1.35)
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  function cellButtonRects(cellX, w, ry, rh, { alignRight = false, withLoad = false }) {
     const cy = ry + rh / 2
     const rect = (/** @type {number} */ x) => ({ x, y: ry, w: ICON_HIT, h: rh, cx: x + ICON_HIT / 2, cy })
-    // The copy button sits on the side the value is not using.
-    if (alignRight) return { copy: rect(cellX + 4) }
+    // The copy button sits on the side the value is not using; Load sits
+    // immediately inboard of it, so the pair reads as one group wherever it is.
+    if (alignRight) {
+      const copy = rect(cellX + 4)
+      return { copy, load: withLoad ? rect(cellX + 4 + ICON_HIT) : null }
+    }
     const right = cellX + w - 4  // 4px right margin
-    return { copy: rect(right - ICON_HIT) }
+    const copy = rect(right - ICON_HIT)
+    return { copy, load: withLoad ? rect(right - ICON_HIT * 2) : null }
   }
 
   function draw() {
@@ -5035,6 +5121,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
     const bodyC = {
       cFg, cText, cMuted, cGrid, cBorder, cMutedBg, cRing, cAccent, cPanel, usedW, navName,
+      // Capped cells only draw their Load control when there is somewhere to
+      // load from, and the spinner's angle is shared by every cell in the frame.
+      oversizeCells: !!onfetchcellvalue,
+      loadingCells: _loadingCells,
+      spinAngle: (performance.now() / 1000) * Math.PI * 1.6,
       AMBER, BLUE_FG, RED, cPrimary, frozenW, tableStyle, dotSize, vSeps, firstColIdx,
       rangeColNames, rangeFirstCol, rangeLastCol, rangeR0, rangeR1,
       // Checked rows, so the cell cursor can drop its side strokes on a row that
@@ -5748,12 +5839,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // 1. Hover buttons. They go on whichever side the value is not using, so
     //    they land in empty space rather than over the text. Geometry must
     //    match cellButtonRects(), which is the click target for these.
-    if (isHover) {
+    const capped = !!c.oversizeCells && isOversizeValue(value)
+    const loadingCell = capped && !!c.loadingCells?.has(`${idx}:${actualIdx}`)
+    if (isHover || loadingCell) {
       if (alignRight) {
-        drawIcon(ctx, 'copy', cellX + 9, cy - 7, 14, c.cMuted, 1.8)
+        if (isHover) drawIcon(ctx, 'copy', cellX + 9, cy - 7, 14, c.cMuted, 1.8)
+        if (capped) drawCellLoad(ctx, cellX + 9 + c.iconHit, cy, loadingCell, c)
       } else {
-        drawIcon(ctx, 'copy', rx - c.iconHit + 5, cy - 7, 14, c.cMuted, 1.8)
+        if (isHover) drawIcon(ctx, 'copy', rx - c.iconHit + 5, cy - 7, 14, c.cMuted, 1.8)
         rx -= c.iconHit
+        // The value is not here and this is how it arrives, so it draws whether
+        // or not the row is hovered once it is fetching.
+        if (capped) { drawCellLoad(ctx, rx - c.iconHit + 5, cy, loadingCell, c); rx -= c.iconHit }
       }
     }
 
@@ -6616,11 +6713,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         const isJson = !isNull && typeof value === 'object'
         // Same alignment test the draw pass uses, so the click target follows
         // the button to whichever side it was painted on.
-        const { copy } = cellButtonRects(
+        const cappedCell = isOversizeValue(value)
+        const { copy, load } = cellButtonRects(
           /** @type {number} */ (t.drawnX), t.col.w, 0, ROW_HEIGHT,
-          { alignRight: isRightAlignedColumn(actualIdx) },
+          { alignRight: isRightAlignedColumn(actualIdx), withLoad: cappedCell && !!onloadcellvalue },
         )
         const relX = x - /** @type {number} */ (t.drawnX)
+        if (load && relX >= load.x - /** @type {number} */ (t.drawnX) && relX <= load.x - /** @type {number} */ (t.drawnX) + load.w) {
+          e.stopPropagation(); void loadCellInline(idx, actualIdx); return
+        }
         if (relX >= copy.x - /** @type {number} */ (t.drawnX) && relX <= copy.x - /** @type {number} */ (t.drawnX) + copy.w) {
           void copyCellValue(idx, actualIdx); return
         }
@@ -8162,6 +8263,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       readOnly={readonly || cellEditorDetached || !!cellEditorOversize || !canEditColumn(cellEditorCol)}
       oversize={cellEditorOversize}
       onloadfull={onfetchcellvalue && cellEditorRow >= 0 ? loadFullCellValue : null}
+
       oncommit={commitCellEditor}
     />
   </div>

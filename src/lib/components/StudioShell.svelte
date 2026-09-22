@@ -2498,16 +2498,21 @@ let rowSearch = $state('')
   // that deletes the selected rows, and the two are the last pair in the app
   // that should share a chord. Deletion of work in progress also earns a
   // modifier more than applying it does.
-  createHotkey('Mod+Alt+Backspace', (e) => {
-    if (activeTab?.kind !== 'table' || pendingEditCount === 0) return
-    // `input-shortcuts.js` shields the editing chords from this layer, but it
-    // resolves ⌘⌥⌫ to no editing mode and so lets it through. Discarding every
-    // staged change because someone reached for a word-delete in a text field
-    // is not a trade worth making.
-    if (isTypingTarget(document.activeElement)) return
-    e.preventDefault()
-    resetEdits()
-  })
+  // Discard every staged change. Alt+⌫ is what the Reset button advertises and
+  // what the hand reaches for; ⌘⌥⌫ stays bound because it shipped and someone's
+  // fingers know it.
+  for (const combo of ['Alt+Backspace', 'Mod+Alt+Backspace']) {
+    createHotkey(combo, (e) => {
+      if (activeTab?.kind !== 'table' || pendingEditCount === 0) return
+      // `input-shortcuts.js` shields the editing chords from this layer, but it
+      // resolves these to no editing mode and so lets them through. Alt+⌫ is
+      // also word-delete in a text field, and discarding every staged change
+      // because someone reached for that is not a trade worth making.
+      if (isTypingTarget(document.activeElement)) return
+      e.preventDefault()
+      resetEdits()
+    })
+  }
 
   // Find & replace in the current table - editor-style Ctrl/⌘+H.
   createHotkey('Mod+H', (e) => {
@@ -6802,6 +6807,35 @@ let rowSearch = $state('')
     return await fetchCellValue(activeSchema, activeTable, pk, col.name)
   }
 
+  /**
+   * Load one capped cell and put it in the row, for the grid's in-cell button.
+   * Only that cell: the rest of the column keeps its size stand-in, because one
+   * value being read is not a reason to pull a half-megabyte column back into
+   * the page.
+   * @param {{ rowIdx: number, colIdx: number }} detail
+   */
+  async function handleLoadCellValue(detail) {
+    const col = columns[detail.colIdx]
+    if (!col) return
+    const res = await handleFetchCellValue(detail)
+    // A JSON column renders from a parsed value, the way an under-cap row in the
+    // same column already arrives; anything else is text.
+    const type = String(col.dataType ?? col.data_type ?? '').toLowerCase()
+    /** @type {unknown} */
+    let next = res.text
+    if (type === 'json' || type === 'jsonb') {
+      try { next = JSON.parse(res.text) } catch { /* leave it as text */ }
+    }
+    rows[detail.rowIdx] = rows[detail.rowIdx].map((cell, j) => (j === detail.colIdx ? next : cell))
+    // rows is $state.raw, so the assignment above does not notify the canvas.
+    dataVersion++
+    if (res.truncated) {
+      toast.info('Loaded as much as fits', {
+        description: `${col.name} is larger than this view can hold - the tail is not shown.`,
+      })
+    }
+  }
+
   /** @param {{ rowIdx: number, colIdx: number, value: unknown }} detail */
   async function handleSaveCell(detail) {
     if (!activeTable || !primaryKey.length) return
@@ -8143,6 +8177,7 @@ let rowSearch = $state('')
                 {incomingForeignKeys}
                 onfetchrelatedrows={handleFetchRelatedRows}
                 onfetchcellvalue={dbType === 'postgres' ? handleFetchCellValue : null}
+                onloadcellvalue={dbType === 'postgres' ? handleLoadCellValue : null}
                 schema={activeSchema}
                 tableName={activeTable ?? ''}
                 connectionId={persistConnectionId}

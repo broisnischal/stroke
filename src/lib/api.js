@@ -741,6 +741,9 @@ export async function getTableRows(schema, table, limit, offset, query = {}) {
     includeCount: query.includeCount !== false,
     // Null placement for the ORDER BY (dialects that support it); unset → default.
     nullsOrder: (() => { try { const v = loadSettings().nullSortOrder; return v === 'first' || v === 'last' ? v : null } catch { return null } })(),
+    // Fetch a wide column as a size and load its value per cell (Settings →
+    // Data). Off means every value on the page, whatever it weighs.
+    previewWide: (() => { try { return loadSettings().lazyWideColumns !== false } catch { return true } })(),
   })
   recordQuery({ sql: r?.sql, durationMs: r?.queryMs ?? Math.round(performance.now() - _t0), schema, table, source: 'browse', success: true })
   return r

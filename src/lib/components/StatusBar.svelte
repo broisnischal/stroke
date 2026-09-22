@@ -738,7 +738,7 @@
           class="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40"
           onclick={onresetedits}
           disabled={applying}
-          title="Discard {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'}"
+          title="Discard {pendingEditCount} unsaved change{pendingEditCount === 1 ? '' : 's'} ({IS_MAC ? '⌥⌫' : 'Alt+Backspace'})"
         >
           <Icon name="undo-2" class="size-3 shrink-0" />
           <span class="@max-[780px]/sb:hidden">Reset</span>
@@ -784,7 +784,7 @@
               <DropdownMenu.Item onSelect={onresetedits} variant="destructive">
                 <Icon name="undo-2" class="size-3.5" />
                 Discard changes
-                <DropdownMenu.Shortcut combo="Mod+Alt+Backspace" />
+                <DropdownMenu.Shortcut combo="Alt+Backspace" />
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>

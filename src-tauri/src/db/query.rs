@@ -1638,6 +1638,10 @@ pub async fn get_table_rows(
     // NULLS LAST default). Applied on the dialects that support explicit null
     // placement (Postgres, SQLite, D1/libSQL, MySQL); ignored by ClickHouse/etc.
     nulls_order: Option<String>,
+    // When false, wide columns are fetched whole - the behaviour before they
+    // were measured, kept behind a setting for anyone who wants every value on
+    // the page whatever it costs.
+    preview_wide: bool,
 ) -> Result<TableRows, String> {
     if limit > MAX_PAGE_LIMIT {
         return Err(format!("Limit {limit} exceeds the maximum of {MAX_PAGE_LIMIT} rows per page"));
@@ -1795,7 +1799,12 @@ pub async fn get_table_rows(
     if include_meta {
         super::wide_columns::invalidate(&pool, &schema, &table);
     }
-    let (mut wide_projection, wide) = super::wide_columns::page_projection(&pool, &schema, &table).await;
+    let (mut wide_projection, wide) = if preview_wide {
+        super::wide_columns::page_projection(&pool, &schema, &table).await
+    } else {
+        // The setting is off: fetch every column whole, however wide it is.
+        (None, Vec::new())
+    };
     let wide_names: Vec<String> = wide.iter().map(|w| w.name.clone()).collect();
     let mut data_sql = match &wide_projection {
         Some(list) => format!("SELECT {list} {data_tail}"),

@@ -822,6 +822,10 @@ pub async fn pg_get_table_rows(
     // Null placement for ORDER BY ("first"/"last"); absent keeps NULLS LAST.
     // Applied on dialects with explicit null placement (Postgres, SQLite, D1/libSQL).
     nulls_order: Option<String>,
+    // Optional - defaults to true. When false, a wide column is fetched whole
+    // like every other column, which is what the app did before and what the
+    // setting turns back on for anyone who wants it.
+    preview_wide: Option<bool>,
 ) -> Result<TableRows, String> {
     get_table_rows(
         state,
@@ -840,6 +844,7 @@ pub async fn pg_get_table_rows(
         sorts.unwrap_or_default(),
         keyset,
         nulls_order,
+        preview_wide.unwrap_or(true),
     )
     .await
 }

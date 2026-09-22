@@ -344,6 +344,10 @@
     settings = updateSettings({ liveModeEnabled: !settings.liveModeEnabled });
   }
 
+  function toggleLazyWideColumns() {
+    settings = updateSettings({ lazyWideColumns: !settings.lazyWideColumns });
+  }
+
   // ── Database (query & connection) numeric/text settings ──────────────────
   /** @param {keyof import('$lib/stores/settings.js').AppSettings} key @param {string|number} raw @param {number} def @param {number} min */
   function setNumber(key, raw, def, min = 0) {
@@ -930,6 +934,9 @@
   {/if}
   {#if show('Live mode', 'Experimental, auto-refresh the active table when its data changes')}
     {@render switchRow('Live mode (experimental)', 'Experimental, show the Live auto-refresh toggle in the status bar. Off by default.', settings.liveModeEnabled, toggleLiveMode)}
+  {/if}
+  {#if show('Load large values on demand', 'Fetch a column that averages megabytes as a size, and load a cell when you open it')}
+    {@render switchRow('Load large values on demand', 'A column averaging half a megabyte a row arrives as its size, and the value loads when you open the cell. Off fetches every value with the page, which is what it did before, and what makes such a table take ten seconds to open. PostgreSQL.', settings.lazyWideColumns, toggleLazyWideColumns)}
   {/if}
   {#if show($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'))}
     {@render switchRow($t('settings.mcpAutostart'), $t('settings.mcpAutostart.desc'), settings.mcpAutoStart, toggleMcpAutoStart)}

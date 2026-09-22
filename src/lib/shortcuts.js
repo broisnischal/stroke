@@ -161,7 +161,7 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Mod+Shift+A', desc: 'Deselect all rows' },
       { combo: 'Mod+S', desc: 'Apply staged changes' },
       { combo: 'Mod+Alt+S', desc: 'Copy staged changes as SQL' },
-      { combo: 'Mod+Alt+Backspace', desc: 'Discard staged changes' },
+      { combo: 'Alt+Backspace', desc: 'Discard staged changes' },
       { combo: 'Mod+Z', desc: 'Undo cell edit' },
       { combo: 'Mod+Shift+Z', desc: 'Redo cell edit' },
       { combo: 'Mod+Up', desc: 'Scroll to top' },
