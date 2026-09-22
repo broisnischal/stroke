@@ -276,6 +276,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     incomingForeignKeys = [],
     /** Fetch related rows for an inline FK sub-view. Returns { columns, rows, error? }. */
     onfetchrelatedrows = /** @type {(detail: any) => Promise<{ columns: any[], rows: any[], error?: string }>} */ (async () => ({ columns: [], rows: [] })),
+    /**
+     * Load one capped cell in full. Wide columns arrive as a preview so a page
+     * of half-megabyte values stays openable; this is how the dock gets the
+     * real thing when someone asks for it. Null when the engine cannot.
+     * @type {null | ((detail: { rowIdx: number, colIdx: number }) => Promise<{ text: string, bytes: number, truncated: boolean }>)}
+     */
+    onfetchcellvalue = null,
     /** Called when the user confirms the new row draft. Receives the validated values. */
     oninsertrow = /** @type {(values: Record<string, unknown>) => Promise<void>} */ (async () => {}),
     /**
@@ -449,6 +456,132 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    */
   let fkSubview = $state(null)
 
+  // ── The dock follows the cell cursor ────────────────────────────────────────
+  // Arrowing up and down a FK column left the dock showing the row it was opened
+  // on, so the preview and the cursor disagreed about which row was being read -
+  // and the only way to move it was to click another FK cell. It now re-queries
+  // the same relation for whatever row the cursor lands on. Debounced: holding
+  // the arrow key down should cost one query at the end of the run, not one per
+  // row crossed.
+  const FK_FOLLOW_DELAY = 140
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let _fkFollowTimer = null
+  let _fkFollowSeq = 0
+
+  $effect(() => {
+    const target = focusedRow
+    const anchored = fkSubview?.rowIdx
+    if (anchored === undefined || target === null || target === anchored) return
+    if (rows[target] === undefined) return
+    untrack(() => {
+      if (_fkFollowTimer) clearTimeout(_fkFollowTimer)
+      _fkFollowTimer = setTimeout(() => { _fkFollowTimer = null; void followFkSubview(target) }, FK_FOLLOW_DELAY)
+    })
+  })
+
+  /**
+   * Re-point the open related-rows dock at `idx`, keeping its relation and its
+   * height. A NULL foreign key resolves to the panel's empty state rather than a
+   * query that can only come back empty.
+   * @param {number} idx
+   */
+  async function followFkSubview(idx) {
+    const sv = fkSubview
+    if (!sv || sv.rowIdx === idx || rows[idx] === undefined) return
+    const row = rows[idx] ?? []
+    const seq = ++_fkFollowSeq
+    /** @param {{ columns?: any[], rows?: any[], error?: string | null }} res */
+    const settle = (res) => {
+      // A newer move (or a close, or a different relation) owns the dock now.
+      if (seq !== _fkFollowSeq || fkSubview?.rowIdx !== idx || fkSubview?.label !== sv.label) return
+      fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
+    }
+
+    if (sv.kind === 'reverse') {
+      const rel = sv.relInfo
+      if (!rel) return
+      fkSubview = { ...sv, rowIdx: idx, data: { loading: true, columns: [], rows: [], error: null } }
+      settle(await onfetchrelatedrows({
+        kind: 'reverse', fromSchema: rel.fromSchema, fromTable: rel.fromTable,
+        fromColumns: rel.fromColumns, toColumns: rel.toColumns, row,
+      }))
+      return
+    }
+
+    const colIdx = sv.colIdx ?? -1
+    const fk = _colCache[colIdx]?.fk ?? null
+    if (!fk) return
+    const value = row[colIdx]
+    if (value === null || value === undefined) {
+      fkSubview = { ...sv, rowIdx: idx, data: { loading: false, columns: [], rows: [], error: null } }
+      return
+    }
+    fkSubview = { ...sv, rowIdx: idx, data: { loading: true, columns: [], rows: [], error: null } }
+    settle(await onfetchrelatedrows({ kind: 'forward', fk, row }))
+  }
+
+  /**
+   * Open a relationship as a view of its own - the related table, filtered to
+   * this row. The dock's "Open in sub view" button lands here too, so the
+   * gesture and the button cannot drift apart.
+   * @param {number} rowIdx @param {any} vc a `virtualRelCols` entry
+   * @param {{ newTab?: boolean }} [opts]
+   */
+  function openReverseFkFullView(rowIdx, vc, opts = {}) {
+    if (rows[rowIdx] === undefined) return
+    onfollowforeignkey({ rowIdx, colIdx: 0, reverseRel: vc, row: rows[rowIdx], newTab: opts.newTab === true })
+  }
+
+  /**
+   * The relationship cell under a canvas point, or null. `rowIdx` is -1 when the
+   * point is inside the column but not on a row (the header band, the slack under
+   * the last row) - still a hit, because the click belongs to that column either
+   * way and must not fall through to the grid behind it.
+   * @param {number} x @param {number} y
+   */
+  function vrelHitAt(x, y) {
+    if (y < HEADER_H || virtualRelCols.length === 0) return null
+    const cx = x + _scrollLeft
+    const vi = _vrelLayout.findIndex((vp) => cx >= vp.x && cx < vp.x + vp.w)
+    if (vi < 0) return null
+    const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
+    const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
+    return { vi, vc: virtualRelCols[vi], rowIdx: r?.inRowBody ? r.idx : -1 }
+  }
+
+  /**
+   * Open (or close) the related-rows dock for a relationship cell. Shared by the
+   * click path and the Enter key, so a relation opens the same way whichever
+   * one you reach it with.
+   * @param {number} rowIdx @param {any} vc a `virtualRelCols` entry
+   */
+  function toggleReverseFkSubview(rowIdx, vc) {
+    if (fkSubview?.rowIdx === rowIdx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label) {
+      fkSubview = null
+      return
+    }
+    // Opening FK sub-view: close JSON expand for the same row (mutually exclusive)
+    if (expandedRows.has(rowIdx)) { const s = new Set(expandedRows); s.delete(rowIdx); expandedRows = s }
+    // The cursor moves to the row being inspected - a real column's click does
+    // this on the way past, and the dock follows the cursor, so a relation cell
+    // that left it behind would drag the dock back.
+    focusedRow = rowIdx
+    // Park the cursor ON the relation cell, not on whatever column it was last
+    // in: it is a navigable column now, and the cell you acted on is the cell
+    // the cursor should be standing in.
+    const relNavIdx = virtualRelCols.indexOf(vc)
+    focusedCol = relNavIdx >= 0 ? visibleColumns.length + relNavIdx : (focusedCol ?? 0)
+    const row = rows[rowIdx] ?? []
+    fkSubview = { rowIdx, kind: 'reverse', label: vc.label, relInfo: vc, data: { loading: true, columns: [], rows: [], error: null } }
+    scrollRowIntoViewBesideDock(rowIdx)
+    void onfetchrelatedrows({ kind: 'reverse', fromSchema: vc.fromSchema, fromTable: vc.fromTable, fromColumns: vc.fromColumns, toColumns: vc.toColumns, row }).then(res => {
+      if (fkSubview?.rowIdx !== rowIdx || fkSubview?.label !== vc.label) return
+      fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
+    })
+  }
+
+  onDestroy(() => { if (_fkFollowTimer) clearTimeout(_fkFollowTimer) })
+
   // ── Related-rows dock (bottom panel) ────────────────────────────────────────
   // The FK sub-view renders docked below the scroll container - a fixed-height
   // drawer with its own internal scroll - instead of inline between rows (which
@@ -548,6 +681,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let vectorViewerColName = $state("");
   let vectorViewerType = $state("vector");
   let vectorViewerNullable = $state(false);
+  /** The cell cannot be written (read-only session, no primary key) - preview only. */
+  let vectorViewerReadOnly = $state(false);
   let vectorViewerValue = $state("");
 
   let geomViewerOpen = $state(false);
@@ -556,6 +691,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let geomViewerColName = $state("");
   let geomViewerType = $state("geometry");
   let geomViewerNullable = $state(false);
+  /** Same as the vector viewer: readable even where it is not writable. */
+  let geomViewerReadOnly = $state(false);
   let geomViewerValue = $state("");
 
   let arrayEditorOpen = $state(false);
@@ -1216,6 +1353,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
+  /** True while a pointer press is what is moving focus into the grid. */
+  let _focusFromPointer = false
+
   function focusRow(rowIdx) {
     if (editingCell) return;
     focusedRow = rowIdx;
@@ -1270,6 +1410,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @returns {boolean} false if there is no such column
    */
   function scrollColumnIntoView(name, behavior = "smooth") {
+    // Relationship columns live right of the real ones, outside `geom`, so they
+    // carry their own x/w - without this the cursor could Tab onto one that is
+    // off-screen and the grid would sit still.
+    const vp = _vrelLayout.find((p) => p.hoverKey === name)
+    if (vp) {
+      if (!tableContainer) return false
+      const PAD = 28
+      const vLeft = vp.x - _scrollLeft
+      const vRight = vLeft + vp.w
+      let target = _scrollLeft
+      if (vLeft < geom.frozenWidth + PAD) target = vp.x - geom.frozenWidth - PAD
+      else if (vRight > _viewportWidth - PAD) target = vp.x + vp.w - _viewportWidth + PAD
+      target = Math.max(0, target)
+      if (Math.abs(target - _scrollLeft) > 1) tableContainer.scrollTo({ left: target, behavior })
+      return true
+    }
     const col = geom.cols.find((c) => c.name === name)
     if (!col) return false
     if (tableContainer && !col.pinned) {
@@ -1418,13 +1574,28 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    *   instead of the existing value (type-to-edit behavior).
    */
   function startEdit(rowIdx, colIdx, initialChar) {
-    if (readonly) return;
     const col = columns[colIdx];
     if (!col) return;
 
     // A hidden column has no on-canvas cell, so the edit overlay can't anchor to
     // it - setting editingCell would trap keyboard nav until Esc. Bail out.
     if (hiddenColumns.has(col.name)) return;
+
+    // Vectors and geometries open their own viewers rather than an inline text
+    // box: 1,500 characters of `0.1,0.1,…` (or a 500-vertex EWKT polygon) in a
+    // one-line input is not an edit surface.
+    //
+    // They open BEFORE the edit gates, because looking at a value is not editing
+    // it. Behind the gates, a read-only session or a table with no primary key
+    // got "Cannot edit - this table has no primary key" where the embedding
+    // preview used to be, which is the preview disappearing for exactly the
+    // tables most likely to hold one. The viewer takes the same read-only flag
+    // and drops its Save.
+    focusedRow = rowIdx;
+    if (openVectorViewer(rowIdx, colIdx)) return;
+    if (openGeometryViewer(rowIdx, colIdx)) return;
+
+    if (readonly) return;
 
     if (!primaryKey.length) {
       toast.error("Cannot edit", {
@@ -1446,12 +1617,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
 
-    focusedRow = rowIdx;
-    // Vectors and geometries open their own viewers rather than an inline text
-    // box: 1,500 characters of `0.1,0.1,…` (or a 500-vertex EWKT polygon) in a
-    // one-line input is not an edit surface.
-    if (openVectorViewer(rowIdx, colIdx)) return;
-    if (openGeometryViewer(rowIdx, colIdx)) return;
     const startValue = effectiveCellValue(rowIdx, colIdx);
     const oversize = oversizeCellInfo(startValue);
     if (oversize) {
@@ -1917,13 +2082,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Surface staged-delete-of-selection to the parent (⌘⌫ / toolbar delete).
   $effect(() => {
     stageDeleteSelected = () => {
-      if (readonly || selected.size === 0) return;
+      if (readonly) return;
+      // Checked rows if there are any, otherwise the row under the cell cursor.
+      // The chord is printed on a context menu item that reads "Delete row" and
+      // acts on the row you opened it over, so requiring a checkbox first made
+      // the shortcut do nothing on exactly the row it was offered for.
+      const targets = selected.size > 0 ? [...selected] : focusedRow !== null ? [focusedRow] : [];
+      if (targets.length === 0) return;
       if (!primaryKey.length) {
         toast.error("Cannot delete", { description: "This table has no primary key." });
         return;
       }
       const next = new Set(pendingDeletes);
-      for (const ri of selected) next.add(ri);
+      for (const ri of targets) next.add(ri);
       pendingDeletes = next;
       scheduleDraw();
     }
@@ -2266,6 +2437,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     vectorViewerType = type.replace(/\(.*$/, "").trim() || "vector";
     vectorViewerNullable = col.isNullable ?? col.is_nullable ?? true;
     vectorViewerValue = v;
+    vectorViewerReadOnly = !canEditColumn(colIdx);
     vectorViewerOpen = true;
     return true;
   }
@@ -2294,6 +2466,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     geomViewerType = type;
     geomViewerNullable = col.isNullable ?? col.is_nullable ?? true;
     geomViewerValue = v;
+    geomViewerReadOnly = !canEditColumn(colIdx);
     geomViewerOpen = true;
     return true;
   }
@@ -2316,6 +2489,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let cellEditorName = $state("");
   let cellEditorType = $state("");
   let cellEditorValue = $state(/** @type {unknown} */ (null));
+  /** Set when the dock holds a 16KB preview of a capped cell, not the value. */
+  let cellEditorOversize = $state(/** @type {{ bytes: number, dataType: string } | null} */ (null));
   /**
    * True when the dock is showing a value that has no cell behind it - a node
    * picked out of an expanded row, say. It cannot follow the cursor (there is
@@ -2345,6 +2520,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {unknown} value @param {string} label
    */
   function openValueInDock(value, label) {
+    cellEditorOversize = null;
     cellEditorRow = -1;
     cellEditorCol = -1;
     cellEditorName = label || 'value';
@@ -2373,6 +2549,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     cellEditorName = col.name ?? "value";
     cellEditorType = String(col.dataType ?? col.data_type ?? _colCache[colIdx]?.colType ?? "");
     cellEditorValue = oversize ? oversize.preview : value;
+    // Kept so the panel can say what it is holding - and so Stage change stays
+    // out of reach. Staging the preview would write 16KB over the 287KB that is
+    // actually in the row.
+    cellEditorOversize = oversize ? { bytes: oversize.bytes, dataType: oversize.dataType } : null;
     return true;
   }
 
@@ -2399,6 +2579,23 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       seedCellEditor(r, ai);
     });
   });
+
+  /**
+   * Swap the dock's preview for the whole value. Only the dock gets it - the
+   * grid keeps the preview, so one row being read does not put a megabyte back
+   * into the page that deliberately left it out.
+   */
+  async function loadFullCellValue() {
+    if (!onfetchcellvalue || cellEditorRow < 0 || cellEditorCol < 0) return
+    const res = await onfetchcellvalue({ rowIdx: cellEditorRow, colIdx: cellEditorCol })
+    cellEditorValue = res.text
+    cellEditorOversize = null
+    if (res.truncated) {
+      toast.info('Loaded as much as fits', {
+        description: `${cellEditorName} is larger than this view can hold - the tail is not shown.`,
+      })
+    }
+  }
 
   /** Stage the edited value - same queue, undo and Apply as an inline edit. */
   function commitCellEditor(/** @type {string} */ next) {
@@ -3254,7 +3451,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     gutterWidth + columns.reduce((acc, c) => acc + widthForColumn(c.name, c.dataType ?? c.data_type ?? ''), 0)
   )
 
-  const navigableColumns = $derived(visibleColumns)
+  /**
+   * Column order for the cell cursor.
+   *
+   * Relationship columns are part of it. They are cells you can act on - Enter
+   * opens the related rows in the dock, the same as a click - and leaving them
+   * out meant Tab walked to the last real column and stopped, with the one
+   * column that opens something unreachable without the mouse. They carry the
+   * same `__vrel__i` key the hover path already uses, so nothing has to guess
+   * whether a name belongs to a real column: `visToActualColIdx` returns -1 for
+   * them, which every edit path already treats as "not editable".
+   */
+  const navigableColumns = $derived(
+    virtualRelCols.length
+      // Keyed off the hover keys, not the layout: the cursor's column order has
+      // no business recomputing every time a zoom or a drag changes an x.
+      ? [...visibleColumns, ...virtualRelCols.map((_, i) => ({ name: _vrelHoverKeys[i], vrelIdx: i }))]
+      : visibleColumns,
+  )
+
+  /** The relationship column a navigable index points at, or null for a real one. */
+  function vrelAtVisIdx(visColIdx) {
+    const idx = navigableColumns[visColIdx]?.vrelIdx
+    return idx === undefined ? null : (virtualRelCols[idx] ?? null)
+  }
 
   // ── Accessibility: focused-cell announcement ────────────────────────────────
   // The canvas grid has no per-cell DOM, so screen readers get nothing on
@@ -3264,6 +3484,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // loop and cannot affect render throughput.
   const a11yCellAnnouncement = $derived.by(() => {
     if (focusedRow === null || focusedCol === null) return ''
+    const vrel = vrelAtVisIdx(focusedCol)
+    if (vrel) return `Row ${focusedRow + 1} of ${rows.length}, related ${vrel.label}, press Enter to open`
     const ai = visToActualColIdx(focusedCol)
     if (ai < 0) return ''
     const col = columns[ai]
@@ -4212,6 +4434,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (!editingCell && !e.altKey && e.key === "Enter" && ((e.ctrlKey || e.metaKey) || e.shiftKey)) {
       e.preventDefault();
       if (focusedRow !== null && focusedCol !== null) {
+        // A relationship column reads the chords the same way a foreign key
+        // does: ⇧↵ opens the related rows in a new tab, ⌘↵ opens them in place.
+        // Plain Enter keeps the dock preview.
+        const vrel = vrelAtVisIdx(focusedCol);
+        if (vrel) {
+          openReverseFkFullView(focusedRow, vrel, { newTab: e.shiftKey && !(e.ctrlKey || e.metaKey) });
+          return;
+        }
         const ai = visToActualColIdx(focusedCol);
         if (ai >= 0) {
           // Shift alone means the new tab; ⌘⇧↵ follows in place, like ⌘↵.
@@ -4315,6 +4545,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       case "F2": {
         e.preventDefault();
         if (focusedRow !== null && focusedCol !== null) {
+          // A relationship column has nothing to edit - Enter opens it, which is
+          // the only thing the cell does.
+          // Plain Enter previews the relation in the dock - a click's half of the
+          // pair. The modified chords are handled above, before this switch.
+          const vrel = vrelAtVisIdx(focusedCol);
+          if (vrel) { toggleReverseFkSubview(focusedRow, vrel); break; }
           const ai = visToActualColIdx(focusedCol);
           if (ai >= 0) startEdit(focusedRow, ai);
         } else { focusedRow = 0; focusedCol = 0; }
@@ -4333,6 +4569,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         break;
       }
       case "Delete": {
+        // ⌘/Ctrl+Delete is "delete row", handled by the app-level hotkey - not a
+        // request to null this cell.
+        if (e.ctrlKey || e.metaKey) break;
         if (focusedRow !== null && focusedCol !== null) {
           const ai = visToActualColIdx(focusedCol);
           if (ai >= 0 && canEditColumn(ai)) { e.preventDefault(); void setCellNull(focusedRow, ai); }
@@ -4340,6 +4579,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         break;
       }
       case "Backspace": {
+        // Same for ⌘/Ctrl+⌫: it deletes the row. Starting an edit here is what
+        // swallowed the chord - focus moved into an input, and the app-level
+        // handler then bowed out of it the way it bows out of any text field.
+        if (e.ctrlKey || e.metaKey) break;
         if (focusedRow !== null && focusedCol !== null) {
           const ai = visToActualColIdx(focusedCol);
           if (ai >= 0 && canEditColumn(ai)) {
@@ -5193,6 +5436,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (_rowBg) { ctx.fillStyle = _rowBg; ctx.fillRect(cellX, ry, cw, rh) }
       const isActive = fkSubview?.rowIdx === idx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label
       const isVHov = hoveredRow === idx && hoveredColName === _vrelHoverKeys[vi]
+      const isFocusedRel = c.focusedRow === idx && c.navName === _vrelHoverKeys[vi]
       if (!_fonts) return
 
       // A relation is a link, so it draws as one: the link glyph, then the table
@@ -5207,6 +5451,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const relGap = Math.round(7 * canvasZoom)
 
       if (isActive) { ctx.fillStyle = withAlpha(c.cPrimary, 0.06); ctx.fillRect(cellX, ry, cw, rh) }
+      else if (isFocusedRel) { ctx.fillStyle = withAlpha(c.cPrimary, 0.08); ctx.fillRect(cellX, ry, cw, rh) }
 
       drawIcon(
         ctx, 'link-2',
@@ -5218,6 +5463,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.fillStyle = isActive ? c.cPrimary : withAlpha(c.cFg, isVHov ? 0.9 : 0.62)
       ctx.textBaseline = 'middle'; ctx.textAlign = 'left'
       ctx.fillText(truncText(ctx, vc.label, cw - (relTextX - cellX) - relPadX), relTextX, ry + rh / 2 + 0.5)
+
+      // Same 2px inset box the cell cursor draws on a real column: one cursor,
+      // whatever kind of column it is standing on.
+      if (isFocusedRel) {
+        ctx.strokeStyle = withAlpha(c.cPrimary, 0.9)
+        ctx.lineWidth = 2
+        ctx.strokeRect(cellX + 1.5, ry + 1.5, cw - 3, rh - 3)
+      }
     }
 
     // ── Batched grid pass ───────────────────────────────────────────────────
@@ -6309,33 +6562,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
     }
     // Check virtual relationship column clicks (right of real columns)
-    if (y >= HEADER_H && virtualRelCols.length > 0) {
-      const cx = x + _scrollLeft
-      const vi = _vrelLayout.findIndex(vp => cx >= vp.x && cx < vp.x + vp.w)
-      if (vi >= 0) {
-        {
-          const vc = virtualRelCols[vi]
-          const bodyY = y + _scrollTop - HEADER_H - insertRowOffset
-          const r = rowAtContentY(rowTops, rows.length, ROW_HEIGHT, bodyY)
-          if (!r?.inRowBody) return
-          const rowIdx = r.idx
-          const row = rows[rowIdx] ?? []
-          // Toggle: same cell closes
-          if (fkSubview?.rowIdx === rowIdx && fkSubview?.kind === 'reverse' && fkSubview?.label === vc.label) {
-            fkSubview = null
-            return
-          }
-          // Opening FK sub-view: close JSON expand for the same row (mutually exclusive)
-          if (expandedRows.has(rowIdx)) { const s = new Set(expandedRows); s.delete(rowIdx); expandedRows = s }
-          fkSubview = { rowIdx, kind: 'reverse', label: vc.label, relInfo: vc, data: { loading: true, columns: [], rows: [], error: null } }
-          scrollRowIntoViewBesideDock(rowIdx)
-          void onfetchrelatedrows({ kind: 'reverse', fromSchema: vc.fromSchema, fromTable: vc.fromTable, fromColumns: vc.fromColumns, toColumns: vc.toColumns, row }).then(res => {
-            if (fkSubview?.rowIdx !== rowIdx || fkSubview?.label !== vc.label) return
-            fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
-          })
-          return
-        }
-      }
+    const relHit = vrelHitAt(x, y)
+    if (relHit) {
+      if (relHit.rowIdx >= 0) toggleReverseFkSubview(relHit.rowIdx, relHit.vc)
+      return
     }
 
     const t = hitTest(x, y)
@@ -6462,6 +6692,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function onCanvasDblClick(/** @type {MouseEvent} */ e) {
     _focusFromKey = false
     const { x, y } = canvasXY(e)
+    // A relationship cell has no edit behind it, so the second click is free to
+    // mean what it means on a foreign key: go there. Same destination as the
+    // dock's "Open in sub view" - the related rows as a table of their own.
+    const relHit = vrelHitAt(x, y)
+    if (relHit) {
+      if (relHit.rowIdx >= 0) openReverseFkFullView(relHit.rowIdx, relHit.vc)
+      return
+    }
     const t = hitTest(x, y)
     if (t.kind !== 'cell') return
     const idx = /** @type {number} */ (t.idx)
@@ -6700,6 +6938,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           oncontextmenu={(e) => onCanvasContextMenu(e, bitsContextMenu)}
           onscroll={onContainerScroll}
           onkeydown={handleTableKeydown}
+          onpointerdown={() => {
+            // Focus arrives from the pointer later in this same task, so the
+            // reset lands after the focusin it causes.
+            _focusFromPointer = true;
+            setTimeout(() => { _focusFromPointer = false; }, 0);
+          }}
           onfocusin={(e) => {
             isTableFocused = true;
             // Tab in from the sidebar lands on the grid itself. With no cell
@@ -6707,7 +6951,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             // the first cell takes it - the same one an arrow key would have
             // moved to. Only when the container is the target: focus entering a
             // cell editor or a new-row field must not reset the cursor.
-            if (e.target === tableContainer && focusedRow === null && rows.length && visibleColumns.length) {
+            //
+            // Not on a click, though. A click already names the cell it means,
+            // and it sets the cursor a moment later - seeding 0,0 on the way in
+            // drew the ring on the first cell for a frame and then moved it,
+            // which is the jump you see on the first click into a fresh table.
+            if (
+              e.target === tableContainer && !_focusFromPointer &&
+              focusedRow === null && rows.length && visibleColumns.length
+            ) {
               focusedRow = 0; focusedCol = 0;
             }
           }}
@@ -7873,7 +8125,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (!sv) return
         if (sv.kind === 'reverse' && sv.relInfo) {
           // Reverse FK: navigate to fromTable with filter
-          onfollowforeignkey({ rowIdx: fkIdx, colIdx: 0, reverseRel: sv.relInfo, row: rows[fkIdx] })
+          openReverseFkFullView(fkIdx, sv.relInfo)
         } else {
           // Forward FK: navigate to referenced table via normal FK nav
           onfollowforeignkey({ rowIdx: fkIdx, colIdx: sv.colIdx ?? 0 })
@@ -7907,7 +8159,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       value={cellEditorValue}
       sourceHint={cellEditorRow >= 0 ? `row ${cellEditorRow + 1}` : ''}
       detached={cellEditorDetached}
-      readOnly={readonly || cellEditorDetached || !canEditColumn(cellEditorCol)}
+      readOnly={readonly || cellEditorDetached || !!cellEditorOversize || !canEditColumn(cellEditorCol)}
+      oversize={cellEditorOversize}
+      onloadfull={onfetchcellvalue && cellEditorRow >= 0 ? loadFullCellValue : null}
       oncommit={commitCellEditor}
     />
   </div>
@@ -7972,7 +8226,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   column={vectorViewerColName}
   dataType={vectorViewerType}
   nullable={vectorViewerNullable}
-  readOnly={readonly}
+  readOnly={vectorViewerReadOnly}
   value={vectorViewerValue}
   onsave={commitVectorViewer}
 />
@@ -7982,7 +8236,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   column={geomViewerColName}
   dataType={geomViewerType}
   nullable={geomViewerNullable}
-  readOnly={readonly}
+  readOnly={geomViewerReadOnly}
   value={geomViewerValue}
   onsave={commitGeometryViewer}
 />
