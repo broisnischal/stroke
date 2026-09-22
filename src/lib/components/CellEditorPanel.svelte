@@ -39,7 +39,7 @@
   import Kbd from './Kbd.svelte'
   import JsonTree from './JsonTree.svelte'
   import Search from '@lucide/svelte/icons/search'
-  import { searchJson, matchOffsets, splitHighlight } from '$lib/json-search.js'
+  import { searchJson, matchOffsets } from '$lib/json-search.js'
   import Braces from '@lucide/svelte/icons/braces'
   import { resetInputHistory } from '$lib/input-shortcuts.js'
 
@@ -498,7 +498,9 @@
   <!-- Editor, and the preview beside it only when there is something to
        preview. A second pane holding a copy of the same plain text would be two
        views of one thing. -->
-  <div class="flex min-h-0 flex-1">
+  <!-- `relative`: the raw pane's highlight layer is absolutely positioned inside
+       this box, beside the gutter rather than under it. -->
+  <div class="relative flex min-h-0 flex-1">
     <!-- Line numbers, on the same 20px baseline grid as the text. Padded top by
          the same 8px the textarea is, so line 1 lines up with line 1. -->
     {#if !wrap && rawOpen}
@@ -510,6 +512,30 @@
       >
         {#each lineNumbers as n (n)}<div class="px-2">{n}</div>{/each}
       </div>
+    {/if}
+    <!-- Find highlights for the raw pane.
+         A textarea cannot mark a range inside itself, so the marks are drawn on
+         a layer *behind* it: same font, same padding, same 20px leading, same
+         wrap mode, scrolled in lockstep by `syncGutter`, and the textarea's
+         background is already transparent - so each glyph sits directly on top
+         of its own highlight. `text-transparent` here because the visible text
+         is the textarea's; this layer contributes nothing but the marks.
+         Only mounted while something matches, which is almost never. -->
+    {#if rawOpen && rawRuns}
+      <div
+        bind:this={hlEl}
+        aria-hidden="true"
+        class={cn(
+          'pointer-events-none absolute inset-y-0 right-0 z-0 overflow-hidden py-2 pr-3 pl-3',
+          'font-mono text-ui-2xs text-transparent select-none',
+          wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre',
+        )}
+        style="left:{!wrap && rawOpen ? gutterW : 0}px; line-height:{LINE_H}px; tab-size:2"
+      >{#each rawRuns as run, i (i)}{#if run.hit >= 0}<mark
+              class={cn(
+                'rounded-[2px] px-0 text-transparent',
+                run.hit === hit ? 'bg-warning/60' : 'bg-warning/35',
+              )}>{run.t}</mark>{:else}{run.t}{/if}{/each}</div>
     {/if}
     <!-- `hidden`, not unmounted: the textarea holds the draft, the undo history
          and the caret. Tearing it down to show the tree would discard all three
@@ -525,7 +551,10 @@
       onscroll={syncGutter}
       aria-label="{colName} value"
       class={cn(
-        'no-field-frame app-scroll min-h-0 flex-1 resize-none bg-transparent py-2 pl-3 pr-3',
+        // `relative z-10`: an absolutely-positioned sibling paints above a static
+        // one whatever the DOM order, so without this the highlight layer covers
+        // the text it is meant to sit behind.
+        'no-field-frame app-scroll relative z-10 min-h-0 flex-1 resize-none bg-transparent py-2 pl-3 pr-3',
         // A code surface, so: whole-pixel leading, two-space tabs, no ligature
         // of prose typography. `leading-relaxed` was 1.625 - a third of a line of
         // air between every row, which is what made this read as a text box

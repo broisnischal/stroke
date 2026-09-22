@@ -1153,12 +1153,16 @@
 {/snippet}
 
 <!-- Section count badge: shows "visible/total" when filters hide rows, else just the total. -->
-{#snippet countBadge(visible, total)}
+<!-- `tight` keeps the count beside the section name instead of pushing it to
+     the far edge. A section with actions in its header needs that edge for
+     them, and a count floating between the two reads as part of the buttons. -->
+{#snippet countBadge(visible, total, tight = false)}
+  {@const cls = cn(tight ? "" : "ml-auto", "shrink-0 font-mono text-ui-2xs text-muted-foreground")}
   {#if visible !== total}
-    <span class="ml-auto font-mono text-ui-2xs text-muted-foreground" title="{visible} shown · {total - visible} hidden of {total}"
+    <span class={cls} title="{visible} shown · {total - visible} hidden of {total}"
       >{visible}<span class="text-muted-foreground">/{total}</span></span>
   {:else}
-    <span class="ml-auto font-mono text-ui-2xs text-muted-foreground">{total}</span>
+    <span class={cls}>{total}</span>
   {/if}
 {/snippet}
 
@@ -1558,7 +1562,12 @@
           role="none"
           use:smoothScroll={{ enabled: !$appNativeScroll }}
           onclick={(e) => {
-            if (selectedItems.size > 0 && !/** @type {Element} */(e.target).closest?.('li')) {
+            // Clicking the empty space around the rows drops the selection.
+            // A button is not empty space: the section headers carry actions
+            // that operate ON the selection, and this handler was undoing them
+            // on the same click that made them.
+            const el = /** @type {Element} */ (e.target)
+            if (selectedItems.size > 0 && !el.closest?.('li') && !el.closest?.('button')) {
               clearSelection()
             }
           }}
@@ -1847,40 +1856,45 @@
               <div class="flex w-full items-center gap-1 px-2.5 pt-2 pb-1">
                 <Icon name="pin" class="size-3 shrink-0 text-muted-foreground" />
                 <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Pinned</span>
-                {@render countBadge(filteredPinnedTables.length, visiblePinnedTables.length)}
-                <!-- Two bulk actions on the pins, as icons: the row is 240px
-                     wide and a third and fourth text label would not fit beside
-                     "Clear all". -->
-                <button
-                  type="button"
-                  aria-pressed={allPinnedSelected}
-                  class={cn(
-                    'hit-area inline-flex size-4 shrink-0 items-center justify-center rounded transition-colors hover:text-foreground',
-                    allPinnedSelected ? 'text-foreground' : 'text-muted-foreground',
-                  )}
-                  onclick={toggleSelectAllPinned}
-                  title={allPinnedSelected
-                    ? `Deselect all ${filteredPinnedTables.length} pinned tables`
-                    : `Select all ${filteredPinnedTables.length} pinned tables`}
-                >
-                  <Icon name={allPinnedSelected ? 'check-circle-2' : 'check'} class="size-3" />
-                </button>
-                <button
-                  type="button"
-                  class="hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
-                  onclick={openAllPinned}
-                  title="Open all {filteredPinnedTables.length} pinned tables in tabs"
-                >
-                  <Icon name="external-link" class="size-3" />
-                </button>
-                {#if pinnedTables.length > 5}
+                {@render countBadge(filteredPinnedTables.length, visiblePinnedTables.length, true)}
+                <!-- The actions own the trailing edge, the count stays with the
+                     name. `stopPropagation` on every one of them: the list's
+                     own click handler clears the selection for any click that
+                     did not land on a row, and the header is not a row - so
+                     "select all" selected seven tables and the same click
+                     deselected them again before the frame was out. -->
+                <div class="ml-auto flex shrink-0 items-center gap-1">
                   <button
                     type="button"
-                    class="shrink-0 font-mono text-ui-2xs text-muted-foreground hover:text-destructive transition-colors"
-                    onclick={clearAllPins}
-                    title="Clear all pinned tables"
-                  >Clear all</button>
-                {/if}
+                    aria-pressed={allPinnedSelected}
+                    class={cn(
+                      'hit-area inline-flex size-4 items-center justify-center rounded transition-colors hover:text-foreground',
+                      allPinnedSelected ? 'text-primary' : 'text-muted-foreground',
+                    )}
+                    onclick={(e) => { e.stopPropagation(); toggleSelectAllPinned() }}
+                    title={allPinnedSelected
+                      ? `Deselect all ${filteredPinnedTables.length} pinned tables`
+                      : `Select all ${filteredPinnedTables.length} pinned tables`}
+                  >
+                    <Icon name={allPinnedSelected ? 'check-circle-2' : 'check'} class="size-3" />
+                  </button>
+                  <button
+                    type="button"
+                    class="hit-area inline-flex size-4 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
+                    onclick={(e) => { e.stopPropagation(); openAllPinned() }}
+                    title="Open all {filteredPinnedTables.length} pinned tables in tabs"
+                  >
+                    <Icon name="external-link" class="size-3" />
+                  </button>
+                  {#if pinnedTables.length > 5}
+                    <button
+                      type="button"
+                      class="font-mono text-ui-2xs text-muted-foreground transition-colors hover:text-destructive"
+                      onclick={(e) => { e.stopPropagation(); clearAllPins() }}
+                      title="Clear all pinned tables"
+                    >Clear all</button>
+                  {/if}
+                </div>
               </div>
               <ul class="flex w-full min-w-full flex-col px-1.5 pb-1 [&>li]:pb-0.5">
                 {#each filteredPinnedTables as tableName, idx (tableName)}
