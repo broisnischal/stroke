@@ -4610,11 +4610,22 @@ let rowSearch = $state('')
 
   /** @param {string} value */
   function handleRowSearchChange(value) {
+    const cleared = !String(value ?? '').trim()
     rowSearch = value
     page = 1
     rawOffset = null
     _keysetCursor = null
     if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+    // Clearing is not a keystroke. The toolbar debounces typing for 250ms and
+    // then this debounced it again, so emptying the box sat for another 150ms
+    // while the search that was already in flight painted its rows - which is
+    // the search carrying on after you cancelled it. An empty box means "show
+    // me the table", and there is nothing left to coalesce, so it runs now.
+    if (cleared) {
+      void loadRows()
+      return
+    }
     searchDebounceTimer = setTimeout(() => {
       searchDebounceTimer = null
       void loadRows()

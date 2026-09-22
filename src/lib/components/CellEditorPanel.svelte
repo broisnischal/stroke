@@ -174,6 +174,21 @@
   const heavy = $derived(draft.length > HEAVY_VALUE_CHARS)
   /** Set by "Render it anyway" - one parse, on demand, for a heavy value. */
   let forceParse = $state(false)
+
+  /**
+   * How much of a heavy value the raw pane shows at once.
+   *
+   * A `<textarea>` handed 8MB renders nothing at all in this webview - the pane
+   * came up empty, which is worse than slow. So past the heavy line the raw
+   * side is a read-only window onto the text, paged: it draws instantly at any
+   * size, and the whole value is still reachable.
+   */
+  const RAW_WINDOW = 128 * 1024
+  let rawOffset = $state(0)
+  // A new cell, or a value that just arrived, starts at the top.
+  $effect(() => { void draft; rawOffset = 0 })
+  const rawWindowText = $derived(heavy ? draft.slice(rawOffset, rawOffset + RAW_WINDOW) : '')
+  const rawWindowEnd = $derived(Math.min(rawOffset + RAW_WINDOW, draft.length))
   // A new cell is a new decision.
   $effect(() => { void colName; void sourceHint; forceParse = false })
 
@@ -739,11 +754,41 @@
                 run.hit === hit ? 'bg-warning/60' : 'bg-warning/35',
               )}>{run.t}</mark>{:else}{run.t}{/if}{/each}</div>
     {/if}
+    {#if heavy && rawOpen}
+      <!-- Read-only, and only a slice of it. Everything a textarea gives you -
+           editing, undo, a caret - costs the browser a full layout of the value,
+           and at this size that is a pane that never paints. -->
+      <div class="flex min-h-0 flex-1 flex-col">
+        <div class="flex h-7 shrink-0 items-center gap-2 border-b border-border/30 px-2.5">
+          <span class="font-mono text-ui-3xs text-muted-foreground tabular-nums">
+            {formatBytes(rawOffset)}–{formatBytes(rawWindowEnd)} of {formatBytes(draft.length)}
+          </span>
+          <span class="rounded-[3px] border border-border/40 px-1.5 py-px font-mono text-ui-3xs text-muted-foreground">read-only</span>
+          <div class="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              disabled={rawOffset === 0}
+              class="inline-flex h-6 items-center rounded-md px-2 font-mono text-ui-3xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+              onclick={() => (rawOffset = Math.max(0, rawOffset - RAW_WINDOW))}
+            >Back</button>
+            <button
+              type="button"
+              disabled={rawWindowEnd >= draft.length}
+              class="inline-flex h-6 items-center rounded-md px-2 font-mono text-ui-3xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+              onclick={() => (rawOffset = Math.min(draft.length - 1, rawOffset + RAW_WINDOW))}
+            >More</button>
+          </div>
+        </div>
+        <pre
+          class="app-scroll min-h-0 flex-1 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] px-3 py-2 font-mono text-ui-2xs text-foreground"
+          style="line-height:{LINE_H}px">{rawWindowText}</pre>
+      </div>
+    {/if}
     <!-- `hidden`, not unmounted: the textarea holds the draft, the undo history
          and the caret. Tearing it down to show the tree would discard all three
          and re-seed the value on the way back. -->
     <textarea
-      class:hidden={!rawOpen}
+      class:hidden={!rawOpen || heavy}
       bind:this={area}
       bind:value={draft}
       readonly={readOnly}
@@ -822,7 +867,7 @@
                 The raw text is already here, and Find works on it under 2 MB.
               </p>
             {/if}
-            {#if parsed.truncated && onloadfull}
+            {#if parsed.truncated && oversize && onloadfull}
               <button
                 type="button"
                 disabled={loadingFull}

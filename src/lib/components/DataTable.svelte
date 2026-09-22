@@ -2146,6 +2146,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
   }
 
+  /**
+   * The required columns still blank. The draft used to say "Required" in a
+   * placeholder and then let you press Insert anyway, so the first thing it told
+   * you about a missing value was an error from the database.
+   */
+  const insertMissing = $derived.by(() => {
+    if (!newRowDrafts) return /** @type {string[]} */ ([])
+    return columns
+      .filter((c) => insertOmitBehaviour(c, primaryKey) === 'required')
+      .filter((c) => !String(newRowDrafts?.[c.name] ?? '').trim())
+      .map((c) => c.name)
+  })
+
   /** @param {string} colName @param {string} value */
   function setNewRowDraft(colName, value) {
     if (!newRowDrafts) return
@@ -2534,6 +2547,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     tickSpinner()
     try {
       await onloadcellvalue({ rowIdx, colIdx })
+      // The dock is a view of a cell, so a cell that just changed under it has
+      // to be re-read. Without this the panel kept showing "not loaded" over a
+      // row that already held the value.
+      if (cellEditorOpen && !cellEditorDetached && cellEditorRow === rowIdx && cellEditorCol === colIdx) {
+        seedCellEditor(rowIdx, colIdx)
+      }
     } catch (e) {
       toast.error('Could not load the value', { description: String(e?.message ?? e) })
     } finally {
@@ -4663,9 +4682,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         break;
       }
       case "Delete": {
-        // ⌘/Ctrl+Delete is "delete row", handled by the app-level hotkey - not a
-        // request to null this cell.
-        if (e.ctrlKey || e.metaKey) break;
+        // A modified Delete belongs to someone else: ⌘/Ctrl+Delete deletes the
+        // row and Alt+Delete discards staged changes, both at the app level.
+        // Clearing this cell is what the UNMODIFIED key means.
+        if (e.ctrlKey || e.metaKey || e.altKey) break;
         if (focusedRow !== null && focusedCol !== null) {
           const ai = visToActualColIdx(focusedCol);
           if (ai >= 0 && canEditColumn(ai)) { e.preventDefault(); void setCellNull(focusedRow, ai); }
@@ -4673,10 +4693,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         break;
       }
       case "Backspace": {
-        // Same for ⌘/Ctrl+⌫: it deletes the row. Starting an edit here is what
-        // swallowed the chord - focus moved into an input, and the app-level
-        // handler then bowed out of it the way it bows out of any text field.
-        if (e.ctrlKey || e.metaKey) break;
+        // Same for a modified ⌫: ⌘/Ctrl+⌫ deletes the row, Alt+⌫ discards every
+        // staged change. Starting an edit here is what swallowed both - focus
+        // moved into an input, and the app-level handler then bowed out of it
+        // the way it bows out of any text field.
+        if (e.ctrlKey || e.metaKey || e.altKey) break;
         if (focusedRow !== null && focusedCol !== null) {
           const ai = visToActualColIdx(focusedCol);
           if (ai >= 0 && canEditColumn(ai)) {
