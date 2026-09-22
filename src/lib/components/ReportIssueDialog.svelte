@@ -74,7 +74,7 @@
     },
   ];
 
-  const GITHUB_REPO = "broisnischal/stroke";
+  const GITHUB_REPO = "stroke-app/stroke";
 
   const systemInfo = $derived(
     `**App version:** ${appVersion}\n**Platform:** ${platform || "unknown"}\n**Reported via:** in-app`,

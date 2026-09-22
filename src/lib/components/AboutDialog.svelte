@@ -193,7 +193,7 @@
       </button>
       <div class="flex items-center gap-3.5">
         <a
-          href="https://github.com/broisnischal/stroke"
+          href="https://github.com/stroke-app/stroke"
           target="_blank"
           rel="noopener noreferrer"
           class="inline-flex items-center gap-1 text-ui-3xs text-muted-foreground transition-colors hover:text-foreground"

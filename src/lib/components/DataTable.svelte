@@ -8,10 +8,10 @@
   import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight, appNumberGrouping, appHighlightActiveRow, appGridFontSize, appImagePreview, appOpenUrlsOnClick, appRowNumbers } from '$lib/stores/settings.js'
   import { createSmoothScroll, wheelPixels } from '$lib/smooth-scroll.js'
   import { isJsonColumnType } from '$lib/cell-expand.js'
-  import { focusTrap } from '$lib/actions/focus-trap.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import ArrowUpDown from "@lucide/svelte/icons/arrow-up-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
@@ -115,6 +115,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import { t } from "$lib/i18n.js";
   import Wand2 from "@lucide/svelte/icons/wand-2";
   import Dices from "@lucide/svelte/icons/dices";
+  import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
+  import Eraser from "@lucide/svelte/icons/eraser";
+  import Columns3 from "@lucide/svelte/icons/columns-3";
+  import CalendarDays from "@lucide/svelte/icons/calendar-days";
+  import Hash from "@lucide/svelte/icons/hash";
   import Clock from "@lucide/svelte/icons/clock";
   import MediaLightbox from "./MediaLightbox.svelte";
   import CellEditorPanel from "./CellEditorPanel.svelte";
@@ -2138,6 +2143,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    */
   let draftMenu = $state(null)
 
+  /** The cell the menu was last closed over, so focus can return to it. */
+  let closedFromDraft = /** @type {{ row: number, col: string } | null} */ (null)
+
   /** @param {MouseEvent} e @param {number} row @param {string} col */
   function openDraftMenu(e, row, col) {
     e.preventDefault()
@@ -2147,26 +2155,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** What the menu can put in a staged cell, given the column's type. */
   const draftMenuActions = $derived.by(() => {
-    if (!draftMenu) return /** @type {{ id: string, label: string, run: () => void }[]} */ ([])
+    /** @typedef {{ id: string, label: string, icon: any, run: () => void }} DraftAction */
+    if (!draftMenu) return /** @type {DraftAction[]} */ ([])
     const { row, col: colName } = draftMenu
     const col = columns.find((c) => c.name === colName)
     const dt = String(col?.dataType ?? col?.data_type ?? '').toLowerCase()
     const set = (/** @type {string} */ v) => setNewRowDraft(row, colName, v)
-    /** @type {{ id: string, label: string, run: () => void }[]} */
+    /** @type {DraftAction[]} */
     const out = []
     if (dt.includes('uuid') || dt.includes('char') || dt.includes('text')) {
-      out.push({ id: 'uuid', label: 'Generate UUID', run: () => set(generateUuid()) })
-      out.push({ id: 'cuid', label: 'Generate CUID', run: () => set(generateCuid()) })
+      out.push({ id: 'uuid', label: 'Generate UUID', icon: Dices, run: () => set(generateUuid()) })
+      out.push({ id: 'cuid', label: 'Generate CUID', icon: Dices, run: () => set(generateCuid()) })
     }
     if (isDateTimeType(dt) || shouldUseDateTimePicker(dt, colName)) {
-      out.push({ id: 'now', label: 'Now', run: () => set(nowDateTimeLocal()) })
+      out.push({ id: 'now', label: 'Now', icon: Clock, run: () => set(nowDateTimeLocal()) })
     } else if (isDateOnlyType(dt)) {
-      out.push({ id: 'today', label: 'Today', run: () => set(nowDateOnly()) })
+      out.push({ id: 'today', label: 'Today', icon: CalendarDays, run: () => set(nowDateOnly()) })
     } else if (isTimeOnlyType(dt)) {
-      out.push({ id: 'time-now', label: 'Now', run: () => set(nowTimeOnly()) })
+      out.push({ id: 'time-now', label: 'Now', icon: Clock, run: () => set(nowTimeOnly()) })
     }
     if (dt.includes('int') || dt.includes('numeric') || dt.includes('decimal') || dt.includes('real') || dt.includes('double')) {
-      out.push({ id: 'zero', label: 'Zero', run: () => set('0') })
+      out.push({ id: 'zero', label: 'Zero', icon: Hash, run: () => set('0') })
     }
     return out
   })
@@ -8841,83 +8850,99 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 {/if}
 
 <!-- Right-click on a staged cell.
-     Hand-rolled rather than one `ContextMenu.Root` per cell: the band is a
-     grid, so that would be a menu instance per column per staged row, mounted
-     and torn down on every keystroke. One fixed box positioned at the pointer
-     costs nothing and closes the same way the rest of the app's menus do. -->
-{#if draftMenu}
-  {@const menuActions = draftMenuActions}
-  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-  <div
-    class="fixed inset-0 z-[120]"
-    onclick={() => (draftMenu = null)}
-    oncontextmenu={(e) => { e.preventDefault(); draftMenu = null }}
-  ></div>
-  <div
-    role="menu"
-    tabindex="-1"
-    class="fixed z-[121] min-w-44 rounded-md border border-border/60 bg-popover p-1 elevate-2-rim"
-    style="left:{Math.min(draftMenu.x, window.innerWidth - 200)}px; top:{Math.min(draftMenu.y, window.innerHeight - 220)}px"
-    use:focusTrap={{ autoFocus: false }}
-    onkeydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); draftMenu = null } }}
+     One menu for the whole band, not one `ContextMenu.Root` per cell: the band
+     is a grid, so per-cell roots would mount and tear down a menu per column on
+     every keystroke. This is the same `DropdownMenu` every other menu in the app
+     uses - so it dismisses, traps focus and reads the same - anchored to a
+     zero-size box parked at the pointer instead of to a trigger button. -->
+<DropdownMenu.Root
+  open={draftMenu !== null}
+  onOpenChange={(open) => {
+    if (open) return
+    // `onCloseAutoFocus` fires after `draftMenu` is cleared, so stash where the
+    // caret has to go back to before letting go of it.
+    closedFromDraft = draftMenu
+    draftMenu = null
+  }}
+>
+  <DropdownMenu.Trigger
+    aria-hidden="true"
+    tabindex={-1}
+    class="pointer-events-none fixed size-0 opacity-0"
+    style="left:{draftMenu?.x ?? 0}px; top:{draftMenu?.y ?? 0}px"
+  />
+  <DropdownMenu.Content
+    align="start"
+    sideOffset={0}
+    class="min-w-48"
+    onCloseAutoFocus={(e) => {
+      // The anchor is a zero-size box parked at the pointer, so letting the menu
+      // hand focus back to it would strand the caret on nothing. Send it to the
+      // staged field the menu was opened over instead.
+      e.preventDefault()
+      const m = closedFromDraft
+      closedFromDraft = null
+      if (!m) return
+      const band = document.querySelector(`[data-new-row="${m.row}"]`)
+      const el = /** @type {HTMLElement|null} */ (
+        band?.querySelector(`[data-new-row-input="${m.col}"]`) ?? null
+      )
+      el?.focus({ preventScroll: true })
+    }}
   >
-    {#each menuActions as action (action.id)}
-      <button
-        type="button"
-        role="menuitem"
-        class="flex h-7 w-full items-center rounded-sm px-2 text-left text-ui-2xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
-        onclick={() => { action.run(); draftMenu = null }}
-      >{action.label}</button>
-    {/each}
-    {#if menuActions.length}
-      <div class="my-1 h-px bg-border/50"></div>
-    {/if}
-    <button
-      type="button"
-      role="menuitem"
-      class="flex h-7 w-full items-center justify-between gap-3 rounded-sm px-2 text-left text-ui-2xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
-      onclick={() => {
-        const v = newRowDrafts?.[draftMenu?.row ?? 0]?.[draftMenu?.col ?? ''] ?? ''
-        void navigator.clipboard?.writeText(v)
-        draftMenu = null
-      }}
-    >Copy value</button>
-    <button
-      type="button"
-      role="menuitem"
-      class="flex h-7 w-full items-center rounded-sm px-2 text-left text-ui-2xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
-      onclick={async () => {
-        const m = draftMenu
-        draftMenu = null
-        if (!m) return
-        try { setNewRowDraft(m.row, m.col, await navigator.clipboard.readText()) } catch { /* no clipboard */ }
-      }}
-    >Paste</button>
-    {#if draftCount > 1}
-      <button
-        type="button"
-        role="menuitem"
-        class="flex h-7 w-full items-center rounded-sm px-2 text-left text-ui-2xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
-        onclick={() => {
-          if (draftMenu) fillDraftColumn(draftMenu.row, draftMenu.col)
-          draftMenu = null
+    {#if draftMenu}
+      {@const menuActions = draftMenuActions}
+      {#each menuActions as action (action.id)}
+        <DropdownMenu.Item onSelect={() => action.run()}>
+          <action.icon />
+          {action.label}
+        </DropdownMenu.Item>
+      {/each}
+      {#if menuActions.length}
+        <DropdownMenu.Separator />
+      {/if}
+      <DropdownMenu.Item
+        onSelect={() => {
+          const v = newRowDrafts?.[draftMenu?.row ?? 0]?.[draftMenu?.col ?? ''] ?? ''
+          void navigator.clipboard?.writeText(v)
         }}
-      >Fill this column in all {draftCount} rows</button>
+      >
+        <Copy />
+        Copy value
+      </DropdownMenu.Item>
+      <DropdownMenu.Item
+        onSelect={async () => {
+          const m = draftMenu
+          if (!m) return
+          try { setNewRowDraft(m.row, m.col, await navigator.clipboard.readText()) } catch { /* no clipboard */ }
+        }}
+      >
+        <ClipboardPaste />
+        Paste
+      </DropdownMenu.Item>
+      {#if draftCount > 1}
+        <DropdownMenu.Item
+          onSelect={() => { if (draftMenu) fillDraftColumn(draftMenu.row, draftMenu.col) }}
+        >
+          <Columns3 />
+          <span data-slot="menu-label">Fill this column in all {draftCount} rows</span>
+        </DropdownMenu.Item>
+      {/if}
+      <DropdownMenu.Separator />
+      <DropdownMenu.Item
+        onSelect={() => {
+          const m = draftMenu
+          if (!m) return
+          const col = columns.find((c) => c.name === m.col)
+          setNewRowDraft(m.row, m.col, col ? defaultInsertDraft(col, primaryKey) : '')
+        }}
+      >
+        <Eraser />
+        Clear
+      </DropdownMenu.Item>
     {/if}
-    <button
-      type="button"
-      role="menuitem"
-      class="flex h-7 w-full items-center rounded-sm px-2 text-left text-ui-2xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent"
-      onclick={() => {
-        const m = draftMenu
-        draftMenu = null
-        if (!m) return
-        const col = columns.find((c) => c.name === m.col)
-        setNewRowDraft(m.row, m.col, col ? defaultInsertDraft(col, primaryKey) : '')
-      }}
-    >Clear</button>
-  </div>
-{/if}
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
 </div>
 
 <Dialog.Root bind:open={tagDialogOpen}>

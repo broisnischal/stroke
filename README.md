@@ -310,19 +310,19 @@ Official builds and updates ship from this repository and [stroke.click](https:/
 **macOS** — [Homebrew](https://brew.sh)
 
 ```bash
-brew install --cask broisnischal/tap/stroke
+brew install --cask stroke-app/tap/stroke
 ```
 
 **Windows** — [Scoop](https://scoop.sh)
 
 ```powershell
-scoop bucket add stroke https://github.com/broisnischal/stroke
+scoop bucket add stroke https://github.com/stroke-app/stroke
 scoop install stroke
 ```
 
 ### Or download directly
 
-Grab the installer from the [Releases](https://github.com/broisnischal/stroke/releases) page.
+Grab the installer from the [Releases](https://github.com/stroke-app/stroke/releases) page.
 
 | Platform | File |
 |----------|------|
@@ -399,7 +399,7 @@ This repository is the complete source. Requires [Node.js](https://nodejs.org) 2
 (or 22.12+; CI builds on 22) and the [Rust toolchain](https://rustup.rs).
 
 ```bash
-git clone https://github.com/broisnischal/stroke
+git clone https://github.com/stroke-app/stroke
 cd stroke
 npm install
 npm run tauri        # dev
@@ -427,4 +427,4 @@ Bug reports, fixes, features, and docs are all welcome — see
 Docker test databases), code conventions, and the PR checklist.
 
 Found a bug or have a feature request? Open an issue at
-[github.com/broisnischal/stroke/issues](https://github.com/broisnischal/stroke/issues).
+[github.com/stroke-app/stroke/issues](https://github.com/stroke-app/stroke/issues).

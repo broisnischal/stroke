@@ -7,7 +7,7 @@
   "homepage": "https://stroke.click",
   "repository": {
     "type": "git",
-    "url": "https://github.com/broisnischal/stroke"
+    "url": "https://github.com/stroke-app/stroke"
   },
   "engines": {
     "node": ">=20.19"

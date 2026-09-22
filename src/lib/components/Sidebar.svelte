@@ -1285,18 +1285,6 @@
                     aria-hidden="true"
                   ></span>
                 {/if}
-                {#if connectionName && count > 0}
-                  <!-- The count is a cue, not a label: it says "there is something in
-                       here" without stealing the width an icon-only strip is for. The
-                       number itself is in the accessible name above. -->
-                  <span
-                    class={cn(
-                      "pointer-events-none absolute top-1.5 right-1 size-1.5 rounded-full",
-                      active ? "bg-primary" : "bg-muted-foreground",
-                    )}
-                    aria-hidden="true"
-                  ></span>
-                {/if}
               </button>
             {/each}
           </div>

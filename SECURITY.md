@@ -7,7 +7,7 @@ connects to production systems, so a public report is a working exploit until
 it is patched.
 
 Report privately through
-[GitHub Security Advisories](https://github.com/broisnischal/stroke/security/advisories/new),
+[GitHub Security Advisories](https://github.com/stroke-app/stroke/security/advisories/new),
 or email **nischaldahal01395@gmail.com**.
 
 Please include what you can: the version, your OS, what an attacker gains, and
