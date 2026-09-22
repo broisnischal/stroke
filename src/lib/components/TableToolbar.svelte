@@ -364,8 +364,11 @@
     return Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   });
 
+  // `rounded-lg`, which resolves to the same 10px as `--radius-field`: app.css asks
+  // fields, dropdown triggers and buttons to share one corner, and `rounded-md` (8px)
+  // left every toolbar button 2px squarer than the field it sits next to.
   const iconBtn =
-    "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
+    "inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30";
 
   // ── Filter row chrome ──────────────────────────────────────────────────────
   // One border, one surface, one hover for every control in a filter row. Column,
@@ -729,7 +732,7 @@
           bind:this={structureSearchEl}
           type="text"
           aria-label="Search column"
-          class= "field-surface h-7 w-full min-w-0 rounded-full! bg-transparent pl-8 pr-7 font-mono text-ui-sm outline-none"
+          class="field-surface h-7 w-full min-w-0 bg-transparent pl-8 pr-7 font-mono text-ui-sm outline-none"
           placeholder="Search column…"
           value={structureSearch}
           oninput={(e) =>
@@ -745,9 +748,16 @@
           aria-label="Search all columns"
           title="Search every column ({KEY.search})"
           class={cn(
-            // `rounded-full!` beats the unlayered bare-input frame rule in
-            // app.css, which is the same reason `border-ring!` below carries one.
-            "field-surface h-7 w-full min-w-0 rounded-full! bg-transparent pl-8 text-ui-sm outline-none",
+            // No radius of its own: `.field-surface` supplies `--radius-field`, the
+            // one corner app.css says fields, triggers and buttons all share. It was
+            // `rounded-full!` - the only two pills in the component library, both of
+            // them here - which made the search box visibly rounder than the filter
+            // button sitting beside it. That is the exact failure the token's own
+            // comment warns about, and it also made the segmented control below
+            // ("they fit the field's own corner") fit nothing.
+            // `border-ring!` still needs its `!` to beat the unlayered bare-input
+            // frame rule in app.css; the radius no longer has anything to beat.
+            "field-surface h-7 w-full min-w-0 bg-transparent pl-8 text-ui-sm outline-none",
             // Right padding is whatever the cluster in that corner occupies:
             // options trigger, keycaps, both, or neither.
             // hint (⌘F) and the toggles never coexist: the hint is for an empty
@@ -773,7 +783,9 @@
                it was about to change. `Aa`, `.*` and `ab` are what every
                editor's find widget prints, they fit the field's own corner, and
                each one's state is visible without opening anything. -->
-          <div class="flex shrink-0 items-center overflow-hidden rounded-md border border-border/50 bg-input/40">
+          <!-- `rounded-sm` (6px), not `rounded-md`: this sits 4px inside the field's
+               10px corner, and concentric means inner = outer - inset. -->
+          <div class="flex shrink-0 items-center overflow-hidden rounded-sm border border-border/50 bg-input/40">
             {#each SEARCH_OPTS as opt, i (opt.key)}
               {@const active = searchOptions[opt.key]}
               <button
@@ -796,7 +808,7 @@
         {#if localSearch}
           <button
             type="button"
-            class="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-[background-color,color] duration-150 ease-out hover:bg-muted/70 hover:text-foreground"
+            class="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground transition-[background-color,color] duration-150 ease-out hover:bg-muted/70 hover:text-foreground"
             aria-label="Clear search"
             onclick={clearSearch}
           >
