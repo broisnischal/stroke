@@ -226,12 +226,34 @@
     })
   })
 
-  // A new connection invalidates the list - drop it so the next expand refetches.
+  /**
+   * Which server a loaded database list belongs to. Not the database - switching
+   * database rebuilds the connection object, and the list of databases ON that
+   * server is the same list either way.
+   * @param {any} c
+   */
+  function dbServerKey(c) {
+    if (!c) return ''
+    return [c.type ?? '', c.host ?? '', c.port ?? '', c.filePath ?? '', c.accountId ?? '', c.url ?? ''].join('|')
+  }
+  let dbEntriesServer = untrack(() => dbServerKey(connection))
+
+  // A new connection invalidates the list, so the next expand refetches it. The
+  // rows only get dropped when the SERVER changes though: every database switch
+  // rebuilds the connection, and blanking the list on each one is what made
+  // switching flash - the panel emptied, drew its loading rows, then refilled
+  // with the same names and the tick on a different row. Now it refetches
+  // underneath the rows it already has.
   $effect(() => {
-    connection
-    dbEntries = []
-    dbEntriesLoaded = false
-    dbEntriesError = ''
+    const server = dbServerKey(connection)
+    untrack(() => {
+      if (server !== dbEntriesServer) {
+        dbEntries = []
+        dbEntriesServer = server
+      }
+      dbEntriesLoaded = false
+      dbEntriesError = ''
+    })
   })
 
   // The shell bumps this after a create/rename/duplicate/drop, since the list it
@@ -1682,10 +1704,12 @@
                   {@render listLoading('Loading databases')}
                 {:else if dbEntriesError && dbEntries.length === 0}
                   <p class="px-4 pb-1.5 text-ui-2xs text-destructive">{dbEntriesError}</p>
-                {:else if !dbEntriesLoaded}
+                {:else if !dbEntriesLoaded && dbEntries.length === 0}
                   <!-- Opened but the first fetch has not started or landed yet.
                        This branch used to print "Loading…" as body text, which is
-                       the state the list spends longest in on a remote server. -->
+                       the state the list spends longest in on a remote server.
+                       Only when there is nothing to show: a refetch over an
+                       existing list leaves the list up. -->
                   {@render listLoading('Loading databases')}
                 {:else if filteredDbEntries.length === 0}
                   <p class="px-4 pb-1.5 text-ui-2xs text-muted-foreground">
