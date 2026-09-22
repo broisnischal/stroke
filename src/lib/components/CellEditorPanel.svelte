@@ -32,6 +32,7 @@
    */
   import Pencil from '@lucide/svelte/icons/pencil'
   import Copy from '@lucide/svelte/icons/copy'
+  import Undo2 from '@lucide/svelte/icons/undo-2'
   import WrapText from '@lucide/svelte/icons/wrap-text'
   import X from '@lucide/svelte/icons/x'
   import { cn } from '$lib/utils.js'
@@ -39,7 +40,7 @@
   import Kbd from './Kbd.svelte'
   import JsonTree from './JsonTree.svelte'
   import Search from '@lucide/svelte/icons/search'
-  import { searchJson, matchOffsets } from '$lib/json-search.js'
+  import { searchJson, matchOffsets, splitHighlight } from '$lib/json-search.js'
   import Braces from '@lucide/svelte/icons/braces'
   import { resetInputHistory } from '$lib/input-shortcuts.js'
 
@@ -216,6 +217,32 @@
     if (area.scrollTop === before) area.scrollTop = before
   }
 
+  /**
+   * Put the stored value back.
+   *
+   * Written through the textarea rather than by assigning `draft`, for the same
+   * reason the Tab handler below does: a state write changes the value without an
+   * `input` event, so the shared undo stack never records the step and the revert
+   * would be the one edit ⌘Z could not bring back. Reverting is a big change to
+   * make with one keystroke - it should be as undoable as any other.
+   */
+  function revert() {
+    if (readOnly || !dirty) return
+    // The tree pane has no textarea to write through; nothing to keep undoable
+    // there either, since the tree is not what you edited it with.
+    if (!rawOpen || !area) {
+      draft = original
+      return
+    }
+    area.focus()
+    area.setSelectionRange(0, area.value.length)
+    const ok = document.execCommand?.('insertText', false, original)
+    if (!ok) {
+      area.setRangeText(original, 0, area.value.length, 'end')
+      area.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+  }
+
   function clearFind() {
     query = ''
     hit = 0
@@ -338,6 +365,14 @@
     if (e.altKey && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault()
       wrap = !wrap
+      return
+    }
+    // Alt+R reverts. In the same Alt+letter family as the wrap toggle, and
+    // `preventDefault` is what stops macOS inserting ® instead - the same reason
+    // Alt+Z above does not leave an Ω behind.
+    if (e.altKey && (e.key === 'r' || e.key === 'R')) {
+      e.preventDefault()
+      revert()
       return
     }
     // Tab indents rather than leaving the field - this is an editor, and the
@@ -463,16 +498,29 @@
       >
         <WrapText class="size-3.5 shrink-0" />
       </button>
+      <!-- Icon only, like the wrap toggle beside it. The word "Copy" next to a
+           copy glyph is the label saying what the picture already says, and this
+           row has to fit a find box, three actions and a close button. -->
       <button
         type="button"
-        class="inline-flex h-7 items-center gap-1.5 rounded px-2 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        class="inline-flex h-7 items-center rounded px-2 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={copy}
         title="Copy the value as text"
+        aria-label="Copy the value as text"
       >
-        Copy
         <Copy class="size-3.5 shrink-0" />
       </button>
       {#if !readOnly}
+        <button
+          type="button"
+          class="inline-flex h-7 items-center rounded px-2 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+          disabled={!dirty}
+          onclick={revert}
+          title="Revert to the stored value (Alt+R)"
+          aria-label="Revert to the stored value"
+        >
+          <Undo2 class="size-3.5 shrink-0" />
+        </button>
         <button
           type="button"
           class="inline-flex h-7 items-center gap-1.5 rounded px-2 font-mono text-ui-2xs text-primary transition-colors hover:bg-primary/10 disabled:opacity-40 disabled:hover:bg-transparent"
