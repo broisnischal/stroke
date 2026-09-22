@@ -22,6 +22,7 @@
     sort: IS_MAC ? "⌥⇧S" : "Alt+Shift+S",
     columns: IS_MAC ? "⌥⇧C" : "Alt+Shift+C",
     reset: IS_MAC ? "⌥⇧R" : "Alt+Shift+R",
+    addRow: IS_MAC ? "⌥N" : "Alt+N",
   };
   import { GAME_WORD, CLEAR_WORD, isMagic } from '$lib/games/easter-eggs.js'
   import {
@@ -1124,7 +1125,7 @@
         type="button"
         class= "field-surface inline-flex h-7 shrink-0 items-center gap-1 px-2 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
         disabled={loading || columns.length === 0 || readonly}
-        title={readonly ? "Read-only mode" : "Insert row (Add)"}
+        title={readonly ? "Read-only mode" : `Stage a new row (${KEY.addRow}), again for another`}
         onclick={onaddrow}
       >
         <Icon name="plus" class="size-3.5 shrink-0" />

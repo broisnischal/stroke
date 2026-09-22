@@ -2763,7 +2763,12 @@ let rowSearch = $state('')
     if (!connection) return
     if (commandOpen || showConnectionModal || showSettingsModal) return
     if (activeTab?.kind !== 'table' || !activeTable) return
-    if (isTypingTarget(document.activeElement)) return
+    // The typing guard keeps Alt+N out of the search box and every other field,
+    // but the staged band is the one place you are typing AND want another row -
+    // "again for another" is the whole point of it, and it is not a chord any
+    // text field claims.
+    const typingIn = document.activeElement
+    if (isTypingTarget(typingIn) && !(typingIn instanceof HTMLElement && typingIn.closest('[data-new-row]'))) return
     e.preventDefault()
     dtBeginInsertRow?.()
   })
