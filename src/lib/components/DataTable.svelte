@@ -8,6 +8,7 @@
   import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight, appNumberGrouping, appHighlightActiveRow, appGridFontSize, appImagePreview, appOpenUrlsOnClick, appRowNumbers } from '$lib/stores/settings.js'
   import { createSmoothScroll, wheelPixels } from '$lib/smooth-scroll.js'
   import { isJsonColumnType } from '$lib/cell-expand.js'
+  import { focusTrap } from '$lib/actions/focus-trap.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -75,6 +76,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     isAutoColumn,
     insertOmitBehaviour,
     buildInsertPayload,
+    isDateTimeType,
     isDateOnlyType,
     isTimeOnlyType,
     oversizeCellInfo,
@@ -84,6 +86,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   import {
     defaultInsertDraft,
     shouldUseDateTimePicker,
+    generateUuid,
+    generateCuid,
+    nowDateTimeLocal,
+    nowDateOnly,
+    nowTimeOnly,
   } from "$lib/insert-field.js";
   import { cellLinkHref, cellUrlType } from "$lib/cell-display.js";
   import InsertValuePicker from "./InsertValuePicker.svelte";
@@ -2091,6 +2098,45 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * so the position is about where you are looking, not about the data.
    * @param {number | null} [anchorRow]
    */
+  /**
+   * The staged cell a right-click opened the menu on, and where to draw it.
+   * @type {{ row: number, col: string, x: number, y: number } | null}
+   */
+  let draftMenu = $state(null)
+
+  /** @param {MouseEvent} e @param {number} row @param {string} col */
+  function openDraftMenu(e, row, col) {
+    e.preventDefault()
+    e.stopPropagation()
+    draftMenu = { row, col, x: e.clientX, y: e.clientY }
+  }
+
+  /** What the menu can put in a staged cell, given the column's type. */
+  const draftMenuActions = $derived.by(() => {
+    if (!draftMenu) return /** @type {{ id: string, label: string, run: () => void }[]} */ ([])
+    const { row, col: colName } = draftMenu
+    const col = columns.find((c) => c.name === colName)
+    const dt = String(col?.dataType ?? col?.data_type ?? '').toLowerCase()
+    const set = (/** @type {string} */ v) => setNewRowDraft(row, colName, v)
+    /** @type {{ id: string, label: string, run: () => void }[]} */
+    const out = []
+    if (dt.includes('uuid') || dt.includes('char') || dt.includes('text')) {
+      out.push({ id: 'uuid', label: 'Generate UUID', run: () => set(generateUuid()) })
+      out.push({ id: 'cuid', label: 'Generate CUID', run: () => set(generateCuid()) })
+    }
+    if (isDateTimeType(dt) || shouldUseDateTimePicker(dt, colName)) {
+      out.push({ id: 'now', label: 'Now', run: () => set(nowDateTimeLocal()) })
+    } else if (isDateOnlyType(dt)) {
+      out.push({ id: 'today', label: 'Today', run: () => set(nowDateOnly()) })
+    } else if (isTimeOnlyType(dt)) {
+      out.push({ id: 'time-now', label: 'Now', run: () => set(nowTimeOnly()) })
+    }
+    if (dt.includes('int') || dt.includes('numeric') || dt.includes('decimal') || dt.includes('real') || dt.includes('double')) {
+      out.push({ id: 'zero', label: 'Zero', run: () => set('0') })
+    }
+    return out
+  })
+
   /** A row of drafts seeded the way opening the band seeds one. */
   function blankDraft() {
     /** @type {Record<string, string>} */
@@ -2154,6 +2200,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     newRowDrafts = null
     newRowFocusCol = null
     newRowFocusIdx = 0
+  }
+
+  /**
+   * Put one staged cell's value into the same column of every staged row.
+   * With several rows in the band this is the difference between typing a
+   * tenant id five times and typing it once.
+   * @param {number} row @param {string} col
+   */
+  function fillDraftColumn(row, col) {
+    if (!newRowDrafts?.length) return
+    const v = newRowDrafts[row]?.[col] ?? ''
+    newRowDrafts = newRowDrafts.map((d) => ({ ...d, [col]: v }))
   }
 
   /** Drop one staged row. The last one out closes the band. @param {number} i */
@@ -2282,7 +2340,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Escape drops the row you are in; the band only closes when it was the
     // last one. Discarding four filled-in rows because you pressed Escape in
     // the fourth is not what that key means.
-    if (e.key === 'Escape') { e.preventDefault(); removeDraftRow(rowIdx); return }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      // Mod+Escape discards the whole band; plain Escape drops this row.
+      if (e.ctrlKey || e.metaKey) cancelNewRow()
+      else removeDraftRow(rowIdx)
+      return
+    }
     // ⌘↵ inserts everything staged - the batch is the point of stacking them.
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submitNewRow(); return }
     // Alt+↵ adds another row below, for filling several in without reaching for
@@ -4620,6 +4684,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** @param {KeyboardEvent} e */
   function handleTableKeydown(e) {
+    // Anything typed inside the staged-row band belongs to the band, which has
+    // its own handler. First thing checked, because the grid's chords sit above
+    // this in the function and ⌘A among them was selecting every row in the
+    // table while the caret was in a draft field - where it means "select this
+    // value". Mod+Escape is the band's too (it clears the whole thing).
+    if (e.target instanceof HTMLElement && e.target.closest('[data-new-row]')) return
     // Every move from here is a keyboard move, so the cursor may scroll itself
     // into view. Set before the branches rather than in each of them.
     _focusFromKey = true
@@ -4711,7 +4781,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
 
     if (editingCell) return;
-    if (newRowDrafts) return;
+
+    // Mod+Escape clears the whole band. Escape inside a row drops that row, and
+    // with eight staged that is eight presses; this is the way out of all of it.
+    if (e.key === 'Escape' && (e.ctrlKey || e.metaKey) && newRowDrafts?.length) {
+      e.preventDefault();
+      cancelNewRow();
+      return;
+    }
 
     // The cell menu's two quick filters, as chords. Alt+F sits beside
     // Alt+Shift+F, which opens the filter menu: same family, one step shorter,
@@ -7498,7 +7575,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     {@const isDateOnly = isDateOnlyType(dt)}
                     {@const isTimeOnly = isTimeOnlyType(dt)}
                     {@const colWidth = widthForColumn(col.name, dt)}
-                    <div class="flex shrink-0 items-center overflow-hidden border-r border-border/35 bg-success/[0.03] px-2" style="width:{colWidth}px">
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div
+                      class="flex shrink-0 items-center overflow-hidden border-r border-border/35 bg-success/[0.03] px-2"
+                      style="width:{colWidth}px"
+                      oncontextmenu={(e) => openDraftMenu(e, di, col.name)}
+                    >
                       {#if isAuto}
                         <!-- Writable, with the generated value as the placeholder.
                              Leaving it blank is the normal path and the label says
@@ -7545,20 +7627,20 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                           onchange={(v) => setNewRowDraft(di, col.name, v)}
                           onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
                         />
-                      {:else if isDateTime}
+                      {:else if isDateTime || isDateOnly}
+                        <!-- The same shape the inline cell editor uses: calendar
+                             on the trailing edge, value at the grid's type size,
+                             field filling the cell. It wore the picker's default
+                             layout - icon first, its own font - so a staged row
+                             looked like a form dropped on top of the table rather
+                             than a row of it. -->
                         <DateTimePicker
                           colName={col.name}
-                          showTime={true}
+                          showTime={isDateTime}
                           disabled={insertSaving}
-                          value={rowDraft[col.name] ?? ''}
-                          onchange={(v) => setNewRowDraft(di, col.name, v)}
-                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
-                        />
-                      {:else if isDateOnly}
-                        <DateTimePicker
-                          colName={col.name}
-                          showTime={false}
-                          disabled={insertSaving}
+                          iconTrailing={true}
+                          class="h-full w-full min-w-0 pr-1"
+                          inputClass="text-[length:inherit]"
                           value={rowDraft[col.name] ?? ''}
                           onchange={(v) => setNewRowDraft(di, col.name, v)}
                           onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
@@ -8578,6 +8660,85 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     nameToIdx={_nameToActualIdx}
     onclose={() => { vcolPanelOpen = false }}
   />
+{/if}
+
+<!-- Right-click on a staged cell.
+     Hand-rolled rather than one `ContextMenu.Root` per cell: the band is a
+     grid, so that would be a menu instance per column per staged row, mounted
+     and torn down on every keystroke. One fixed box positioned at the pointer
+     costs nothing and closes the same way the rest of the app's menus do. -->
+{#if draftMenu}
+  {@const menuActions = draftMenuActions}
+  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+  <div
+    class="fixed inset-0 z-[120]"
+    onclick={() => (draftMenu = null)}
+    oncontextmenu={(e) => { e.preventDefault(); draftMenu = null }}
+  ></div>
+  <div
+    role="menu"
+    tabindex="-1"
+    class="fixed z-[121] min-w-44 rounded-md border border-border/60 bg-popover p-1 elevate-2-rim"
+    style="left:{Math.min(draftMenu.x, window.innerWidth - 200)}px; top:{Math.min(draftMenu.y, window.innerHeight - 220)}px"
+    use:focusTrap={{ autoFocus: false }}
+    onkeydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); draftMenu = null } }}
+  >
+    {#each menuActions as action (action.id)}
+      <button
+        type="button"
+        role="menuitem"
+        class="flex h-7 w-full items-center rounded-sm px-2 text-left text-ui-2xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
+        onclick={() => { action.run(); draftMenu = null }}
+      >{action.label}</button>
+    {/each}
+    {#if menuActions.length}
+      <div class="my-1 h-px bg-border/50"></div>
+    {/if}
+    <button
+      type="button"
+      role="menuitem"
+      class="flex h-7 w-full items-center justify-between gap-3 rounded-sm px-2 text-left text-ui-2xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
+      onclick={() => {
+        const v = newRowDrafts?.[draftMenu?.row ?? 0]?.[draftMenu?.col ?? ''] ?? ''
+        void navigator.clipboard?.writeText(v)
+        draftMenu = null
+      }}
+    >Copy value</button>
+    <button
+      type="button"
+      role="menuitem"
+      class="flex h-7 w-full items-center rounded-sm px-2 text-left text-ui-2xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
+      onclick={async () => {
+        const m = draftMenu
+        draftMenu = null
+        if (!m) return
+        try { setNewRowDraft(m.row, m.col, await navigator.clipboard.readText()) } catch { /* no clipboard */ }
+      }}
+    >Paste</button>
+    {#if draftCount > 1}
+      <button
+        type="button"
+        role="menuitem"
+        class="flex h-7 w-full items-center rounded-sm px-2 text-left text-ui-2xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent"
+        onclick={() => {
+          if (draftMenu) fillDraftColumn(draftMenu.row, draftMenu.col)
+          draftMenu = null
+        }}
+      >Fill this column in all {draftCount} rows</button>
+    {/if}
+    <button
+      type="button"
+      role="menuitem"
+      class="flex h-7 w-full items-center rounded-sm px-2 text-left text-ui-2xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent"
+      onclick={() => {
+        const m = draftMenu
+        draftMenu = null
+        if (!m) return
+        const col = columns.find((c) => c.name === m.col)
+        setNewRowDraft(m.row, m.col, col ? defaultInsertDraft(col, primaryKey) : '')
+      }}
+    >Clear</button>
+  </div>
 {/if}
 </div>
 

@@ -2743,6 +2743,19 @@ let rowSearch = $state('')
     void handleModRefresh()
   })
 
+  // Alt+N stages a new row, the same thing the toolbar's Add does. It joins the
+  // Alt family the grid already uses for what is in front of you - Alt+F filter
+  // by this value, Alt+E exclude it, Alt+D duplicate this row - and it appends,
+  // so holding it out for three rows is three rows. Mod+Escape clears the band.
+  createHotkey('Alt+N', (e) => {
+    if (!connection) return
+    if (commandOpen || showConnectionModal || showSettingsModal) return
+    if (activeTab?.kind !== 'table' || !activeTable) return
+    if (isTypingTarget(document.activeElement)) return
+    e.preventDefault()
+    dtBeginInsertRow?.()
+  })
+
   // F5 reloads what you are looking at, not the app.
   //
   // It was bound to nothing, so the webview took it and reloaded the document -
