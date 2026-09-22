@@ -2779,7 +2779,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** @param {number} rowIdx */
-  async function duplicateRow(rowIdx) {
+  function duplicateRow(rowIdx) {
     if (readonly) return;
     const row = rows[rowIdx];
     if (!row) return;
@@ -2794,13 +2794,28 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         return;
       }
     }
-    const record = rowToRecord(columns, row);
-    for (const pk of primaryKey) delete record[pk];
-    try {
-      await oninsertrow(record);
-    } catch {
-      // error toast already shown by oninsertrow
-    }
+    // The copy lands in the insert draft, not in the table. Duplicating used to
+    // write immediately, which is a row in the database for one keystroke or one
+    // menu click - and no chance to change the one field that made you duplicate
+    // it in the first place. The draft is the same band the Add button opens, so
+    // it is reviewable, editable, discardable, and goes through the same
+    // confirm-and-insert path on submit.
+    /** @type {Record<string, string>} */
+    const drafts = {};
+    columns.forEach((col, i) => {
+      // A generated value and the key are the database's to assign - copying
+      // them is what would make the insert collide with the row it came from.
+      const auto = isAutoColumn(col, primaryKey) || primaryKey.includes(col.name);
+      drafts[col.name] = auto ? defaultInsertDraft(col, primaryKey) : valueToEditString(row[i]);
+    });
+    newRowDrafts = drafts;
+    const firstEditable = columns.find((c) => !isAutoColumn(c, primaryKey));
+    newRowFocusCol = firstEditable?.name ?? columns[0]?.name ?? null;
+    tableContainer?.scrollTo({ top: 0, behavior: "smooth" });
+    toast.info("Copied into a new row", {
+      description: "Nothing is written until you submit it.",
+      duration: 2600,
+    });
   }
 
   /** @param {number} rowIdx @param {number} colIdx @param {'down'|'right'|'left'} action @param {boolean} [autoEdit] */
@@ -4526,11 +4541,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
     }
 
-    // Mod+D duplicates the focused row - the same staged insert the menu makes.
-    if (!editingCell && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "d" || e.key === "D")) {
+    // Alt+D copies the focused row into the insert draft, beside the Alt+F /
+    // Alt+E pair - all three act on what the cursor is standing on.
+    if (!editingCell && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "d" || e.key === "D")) {
       if (!readonly && focusedRow !== null) {
         e.preventDefault();
-        void duplicateRow(focusedRow);
+        duplicateRow(focusedRow);
         return;
       }
     }
@@ -8195,7 +8211,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         >
           <CopyPlus />
           Duplicate row
-          <ContextMenu.Shortcut combo="Mod+D" />
+          <ContextMenu.Shortcut combo="Alt+D" />
         </ContextMenu.Item>
         <ContextMenu.Separator />
         {#if pendingDeletes.has(contextRowIdx)}

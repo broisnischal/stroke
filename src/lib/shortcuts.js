@@ -150,7 +150,7 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Alt+Shift+R', desc: 'Reset table view (clear filters/sort/search)' },
       { combo: 'Alt+F', desc: 'Filter by the focused cell\'s value' },
       { combo: 'Alt+E', desc: 'Exclude the focused cell\'s value' },
-      { combo: 'Mod+D', desc: 'Duplicate the focused row' },
+      { combo: 'Alt+D', desc: 'Copy the focused row into the insert draft' },
       { combo: 'Mod+E', desc: 'Expand / collapse the focused row' },
       { combo: 'Shift+Space', desc: 'Preview the focused cell in the bottom dock' },
       { combo: 'Enter', desc: 'Edit cell' },
