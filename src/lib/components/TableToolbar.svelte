@@ -40,6 +40,7 @@
   import { onDestroy, untrack } from "svelte";
   import { formatCompactCount } from "$lib/table-list.js";
   import { describeTableView } from "$lib/stores/table-views.js";
+  import { searchOptionHotkey, SEARCH_OPTION_KEYS } from "$lib/search-options.js";
 
   /** @typedef {import('$lib/table-query.js').TableSort} TableSort */
   /** @typedef {import('$lib/table-query.js').TableFilter} TableFilter */
@@ -47,6 +48,15 @@
 
   let {
     queryMs = 0,
+    /**
+     * Columns this page fetched as a preview instead of a value, with the
+     * average size that earned them the treatment. Empty on every ordinary
+     * table - when it is not, the chip below says so, because a column showing
+     * "369 KB" where its contents should be needs to be explained once rather
+     * than reported as a bug.
+     * @type {{ name: string, avgBytes: number }[]}
+     */
+    previewColumns = [],
     page = 1,
     pageSize = 50,
     total = 0,
@@ -155,10 +165,30 @@
   } = $props();
 
   const ALL_SEARCH_OPTS = /** @type {const} */ ([
-    { key: "matchCase", cap: "Aa", title: "Match case" },
-    { key: "wholeWord", cap: "ab", title: "Match whole word" },
-    { key: "regex", cap: ".*", title: "Use a regular expression" },
+    { key: "matchCase", cap: "Aa", title: `Match case (${SEARCH_OPTION_KEYS.matchCase})` },
+    { key: "wholeWord", cap: "ab", title: `Match whole word (${SEARCH_OPTION_KEYS.wholeWord})` },
+    { key: "regex", cap: ".*", title: `Use a regular expression (${SEARCH_OPTION_KEYS.regex})` },
   ]);
+
+  /**
+   * Alt+C / Alt+W / Alt+R from inside the search field, the chords every editor's
+   * find widget answers to. Options the engine cannot honor are not bound - a
+   * chord that silently does nothing is worse than no chord.
+   * @param {KeyboardEvent} e
+   */
+  /** @param {number} n */
+  function fmtBytes(n) {
+    if (n < 1024) return `${Math.round(n)} B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  function onSearchKeydown(e) {
+    const opt = searchOptionHotkey(e);
+    if (!opt || !searchOptionsSupport[opt]) return;
+    e.preventDefault();
+    onsearchoptionschange({ ...searchOptions, [opt]: !searchOptions[opt] });
+  }
   // Only the options this engine can honor (SQLite/D1 → match-case only, etc.).
   const SEARCH_OPTS = $derived(
     ALL_SEARCH_OPTS.filter((o) => searchOptionsSupport[o.key]),
@@ -769,6 +799,7 @@
           value={localSearch}
           disabled={columns.length === 0}
           oninput={(e) => handleSearchInput(e.currentTarget.value)}
+          onkeydown={onSearchKeydown}
         />
       {/if}
       <!-- Right-side cluster: keycap hint + search options popover + clear (✕) -->
@@ -792,6 +823,7 @@
                 type="button"
                 aria-pressed={active}
                 aria-label={opt.title}
+                aria-keyshortcuts={SEARCH_OPTION_KEYS[opt.key]}
                 title={opt.title}
                 class={cn(
                   "inline-flex h-5 items-center justify-center px-1.5 font-mono text-ui-3xs transition-colors",
@@ -1092,6 +1124,22 @@
 
     <!-- Spacer -->
     <div class="flex-1"></div>
+
+    {#if previewColumns.length && tableViewMode !== "structure"}
+      <!-- What the page did NOT fetch, and why. One chip, no dialog: it is a
+           fact about this table, not a decision anyone has to make. -->
+      <span
+        class="flex shrink-0 items-center gap-1 rounded-[4px] border border-border/50 bg-muted/30 px-1.5 py-px font-mono text-ui-3xs text-muted-foreground @max-[760px]/tb:hidden"
+        title={`Fetched as previews, not values: ${previewColumns
+          .map((c) => `${c.name} (~${fmtBytes(c.avgBytes)}/row)`)
+          .join(', ')}.\n\nA page of these would move ${fmtBytes(
+          previewColumns.reduce((n, c) => n + c.avgBytes, 0) * Math.max(1, to - from + 1),
+        )}. Open a cell (Shift+Space) and press Load to read one in full.`}
+      >
+        <Icon name="eye-off" class="size-3 shrink-0" />
+        {previewColumns.length === 1 ? previewColumns[0].name : `${previewColumns.length} columns`} previewed
+      </span>
+    {/if}
 
     {#if tableViewMode !== "structure"}
       {#if infiniteScroll}

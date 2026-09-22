@@ -115,9 +115,9 @@
   // This keeps those large libraries out of the startup bundle and idle memory.
   import { Button } from '$lib/components/ui/button/index.js'
   import AlertTriangle from '@lucide/svelte/icons/triangle-alert'
-  import X from '@lucide/svelte/icons/x'
   import Lock from '@lucide/svelte/icons/lock'
   import WifiOff from '@lucide/svelte/icons/wifi-off'
+  import Unplug from '@lucide/svelte/icons/unplug'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import {
     disconnectPostgres,
@@ -140,6 +140,7 @@
     txRollback,
     executeDdl,
     updateTableCell,
+    fetchCellValue,
     deleteTableRows,
     insertTableRow,
     toggleDevtools,
@@ -217,6 +218,7 @@
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import { humanizeDbError } from '$lib/ai.js'
+  import { focusTrap } from '$lib/actions/focus-trap.js'
   import {
     MAX_PAGE_SIZE,
     fetchLimitFor,
@@ -258,6 +260,8 @@
     setConnectionGroup,
     setLastConnectionId,
     setLastSchema,
+    wasDisconnected,
+    setWasDisconnected,
     upsertConnection,
     engineFamily,
   } from '$lib/stores/connections.js'
@@ -307,7 +311,7 @@
   import { switchDiagramsConnection } from '$lib/stores/saved-diagrams.js'
   import { dashboards, activeDashboardId, switchDashboardsConnection } from '$lib/stores/dashboards.js'
   import { buildOption } from '$lib/chart-utils.js'
-  import { isNetworkError } from '$lib/utils.js'
+  import { isNetworkError, connectionErrorKind } from '$lib/utils.js'
   import { get } from 'svelte/store'
   import { virtualColumnsStore } from '$lib/stores/virtual-columns.js'
 
@@ -389,6 +393,33 @@
     try { await disconnectPostgres() } catch { /* nothing to tear down */ }
   }
   let showConnectionModal = $state(false)
+  /** Engine chosen on the welcome screen - the modal opens straight into its form. */
+  let connectionModalEngine = $state('')
+  /** @type {HTMLElement | null} */
+  let welcomeConnectBtn = $state(null)
+
+  // The welcome screen has exactly one thing to do, so its button starts with
+  // focus: Enter opens the dialog, Tab walks the engine chips, and nobody has to
+  // reach for the mouse to get in. Skipped while a dialog owns the window.
+  $effect(() => {
+    if (connection || showConnectionModal || !welcomeConnectBtn) return
+    welcomeConnectBtn.focus({ preventScroll: true })
+  })
+
+  /**
+   * Open a link in the user's browser. In a Tauri window a plain anchor
+   * navigates the webview itself - away from the app - so every outbound link
+   * goes through the opener plugin, with `window.open` as the dev-server path.
+   * @param {string} url
+   */
+  async function openExternalUrl(url) {
+    try {
+      const { openUrl } = await import('@tauri-apps/plugin-opener')
+      await openUrl(url)
+    } catch {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+  }
   let showDockerModal = $state(false)
   let dockerInitialDb = $state(/** @type {string | null} */ (null))
   /** Bottom query-log console visibility. */
@@ -1269,6 +1300,9 @@
 
   let total = $state(0)
   let queryMs = $state(0)
+  /** Columns the last page fetched as a preview instead of a value, with the
+   *  average size that earned it. Empty on every ordinary table. */
+  let previewColumns = $state(/** @type {{ name: string, avgBytes: number }[]} */ ([]))
   let loadingRows = $state(false)
   let loadingMore = $state(false)
   let page = $state(1)
@@ -1971,6 +2005,7 @@ let rowSearch = $state('')
     // the state just restored above is the one this total belongs to.
     _totalSig = rowPredicateSig
     queryMs = s.queryMs
+    previewColumns = s.previewColumns ?? []
     loadingRows = !!s.loadingRows && isTabBusy(tabId)
     error = s.error
     selected = new Set(s.selected)
@@ -2078,6 +2113,7 @@ let rowSearch = $state('')
     rows = []
     total = 0
     queryMs = 0
+    previewColumns = []
     loadingRows = false
     error = ''
     selected = new Set()
@@ -2428,12 +2464,7 @@ let rowSearch = $state('')
     extensions: () => openExtensionsTab(),
 
     shortcuts: () => (showShortcutsModal = true),
-    changelog: () => {
-      const url = 'https://stroke.click/changelog?utm_source=stroke-app&utm_medium=menu&utm_campaign=changelog'
-      void import('@tauri-apps/plugin-opener')
-        .then(({ openUrl }) => openUrl(url))
-        .catch(() => window.open(url, '_blank', 'noopener,noreferrer'))
-    },
+    changelog: () => void openExternalUrl('https://stroke.click/changelog?utm_source=stroke-app&utm_medium=menu&utm_campaign=changelog'),
     reportIssue: () => (showReportIssueDialog = true),
     checkUpdates: () => void updateDialog?.checkNow?.(),
     about: () => (showAboutModal = true),
@@ -2687,7 +2718,9 @@ let rowSearch = $state('')
       el instanceof HTMLTextAreaElement ||
       (el instanceof HTMLElement && el.isContentEditable)
     ) return
-    if (activeTab?.kind !== 'table' || !activeTable || selected.size === 0) return
+    if (activeTab?.kind !== 'table' || !activeTable) return
+    // No checkbox selection is not "nothing to delete": the grid falls back to
+    // the focused row, which is the row the menu offers this chord on.
     e.preventDefault()
     stageDeleteSelectedRows()
   })
@@ -5805,6 +5838,7 @@ let rowSearch = $state('')
 
   async function onConnected(conn, savedId) {
     recordActivity({ type: 'connect', title: `Connected to ${conn.name ?? conn.database ?? conn.filePath ?? 'database'}`, success: true })
+    setWasDisconnected(false)
     connection = conn
     savedConnections = loadSavedConnections()
     tableReadonly = savedConnections.find(c => c.id === savedId)?.readOnly ?? conn.readOnly ?? false
@@ -6007,6 +6041,13 @@ let rowSearch = $state('')
 
     const last = getLastConnection()
     if (!last) { showConnectionModal = true; return }
+
+    // Disconnect is a decision, and it survives a restart. Coming back connected
+    // to the database someone deliberately stepped away from - on a reload, or
+    // the next morning - is the one outcome that command exists to prevent, so
+    // this launch stays on the welcome screen. The connection is still saved and
+    // still the highlighted one; reconnecting is a click.
+    if (wasDisconnected()) return
 
     // Respect the "auto reconnect on startup" setting - if disabled, go straight
     // to the connection modal instead of re-connecting silently.
@@ -6307,6 +6348,7 @@ let rowSearch = $state('')
     // Remember where the user was so reconnecting restores this schema.
     if (persistConnectionId && activeSchema) setLastSchema(persistConnectionId, activeSchema)
     recordActivity({ type: 'disconnect', title: `Disconnected from ${connection?.name ?? 'database'}`, success: true })
+    setWasDisconnected(true)
     try { await disconnectPostgres() } catch { /* ignore */ }
     try { await mcpStop() } catch { /* ignore */ }
     mcpRunning = false
@@ -6440,6 +6482,30 @@ let rowSearch = $state('')
       return false
     }
   }
+  /** Drives the spinner on the error state's Retry / Reconnect button. */
+  let retryingLoad = $state(false)
+  /**
+   * Retry whatever the table view failed at. A dropped pool needs rebuilding
+   * first - retrying the same query against a closed pool just reprints the
+   * same error.
+   */
+  async function retryTableLoad() {
+    if (retryingLoad) return
+    const dropped = connectionErrorKind(error) === 'dropped' || connectionLost
+    retryingLoad = true
+    try {
+      error = ''
+      showRawError = false
+      if (dropped) await reconnectPool()
+      // No table selected means the failure came from the catalog, not a row
+      // fetch, so retry what actually broke.
+      if (activeTable) await loadRows()
+      else await loadTables({ force: true })
+    } finally {
+      retryingLoad = false
+    }
+  }
+
   /** Rate-limited silent reconnect + quiet refetch, for background triggers. */
   async function silentReconnect() {
     if (_reconnecting || !connection) return
@@ -6719,6 +6785,23 @@ let rowSearch = $state('')
     }
   }
 
+  /**
+   * Load one capped cell in full, for the dock.
+   *
+   * A browse page fetches wide columns as a preview - the whole point of that
+   * is not moving half a megabyte per row for a grid that draws forty
+   * characters - so reading one is an explicit, per-row request.
+   * @param {{ rowIdx: number, colIdx: number }} detail
+   */
+  async function handleFetchCellValue(detail) {
+    if (!activeTable) throw new Error('No table is open')
+    const col = columns[detail.colIdx]
+    if (!col) throw new Error('That column is gone')
+    const pk = primaryKeyForRow(detail.rowIdx)
+    if (!pk) throw new Error('This table has no primary key, so a single row cannot be addressed')
+    return await fetchCellValue(activeSchema, activeTable, pk, col.name)
+  }
+
   /** @param {{ rowIdx: number, colIdx: number, value: unknown }} detail */
   async function handleSaveCell(detail) {
     if (!activeTable || !primaryKey.length) return
@@ -6812,6 +6895,7 @@ let rowSearch = $state('')
 <Onboarding bind:open={showOnboarding} onconnect={() => (showConnectionModal = true)} onsample={handleSampleConnect} />
 <ConnectionModal
   bind:open={showConnectionModal}
+  bind:initialEngine={connectionModalEngine}
   onconnected={(conn, id) => onConnected(conn, id)}
   maxConnections={$hasPro ? Infinity : FREE_CONNECTION_LIMIT}
   activeConnectionName={connection ? (connection.name || connection.database || connection.host || connection.filePath || 'Connected') : ''}
@@ -7221,13 +7305,22 @@ let rowSearch = $state('')
           </p>
         </div>
 
-        <!-- Supported engines, real brand marks -->
+        <!-- Supported engines, real brand marks. Each one is the shortcut into
+             its own form: naming the engine IS the first step of the wizard, so
+             a chip that only sat there was asking to be clicked and doing
+             nothing. -->
         <div class="relative flex flex-wrap items-center justify-center gap-2">
           {#each [['postgres','PostgreSQL'],['mysql','MySQL'],['sqlite','SQLite'],['clickhouse','ClickHouse'],['d1','Cloudflare D1']] as [id, label]}
-            <span class="inline-flex items-center gap-2 rounded-full border border-border/50 bg-muted/20 py-1.5 pl-2.5 pr-3.5 text-ui-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground">
-              <DbIcon {id} class="size-4 text-muted-foreground" />
+            <button
+              type="button"
+              title="New {label} connection"
+              aria-label="New {label} connection"
+              class="inline-flex items-center gap-2 rounded-full border border-border/50 bg-muted/20 py-1.5 pl-2.5 pr-3.5 text-ui-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted/40 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              onclick={() => { connectionModalEngine = id; showConnectionModal = true }}
+            >
+              <DbIcon {id} class="size-4 shrink-0 text-muted-foreground" />
               {label}
-            </span>
+            </button>
           {/each}
         </div>
 
@@ -7235,6 +7328,7 @@ let rowSearch = $state('')
           <Button
             type="button"
             class="h-9 rounded-lg px-5 text-ui-sm font-semibold"
+            bind:ref={welcomeConnectBtn}
             onclick={() => (showConnectionModal = true)}
           >
             <Plus class="size-4" />
@@ -7246,6 +7340,17 @@ let rowSearch = $state('')
             for the command menu
           </p>
         </div>
+
+        <p class="relative mt-2 text-ui-xs text-muted-foreground">
+          made with care by
+          <a
+            href="https://nischal-dahal.com.np"
+            target="_blank"
+            rel="noreferrer"
+            class="text-foreground/80 underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            onclick={(e) => { e.preventDefault(); void openExternalUrl('https://nischal-dahal.com.np') }}
+          >@broisnees</a>
+        </p>
       </div>
     {:else}
       <!-- Full-window AI chat, kept mounted after first open so state is preserved -->
@@ -7808,68 +7913,85 @@ let rowSearch = $state('')
       {/if}
 
       {#if activeTab?.kind === 'table'}
+        <!-- The failure outranks the empty state: an error raised while the tab
+             has no table selected still has to be readable, and it carries the
+             only control that clears it. -->
         {#if error}
-          {#if isNetworkError(error)}
-            <!-- ── Network / offline error, full-area friendly state ── -->
-            <div class="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-              <WifiOff class="size-8 text-muted-foreground" />
-              <div class="space-y-1">
-                <p class="font-mono text-ui font-medium text-foreground/70">Cannot reach database</p>
-                <p class="font-mono text-ui-xs text-muted-foreground">Check your internet connection or whether the server is reachable.</p>
-              </div>
-              <button
-                type="button"
-                class="flex items-center gap-1.5 rounded-md border border-border/30 bg-muted/30 px-3 py-1.5 font-mono text-ui-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-                onclick={() => { error = ''; connectionLost = false; void loadRows() }}
-              >
-                <RefreshCw class="size-3" />
-                Retry
-              </button>
-            </div>
-          {:else}
-            <!-- ── SQL / application error, compact banner ── -->
-            <div class="flex shrink-0 items-start gap-2.5 border-b border-destructive/15 bg-destructive/[0.04] px-3 py-2">
-              <AlertTriangle class="mt-px size-3.5 shrink-0 text-destructive" />
+          <!-- ── Load failure, stated where the grid would be ────────────────
+               A banner pinned to the top over an empty grid made the reader
+               look in two places and left them with "dismiss to continue" as
+               the only way forward. One centred state instead: what broke, why,
+               and the action that fixes it - reconnect for a dropped pool,
+               retry for everything else. -->
+          {@const kind = connectionErrorKind(error)}
+          {@const humanized = humanizeDbError(error)}
+          <div
+            class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center"
+            role="alert"
+          >
+            {#if kind === 'unreachable'}
+              <WifiOff class="size-8 shrink-0 text-muted-foreground" />
+            {:else if kind === 'dropped'}
+              <Unplug class="size-8 shrink-0 text-muted-foreground" />
+            {:else}
+              <AlertTriangle class="size-8 shrink-0 text-destructive" />
+            {/if}
+
+            <div class="flex max-w-md flex-col gap-1">
+              <p class="text-ui-sm font-medium text-foreground">
+                {#if kind === 'unreachable'}Cannot reach database
+                {:else if kind === 'dropped'}Connection dropped
+                {:else}This table failed to load{/if}
+              </p>
               <!-- Drivers wrap the cause in transport noise - D1 returns its whole
                    HTTP envelope around a five-word message. Show the cause; the
                    raw text stays one click away and in the query log. -->
-              <p class="min-w-0 flex-1 font-mono text-ui-xs leading-relaxed text-destructive">
-                {humanizeDbError(error)}
-                {#if humanizeDbError(error) !== error.replace(/^Error:\s*/, '').trim()}
-                  <button
-                    type="button"
-                    class="ml-1.5 align-baseline text-ui-3xs text-destructive underline-offset-2 transition-colors hover:text-destructive hover:underline"
-                    onclick={() => (showRawError = !showRawError)}
-                  >{showRawError ? 'hide raw' : 'raw'}</button>
-                  {#if showRawError}
-                    <span class="mt-1 block break-all text-ui-3xs text-destructive">{error}</span>
-                  {/if}
-                {/if}
+              <p class="break-words font-mono text-ui-xs leading-relaxed {kind ? 'text-muted-foreground' : 'text-destructive'}">
+                {#if kind === 'unreachable'}Check your internet connection, or whether the server is still accepting connections.
+                {:else if kind === 'dropped'}The pool for this connection closed. Reconnecting rebuilds it and reloads the table.
+                {:else}{humanized}{/if}
               </p>
+              {#if showRawError}
+                <p class="mt-1 max-h-40 overflow-auto break-all text-left font-mono text-ui-3xs text-muted-foreground">{error}</p>
+              {/if}
+            </div>
+
+            <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="mt-px shrink-0 text-destructive transition-colors hover:text-destructive"
-                onclick={() => (error = '')}
-                title="Dismiss"
+                data-autofocus
+                disabled={retryingLoad}
+                class="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-muted/40 px-3 text-ui-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+                onclick={() => void retryTableLoad()}
               >
-                <X class="size-3.5" />
+                <RefreshCw class="size-3.5 shrink-0 {retryingLoad ? 'animate-spin' : ''}" />
+                {kind === 'dropped' || connectionLost ? 'Reconnect' : 'Retry'}
               </button>
+              {#if !kind}
+                <button
+                  type="button"
+                  class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
+                  onclick={() => { error = ''; showRawError = false }}
+                >Dismiss</button>
+              {/if}
             </div>
-          {/if}
-        {/if}
 
-        {#if !activeTable}
+            {#if humanized !== error.replace(/^Error:\s*/, '').trim()}
+              <button
+                type="button"
+                class="text-ui-3xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                onclick={() => (showRawError = !showRawError)}
+              >{showRawError ? 'Hide raw error' : 'Show raw error'}</button>
+            {/if}
+          </div>
+        {:else if !activeTable}
           <div class="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
             <p class="font-mono text-ui text-muted-foreground">
               Select a table from the sidebar or press
               <Kbd combo="Mod+K" size="md" />
             </p>
           </div>
-        {:else if error && !isNetworkError(error)}
-          <div class="flex flex-1 items-center justify-center">
-            <p class="font-mono text-ui-sm text-muted-foreground">Dismiss the error above to continue.</p>
-          </div>
-        {:else if !error}
+        {:else}
           {#if tableViewMode === 'structure' && canShowStructure}
             {#if tableToolbarVisible}
             <TableToolbar
@@ -7927,6 +8049,7 @@ let rowSearch = $state('')
 
             {sidebarOpen}
             {queryMs}
+            {previewColumns}
             {page}
             {pageSize}
             offset={currentOffset}
@@ -8019,6 +8142,7 @@ let rowSearch = $state('')
                 rowNumberOffset={infiniteScroll ? 0 : currentOffset}
                 {incomingForeignKeys}
                 onfetchrelatedrows={handleFetchRelatedRows}
+                onfetchcellvalue={dbType === 'postgres' ? handleFetchCellValue : null}
                 schema={activeSchema}
                 tableName={activeTable ?? ''}
                 connectionId={persistConnectionId}
@@ -8174,7 +8298,10 @@ let rowSearch = $state('')
       {/if}
 
       {#if !activeTab || activeTab.kind === 'welcome'}
-        {@const isMac = navigator.platform.toUpperCase().includes('MAC')}
+        <!-- One platform test for the whole app: `IS_MAC` comes from `detectOs()`,
+             which reads the Tauri platform. `navigator.platform` is deprecated,
+             and a second source of truth is a second answer waiting to happen. -->
+        {@const isMac = IS_MAC}
         {@const mod = isMac ? '⌘' : 'Ctrl'}
         <!-- Tile chrome. Every tile is the same fixed height with the icon row
              pinned to the top and the label to the bottom, so labels stay on a
@@ -8197,7 +8324,7 @@ let rowSearch = $state('')
              this size. -->
         {@const shiftKey = isMac ? '⇧' : 'Shift'}
         {#snippet chord(/** @type {string[]} */ keys)}
-          <Kbd {keys} />
+          <Kbd {keys} wrap />
         {/snippet}
 
         <!-- The tile grid, back to the shape it had: icon pinned top, label and
@@ -8230,7 +8357,7 @@ let rowSearch = $state('')
               <span class="truncate text-ui-2xs font-medium leading-[1.25] text-foreground">{label}</span>
               <!-- The chord row is always present, empty or not, so every label in a
                    row lands on the same baseline whether or not it wrapped. -->
-              <span class="flex min-h-[1em] min-w-0 items-center overflow-hidden">
+              <span class="flex min-h-[1em] min-w-0 flex-wrap items-center">
                 {#if opts.keys && !locked}{@render chord(opts.keys)}{/if}
               </span>
             </span>
@@ -8516,24 +8643,32 @@ let rowSearch = $state('')
 {#if confirmDialog}
   <div
     class="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4"
-    role="dialog"
+    role="alertdialog"
     aria-modal="true"
+    aria-labelledby="confirm-dialog-message"
     onclick={(e) => { if (e.target === e.currentTarget) resolveConfirm(false) }}
-    onkeydown={(e) => { if (e.key === 'Escape') resolveConfirm(false); if (e.key === 'Enter') resolveConfirm(true) }}
+    onkeydown={(e) => {
+      if (e.key === 'Escape') { e.preventDefault(); resolveConfirm(false); return }
+      // Enter on a focused button is the button's own job - this only covers the
+      // case where focus is parked on the shell itself.
+      if (e.key === 'Enter' && e.target === e.currentTarget) { e.preventDefault(); resolveConfirm(true) }
+    }}
     tabindex="-1"
+    use:focusTrap
   >
     <div class="w-full max-w-sm rounded-2xl border border-border/60 bg-background p-5 elevate-3-rim">
-      <p class="text-ui-sm text-foreground">{confirmDialog.message}</p>
+      <p id="confirm-dialog-message" class="text-ui-sm text-foreground">{confirmDialog.message}</p>
       <div class="mt-4 flex justify-end gap-2">
         <button
           type="button"
           onclick={() => resolveConfirm(false)}
-          class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+          class="inline-flex h-8 items-center rounded-md px-3 text-ui-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
         >Cancel</button>
         <button
           type="button"
+          data-autofocus
           onclick={() => resolveConfirm(true)}
-          class="inline-flex h-8 items-center rounded-md bg-destructive px-3 text-ui-xs font-medium text-destructive-foreground hover:opacity-90"
+          class="inline-flex h-8 items-center rounded-md bg-destructive px-3 text-ui-xs font-medium text-destructive-foreground hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
         >{confirmDialog.confirmLabel}</button>
       </div>
     </div>
