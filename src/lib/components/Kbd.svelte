@@ -23,6 +23,11 @@
    * @property {string} [combo] e.g. `Mod+Shift+X`, or `Mod+K W` for a sequence
    * @property {string[]} [keys] pre-resolved caps, for a chord with no combo string
    * @property {'sm' | 'md'} [size] `sm` inside menus and fields, `md` in dialogs and empty states
+   * @property {boolean} [wrap] let a chord break onto a second line instead of
+   *   being clipped. Off macOS a modifier is a word, not a glyph, so
+   *   `Ctrl Shift X` runs three times the width of `⌘⇧X` - in a narrow
+   *   container the cap that gets cut is the last one, which is the one that
+   *   identifies the shortcut.
    */
   import { keycaps } from '$lib/shortcuts.js'
   import { cn } from '$lib/utils.js'
@@ -32,6 +37,7 @@
     /** @type {string[] | null} */
     keys = null,
     size = 'sm',
+    wrap = false,
     class: className = '',
     ...rest
   } = $props()
@@ -52,8 +58,8 @@
 </script>
 
 {#if total}
-  <span class={cn('inline-flex shrink-0 items-center gap-1.5', className)} {...rest}>
-    {#each groups as group, g (g)}<span class="inline-flex shrink-0 items-center gap-0.5"
+  <span class={cn('inline-flex items-center gap-1.5', wrap ? 'min-w-0 flex-wrap gap-y-1' : 'shrink-0', className)} {...rest}>
+    {#each groups as group, g (g)}<span class={cn('inline-flex items-center gap-0.5', wrap ? 'min-w-0 flex-wrap gap-y-1' : 'shrink-0')}
         >{#each group as cap, i (i)}<kbd data-size={size}>{cap}</kbd>{/each}</span
       >{/each}
   </span>
