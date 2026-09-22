@@ -638,6 +638,29 @@
     clearSelection()
   }
 
+  /**
+   * Select, or deselect, every pinned table on screen.
+   *
+   * A toggle rather than a one-way "select all": having selected seven rows to
+   * act on them, the way back was clicking each one again. Only the rows the
+   * filter is showing are touched, so it always matches what you can see.
+   */
+  function toggleSelectAllPinned() {
+    const names = filteredPinnedTables
+    if (!names.length) return
+    const allOn = names.every((n) => selectedItems.has(n))
+    const next = new Set(selectedItems)
+    for (const n of names) { if (allOn) next.delete(n); else next.add(n) }
+    selectedItems = next
+    lastSelectedName = allOn ? null : names[names.length - 1]
+  }
+
+  /** Open every pinned table on screen in its own tab, in the order shown. */
+  function openAllPinned() {
+    for (const n of filteredPinnedTables) ontableselect(n)
+  }
+
+
   function copySelectedNames() {
     navigator.clipboard.writeText([...selectedItems].join('\n'))
     clearSelection()
@@ -766,6 +789,12 @@
   // would sit above the results untouched - so they take the same predicate.
   const filteredPinnedTables = $derived(
     lf ? visiblePinnedTables.filter((n) => n.toLowerCase().includes(lf)) : visiblePinnedTables,
+  );
+
+  /** Drives the pinned header's select-all toggle: its state and its label. */
+  const allPinnedSelected = $derived(
+    filteredPinnedTables.length > 0 &&
+      filteredPinnedTables.every((n) => selectedItems.has(n)),
   );
 
   // Selectable rows in display order (pinned first, then regular) - drives shift range-select.
@@ -1819,6 +1848,31 @@
                 <Icon name="pin" class="size-3 shrink-0 text-muted-foreground" />
                 <span class="text-ui-2xs font-medium tracking-wider text-muted-foreground uppercase">Pinned</span>
                 {@render countBadge(filteredPinnedTables.length, visiblePinnedTables.length)}
+                <!-- Two bulk actions on the pins, as icons: the row is 240px
+                     wide and a third and fourth text label would not fit beside
+                     "Clear all". -->
+                <button
+                  type="button"
+                  aria-pressed={allPinnedSelected}
+                  class={cn(
+                    'hit-area inline-flex size-4 shrink-0 items-center justify-center rounded transition-colors hover:text-foreground',
+                    allPinnedSelected ? 'text-foreground' : 'text-muted-foreground',
+                  )}
+                  onclick={toggleSelectAllPinned}
+                  title={allPinnedSelected
+                    ? `Deselect all ${filteredPinnedTables.length} pinned tables`
+                    : `Select all ${filteredPinnedTables.length} pinned tables`}
+                >
+                  <Icon name={allPinnedSelected ? 'check-circle-2' : 'check'} class="size-3" />
+                </button>
+                <button
+                  type="button"
+                  class="hit-area inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
+                  onclick={openAllPinned}
+                  title="Open all {filteredPinnedTables.length} pinned tables in tabs"
+                >
+                  <Icon name="external-link" class="size-3" />
+                </button>
                 {#if pinnedTables.length > 5}
                   <button
                     type="button"

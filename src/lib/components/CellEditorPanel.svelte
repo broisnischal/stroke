@@ -39,7 +39,7 @@
   import Kbd from './Kbd.svelte'
   import JsonTree from './JsonTree.svelte'
   import Search from '@lucide/svelte/icons/search'
-  import { searchJson, matchOffsets } from '$lib/json-search.js'
+  import { searchJson, matchOffsets, splitHighlight } from '$lib/json-search.js'
   import Braces from '@lucide/svelte/icons/braces'
   import { resetInputHistory } from '$lib/input-shortcuts.js'
 
@@ -159,8 +159,13 @@
   // A tree is the one shape you cannot scan: what you are looking for is behind
   // a chevron three levels down. Typing here opens exactly the branches that
   // lead to a hit and leaves the rest closed, and highlights the run that
-  // matched. In the raw pane the same query steps the caret from match to
-  // match, because a textarea cannot be highlighted but it can be selected.
+  // matched. The raw pane marks its hits too - see the highlight layer in the
+  // template. It used to only step the caret from match to match, on the
+  // reasoning that a textarea cannot be highlighted: true of the element
+  // itself, but the marks can be drawn behind it. Stepping alone meant typing a
+  // query showed "1/1" over a value with nothing marked on it, and even after
+  // pressing Enter the selection was invisible the moment focus went back to
+  // the find box.
   let query = $state('')
   /** @type {HTMLInputElement | null} */
   let findEl = $state(null)
@@ -170,6 +175,22 @@
     isTreeable && query ? searchJson(parsed?.value, query) : null,
   )
   const rawHits = $derived(query ? matchOffsets(draft, query) : [])
+  /** @type {HTMLElement | null} */
+  let hlEl = $state(null)
+  /**
+   * The raw value split into plain and matched runs, each hit carrying its index
+   * so the one the caret is on can be brighter than the others. Null when there
+   * is nothing to mark, which is what keeps the layer out of the DOM entirely
+   * for the overwhelmingly common case of no query.
+   */
+  const rawRuns = $derived.by(() => {
+    if (!query || !rawHits.length) return null
+    let n = -1
+    return splitHighlight(draft, query).map((run) => ({
+      t: run.t,
+      hit: run.hit ? ++n : -1,
+    }))
+  })
   /** What the counter says: tree rows while the tree is what you are reading. */
   const hitCount = $derived(rawOpen && !isTreeable ? rawHits.length : (treeSearch?.count ?? rawHits.length))
 
@@ -233,6 +254,13 @@
   let gutterEl = $state(null)
   function syncGutter() {
     if (gutterEl && area) gutterEl.scrollTop = area.scrollTop
+    // The highlight layer has to track both axes: with wrapping off the textarea
+    // scrolls sideways, and a mark that does not follow it lands on the wrong
+    // characters rather than merely looking untidy.
+    if (hlEl && area) {
+      hlEl.scrollTop = area.scrollTop
+      hlEl.scrollLeft = area.scrollLeft
+    }
   }
 
   function apply() {
