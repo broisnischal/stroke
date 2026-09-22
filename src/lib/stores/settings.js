@@ -4,6 +4,7 @@ import {
   DEFAULT_THEME_ID,
   isDarkTheme,
   THEME_IDS,
+  CYCLE_THEME_IDS,
   normalizeThemeId,
   getThemeDefinition,
 } from '$lib/themes/registry.js'
@@ -1079,7 +1080,12 @@ export function resetZoom() {
 export function cycleTheme() {
   const current = loadSettings()
   const dark = isDarkTheme(current.theme)
-  const sameMode = THEME_IDS.filter(id => isDarkTheme(id) === dark)
+  // `CYCLE_THEME_IDS`, not every theme: the hidden one is an easter egg, and
+  // cycling used to deal it out like any other. Standing on it still works -
+  // `indexOf` returns -1 and the next step lands on the first real theme, which
+  // is the way out.
+  const sameMode = CYCLE_THEME_IDS.filter(id => isDarkTheme(id) === dark)
+  if (!sameMode.length) return current
   const idx = sameMode.indexOf(current.theme)
   const next = sameMode[(idx + 1) % sameMode.length]
   return updateSettings({ theme: next })

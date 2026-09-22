@@ -8537,7 +8537,9 @@ let rowSearch = $state('')
             {#if isRedis}
               {@render row(KeyRound, "Keyspace", "Browse keys and values", openRedisTab, {})}
             {:else}
-              {@render row(Terminal, "SQL", "Write and run a query", openSqlTab, { keys: [mod, "T"] })}
+              <!-- ⌘T opens the command palette on its tables page; the SQL view
+                   is ⌘⇧S. The tile printed a chord that went somewhere else. -->
+              {@render row(Terminal, "SQL", "Write and run a query", openSqlTab, { keys: [mod, shiftKey, "S"] })}
               {@render row(Sparkles, "AI", "Ask about this database", openAiTab, { pro: true, keys: [mod, shiftKey, "E"] })}
             {/if}
             {@render row(Blocks, "Extensions", "Add and manage extensions", openExtensionsTab, { pro: true, keys: [mod, shiftKey, "X"] })}

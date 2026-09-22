@@ -238,6 +238,16 @@ export const APP_THEMES = [
 /** Sync with index.html boot script when adding themes. */
 export const THEME_IDS = /** @type {readonly ThemeId[]} */ (APP_THEMES.map((t) => t.id))
 
+/**
+ * The themes ⌘M walks. Hidden ones are not in it: an easter egg is something
+ * you go and find, not something a cycle hands you on the way past - and
+ * `hotdog` in particular is not a theme anyone wants to land on mid-session.
+ * Selecting it from the picker still works once it has been found.
+ */
+export const CYCLE_THEME_IDS = /** @type {readonly ThemeId[]} */ (
+  APP_THEMES.filter((t) => !t.hidden).map((t) => t.id)
+)
+
 /** @param {unknown} value */
 export function normalizeThemeId(value) {
   if (typeof value === 'string' && THEME_IDS.includes(/** @type {ThemeId} */ (value))) {

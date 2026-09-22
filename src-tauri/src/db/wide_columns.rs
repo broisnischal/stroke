@@ -76,6 +76,17 @@ const SAMPLE_ROWS: i64 = 500;
 /// the sample is skipped entirely - which is the path almost every table takes.
 const TOAST_SAMPLE_FLOOR: i64 = 1024 * 1024;
 
+/// Stored size above which a row's TEXT length is checked as well.
+///
+/// `pg_column_size` is the COMPRESSED size, and these payloads compress
+/// extraordinarily well - a jsonb holding a file as an array of byte integers
+/// ran 8.4MB stored against 18.1MB of text, and rows well under the cap on disk
+/// were shipping multiple megabytes each. The text check materialises the value,
+/// so it is worth about 260ms a page on the table it was measured against, and
+/// it is what makes the page size bounded rather than hopeful. Below the floor
+/// no amount of compression can reach the cap, so those rows skip it.
+const TEXT_CHECK_FLOOR: usize = 4 * 1024;
+
 #[derive(Clone, Debug)]
 pub struct WideColumn {
     pub name: String,
@@ -305,8 +316,12 @@ pub fn projection(all_columns: &[String], wide: &[WideColumn]) -> Option<String>
                     "CASE WHEN pg_column_size({quoted}) > {cap} \
                      THEN jsonb_build_object('__strokeOversize', true, 'dataType', '{col_type}', \
                      'bytes', pg_column_size({quoted})) \
+                     WHEN pg_column_size({quoted}) > {floor} AND length({quoted}::text) > {cap} \
+                     THEN jsonb_build_object('__strokeOversize', true, 'dataType', '{col_type}', \
+                     'bytes', octet_length({quoted}::text)) \
                      ELSE jsonb_build_object('__strokeInline', to_jsonb({quoted})) END AS {quoted}",
                     cap = CELL_VALUE_CAP,
+                    floor = TEXT_CHECK_FLOOR,
                 )
             } else {
                 quoted
@@ -372,6 +387,8 @@ mod tests {
         assert!(sql.contains("'dataType', 'jsonb'"));
         // No preview: building one would detoast every over-cap value on the page.
         assert!(!sql.contains("left("));
+        // The compressed size is the cheap gate; the text length is the honest one.
+        assert!(sql.contains("length(\"resume\"::text) >"));
         assert!(sql.contains("AS \"resume\""));
         assert!(sql.ends_with(", \"status\""));
         // Every column is still selected, in order.
