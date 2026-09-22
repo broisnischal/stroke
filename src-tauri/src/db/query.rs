@@ -1786,7 +1786,16 @@ pub async fn get_table_rows(
     // that, so those come back as the oversize sentinel (or, under the cap, as
     // the value itself) and the bytes never leave the server. Nothing wide =>
     // no rewrite, and the plain `SELECT *` path is untouched.
-    let (wide_projection, wide) = super::wide_columns::page_projection(&pool, &schema, &table).await;
+    // A fetch that re-reads the catalog re-reads this too: `include_meta` is the
+    // app's own signal that it does not trust what it holds about this table, and
+    // a projection is built from a column list. Row data is never cached anywhere
+    // in this path - every page is a fresh query - but a stale SELECT LIST would
+    // drop a new column, which looks exactly like stale data to whoever is
+    // looking at it.
+    if include_meta {
+        super::wide_columns::invalidate(&pool, &schema, &table);
+    }
+    let (mut wide_projection, wide) = super::wide_columns::page_projection(&pool, &schema, &table).await;
     let wide_names: Vec<String> = wide.iter().map(|w| w.name.clone()).collect();
     let mut data_sql = match &wide_projection {
         Some(list) => format!("SELECT {list} {data_tail}"),
@@ -1870,6 +1879,19 @@ pub async fn get_table_rows(
         Ok(rows) => rows,
         Err(err) => {
             let msg = err.to_string();
+            // A column the projection names is gone - dropped or renamed since it
+            // was built. Rebuild the page from `SELECT *` rather than showing an
+            // error where the table should be, and drop the cached decision so
+            // the next page builds a current one.
+            if wide_projection.is_some() && (msg.contains("does not exist") || msg.contains("42703")) {
+                super::wide_columns::invalidate(&pool, &schema, &table);
+                wide_projection = None;
+                data_sql = format!("SELECT * {data_tail}");
+                bind_page(&data_sql, &where_clause.binds, keyset_bind.as_ref(), limit, offset)
+                    .fetch_all(&pool)
+                    .await
+                    .map_err(|e| format!("Failed to fetch rows: {e}"))?
+            } else {
             if !is_missing_binary_output(&msg) {
                 return Err(format!("Failed to fetch rows: {msg}"));
             }
@@ -1883,6 +1905,7 @@ pub async fn get_table_rows(
                         .map_err(|e| format!("Failed to fetch rows: {e}"))?
                 }
                 None => return Err(format!("Failed to fetch rows: {msg}")),
+            }
             }
         }
     };

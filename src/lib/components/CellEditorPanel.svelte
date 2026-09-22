@@ -39,6 +39,7 @@
    */
   import Pencil from '@lucide/svelte/icons/pencil'
   import Copy from '@lucide/svelte/icons/copy'
+  import Download from '@lucide/svelte/icons/download'
   import Undo2 from '@lucide/svelte/icons/undo-2'
   import WrapText from '@lucide/svelte/icons/wrap-text'
   import X from '@lucide/svelte/icons/x'
@@ -486,6 +487,24 @@
         class="shrink-0 rounded-[3px] border border-warning/30 bg-warning/10 px-1.5 py-px font-mono text-ui-3xs text-warning"
         title="A wide column reports its size per row instead of its contents - the value is not loaded and cannot be edited until it is"
       >{formatBytes(oversize.bytes)} · not loaded</span>
+      {#if onloadfull}
+        <button
+          type="button"
+          disabled={loadingFull}
+          title="Load this value ({formatBytes(oversize.bytes)})"
+          aria-label="Load this value"
+          class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-primary/15 px-2 font-mono text-ui-3xs font-medium text-primary transition-colors hover:bg-primary/25 disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          onclick={() => void loadFull()}
+        >
+          {#if loadingFull}
+            <span class="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent"></span>
+            Loading
+          {:else}
+            <Download class="size-3 shrink-0" />
+            Load
+          {/if}
+        </button>
+      {/if}
     {/if}
     {#if dirty && !readOnly}
       <span class="shrink-0 text-ui-3xs text-primary">edited</span>

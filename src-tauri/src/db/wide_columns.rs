@@ -93,9 +93,14 @@ pub struct WideColumn {
 /// replaces.
 type CacheEntry = (Instant, Vec<WideColumn>, Option<String>);
 static WIDE_CACHE: OnceLock<std::sync::Mutex<HashMap<String, CacheEntry>>> = OnceLock::new();
-/// Stats move when ANALYZE runs, which is not something a browsing session has
-/// to see within the minute.
-const WIDE_CACHE_TTL: Duration = Duration::from_secs(300);
+/// How long the decision about a table survives.
+///
+/// Short on purpose. What is cached here is the SELECT LIST, not data - but a
+/// column list that is one minute out of date is a column the grid would not
+/// draw, and "the row I just added a column for is missing" is indistinguishable
+/// from stale data to the person looking at it. A minute costs one catalog round
+/// trip per table per minute and removes the question.
+const WIDE_CACHE_TTL: Duration = Duration::from_secs(60);
 
 fn cache_key(pool: &sqlx::PgPool, schema: &str, table: &str) -> String {
     let opts = pool.connect_options();
@@ -313,12 +318,31 @@ pub fn projection(all_columns: &[String], wide: &[WideColumn]) -> Option<String>
 
 /// Unwrap the `__strokeInline` envelope a stand-in column wraps small values in.
 /// Anything else - a real value, or the oversize sentinel - passes through.
+///
+/// One case needs care. The SQL branch is decided on `pg_column_size`, which is
+/// the COMPRESSED stored size, while the row cap downstream measures the JSON
+/// TEXT. A 550KB value that compresses to 120KB therefore takes the inline
+/// branch and is then capped anyway - and the sentinel that produces carries the
+/// envelope inside its preview, which is how `{"__strokeInline": {…` ended up
+/// rendered in a grid cell. Recognise that and hand back a clean sentinel.
 pub fn unwrap_inline(v: Value) -> Value {
     match v {
-        Value::Object(ref map) if map.len() == 1 => match map.get("__strokeInline") {
-            Some(inner) => inner.clone(),
-            None => v,
-        },
+        Value::Object(ref map) if map.len() == 1 && map.contains_key("__strokeInline") => {
+            map.get("__strokeInline").cloned().unwrap_or(Value::Null)
+        }
+        Value::Object(ref map)
+            if map.get("__strokeOversize") == Some(&Value::Bool(true))
+                && map
+                    .get("preview")
+                    .and_then(Value::as_str)
+                    .is_some_and(|p| p.trim_start().starts_with("{\"__strokeInline\"")) =>
+        {
+            let mut out = map.clone();
+            // The preview is of the envelope, not of the value: worse than
+            // nothing, because it reads as the value's first bytes.
+            out.remove("preview");
+            Value::Object(out)
+        }
         _ => v,
     }
 }
@@ -358,6 +382,23 @@ mod tests {
     fn a_quote_in_a_column_name_cannot_escape_the_identifier() {
         let sql = projection(&["we\"ird".into()], &[wide("we\"ird")]).expect("a projection");
         assert!(sql.contains("\"we\"\"ird\""));
+    }
+
+    #[test]
+    fn a_capped_envelope_becomes_a_clean_sentinel() {
+        // The compressed size took the inline branch; the text cap then wrapped
+        // the envelope. The preview would otherwise render as `{"__strokeInline"…`
+        // in a grid cell.
+        let capped = serde_json::json!({
+            "__strokeOversize": true,
+            "bytes": 563_712,
+            "dataType": "jsonb",
+            "preview": "{\"__strokeInline\": {\"size\": 123524",
+        });
+        let out = unwrap_inline(capped);
+        assert_eq!(out["__strokeOversize"], serde_json::json!(true));
+        assert_eq!(out["bytes"], serde_json::json!(563_712));
+        assert!(out.get("preview").is_none());
     }
 
     #[test]
