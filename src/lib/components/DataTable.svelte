@@ -818,9 +818,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let isTableFocused = $state(false);
 
   /** Draft values for the pending new row, keyed by column name. null = no new row. */
-  let newRowDrafts = $state(/** @type {Record<string, string> | null} */ (null))
+  /**
+   * Rows staged for insert, oldest first, rendered as a band under the header.
+   *
+   * A list rather than one row: duplicating twice means two new rows, and
+   * filling in three related records should not be three round trips through
+   * Add → type → Insert. `null` and `[]` both mean "no band".
+   * @type {Record<string, string>[] | null}
+   */
+  let newRowDrafts = $state(/** @type {Record<string, string>[] | null} */ (null))
   /** Name of the column whose input is focused in the new row. */
   let newRowFocusCol = $state(/** @type {string | null} */ (null))
+  /** Which staged row the focused field belongs to. */
+  let newRowFocusIdx = $state(0)
 
 
   // ── Canvas zoom ────────────────────────────────────────────────────────────
@@ -891,7 +901,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   })
 
   /** Extra body offset for the inline insert-row slot (a DOM overlay). */
-  const insertRowOffset = $derived(newRowDrafts ? ROW_HEIGHT : 0)
+  const draftCount = $derived(newRowDrafts?.length ?? 0)
+  const insertRowOffset = $derived(draftCount * ROW_HEIGHT)
   /** Measured heights for each expanded row (rowIdx → px). Updated by ResizeObserver. */
   let expandedRowHeights = $state(/** @type {Map<number, number>} */ (new Map()))
 
@@ -1791,11 +1802,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @returns {Record<string, unknown> | null}
    */
   function pendingInsertValues() {
-    if (!newRowDrafts) return null;
-    const hasAny = Object.values(newRowDrafts).some((v) => v !== "" && v != null);
+    const staged = newRowDrafts?.[0];
+    if (!staged) return null;
+    const hasAny = Object.values(staged).some((v) => v !== "" && v != null);
     if (!hasAny) return null;
     const editableCols = columns.filter((c) => isEditableType(c.dataType ?? c.data_type ?? ""));
-    const built = buildInsertPayload(editableCols, primaryKey, newRowDrafts);
+    const built = buildInsertPayload(editableCols, primaryKey, staged);
     return built.ok ? /** @type {Record<string, unknown>} */ (built.values) : null;
   }
 
@@ -2011,7 +2023,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Apply/Reset pair stayed hidden while a filled-in row sat under the header
   // with no way to commit it but a click on a 12px tick.
   $effect(() => {
-    pendingEditCount = pendingEdits.size + pendingDeletes.size + (newRowDrafts ? 1 : 0);
+    pendingEditCount = pendingEdits.size + pendingDeletes.size + draftCount;
   });
 
   // Surface scroll-to-top / scroll-to-bottom to the parent (→ StatusBar buttons).
@@ -2079,14 +2091,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * so the position is about where you are looking, not about the data.
    * @param {number | null} [anchorRow]
    */
-  function openInsertDraft(anchorRow = null) {
-    if (readonly) return
+  /** A row of drafts seeded the way opening the band seeds one. */
+  function blankDraft() {
     /** @type {Record<string, string>} */
     const drafts = {}
     for (const col of columns) {
       drafts[col.name] = defaultInsertDraft(col, primaryKey)
     }
-    newRowDrafts = drafts
+    return drafts
+  }
+
+  function openInsertDraft(anchorRow = null) {
+    if (readonly) return
+    // Add on an open band appends: pressing it three times is three rows, not
+    // the same row reset twice.
+    newRowDrafts = [...(newRowDrafts ?? []), blankDraft()]
+    newRowFocusIdx = newRowDrafts.length - 1
     // Focus first non-auto column (all columns, including hidden ones)
     const first = columns.find((c) => !isAutoColumn(c, primaryKey))
     newRowFocusCol = first?.name ?? columns[0]?.name ?? null
@@ -2133,36 +2153,85 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function cancelNewRow() {
     newRowDrafts = null
     newRowFocusCol = null
+    newRowFocusIdx = 0
   }
 
-  function submitNewRow() {
-    if (!newRowDrafts || insertSaving) return
+  /** Drop one staged row. The last one out closes the band. @param {number} i */
+  function removeDraftRow(i) {
+    if (!newRowDrafts) return
+    const next = newRowDrafts.filter((_, j) => j !== i)
+    newRowDrafts = next.length ? next : null
+    newRowFocusIdx = Math.max(0, Math.min(newRowFocusIdx, (newRowDrafts?.length ?? 1) - 1))
+  }
+
+  /**
+   * Insert the staged rows - one of them, or all of them.
+   *
+   * All of them is what the header tick and Apply mean. One confirm covers the
+   * batch: reviewing three inserts is one list of three statements, not three
+   * dialogs.
+   * @param {number | null} [only] index of a single staged row, or null for all
+   */
+  function submitNewRow(only = null) {
+    if (!newRowDrafts?.length || insertSaving) return
     const editableCols = columns.filter(c => isEditableType(c.dataType ?? c.data_type ?? ''))
-    const built = buildInsertPayload(editableCols, primaryKey, newRowDrafts)
-    if (!built.ok) {
-      toast.error('Cannot insert row', { description: built.message })
-      return
+    /** @type {{ i: number, values: Record<string, unknown> }[]} */
+    const batch = []
+    const indices = only === null ? newRowDrafts.map((_, i) => i) : [only]
+    for (const i of indices) {
+      const drafts = newRowDrafts[i]
+      if (!drafts) continue
+      const built = buildInsertPayload(editableCols, primaryKey, drafts)
+      if (!built.ok) {
+        toast.error(`Cannot insert row ${i + 1}`, { description: built.message })
+        return
+      }
+      batch.push({ i, values: /** @type {Record<string, unknown>} */ (built.values) })
     }
-    const values = /** @type {Record<string, unknown>} */ (built.values)
+    if (!batch.length) return
     requestWrite({
       kind: "insert",
-      title: "Review insert",
-      description: "A new row will be inserted.",
-      statements: buildInsertStatements(values, dmlContext),
-      confirmLabel: "Insert row",
+      title: batch.length === 1 ? "Review insert" : `Review ${batch.length} inserts`,
+      description: batch.length === 1 ? "A new row will be inserted." : `${batch.length} new rows will be inserted.`,
+      statements: batch.flatMap((b) => buildInsertStatements(b.values, dmlContext)),
+      confirmLabel: batch.length === 1 ? "Insert row" : `Insert ${batch.length} rows`,
       destructive: false,
-      run: () => executeInsertRow(values),
+      run: () => executeInsertRows(batch),
     })
   }
 
-  /** @param {Record<string, unknown>} values */
-  async function executeInsertRow(values) {
-    try {
-      await oninsertrow(values)
-      newRowDrafts = null
-      newRowFocusCol = null
-    } catch {
-      // error toast already shown by oninsertrow
+  /**
+   * Run the batch in order, and keep whatever did not land.
+   *
+   * A row that fails stays staged with everything still typed into it - losing
+   * four filled-in rows because the third one violated a constraint is not a
+   * trade worth making.
+   * @param {{ i: number, values: Record<string, unknown> }[]} batch
+   */
+  async function executeInsertRows(batch) {
+    /** @type {Set<number>} */
+    const done = new Set()
+    let failed = false
+    for (const { i, values } of batch) {
+      try {
+        await oninsertrow(values)
+        done.add(i)
+      } catch {
+        // oninsertrow has already said what went wrong.
+        failed = true
+        break
+      }
+    }
+    if (done.size) {
+      const left = (newRowDrafts ?? []).filter((_, i) => !done.has(i))
+      newRowDrafts = left.length ? left : null
+      if (!newRowDrafts) { newRowFocusCol = null; newRowFocusIdx = 0 }
+      else newRowFocusIdx = Math.min(newRowFocusIdx, newRowDrafts.length - 1)
+    }
+    if (failed && done.size) {
+      toast.info(`Inserted ${done.size} of ${batch.length}`, {
+        description: 'The rows that did not go in are still staged.',
+      })
     }
   }
 
@@ -2172,11 +2241,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * you about a missing value was an error from the database.
    */
   const insertMissing = $derived.by(() => {
-    if (!newRowDrafts) return /** @type {string[]} */ ([])
-    return columns
-      .filter((c) => insertOmitBehaviour(c, primaryKey) === 'required')
-      .filter((c) => !String(newRowDrafts?.[c.name] ?? '').trim())
-      .map((c) => c.name)
+    if (!newRowDrafts?.length) return /** @type {string[]} */ ([])
+    const required = columns.filter((c) => insertOmitBehaviour(c, primaryKey) === 'required')
+    /** @type {string[]} */
+    const out = []
+    for (const d of newRowDrafts) {
+      for (const c of required) {
+        if (!String(d?.[c.name] ?? '').trim() && !out.includes(c.name)) out.push(c.name)
+      }
+    }
+    return out
   })
 
   /**
@@ -2185,25 +2259,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * A fresh draft is not empty - date columns seed themselves with now, and a
    * generated column carries its placeholder - so "has content" means it differs
    * from what opening it would produce.
-   * @param {Record<string, string>} drafts
+   * @param {Record<string, string>[] | null} drafts
    */
   function draftHasContent(drafts) {
-    return columns.some((col) => {
-      const seeded = defaultInsertDraft(col, primaryKey)
-      return String(drafts[col.name] ?? '') !== String(seeded ?? '')
-    })
+    return (drafts ?? []).some((row) =>
+      columns.some((col) => {
+        const seeded = defaultInsertDraft(col, primaryKey)
+        return String(row?.[col.name] ?? '') !== String(seeded ?? '')
+      }),
+    )
   }
 
-  /** @param {string} colName @param {string} value */
-  function setNewRowDraft(colName, value) {
-    if (!newRowDrafts) return
-    newRowDrafts = { ...newRowDrafts, [colName]: value }
+  /** @param {number} rowIdx @param {string} colName @param {string} value */
+  function setNewRowDraft(rowIdx, colName, value) {
+    if (!newRowDrafts?.[rowIdx]) return
+    newRowDrafts = newRowDrafts.map((d, i) => (i === rowIdx ? { ...d, [colName]: value } : d))
   }
 
   /** @param {KeyboardEvent} e */
-  function onNewRowKeydown(e) {
-    if (e.key === 'Escape') { e.preventDefault(); cancelNewRow(); return }
+  /** @param {KeyboardEvent} e @param {number} [rowIdx] the staged row the field belongs to */
+  function onNewRowKeydown(e, rowIdx = 0) {
+    // Escape drops the row you are in; the band only closes when it was the
+    // last one. Discarding four filled-in rows because you pressed Escape in
+    // the fourth is not what that key means.
+    if (e.key === 'Escape') { e.preventDefault(); removeDraftRow(rowIdx); return }
+    // ⌘↵ inserts everything staged - the batch is the point of stacking them.
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void submitNewRow(); return }
+    // Alt+↵ adds another row below, for filling several in without reaching for
+    // the Add button between each one.
+    if (e.altKey && e.key === 'Enter') { e.preventDefault(); openInsertDraft(); return }
 
     // Tab / Enter: move right between cells (not down to the next row).
     // Shift+Tab moves left. Enter at the last cell submits.
@@ -2221,7 +2305,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       } else {
         const next = curIdx + 1
         if (next >= editableCols.length) {
-          if (e.key === 'Enter') void submitNewRow()
+          if (e.key === 'Enter') void submitNewRow(rowIdx)
           else newRowFocusCol = editableCols[0].name  // Tab wraps to first
         } else {
           newRowFocusCol = editableCols[next].name
@@ -2233,10 +2317,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // Auto-focus the new-row input when focus column changes.
   $effect(() => {
     const col = newRowFocusCol
-    if (!col || !newRowDrafts) return
+    const bandIdx = newRowFocusIdx
+    if (!col || !newRowDrafts?.length) return
     tick().then(() => {
+      // Scoped to the staged row that asked for focus. A global lookup by column
+      // name lands in the first band every time, so with three rows staged the
+      // caret jumped back to the top one on every move.
+      const band = document.querySelector(`[data-new-row="${bandIdx}"]`)
       const el = /** @type {HTMLElement|null} */ (
-        document.querySelector(`[data-new-row-input="${col}"]`)
+        band?.querySelector(`[data-new-row-input="${col}"]`) ?? null
       )
       el?.focus()
     })
@@ -2884,14 +2973,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
       drafts[col.name] = valueToEditString(v);
     });
-    newRowDrafts = drafts;
+    newRowDrafts = [...(newRowDrafts ?? []), drafts];
+    newRowFocusIdx = newRowDrafts.length - 1;
     const firstEditable = columns.find((c) => !isAutoColumn(c, primaryKey));
     newRowFocusCol = firstEditable?.name ?? columns[0]?.name ?? null;
     tableContainer?.scrollTo({ top: 0, behavior: "smooth" });
-    toast.info("Copied into a new row", {
-      description: "Nothing is written until you submit it.",
-      duration: 2600,
-    });
+    toast.info(
+      newRowDrafts.length === 1 ? "Copied into a new row" : `${newRowDrafts.length} rows staged`,
+      { description: "Nothing is written until you submit them.", duration: 2600 },
+    );
   }
 
   /** @param {number} rowIdx @param {number} colIdx @param {'down'|'right'|'left'} action @param {boolean} [autoEdit] */
@@ -4095,7 +4185,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Per-tab expand/sub-view state preservation ───────────────────────────────
   // Expand rows and FK sub-view are saved per columnWidthsKey so switching tabs
   // restores exactly what the user had open in each table.
-  /** @type {Map<string, { expandedRows: Set<number>, fkSubview: typeof fkSubview, newRowDrafts: Record<string, string> | null, newRowFocusCol: string | null }>} */
+  /** @type {Map<string, { expandedRows: Set<number>, fkSubview: typeof fkSubview, newRowDrafts: Record<string, string>[] | null, newRowFocusCol: string | null }>} */
   const _tabExpandCache = new Map()
   // Cap the per-tab cache: each entry can retain a whole FK sub-view's fetched
   // rows, so an unbounded map would accumulate row data for every table visited
@@ -4123,8 +4213,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           // tab switch with one open shifted the rows under it - a layout change
           // for something nobody had typed into yet. A draft with anything in it
           // is work, and work is kept.
-          newRowDrafts: newRowDrafts && draftHasContent(newRowDrafts) ? { ...newRowDrafts } : null,
-          newRowFocusCol: newRowDrafts && draftHasContent(newRowDrafts) ? newRowFocusCol : null,
+          newRowDrafts: draftHasContent(newRowDrafts) ? newRowDrafts?.map((d) => ({ ...d })) ?? null : null,
+          newRowFocusCol: draftHasContent(newRowDrafts) ? newRowFocusCol : null,
         })
         // Evict least-recently-used entries (oldest insertion order) over the cap.
         while (_tabExpandCache.size > TAB_EXPAND_CACHE_MAX) {
@@ -4140,8 +4230,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const saved = _tabExpandCache.get(newKey)
       expandedRows = saved ? new Set(saved.expandedRows) : new Set()
       fkSubview = saved?.fkSubview ?? null
-      newRowDrafts = saved?.newRowDrafts ? { ...saved.newRowDrafts } : null
+      newRowDrafts = saved?.newRowDrafts?.length ? saved.newRowDrafts.map((d) => ({ ...d })) : null
       newRowFocusCol = saved?.newRowFocusCol ?? null
+      newRowFocusIdx = 0
       const restored = loadPendingChanges(newKey)
       pendingEdits = restored.edits
       pendingDeletes = restored.deletes
@@ -6185,10 +6276,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       ctx.strokeStyle = c.cGrid; ctx.lineWidth = 1
       ctx.beginPath(); ctx.moveTo(x + cw - 0.5, 0); ctx.lineTo(x + cw - 0.5, HEADER_H); ctx.stroke()
       if (!_fonts) continue
-      // Left-aligned, on the same x as the cell text below it. It was centred to
-      // sit over centred chips; with the chips gone, centring it would leave the
-      // header floating half a column right of its own values.
-      const hdrTextX = Math.round(10 * canvasZoom) + Math.round(12 * canvasZoom) + Math.round(7 * canvasZoom)
+      // `CELL_PAD_X`, the same left edge every other column header starts at.
+      // It used to be indented to the cell TEXT below it - past the link glyph -
+      // which lined it up with its own values and out of line with every header
+      // beside it. Headers read across the row; that edge wins.
+      const hdrTextX = CELL_PAD_X
       ctx.font = _fonts.header; ctx.fillStyle = withAlpha(c.cMuted, 0.6)
       ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
       ctx.fillText(truncText(ctx, vc.label, cw - hdrTextX - 12), x + hdrTextX, HEADER_H / 2 + 0.5)
@@ -6796,7 +6888,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // Check virtual relationship column clicks (right of real columns)
     const relHit = vrelHitAt(x, y)
     if (relHit) {
-      if (relHit.rowIdx >= 0) toggleReverseFkSubview(relHit.rowIdx, relHit.vc)
+      if (relHit.rowIdx >= 0) {
+        // Modifier click follows the relation, the way it does on a foreign key:
+        // ⌘/Ctrl opens the related rows as a view, ⇧ puts them in a new tab.
+        // Plain click keeps the dock preview.
+        if (e.metaKey || e.ctrlKey || e.shiftKey) {
+          openReverseFkFullView(relHit.rowIdx, relHit.vc, {
+            newTab: e.shiftKey && !(e.metaKey || e.ctrlKey),
+          })
+        } else {
+          toggleReverseFkSubview(relHit.rowIdx, relHit.vc)
+        }
+      }
       return
     }
 
@@ -7303,29 +7406,56 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                    frame, which lagged the native scroll and produced the vertical
                    jitter + ghost row. No `left` inset, so it still scrolls
                    horizontally in lock-step with the columns via native scroll. -->
-              {#if newRowDrafts}
+              {#each newRowDrafts ?? [] as rowDraft, di (di)}
                 <!-- `cell-fields`: the app-wide rule (app.css) that makes a field
                      inside a grid cell flush - no border, no radius, no background
                      of its own. Without it every draft input drew the 2px border at
                      the 12px field radius the unlayered bare-input rule gives any
                      input, so a row of 28px cells came out as a row of pills inside
                      a row that already has its own rules and its own insert ring.
-                     The same fix the cell editor and the structure grid carry. -->
+                     The same fix the cell editor and the structure grid carry.
+                     -
+                     One band per staged row, stacked under the header in the order
+                     they were added. `top` walks down by a row height each time,
+                     and `z-index` descends so an earlier row's ring is never drawn
+                     over by the one below it. -->
                 <div
                   role="none"
-                  class="cell-fields sticky z-20 flex border-b border-border/30 bg-panel ring-1 ring-inset ring-success/25"
-                  style="top:{HEADER_H}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px"
-                  onkeydown={onNewRowKeydown}
+                  data-new-row={di}
+                  class={cn(
+                    // One ring per row drew a line between every pair of staged
+                    // rows on top of the border that was already there, which is
+                    // the doubled edge. The stack reads as a band instead: a faint
+                    // tint throughout, ordinary row rules between, and one firm
+                    // edge where it meets the data.
+                    // The pickers carry their own type scale, so the size is
+                    // pushed onto everything the band renders - a staged row has
+                    // to line up with the rows under it, and those are drawn at
+                    // the grid's own font size, not at a rung of the UI scale.
+                    'cell-fields sticky flex bg-panel [&_button]:text-[length:inherit] [&_input]:text-[length:inherit] [&_span]:text-[length:inherit]',
+                    di === draftCount - 1
+                      ? 'border-b-2 border-success/35'
+                      : 'border-b border-border/30',
+                  )}
+                  style="top:{HEADER_H + di * ROW_HEIGHT}px; height:{ROW_HEIGHT}px; width:{insertRowTotalWidth}px; z-index:{20 - Math.min(di, 9)}; font-size:{gridMetrics.cellPx}px"
+                  onkeydown={(e) => onNewRowKeydown(e, di)}
                 >
                   {#if showRowExpand}
                     <div class="flex shrink-0 items-center justify-center border-r border-border/20 bg-primary/5" style="width:{GUTTER_EXPAND_W}px">
                       {#if insertSaving}
                         <Loader class="size-3 animate-spin text-muted-foreground" />
                       {:else}
+                        <!-- The tick on the FIRST row inserts every staged row;
+                             on the rest it inserts just that one. One click for
+                             the batch is what you want after filling several in,
+                             and the row you are looking at is what you want when
+                             only one of them is ready. -->
                         <Check
                           class="size-3 cursor-pointer text-primary hover:text-primary"
-                          onclick={() => void submitNewRow()}
-                          title="Insert row (⌘↵)"
+                          onclick={() => void submitNewRow(di === 0 ? null : di)}
+                          title={di === 0 && draftCount > 1
+                            ? `Insert all ${draftCount} rows (⌘↵)`
+                            : 'Insert this row (⌘↵)'}
                         />
                       {/if}
                     </div>
@@ -7335,8 +7465,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                       <button
                         type="button"
                         class="inline-flex size-4 items-center justify-center rounded text-muted-foreground hover:text-destructive"
-                        onclick={cancelNewRow}
-                        title="Cancel"
+                        onclick={() => removeDraftRow(di)}
+                        title={draftCount > 1 ? 'Discard this row' : 'Cancel'}
                       >
                         <X class="size-3" />
                       </button>
@@ -7360,7 +7490,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                     {@const isDateOnly = isDateOnlyType(dt)}
                     {@const isTimeOnly = isTimeOnlyType(dt)}
                     {@const colWidth = widthForColumn(col.name, dt)}
-                    <div class="flex shrink-0 items-center overflow-hidden border-r border-border/20 px-2" style="width:{colWidth}px">
+                    <div class="flex shrink-0 items-center overflow-hidden border-r border-border/35 bg-success/[0.03] px-2" style="width:{colWidth}px">
                       {#if isAuto}
                         <!-- Writable, with the generated value as the placeholder.
                              Leaving it blank is the normal path and the label says
@@ -7378,62 +7508,62 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                             ? 'auto-increment'
                             : 'generated'}
                           title="The database fills this in. Type a value only to override it."
-                          class="w-full min-w-0 bg-transparent font-mono text-ui-sm text-foreground outline-none placeholder:italic placeholder:text-muted-foreground disabled:opacity-50"
-                          value={newRowDrafts[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                          onfocus={() => (newRowFocusCol = col.name)}
+                          class="w-full min-w-0 bg-transparent font-mono text-[length:inherit] text-foreground outline-none placeholder:italic placeholder:text-muted-foreground disabled:opacity-50"
+                          value={rowDraft[col.name] ?? ''}
+                          oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
+                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
                         />
                       {:else if enumValues}
                         <InsertValuePicker
                           colName={col.name}
                           options={enumValues}
-                          value={newRowDrafts[col.name] ?? ''}
+                          value={rowDraft[col.name] ?? ''}
                           emptyLabel={blankLabel}
                           placeholder={blankLabel}
                           placeholderClass={blankClass}
                           disabled={insertSaving}
-                          onchange={(v) => setNewRowDraft(col.name, v)}
-                          onfocus={() => (newRowFocusCol = col.name)}
+                          onchange={(v) => setNewRowDraft(di, col.name, v)}
+                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
                         />
                       {:else if isBoolean}
                         <InsertValuePicker
                           colName={col.name}
                           options={['true', 'false']}
-                          value={newRowDrafts[col.name] ?? ''}
+                          value={rowDraft[col.name] ?? ''}
                           emptyLabel={blankLabel}
                           placeholder={blankLabel}
                           placeholderClass={blankClass}
                           disabled={insertSaving}
-                          onchange={(v) => setNewRowDraft(col.name, v)}
-                          onfocus={() => (newRowFocusCol = col.name)}
+                          onchange={(v) => setNewRowDraft(di, col.name, v)}
+                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
                         />
                       {:else if isDateTime}
                         <DateTimePicker
                           colName={col.name}
                           showTime={true}
                           disabled={insertSaving}
-                          value={newRowDrafts[col.name] ?? ''}
-                          onchange={(v) => setNewRowDraft(col.name, v)}
-                          onfocus={() => (newRowFocusCol = col.name)}
+                          value={rowDraft[col.name] ?? ''}
+                          onchange={(v) => setNewRowDraft(di, col.name, v)}
+                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
                         />
                       {:else if isDateOnly}
                         <DateTimePicker
                           colName={col.name}
                           showTime={false}
                           disabled={insertSaving}
-                          value={newRowDrafts[col.name] ?? ''}
-                          onchange={(v) => setNewRowDraft(col.name, v)}
-                          onfocus={() => (newRowFocusCol = col.name)}
+                          value={rowDraft[col.name] ?? ''}
+                          onchange={(v) => setNewRowDraft(di, col.name, v)}
+                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
                         />
                       {:else if isTimeOnly}
                         <input
                           data-new-row-input={col.name}
                           type="time"
                           disabled={insertSaving}
-                          class="w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50"
-                          value={newRowDrafts[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                          onfocus={() => (newRowFocusCol = col.name)}
+                          class="w-full bg-transparent font-mono text-[length:inherit] text-foreground outline-none disabled:opacity-50"
+                          value={rowDraft[col.name] ?? ''}
+                          oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
+                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
                         />
                       {:else}
                         <input
@@ -7442,18 +7572,18 @@ import FilterX from "@lucide/svelte/icons/filter-x";
                           disabled={insertSaving}
                           placeholder={blankLabel}
                           class={cn(
-                            "w-full bg-transparent font-mono text-ui-sm text-foreground outline-none disabled:opacity-50",
+                            "w-full bg-transparent font-mono text-[length:inherit] text-foreground outline-none disabled:opacity-50",
                             blankClass,
                           )}
-                          value={newRowDrafts[col.name] ?? ''}
-                          oninput={(e) => setNewRowDraft(col.name, e.currentTarget.value)}
-                          onfocus={() => (newRowFocusCol = col.name)}
+                          value={rowDraft[col.name] ?? ''}
+                          oninput={(e) => setNewRowDraft(di, col.name, e.currentTarget.value)}
+                          onfocus={() => { newRowFocusCol = col.name; newRowFocusIdx = di }}
                         />
                       {/if}
                     </div>
                   {/each}
                 </div>
-              {/if}
+              {/each}
 
               <!-- JSON expand panels (independent from FK sub-view).
                    Same pin pattern as the FK sub-view: outer absolute for vertical
