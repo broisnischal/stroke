@@ -28,6 +28,8 @@
    * @property {string} [sourceHint] Small context hint, e.g. "row 12".
    * @property {boolean} [readOnly]
    * @property {boolean} [detached] Showing a value with no cell behind it.
+   * @property {boolean} [truncatedLoad] The value was loaded, but the server
+   *   stopped at its ceiling - the text on screen is not all of it.
    * @property {() => Promise<void>} [onloadfull] Fetch the whole value for a
    *   capped cell. The parent replaces `value` with it, which is what clears
    *   `oversize` and turns the preview back into an ordinary value.
@@ -64,6 +66,7 @@
     oversize = null,
     /** @type {null | (() => Promise<void>)} */
     onloadfull = null,
+    truncatedLoad = false,
     oncommit = /** @type {(next: string) => void} */ (() => {}),
   } = $props()
 
@@ -140,6 +143,25 @@
   const isNull = $derived(value === null || value === undefined)
 
   /** Structured values get a tree pane; plain text does not need one. */
+  /**
+   * Past this, nothing runs over the whole value on its own.
+   *
+   * A jsonb holding a file as an array of byte integers comes back as tens of
+   * megabytes of text. `JSON.parse` on 18MB is a few hundred milliseconds, and
+   * a derived re-runs it on every keystroke; the search splits the same string
+   * into highlight runs; a `<textarea>` with 18MB in it has to lay all of it
+   * out. Each of those is fine at 100KB and none of them is fine at 18MB, so
+   * above the line the tree is built when asked for, the highlight layer stands
+   * down, and the raw pane is opt-in.
+   */
+  const HEAVY_VALUE_CHARS = 2 * 1024 * 1024
+
+  const heavy = $derived(draft.length > HEAVY_VALUE_CHARS)
+  /** Set by "Render it anyway" - one parse, on demand, for a heavy value. */
+  let forceParse = $state(false)
+  // A new cell is a new decision.
+  $effect(() => { void colName; void sourceHint; forceParse = false })
+
   const parsed = $derived.by(() => {
     const t = draft.trim()
     if (!t || (t[0] !== '{' && t[0] !== '[')) return null
@@ -148,13 +170,31 @@
     // "invalid JSON" sent people looking for a corrupt row that does not exist.
     // Name what actually happened instead.
     if (oversize) {
-      const loaded = new Blob([draft]).size
+      // `draft.length` rather than a Blob: this runs on every keystroke, and
+      // allocating a Blob to measure a string is the expensive way to ask.
+      const loaded = draft.length
       return {
         ok: false,
         truncated: true,
         error: loaded
           ? `Showing the first ${formatBytes(loaded)} of ${formatBytes(oversize.bytes)}. The page fetched a preview of this column instead of the value - that is what keeps a table of half-megabyte cells openable at all.`
           : `This cell holds ${formatBytes(oversize.bytes)}. The page fetched its size, not its contents: reading a column like this for every row on screen is what makes a table take ten seconds to open. It is one click away.`,
+      }
+    }
+    // Loaded, but the server stopped at the ceiling: the text really is cut, so
+    // parsing it can only fail. Say which it is.
+    if (truncatedLoad) {
+      return {
+        ok: false,
+        truncated: true,
+        error: `Loaded ${formatBytes(draft.length)}, which is as much of this value as this view holds. The rest is not shown, so it cannot be parsed or edited here - read it with a query if you need all of it.`,
+      }
+    }
+    if (heavy && !forceParse) {
+      return {
+        ok: false,
+        heavy: true,
+        error: `${formatBytes(draft.length)} of JSON. Building a tree from it means parsing the whole thing, which takes long enough to be felt - so it waits until you ask.`,
       }
     }
     try { return { ok: true, value: JSON.parse(t) } } catch (e) { return { ok: false, error: String(e) } }
@@ -180,6 +220,9 @@
     return `${(n / 1024 / 1024).toFixed(1)} MB`
   }
   const isTreeable = $derived(!!parsed?.ok)
+  // A heavy value has no tree until it is asked for, so the raw text is the
+  // thing to show - and the pane it lives in is the one that was hidden.
+  $effect(() => { if (heavy && !forceParse) rawOpen = true })
 
   /**
    * Whether the raw text sits beside the tree.
@@ -224,7 +267,9 @@
   const treeSearch = $derived(
     isTreeable && query ? searchJson(parsed?.value, query) : null,
   )
-  const rawHits = $derived(query ? matchOffsets(draft, query) : [])
+  // Searching a value this size means walking it per keystroke, twice (offsets,
+  // then highlight runs). The find box still works on everything under the line.
+  const rawHits = $derived(query && !heavy ? matchOffsets(draft, query) : [])
   /** @type {HTMLElement | null} */
   let hlEl = $state(null)
   /**
@@ -234,7 +279,7 @@
    * for the overwhelmingly common case of no query.
    */
   const rawRuns = $derived.by(() => {
-    if (!query || !rawHits.length) return null
+    if (!query || heavy || !rawHits.length) return null
     let n = -1
     return splitHighlight(draft, query).map((run) => ({
       t: run.t,
@@ -297,7 +342,14 @@
     hit = 0
   }
 
-  const lines = $derived(draft ? draft.split('\n').length : 0)
+  // `split` allocates an array the size of the line count; on a one-line 18MB
+  // value that is cheap, on a large multi-line one it is not, and the number is
+  // chrome either way.
+  const lines = $derived.by(() => {
+    if (!draft) return 0
+    if (heavy) return 0
+    return draft.split('\n').length
+  })
   const chars = $derived(draft.length)
 
   /**
@@ -314,6 +366,11 @@
    * to bring it back.
    */
   let wrap = $state(true)
+  // Wrapping is what a multi-megabyte value cannot afford: one 18MB line laid
+  // out across the pane's width is the most expensive thing this panel can be
+  // asked to do. It comes back the moment the value is small again, and the
+  // toggle still works if you want it.
+  $effect(() => { if (heavy) wrap = false })
 
   /** One entry per logical line. Values are a cell, not a file - no windowing. */
   const lineNumbers = $derived(Array.from({ length: Math.max(1, lines) }, (_, i) => i + 1))
@@ -738,6 +795,18 @@
             />
           {:else}
             <p class={cn('whitespace-pre-wrap font-mono text-ui-3xs leading-relaxed', parsed.truncated ? 'text-muted-foreground' : 'text-destructive/90')}>{parsed.error}</p>
+            {#if parsed.heavy}
+              <button
+                type="button"
+                class="mt-2.5 inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 font-mono text-ui-3xs font-medium text-primary-foreground transition-[opacity,transform] hover:opacity-90 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                onclick={() => (forceParse = true)}
+              >
+                Render it anyway
+              </button>
+              <p class="mt-1.5 font-mono text-ui-3xs text-muted-foreground/70">
+                The raw text is already here, and Find works on it under 2 MB.
+              </p>
+            {/if}
             {#if parsed.truncated && onloadfull}
               <button
                 type="button"

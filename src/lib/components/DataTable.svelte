@@ -2544,6 +2544,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** Set when the dock holds a 16KB preview of a capped cell, not the value. */
   let cellEditorOversize = $state(/** @type {{ bytes: number, dataType: string } | null} */ (null));
+  /** The loaded value hit the fetch ceiling: what is in the dock is not all of it. */
+  let cellEditorTruncated = $state(false);
   /**
    * True when the dock is showing a value that has no cell behind it - a node
    * picked out of an expanded row, say. It cannot follow the cursor (there is
@@ -2574,6 +2576,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    */
   function openValueInDock(value, label) {
     cellEditorOversize = null;
+    cellEditorTruncated = false;
     cellEditorRow = -1;
     cellEditorCol = -1;
     cellEditorName = label || 'value';
@@ -2606,6 +2609,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // out of reach. Staging the preview would write 16KB over the 287KB that is
     // actually in the row.
     cellEditorOversize = oversize ? { bytes: oversize.bytes, dataType: oversize.dataType } : null;
+    cellEditorTruncated = false;
     return true;
   }
 
@@ -2643,11 +2647,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const res = await onfetchcellvalue({ rowIdx: cellEditorRow, colIdx: cellEditorCol })
     cellEditorValue = res.text
     cellEditorOversize = null
-    if (res.truncated) {
-      toast.info('Loaded as much as fits', {
-        description: `${cellEditorName} is larger than this view can hold - the tail is not shown.`,
-      })
-    }
+    cellEditorTruncated = res.truncated === true
   }
 
   /** Stage the edited value - same queue, undo and Apply as an inline edit. */
@@ -8306,6 +8306,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       detached={cellEditorDetached}
       readOnly={readonly || cellEditorDetached || !!cellEditorOversize || !canEditColumn(cellEditorCol)}
       oversize={cellEditorOversize}
+      truncatedLoad={cellEditorTruncated}
       onloadfull={onfetchcellvalue && cellEditorRow >= 0 ? loadFullCellValue : null}
 
       oncommit={commitCellEditor}

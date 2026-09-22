@@ -3706,9 +3706,15 @@ pub struct CellValueResult {
 
 /// Hard ceiling on a single fetched value, whatever the caller asks for. Past
 /// this, a webview is not the right place to read it.
-const CELL_FETCH_HARD_MAX: i64 = 16 * 1024 * 1024;
+const CELL_FETCH_HARD_MAX: i64 = 64 * 1024 * 1024;
 /// What the dock asks for when it does not say.
-const CELL_FETCH_DEFAULT_MAX: i64 = 4 * 1024 * 1024;
+///
+/// Generous on purpose. The stored size is not the size of the text: a jsonb
+/// holding a file as an array of byte integers is about 2.2x larger as text than
+/// on disk, so a row that `pg_column_size` calls 8.4MB arrives as 18.1MB of
+/// JSON. A 4MB default cut that at exactly 4,194,304 characters and the pane
+/// reported the result as invalid JSON, which is true and useless.
+const CELL_FETCH_DEFAULT_MAX: i64 = 32 * 1024 * 1024;
 
 pub async fn fetch_cell_value(
     state: State<'_, DbState>,
@@ -3791,14 +3797,16 @@ pub async fn fetch_cell_value(
         validate_ident(pk_col)?;
         where_parts.push(format!(r#""{pk_col}" = ${}"#, i + 2));
     }
-    // One extra character is read so a value sitting exactly on the ceiling can
-    // be told apart from one that was cut.
+    // `octet_length(col::text)`, not `pg_column_size`: the caller is about to
+    // render text, and the compressed on-disk size of a jsonb says little about
+    // how long that text is. Truncation is decided here too, in the same units
+    // `left` cuts in, rather than inferred from the string that comes back.
     let sql = format!(
-        r#"SELECT pg_column_size("{column}")::bigint, left("{column}"::text, $1) FROM "{schema}"."{table}" WHERE {} LIMIT 1"#,
+        r#"SELECT octet_length("{column}"::text)::bigint, left("{column}"::text, $1), length("{column}"::text) > $1 FROM "{schema}"."{table}" WHERE {} LIMIT 1"#,
         where_parts.join(" AND ")
     );
 
-    let mut q = sqlx::query(&sql).bind((ceiling + 1) as i32);
+    let mut q = sqlx::query(&sql).bind(ceiling as i32);
     for pk_col in &pk_columns {
         let pk_val = primary_key
             .get(pk_col)
@@ -3816,11 +3824,8 @@ pub async fn fetch_cell_value(
         .ok_or_else(|| "That row is no longer in the table".to_string())?;
 
     let bytes: i64 = row.try_get(0).unwrap_or(0);
-    let mut text: String = row.try_get::<Option<String>, _>(1).ok().flatten().unwrap_or_default();
-    let truncated = (text.len() as i64) > ceiling;
-    if truncated {
-        text.truncate(ceiling as usize);
-    }
+    let text: String = row.try_get::<Option<String>, _>(1).ok().flatten().unwrap_or_default();
+    let truncated: bool = row.try_get::<Option<bool>, _>(2).ok().flatten().unwrap_or(false);
 
     Ok(CellValueResult { text, bytes, truncated })
 }
