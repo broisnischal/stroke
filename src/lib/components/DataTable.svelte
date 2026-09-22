@@ -4510,6 +4510,31 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (editingCell) return;
     if (newRowDrafts) return;
 
+    // The cell menu's two quick filters, as chords. Alt+F sits beside
+    // Alt+Shift+F, which opens the filter menu: same family, one step shorter,
+    // and Alt+E is the other half of the pair. Handled before the switch so a
+    // plain `f` or `e` still reaches type-to-edit.
+    if (!editingCell && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "f" || e.key === "F" || e.key === "e" || e.key === "E")) {
+      if (focusedRow !== null && focusedCol !== null) {
+        const ai = visToActualColIdx(focusedCol);
+        const col = columns[ai];
+        if (ai >= 0 && col) {
+          e.preventDefault();
+          onfilterbyvalue(col.name, rows[focusedRow]?.[ai], e.key === "e" || e.key === "E");
+          return;
+        }
+      }
+    }
+
+    // Mod+D duplicates the focused row - the same staged insert the menu makes.
+    if (!editingCell && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "d" || e.key === "D")) {
+      if (!readonly && focusedRow !== null) {
+        e.preventDefault();
+        void duplicateRow(focusedRow);
+        return;
+      }
+    }
+
     // Mod+E toggles the focused row's detail panel - the same thing the gutter
     // chevron and the context menu's Expand do, for a hand already on the
     // keyboard. Below the `editingCell` guard on purpose: inside the inline
@@ -8051,12 +8076,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
               >
                 <ListFilter />
                 {menuCellNull ? 'Is NULL' : 'By this value'}
+                <ContextMenu.Shortcut combo="Alt+F" />
               </ContextMenu.Item>
               <ContextMenu.Item
                 onSelect={() => runMenuAction(() => onfilterbyvalue(menuColName, rows[contextRowIdx]?.[contextColIdx], true))}
               >
                 <FilterX />
                 {menuCellNull ? 'Is not NULL' : 'Exclude this value'}
+                <ContextMenu.Shortcut combo="Alt+E" />
               </ContextMenu.Item>
               {#if quickFilter}
                 {#each quickFilter.groups as group, gi (gi)}
@@ -8168,6 +8195,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         >
           <CopyPlus />
           Duplicate row
+          <ContextMenu.Shortcut combo="Mod+D" />
         </ContextMenu.Item>
         <ContextMenu.Separator />
         {#if pendingDeletes.has(contextRowIdx)}
