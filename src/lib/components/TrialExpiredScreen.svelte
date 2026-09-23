@@ -3,6 +3,7 @@
   // expired and no valid license is present - there is no dismiss path, the
   // only way through is activating a license.
   import { onMount } from 'svelte'
+  import { revealApp } from '$lib/app-reveal.js'
   import Logo from './Logo.svelte'
   import Icon from './Icon.svelte'
   import LicenseActivation from './LicenseActivation.svelte'
@@ -18,6 +19,7 @@
   let isTauri = $state(false)
   onMount(() => {
     isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+    revealApp()
   })
 
   /** @param {MouseEvent} e */

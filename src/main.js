@@ -2,6 +2,7 @@ import { mount } from 'svelte'
 import './app.css'
 import App from './App.svelte'
 import { applySettings, installZoomShortcuts, loadSettings, resetWebviewZoom } from '$lib/stores/settings.js'
+import { armRevealFailsafe } from '$lib/app-reveal.js'
 
 // Clear all local storage when VITE_FRESH_START=1 (used by `npm run tauri:fresh`)
 if (import.meta.env.VITE_FRESH_START === '1') {
@@ -19,6 +20,7 @@ if (import.meta.env.VITE_FRESH_START === '1') {
 applySettings(loadSettings())
 installZoomShortcuts()
 resetWebviewZoom()
+armRevealFailsafe()
 
 // ── Zoom watchdog ────────────────────────────────────────────────────────────
 // Final safety net against any stray webview zoom that slips past the event

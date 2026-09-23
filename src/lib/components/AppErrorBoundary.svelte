@@ -4,6 +4,7 @@
   import Bug from '@lucide/svelte/icons/bug'
   // Static: StudioShell already imports it, so it is in the main chunk either way.
   import ReportIssueDialog from './ReportIssueDialog.svelte'
+  import { revealApp } from '$lib/app-reveal.js'
 
   let { children } = $props()
 
@@ -25,7 +26,7 @@
   }
 </script>
 
-<svelte:boundary onerror={(e) => { try { console.error('[app-boundary]', e) } catch { /* noop */ } }}>
+<svelte:boundary onerror={(e) => { try { console.error('[app-boundary]', e) } catch { /* noop */ } revealApp() }}>
   {@render children()}
 
   {#snippet failed(error, reset)}

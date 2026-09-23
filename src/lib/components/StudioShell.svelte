@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy, untrack, tick } from 'svelte'
   import { fade } from 'svelte/transition'
+  import { revealApp } from '$lib/app-reveal.js'
   import { setReadOnly } from '$lib/stores/read-only.js'
   import { isWriteSql } from '$lib/sql-write.js'
   import Logo from './Logo.svelte'
@@ -6097,6 +6098,11 @@ let rowSearch = $state('')
     } catch {
       // Non-critical - don't block app start if Tauri backend unavailable (browser dev)
     }
+
+    // Everything below decides the first screen synchronously (onboarding, the
+    // connection modal, the welcome screen, or the reconnect overlay), so the
+    // fade-in lands on that screen rather than on a frame of the one before it.
+    revealApp()
 
     // First-time user - show onboarding instead of bare connection modal
     try {
