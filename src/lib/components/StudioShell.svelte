@@ -8531,53 +8531,6 @@ let rowSearch = $state('')
               <Logo class="size-6" />
             </div>
             <p class="text-ui-3xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Quick access</p>
-            {#if connection}
-              <div class="flex w-full min-w-0 flex-col gap-1.5">
-                <span class="flex min-w-0 items-center gap-2 font-mono text-ui-sm font-medium text-foreground">
-                  <span class="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true"></span>
-                  <span class="truncate">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}</span>
-                </span>
-                <!-- The facts a fresh tab actually needs before it runs anything:
-                     which engine, which schema the next query resolves against,
-                     and where the server is. The schema was the one missing, and
-                     it is the one that silently changes what an unqualified table
-                     name means. `dl` because these are label/value pairs; the
-                     labels stay visible rather than living in a tooltip. -->
-                <dl class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 font-mono text-ui-2xs text-muted-foreground">
-                  <div class="flex min-w-0 items-center gap-1.5">
-                    <dt class="shrink-0 text-muted-foreground/60">engine</dt>
-                    <dd class="truncate capitalize text-foreground/80">{dbType}</dd>
-                  </div>
-                  {#if schemas.length > 0 && activeSchema}
-                    <div class="flex min-w-0 items-center gap-1.5">
-                      <dt class="shrink-0 text-muted-foreground/60">schema</dt>
-                      <dd class="truncate text-foreground/80">{activeSchema}</dd>
-                    </div>
-                  {/if}
-                  <div class="flex min-w-0 items-center gap-1.5">
-                    <dt class="shrink-0 text-muted-foreground/60">tables</dt>
-                    <dd class="tabular-nums text-foreground/80">{tables.length.toLocaleString('en-US')}</dd>
-                  </div>
-                  {#if connection.host}
-                    <div class="flex min-w-0 items-center gap-1.5">
-                      <dt class="shrink-0 text-muted-foreground/60">host</dt>
-                      <dd class="truncate text-foreground/80">{connection.host}{connection.port ? `:${connection.port}` : ''}</dd>
-                    </div>
-                  {:else if connection.filePath}
-                    <div class="flex min-w-0 items-center gap-1.5">
-                      <dt class="shrink-0 text-muted-foreground/60">file</dt>
-                      <dd class="truncate text-foreground/80" title={connection.filePath}>{connection.filePath}</dd>
-                    </div>
-                  {/if}
-                  {#if connection.user}
-                    <div class="flex min-w-0 items-center gap-1.5">
-                      <dt class="shrink-0 text-muted-foreground/60">user</dt>
-                      <dd class="truncate text-foreground/80">{connection.user}</dd>
-                    </div>
-                  {/if}
-                </dl>
-              </div>
-            {/if}
           </div>
           <!-- Five tiles, not sixteen. Sixteen equal-weight tiles asked you to read
                the whole grid to find the one you wanted; these five are what a tab
