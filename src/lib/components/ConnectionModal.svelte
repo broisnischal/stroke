@@ -528,36 +528,25 @@
   /**
    * A connection string in the clipboard is where this dialog usually starts -
    * copied out of a provider dashboard, a .env, or a teammate's message - and
-   * the first thing anyone does here is paste it. So the dialog pastes it.
+   * the first thing anyone does here is paste it. So clicking into the paste
+   * bar pastes it.
    *
-   * Strictly: only a string that parses as a connection URI, only into an empty
-   * bar, and nothing is applied until Continue is pressed. It saves the paste,
+   * Strictly: only on a click into the bar (never on open or window focus - on
+   * macOS every clipboard read can raise the system paste prompt), only a string
+   * that parses as a connection URI, only into an empty bar, and nothing is
+   * applied until Continue is pressed. It saves the paste,
    * not the decision. A `.env` line is unwrapped (`DATABASE_URL="postgres://…"`)
    * because that is the form the string is usually copied in.
    */
   /** What the clipboard last put in the bar, so a refill can tell its own text from typing. */
   let clipboardFilled = "";
-  /** A string the user cleared away. Putting it back on the next focus would be a fight. */
+  /** A string the user cleared away. Putting it back on the next click would be a fight. */
   let clipboardDismissed = "";
 
-  // Re-read on every window focus, not only on open: the usual shape of this is
-  // copying the string from a provider dashboard in the browser and coming
-  // back, and by then the dialog has been open for a minute. Both events are
-  // bound - a Tauri window focus fires `focus` on the webview, and a workspace
-  // switch or an unminimise only fires `visibilitychange`.
-  $effect(() => {
-    if (!open) return;
-    const reread = () => { if (step === "pick") void prefillFromClipboard(); };
-    const onVisible = () => { if (!document.hidden) reread(); };
-    window.addEventListener("focus", reread);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", reread);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  });
-
   async function prefillFromClipboard() {
+    // Typing beats the clipboard, always - and then there is no reason to read it.
+    if (!open || step !== "pick") return;
+    if (quickUri.trim() && quickUri !== clipboardFilled) return;
     try {
       const raw = String((await navigator.clipboard.readText()) ?? "").trim();
       if (!raw || raw.length > 2000 || raw.includes("\n")) return;
@@ -567,8 +556,7 @@
         .trim();
       const candidate = detectConnectionUri(raw) ? raw : detectConnectionUri(unwrapped) ? unwrapped : "";
       if (!candidate) return;
-      // Anything the user did in the meantime wins - this lands a tick or two
-      // after the dialog opened, and re-runs every time the window is focused.
+      // Anything the user did while the read was in flight wins.
       if (!open || step !== "pick") return;
       if (candidate === quickUri) return;                 // already there
       if (candidate === clipboardDismissed) return;       // they cleared this one away
@@ -1472,8 +1460,8 @@
       quickUri = "";
       quickHint = "";
       void refreshLocal();
-      void prefillFromClipboard();
       // The paste bar takes focus: the modal opens, you paste, you press Enter.
+      // Focus alone does not read the clipboard - only a click into the bar does.
       // Only on the front page - a saved connection opens straight into its form.
       void tick().then(() => { if (step === "pick") quickUriEl?.focus(); });
     });
@@ -3211,6 +3199,7 @@
                           aria-label="Paste a connection string"
                           spellcheck="false"
                           class="h-9 pl-8 font-mono text-ui-xs"
+                          onclick={() => void prefillFromClipboard()}
                           oninput={(e) => {
                             quickHint = "";
                             // Cleared on purpose: do not hand the same string
