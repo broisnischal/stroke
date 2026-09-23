@@ -731,7 +731,10 @@
   }
 </script>
 
-<div class="flex shrink-0 flex-col">
+<!-- Controls disable for every fetch; the dim waits 200ms so a quick one never
+     flashes the whole bar. CSS takes the transition from the state being
+     entered, so re-enabling (back to the controls' own transitions) is instant. -->
+<div class="flex shrink-0 flex-col [&_:disabled]:transition-opacity [&_:disabled]:delay-200">
   <!-- overflow-x-auto is the floor, not the plan: the breakpoints below hide
        optional controls first and the search gives way after that. It exists so
        that when a window is narrow enough (or zoomed far enough) that even the

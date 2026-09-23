@@ -5302,6 +5302,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     const ctx = _ctx
     const read = _readColor
     if (!ctx || !read || !canvasEl || !colorProbe) return
+    // Drop any scroll delta seen while holding: the first real frame after a
+    // hold is a different table and must repaint whole, never blit the old one.
+    if (holdPaint && _surfaceHasFrame) { _blitDy = 0; return }
+    _surfaceHasFrame = true
 
     // ── Scroll blitting ──────────────────────────────────────────────────────
     // After the truncation cache, `fillText` is the whole remaining draw cost:
@@ -5664,6 +5668,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let loadingSpan = $state(/** @type {{first:number,last:number}|null} */ (null))
   /** A window that lands quickly must not flash a pill on its way past. */
   const SPAN_SHOW_AFTER = 220
+  /** `loading`, held back the same way: a fetch that lands within a frame or
+   *  two never flashes a spinner. */
+  let loadingVisible = $state(false)
+  $effect(() => {
+    if (!loading) { loadingVisible = false; return }
+    const t = setTimeout(() => (loadingVisible = true), SPAN_SHOW_AFTER)
+    return () => clearTimeout(t)
+  })
+  /** Paint holding. A table switch empties `columns` the moment it starts, and
+   *  drawing that frame blanked the grid for the whole round trip - the old
+   *  table, then nothing, then the new one. For the same grace window as the
+   *  spinner the canvas keeps the last table's pixels and the swap lands as one
+   *  frame. Never on a surface that holds nothing yet: a fresh or just-resized
+   *  canvas is blank (or black in WebKit) and has to be painted. */
+  const holdPaint = $derived(loading && columns.length === 0 && !loadingVisible)
+  let _surfaceHasFrame = false
   /** Reactivity budget: the pill re-reads at most this often, not per frame. */
   const SPAN_PUBLISH_MS = 150
 
@@ -6726,6 +6746,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    *  rather than short-circuiting on unchanged dimensions. That guarantees the
    *  visible canvas is transformed + painted on every mount / tab switch (a
    *  short-circuit here risked leaving a fresh canvas untransformed → blank). */
+  /** Tallest the grid viewport has been - see the height in syncCanvasSurface. */
+  let _tallestViewportH = 0
   function syncCanvasSurface() {
     const canvas = canvasEl
     const probe = colorProbe
@@ -6739,7 +6761,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // keeps _ctx and the on-screen canvas in lockstep.
     _ctx = canvas.getContext('2d')
     const cssW = Math.max(1, Math.round(_viewportWidth))
-    const cssH = Math.max(1, Math.round(_viewportHeight))
+    // Height is not simply the viewport's. Resizing the backing store on WebKit
+    // swaps the new bitmap in a frame before the new box size lands, so the
+    // related-rows dock opening (it shortens the viewport) showed one frame of
+    // the grid stretched by old/new. So a shrink leaves the canvas as tall as
+    // the viewport has been, clipped by the scroll container - but never taller
+    // than the content, so it can never add scroll range the table did not
+    // already have. Short tables still follow the viewport exactly.
+    if (_viewportHeight > _tallestViewportH) _tallestViewportH = _viewportHeight
+    const cssH = Math.max(1, Math.round(Math.max(_viewportHeight, Math.min(spacerHeight, _tallestViewportH))))
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     const bw = Math.max(1, Math.round(cssW * dpr))
     const bh = Math.max(1, Math.round(cssH * dpr))
@@ -6752,6 +6782,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       canvas.width = bw
       canvas.height = bh
       resized = true
+      _surfaceHasFrame = false
     }
     // canvas.width/height assignment resets the transform, so always (re)apply it.
     if (_ctx) _ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -6974,6 +7005,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   // First-paint guard for the layout effect below (see there).
   let _firstPaintDone = false
+  let _lastLayoutVh = 0
   // Layout / sizing effect - resize the backing store when geometry or viewport
   // changes. Tracks ONLY dependencies that can change the canvas dimensions,
   // geometry, or the full set of drawn data. Interaction state (selection, focus,
@@ -6994,6 +7026,10 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     void vexprTotalW; void _vcolFns
     void zoomState.value; void canvasZoom
     const { ok, resized } = syncCanvasSurface()
+    // The canvas can outgrow the viewport (see syncCanvasSurface), and what sits
+    // below the fold is stale - a dock closing has to paint it in the same frame.
+    const vhChanged = _viewportHeight !== _lastLayoutVh
+    _lastLayoutVh = _viewportHeight
     if (ok) {
       // Paint synchronously only on the FIRST mount (so a fresh canvas never
       // composites as an untransformed, unpainted "black" grid) and whenever the
@@ -7003,7 +7039,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       // rAF-coalesced scheduleDraw() below is enough and the previously
       // unconditional synchronous draw() (which double-painted every update) is
       // skipped.
-      if (!_firstPaintDone || resized) draw()
+      if (!_firstPaintDone || resized || vhChanged) draw()
       _firstPaintDone = true
       scheduleDraw()
     }
@@ -7016,6 +7052,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     void hoveredRow; void hoveredColName; void _resizeHoverCol; void resizingColName
     void selected; void focusedRow; void focusedCol; void selAnchor; void editingCell
     void pendingEdits; void pendingDeletes; void insertSaving; void fkSubview
+    void holdPaint
     if (_ctx) scheduleDraw()
   })
 
@@ -7467,9 +7504,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
 <div class="flex min-h-0 flex-1 overflow-hidden">
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-{#if loading && columns.length === 0}
-  <TableLoading {embedded} />
-{:else}
   <ContextMenu.Root
     onOpenChange={(open) => {
       contextMenuOpen = open;
@@ -7496,6 +7530,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           class={cn(
             "app-scroll relative overflow-auto bg-panel select-none outline-none [scrollbar-gutter:stable] [contain:layout] [overflow-anchor:none]",
             embedded ? "max-h-80" : "min-h-0 flex-1",
+            embedded && loading && columns.length === 0 && "min-h-40",
             resizingColName && "cursor-col-resize",
           )}
           oncontextmenu={(e) => onCanvasContextMenu(e, bitsContextMenu)}
@@ -8175,7 +8210,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           {/if}
 
           <!-- Empty states -->
-          {#if visibleColumns.length === 0}
+          {#if loading && columns.length === 0}
+            <!-- First load of a table. Drawn over the live grid rather than in
+                 place of it: swapping the grid out destroyed the canvas on every
+                 table open, and a load that landed a frame later flashed a
+                 spinner plus a brand-new compositor layer. -->
+            {#if loadingVisible}
+              <div class="pointer-events-none absolute inset-0 z-[3] flex flex-col animate-in fade-in duration-300">
+                <TableLoading {embedded} />
+              </div>
+            {/if}
+          {:else if visibleColumns.length === 0}
             <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
                 <Table2 class="size-8 text-muted-foreground" />
@@ -8192,8 +8237,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
             <div class="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center" role="status" aria-live="polite">
               <div class="flex flex-col items-center gap-2 px-4 text-center">
                 {#if loading}
-                  <Loader class="size-5 animate-spin text-muted-foreground" />
-                  <p class="text-ui-sm text-muted-foreground">Loading rows…</p>
+                  {#if loadingVisible}
+                    <div class="flex flex-col items-center gap-2 animate-in fade-in duration-300">
+                      <Loader class="size-5 animate-spin text-muted-foreground" />
+                      <p class="text-ui-sm text-muted-foreground">Loading rows…</p>
+                    </div>
+                  {/if}
                 {:else}
                   <Table2 class="size-8 text-muted-foreground" />
                   <p class="text-ui-sm text-muted-foreground">No rows in this table</p>
@@ -8754,7 +8803,6 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       {/if}
     </ContextMenu.Content>
   </ContextMenu.Root>
-{/if}
 
 <!-- Related-rows dock, sits BELOW the scroll container in this flex column, so
      it never scrolls with the grid and the grid never fights its inner scroll. -->

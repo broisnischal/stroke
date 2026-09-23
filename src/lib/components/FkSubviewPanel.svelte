@@ -38,6 +38,14 @@
     onfullview = () => {},
   } = $props()
 
+  /** `data.loading`, held back ~220ms (the grid's SPAN_SHOW_AFTER) so it never flashes. */
+  let loadingVisible = $state(false)
+  $effect(() => {
+    if (!data?.loading) { loadingVisible = false; return }
+    const t = setTimeout(() => (loadingVisible = true), 220)
+    return () => clearTimeout(t)
+  })
+
   /** @param {unknown} v */
   function fmt(v) {
     if (v === null || v === undefined) return 'NULL'
@@ -212,9 +220,15 @@
 
   <!-- Content, three visually distinct states: loading / failed / empty -->
   {#if data?.loading}
+    <!-- The row keeps its height from the first frame; only the spinner waits,
+         so a lookup that lands a frame later never flashes it. -->
     <div class="flex flex-1 items-center gap-2 px-3 py-4">
-      <Loader class="size-3.5 animate-spin text-muted-foreground" />
-      <span class="font-mono text-ui-2xs text-muted-foreground">Loading related rows…</span>
+      {#if loadingVisible}
+        <span class="flex items-center gap-2 animate-in fade-in duration-300">
+          <Loader class="size-3.5 animate-spin text-muted-foreground" />
+          <span class="font-mono text-ui-2xs text-muted-foreground">Loading related rows…</span>
+        </span>
+      {/if}
     </div>
 
   {:else if data?.error}
