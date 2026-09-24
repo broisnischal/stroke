@@ -9,6 +9,19 @@
   import LicenseActivation from './LicenseActivation.svelte'
   import WindowControls from './WindowControls.svelte'
   import { detectOs } from '$lib/platform.js'
+  import { cn } from '$lib/utils.js'
+
+  /** Called once activation has finished celebrating; LicenseGate drops the gate on it. */
+  let { onactivated = () => {} } = $props()
+
+  /** The key was accepted: the copy turns into a welcome while the confetti runs. */
+  let activated = $state(false)
+  /** The celebration is over: fade out, then let the gate hand over to the app. */
+  let leaving = $state(false)
+  function finish() {
+    leaving = true
+    setTimeout(onactivated, 220)
+  }
 
   const isMac = typeof navigator !== 'undefined' && detectOs() === 'macos'
 
@@ -38,7 +51,7 @@
   }
 </script>
 
-<div class="fixed inset-0 z-[9999] flex flex-col bg-background">
+<div class={cn('fixed inset-0 z-[9999] flex flex-col bg-background transition-opacity duration-200 ease-out', leaving && 'opacity-0')}>
   <!-- Bare title bar: just the drag region, the mark, and window controls -->
   <div
     class="flex h-[38px] shrink-0 items-center border-b border-border/40 px-2.5 select-none"
@@ -64,30 +77,37 @@
     ></div>
 
     <div class="relative flex w-full max-w-[26rem] flex-col items-center gap-6 text-center">
-      <div class="grid size-14 place-items-center rounded-2xl border border-border/50 bg-card/40 shadow-sm">
-        <Logo class="size-7" />
+      <div class="grid size-12 place-items-center rounded-lg border border-border/60 bg-card/40">
+        <Logo class="size-6" />
       </div>
 
-      <div class="space-y-2">
-        <h1 class="text-ui-3xl font-semibold tracking-tight text-foreground text-balance">Your free trial has ended</h1>
-        <p class="text-ui leading-relaxed text-muted-foreground text-balance">
-          Activate a license to keep using Stroke. Your saved connections and settings are untouched, they'll be right here.
-        </p>
+      <div class="flex flex-col items-center gap-2">
+        <!-- Two short lines instead of one sentence balanced into three: what
+             to do, then the reassurance, at a quieter weight. -->
+        {#if activated}
+          <h1 class="text-ui-3xl font-semibold tracking-tight text-foreground text-balance animate-in fade-in duration-300">Welcome to Stroke</h1>
+          <p class="text-ui leading-normal text-foreground/80 text-pretty animate-in fade-in duration-300">Your license is active.</p>
+          <p class="text-ui-sm leading-normal text-muted-foreground text-pretty animate-in fade-in duration-300">Opening your workspace.</p>
+        {:else}
+          <h1 class="text-ui-3xl font-semibold tracking-tight text-foreground text-balance">Your free trial has ended</h1>
+          <p class="text-ui leading-normal text-foreground/80 text-pretty">Activate a license to keep using Stroke.</p>
+          <p class="text-ui-sm leading-normal text-muted-foreground text-pretty">Your connections and settings are saved and waiting.</p>
+        {/if}
       </div>
 
       <!-- Activation, the only way forward. No card; just the field + button. -->
       <div class="w-full">
-        <LicenseActivation naked />
+        <LicenseActivation naked onsuccess={() => (activated = true)} onactivated={finish} />
       </div>
 
-      <div class="flex items-center gap-4 text-ui-xs">
+      <div class={cn('flex items-center gap-4 text-ui-xs transition-opacity duration-200', activated && 'pointer-events-none opacity-0')}>
         <a
           href="https://stroke.click"
           target="_blank"
           rel="noopener noreferrer"
           class="inline-flex items-center gap-1.5 font-medium text-foreground transition-colors hover:text-primary"
         >
-          Get a license <Icon name="external-link" class="size-3.5" />
+          Get a license <Icon name="external-link" class="size-3.5 shrink-0" />
         </a>
         <span class="text-border">·</span>
         <button
