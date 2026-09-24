@@ -2868,7 +2868,7 @@
                       <div
                         data-conn-row
                         class={cn(
-                          "group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none focus:bg-muted/60 focus:text-foreground focus:outline-2 focus:-outline-offset-2 focus:outline-ring active:scale-[0.98]",
+                          "group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none focus-visible:bg-muted/60 focus-visible:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:scale-[0.98]",
                           savedStagger && "cn-stagger-in",
                           isSel
                             ? "bg-muted/50 text-foreground"
@@ -2923,8 +2923,12 @@
                         title="Click to edit · double-click to connect ({IS_MAC ? '⌘' : 'Ctrl'}+Enter)"
                       >
                         {#if isSel}
+                          <!-- Selection bar. Hidden while the keyboard focus
+                               outline is up: the outline is drawn 2px inside the
+                               row, so the bar landed right against its left edge
+                               and read as a doubled border. -->
                           <span
-                            class="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-foreground/70"
+                            class="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-foreground/70 transition-opacity duration-150 group-focus-visible:opacity-0"
                           ></span>
                         {/if}
                         <!-- Fixed-size icon slot keeps every row's text left-edge aligned. Fades to Play on hover. -->
