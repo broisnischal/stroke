@@ -56,7 +56,10 @@ jobs:
 
           # Extract changelog for this version from CHANGELOG.md.
           # Grabs everything between the matching "## [X.Y.Z]" header and the next one.
-          VERSION="${TAG#v}"
+          # VERSION goes in the environment: it used to trail the script as
+          # `VERSION=...`, which node receives as an argument, so the script
+          # looked for "## [undefined]" and every release said "No changelog".
+          export VERSION="${TAG#v}"
           CHANGELOG=$(node -e "
             const fs = require('fs')
             const lines = fs.readFileSync('CHANGELOG.md', 'utf8').split('\n')
@@ -69,7 +72,7 @@ jobs:
               if (inside) out.push(l)
             }
             process.stdout.write(out.join('\n').trim())
-          " VERSION="$VERSION")
+          ")
 
           cat > /tmp/notes.md << EOF
           ${CHANGELOG:-No changelog available for this release.}
@@ -78,7 +81,7 @@ jobs:
 
           ### Install
 
-          **Easiest — package managers (no security warnings):**
+          **Package managers (no security warnings):**
 
           \`\`\`sh
           # macOS
@@ -91,13 +94,13 @@ jobs:
 
           **Or download directly below:**
 
-          **macOS** — \`stroke_*_aarch64.dmg\` (Apple Silicon) · \`stroke_*_x64.dmg\` (Intel)
+          **macOS:** \`stroke_*_aarch64.dmg\` (Apple Silicon) · \`stroke_*_x64.dmg\` (Intel)
           > Ad-hoc signed. If macOS says it's "damaged", run once: \`xattr -cr /Applications/Stroke.app\`
 
-          **Windows** — \`stroke_*_x64-setup.exe\` (recommended) · \`.msi\`
-          > Unsigned. On SmartScreen, click **More info → Run anyway**.
+          **Windows:** \`stroke_*_x64-setup.exe\` (recommended) · \`.msi\`
+          > Unsigned. On SmartScreen, click **More info**, then **Run anyway**.
 
-          **Linux** — \`.deb\` · \`.rpm\` · \`.AppImage\`
+          **Linux:** \`.deb\` · \`.rpm\` · \`.AppImage\`
 
           Built from \`${SHA}\`.
           EOF
