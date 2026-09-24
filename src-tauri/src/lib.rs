@@ -28,11 +28,7 @@ mod web_search;
 use db::{ActiveConnection, DbState, TunnelState};
 use mcp::McpState;
 use std::sync::{Arc, Mutex};
-use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
-};
+use tauri::Manager;
 
 // The surface behind the page, shown whenever the webview has yet to composite a
 // frame - a cold start, a reload, or any moment the UI is mid-repaint. The
@@ -271,24 +267,6 @@ fn unlock_macos_webview_frame_rate(window: &tauri::WebviewWindow) {
     });
 }
 
-/// Resolve the tray icon that matches the current system appearance.
-/// A dark mark sits on the light menu bar; a light mark on the dark menu bar,
-/// so the logo stays visible regardless of the OS theme.
-fn tray_icon_for_theme(
-    app: &tauri::AppHandle,
-    theme: tauri::Theme,
-) -> Option<tauri::image::Image<'static>> {
-    let name = match theme {
-        tauri::Theme::Dark => "icons/tray-light.png",
-        _ => "icons/tray-dark.png",
-    };
-    let path = app
-        .path()
-        .resolve(name, tauri::path::BaseDirectory::Resource)
-        .ok()?;
-    tauri::image::Image::from_path(path).ok()
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Linux WebKitGTK rendering fix - set before any threads spawn.
@@ -473,66 +451,13 @@ pub fn run() {
                     .level(log::LevelFilter::Info)
                     .build(),
             )?;
-            // ── System tray ───────────────────────────────────────────────────
-            let show_item = MenuItem::with_id(app, "show", "Open Stroke", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit Stroke", true, None::<&str>)?;
-            let sep = PredefinedMenuItem::separator(app)?;
-
-            let tray_menu = Menu::with_items(app, &[&show_item, &sep, &quit_item])?;
-
-            // Dedicated tray icon (Stroke mark) chosen to stay visible against the
-            // current system menu-bar theme; swapped live on ThemeChanged below.
-            let initial_theme = window.theme().unwrap_or(tauri::Theme::Light);
-            let tray_icon = tray_icon_for_theme(app.handle(), initial_theme)
-                .unwrap_or_else(|| app.default_window_icon().unwrap().clone());
-
-            let _tray = TrayIconBuilder::with_id("main-tray")
-                .icon(tray_icon)
-                .menu(&tray_menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
-                })
-                .build(app)?;
-
-            // ── Hide to tray on close instead of quitting ─────────────────────
+            // No tray and no hide-on-close: closing the last window quits the
+            // process. Hiding to the tray left a live instance behind on every
+            // close, and each relaunch added another icon next to the old ones.
             let app_handle = app.handle().clone();
             window.on_window_event(move |event| match event {
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    api.prevent_close();
-                    if let Some(w) = app_handle.get_webview_window("main") {
-                        let _ = w.hide();
-                    }
-                }
-                // Keep the tray mark visible when the OS flips light/dark, and keep
-                // the pre-paint surface on the same end of the scale.
+                // Keep the pre-paint surface on the same end of the scale as the OS.
                 tauri::WindowEvent::ThemeChanged(theme) => {
-                    if let Some(tray) = app_handle.tray_by_id("main-tray") {
-                        if let Some(icon) = tray_icon_for_theme(&app_handle, *theme) {
-                            let _ = tray.set_icon(Some(icon));
-                        }
-                    }
                     if let Some(w) = app_handle.get_webview_window("main") {
                         let surface = surface_for_theme(*theme);
                         let _ = w.set_background_color(Some(surface));
@@ -696,9 +621,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
-            // Real exit only (tray Quit / OS shutdown) - the hide-to-tray
-            // CloseRequested path never reaches here. Reap the OmniRoute proxy
-            // we spawned, or it survives every app quit.
+            // The last window closed, or the OS is shutting down. Reap the
+            // OmniRoute proxy we spawned, or it survives every app quit.
             if let tauri::RunEvent::Exit = event {
                 app.state::<omniroute::OmniRouteState>().kill_now();
             }
