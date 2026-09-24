@@ -1137,12 +1137,27 @@
     const hit = hitNode(e.clientX - r.left, e.clientY - r.top)
     if (hit) onopen(hit.id)
   }
-  /** @param {WheelEvent} e */
+  /**
+   * Ctrl/Cmd + wheel zooms at the cursor (a trackpad pinch arrives the same
+   * way, as ctrl+wheel); a plain wheel scrolls the diagram, and Shift turns a
+   * vertical wheel sideways. Every wheel used to zoom, so there was no way to
+   * scroll a large schema, and Ctrl+wheel never arrived at all: the global
+   * zoom blocker swallows it outside a [data-zoom-surface].
+   * @param {WheelEvent} e
+   */
   function onWheel(e) {
     e.preventDefault()
     if (!canvas) return
-    const r = canvas.getBoundingClientRect()
-    zoomBy(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top)
+    // Line and page deltas (a notched wheel on some engines) to pixels.
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? cssH : 1
+    const dx = e.deltaX * unit, dy = e.deltaY * unit
+    if (e.ctrlKey || e.metaKey) {
+      const r = canvas.getBoundingClientRect()
+      zoomBy(Math.exp(-dy * 0.0015), e.clientX - r.left, e.clientY - r.top)
+      return
+    }
+    if (e.shiftKey && dx === 0) { cam.panX -= dy } else { cam.panX -= dx; cam.panY -= dy }
+    markDirty()
   }
 
   // Click the minimap to recenter there.
@@ -1205,6 +1220,7 @@
     onpointercancel={onPointerUp}
     ondblclick={onDblClick}
     onwheel={onWheel}
+    data-zoom-surface
   ></canvas>
 
   <!-- Zoom controls -->
