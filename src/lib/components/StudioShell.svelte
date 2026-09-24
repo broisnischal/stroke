@@ -7250,8 +7250,12 @@ let rowSearch = $state('')
     class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-7 bg-background"
     out:fade={{ duration: 200 }}
   >
+    <!-- The ring and the label wait before they appear. A warm reconnect lands
+         in a few hundred ms, and showing them at once flashed "Reconnecting"
+         for a moment, then faded it out over the shell - on a cold start that
+         read as the window flickering. The plain surface covers the wait. -->
     <!-- Spinning ring + logo -->
-    <div class="relative flex size-[88px] items-center justify-center">
+    <div class="relative flex size-[88px] items-center justify-center" in:fade={{ delay: 350, duration: 150 }}>
       <svg class="absolute inset-0 size-full animate-spin" viewBox="0 0 88 88" fill="none" aria-hidden="true">
         <circle cx="44" cy="44" r="42" stroke="currentColor" stroke-width="1.5"
           stroke-dasharray="44 220" stroke-linecap="round"
@@ -7263,7 +7267,7 @@ let rowSearch = $state('')
     </div>
 
     <!-- Text -->
-    <div class="flex max-w-sm flex-col items-center gap-1.5 text-center">
+    <div class="flex max-w-sm flex-col items-center gap-1.5 text-center" in:fade={{ delay: 350, duration: 150 }}>
       <p class="max-w-full truncate text-ui-sm font-medium text-foreground/70">
         {autoConnectVerb}{autoConnectName ? ` to ${shortConnLabel(autoConnectName)}` : ''}
       </p>
