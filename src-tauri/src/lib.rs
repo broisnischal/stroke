@@ -51,6 +51,78 @@ fn surface_for_theme(theme: tauri::Theme) -> tauri::window::Color {
     }
 }
 
+/// Paint the webview's own backdrop, whichever webview this platform uses.
+///
+/// The window background set by `set_background_color` is behind the webview
+/// widget, and the widget fills the window - so what the user actually sees
+/// before the page paints is the *webview's* backdrop, which defaults to white
+/// on all three engines. The page then boots at `opacity: 0` (index.html) and
+/// stays there until the first finished screen, so that white sits on screen
+/// for the whole startup, not just a frame.
+///
+/// Each engine names the knob differently and none of them is reachable through
+/// Tauri's own API:
+///   - WKWebView (macOS):    `underPageBackgroundColor`
+///   - WebView2 (Windows):   `ICoreWebView2Controller2::DefaultBackgroundColor`
+///   - WebKitGTK (Linux):    `webkit_web_view_set_background_color`
+fn set_webview_backdrop(window: &tauri::WebviewWindow, color: tauri::window::Color) {
+    #[cfg(target_os = "macos")]
+    set_macos_webview_backdrop(window, color);
+    #[cfg(target_os = "windows")]
+    set_windows_webview_backdrop(window, color);
+    #[cfg(target_os = "linux")]
+    set_linux_webview_backdrop(window, color);
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    let _ = (window, color);
+}
+
+/// WebView2's pre-paint colour.
+///
+/// `DefaultBackgroundColor` lives on `ICoreWebView2Controller2`, a later
+/// revision of the controller Tauri hands back, so the interface is queried for
+/// rather than assumed - on a runtime too old to carry it the cast fails and the
+/// backdrop stays at the default instead of the call being a hard error.
+#[cfg(target_os = "windows")]
+fn set_windows_webview_backdrop(window: &tauri::WebviewWindow, color: tauri::window::Color) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2Controller2, COREWEBVIEW2_COLOR,
+    };
+    use windows_core::Interface;
+
+    let tauri::window::Color(r, g, b, a) = color;
+    let _ = window.with_webview(move |webview| {
+        if let Ok(controller) = webview.controller().cast::<ICoreWebView2Controller2>() {
+            // A is the alpha channel of the backdrop itself: a translucent value
+            // would let the (white) host window show through again, so it stays
+            // fully opaque whatever the caller passed for the window colour.
+            let _ = unsafe {
+                controller.SetDefaultBackgroundColor(COREWEBVIEW2_COLOR {
+                    A: a,
+                    R: r,
+                    G: g,
+                    B: b,
+                })
+            };
+        }
+    });
+}
+
+/// WebKitGTK's pre-paint colour.
+#[cfg(target_os = "linux")]
+fn set_linux_webview_backdrop(window: &tauri::WebviewWindow, color: tauri::window::Color) {
+    use webkit2gtk::WebViewExt;
+
+    let tauri::window::Color(r, g, b, a) = color;
+    let _ = window.with_webview(move |webview| {
+        webview.inner().set_background_color(&gdk::RGBA::new(
+            r as f64 / 255.0,
+            g as f64 / 255.0,
+            b as f64 / 255.0,
+            a as f64 / 255.0,
+        ));
+    });
+}
+
 /// Paint the webview's own backdrop on macOS.
 ///
 /// `WebviewWindow::set_background_color` is documented as "not implemented for
@@ -327,8 +399,7 @@ pub fn run() {
             let window_theme = window.theme().unwrap_or(tauri::Theme::Dark);
             let surface = surface_for_theme(window_theme);
             let _ = window.set_background_color(Some(surface));
-            #[cfg(target_os = "macos")]
-            set_macos_webview_backdrop(&window, surface);
+            set_webview_backdrop(&window, surface);
 
             #[cfg(target_os = "macos")]
             {
@@ -437,8 +508,7 @@ pub fn run() {
                     if let Some(w) = app_handle.get_webview_window("main") {
                         let surface = surface_for_theme(*theme);
                         let _ = w.set_background_color(Some(surface));
-                        #[cfg(target_os = "macos")]
-                        set_macos_webview_backdrop(&w, surface);
+                        set_webview_backdrop(&w, surface);
                     }
                 }
                 _ => {}

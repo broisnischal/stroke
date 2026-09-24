@@ -71,6 +71,19 @@ objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSColor", 
 objc2-quartz-core = { version = "0.3", features = ["CALayer"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView"] }
 
+# Same job as the macOS block above, for the other two engines: paint the
+# webview's pre-paint backdrop so startup never flashes white.
+# (set_windows_webview_backdrop / set_linux_webview_backdrop in lib.rs.)
+# Both are already in the tree via tauri/wry - pinned here to the versions wry
+# resolves so this never links a second copy of either binding.
+[target.'cfg(target_os = "windows")'.dependencies]
+webview2-com = "0.38"
+windows-core = "0.61"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+gdk = "0.18"
+
 [dev-dependencies]
 # `start_paused` in #[tokio::test] - lets the connect-deadline test fire the
 # timeout on a virtual clock instead of waiting CONNECT_DEADLINE for real.
