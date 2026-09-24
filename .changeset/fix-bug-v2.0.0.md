@@ -9,7 +9,7 @@
 - **Smoother startup** - the window fades in once, on its first finished screen, instead of fading in empty and then popping in the app
 
 #### Connections
-- **No surprise clipboard prompts** - the connect dialog reads the clipboard only when you click the paste bar, not on open or every time the window gets focus
+- **No clipboard permission dialog** - the connect dialog reads the clipboard through the OS rather than the permission-gated web API, so Windows no longer interrupts with a "wants to see text and images copied to the clipboard" prompt. It still only reads when you click the paste bar, never on open or on window focus
 
 ### Changes
 - The new tab no longer repeats the connection details (database, engine, schema, host, user) already shown in the title and status bar

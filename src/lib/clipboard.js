@@ -7,8 +7,51 @@
 // no such restriction, so we transparently patch `navigator.clipboard` to use it.
 // Every existing `navigator.clipboard.writeText(...)` call site (and Monaco's)
 // then works with no per-call changes.
+//
+// Reads go the same way, for a different reason: the web read API is permission
+// gated, and asking for that permission puts a "wants to see text and images
+// copied to the clipboard" dialog over the app. `readClipboardText` never calls
+// it, so the dialog never appears.
 
 let _installed = false
+
+/** @type {Promise<any> | null} */
+let _pluginPromise = null
+
+/** The Tauri clipboard plugin, or null in browser dev where it isn't bundled. */
+function plugin() {
+  if (!_pluginPromise) {
+    _pluginPromise = import('@tauri-apps/plugin-clipboard-manager').catch(() => null)
+  }
+  return _pluginPromise
+}
+
+/**
+ * Read the clipboard as text, through Rust, never through the web API.
+ *
+ * `navigator.clipboard.readText()` is a permission-gated call: WebView2 raises
+ * a "…wants to see text and images copied to the clipboard / Block / Allow"
+ * dialog over the app the first time it runs, and WKWebView raises the system
+ * paste prompt. Nothing in this app is worth that interruption, so the web read
+ * API is never called - not even as a fallback. The Tauri plugin reads the OS
+ * clipboard from Rust with no prompt at all.
+ *
+ * Returns '' when there is no text to read: an empty clipboard, an image, or
+ * browser dev where the plugin isn't there. Every caller treats that as
+ * "nothing to paste", so a read never has to be guarded.
+ *
+ * @returns {Promise<string>}
+ */
+export async function readClipboardText() {
+  try {
+    const mod = await plugin()
+    if (typeof mod?.readText !== 'function') return ''
+    return String((await mod.readText()) ?? '')
+  } catch {
+    // Empty clipboard, or it holds something that isn't text - both are "nothing".
+    return ''
+  }
+}
 
 export async function installClipboardBridge() {
   if (_installed) return
@@ -19,19 +62,11 @@ export async function installClipboardBridge() {
 
   // Lazily load the Tauri plugin - absent in browser dev, where the native API
   // works fine, so we leave the clipboard untouched there.
-  let tauriWrite = null
-  let tauriRead = null
-  try {
-    const mod = await import('@tauri-apps/plugin-clipboard-manager')
-    tauriWrite = mod.writeText
-    tauriRead = mod.readText
-  } catch {
-    return
-  }
+  const mod = await plugin()
+  const tauriWrite = mod?.writeText
   if (typeof tauriWrite !== 'function') return
 
   const nativeWrite = typeof clip.writeText === 'function' ? clip.writeText.bind(clip) : null
-  const nativeRead = typeof clip.readText === 'function' ? clip.readText.bind(clip) : null
 
   try {
     clip.writeText = async (/** @type {any} */ text) => {
@@ -44,11 +79,10 @@ export async function installClipboardBridge() {
         if (!execCommandCopy(s)) throw e
       }
     }
-    if (typeof tauriRead === 'function') {
-      clip.readText = async () => {
-        try { return await tauriRead() } catch { return nativeRead ? nativeRead() : '' }
-      }
-    }
+    // Same for reads, so a stray `navigator.clipboard.readText()` - ours, or
+    // one inside a dependency - can never raise the webview's permission
+    // dialog. It resolves to '' instead of falling back to the web API.
+    clip.readText = readClipboardText
 
     // Monaco sniffs the UA for Safari, which WebKitGTK also matches, and installs
     // a Safari clipboard workaround: on *every* click and keydown in an editor it

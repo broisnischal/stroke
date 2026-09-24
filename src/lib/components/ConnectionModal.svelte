@@ -42,6 +42,7 @@
   import { Popover, PopoverTrigger, PopoverContent } from "$lib/components/ui/popover/index.js";
   import PasswordInput from "./PasswordInput.svelte";
   import { requireUnlock } from "$lib/stores/app-lock.js";
+  import { readClipboardText } from "$lib/clipboard.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -548,7 +549,7 @@
     if (!open || step !== "pick") return;
     if (quickUri.trim() && quickUri !== clipboardFilled) return;
     try {
-      const raw = String((await navigator.clipboard.readText()) ?? "").trim();
+      const raw = (await readClipboardText()).trim();
       if (!raw || raw.length > 2000 || raw.includes("\n")) return;
       const unwrapped = raw
         .replace(/^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*/, "")

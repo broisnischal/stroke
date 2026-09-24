@@ -8,6 +8,7 @@
   import { increaseZoom, decreaseZoom, resetZoom, appPreviewDml, appTableStyle, TABLE_STYLES, normalizeTableStyle, appVimMode, appTableAlign, appNativeScroll, appRowSpacing, appZebraRows, rowSpacingHeight, appNumberGrouping, appHighlightActiveRow, appGridFontSize, appImagePreview, appOpenUrlsOnClick, appRowNumbers } from '$lib/stores/settings.js'
   import { createSmoothScroll, wheelPixels } from '$lib/smooth-scroll.js'
   import { isJsonColumnType } from '$lib/cell-expand.js'
+  import { readClipboardText } from '$lib/clipboard.js'
   import { setVimSubMode } from '$lib/vim/vim.js'
   import { toast } from "$lib/components/ui/sonner/toast.svelte.js";
   import * as ContextMenu from "$lib/components/ui/context-menu/index.js";
@@ -8962,7 +8963,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         onSelect={async () => {
           const m = draftMenu
           if (!m) return
-          try { setNewRowDraft(m.row, m.col, await navigator.clipboard.readText()) } catch { /* no clipboard */ }
+          const text = await readClipboardText()
+          if (text) setNewRowDraft(m.row, m.col, text)
         }}
       >
         <ClipboardPaste />
