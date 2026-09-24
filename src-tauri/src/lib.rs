@@ -51,6 +51,24 @@ fn surface_for_theme(theme: tauri::Theme) -> tauri::window::Color {
     }
 }
 
+/// How long a window may stay hidden before it is shown regardless.
+///
+/// Windows are built hidden and the frontend shows them on its first finished
+/// screen (src/lib/app-reveal.js). The frontend has its own 2.5s failsafe; this
+/// one covers the case where no JS runs at all (a broken bundle, a webview that
+/// never loads), which would otherwise leave a live process with no window.
+const REVEAL_FAILSAFE: std::time::Duration = std::time::Duration::from_secs(4);
+
+pub(crate) fn arm_reveal_failsafe(window: &tauri::WebviewWindow) {
+    let window = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(REVEAL_FAILSAFE);
+        if !window.is_visible().unwrap_or(true) {
+            let _ = window.show();
+        }
+    });
+}
+
 /// Paint the webview's own backdrop, whichever webview this platform uses.
 ///
 /// The window background set by `set_background_color` is behind the webview
@@ -344,6 +362,15 @@ pub fn run() {
             .min_inner_size(960.0, 600.0)
             .resizable(true)
             .maximized(true)
+            // Hidden until the page has its first finished screen: revealApp()
+            // in src/lib/app-reveal.js shows it. A window visible from build()
+            // put every pre-paint layer on screen in turn - the host surface,
+            // the webview backdrop, the maximize resize - and on Windows that
+            // read as the window flickering between two blacks for half a second
+            // before the app appeared. tao keeps MAXIMIZED across the hide, and
+            // show() issues SW_SHOW then SW_MAXIMIZE, so the OS still records a
+            // real maximized state (minimize -> restore keeps working).
+            .visible(false)
             // Never let the default white surface show. The real theme is only
             // known to the frontend (localStorage), so start on the dark base -
             // 11 of the 16 themes are dark - and correct to light right after
@@ -400,6 +427,7 @@ pub fn run() {
             let surface = surface_for_theme(window_theme);
             let _ = window.set_background_color(Some(surface));
             set_webview_backdrop(&window, surface);
+            arm_reveal_failsafe(&window);
 
             #[cfg(target_os = "macos")]
             {
@@ -533,6 +561,7 @@ pub fn run() {
             commands::ai_fetch_page,
             commands::read_file,
             commands::open_new_window,
+            commands::reveal_window,
             commands::restart_app,
             commands::toggle_devtools,
             commands::test_postgres_connection,
