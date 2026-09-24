@@ -42,6 +42,7 @@
   import { Popover, PopoverTrigger, PopoverContent } from "$lib/components/ui/popover/index.js";
   import PasswordInput from "./PasswordInput.svelte";
   import { requireUnlock } from "$lib/stores/app-lock.js";
+  import { readClipboardText } from "$lib/clipboard.js";
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import { ScrollArea } from "$lib/components/ui/scroll-area/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -528,38 +529,27 @@
   /**
    * A connection string in the clipboard is where this dialog usually starts -
    * copied out of a provider dashboard, a .env, or a teammate's message - and
-   * the first thing anyone does here is paste it. So the dialog pastes it.
+   * the first thing anyone does here is paste it. So clicking into the paste
+   * bar pastes it.
    *
-   * Strictly: only a string that parses as a connection URI, only into an empty
-   * bar, and nothing is applied until Continue is pressed. It saves the paste,
+   * Strictly: only on a click into the bar (never on open or window focus - on
+   * macOS every clipboard read can raise the system paste prompt), only a string
+   * that parses as a connection URI, only into an empty bar, and nothing is
+   * applied until Continue is pressed. It saves the paste,
    * not the decision. A `.env` line is unwrapped (`DATABASE_URL="postgres://…"`)
    * because that is the form the string is usually copied in.
    */
   /** What the clipboard last put in the bar, so a refill can tell its own text from typing. */
   let clipboardFilled = "";
-  /** A string the user cleared away. Putting it back on the next focus would be a fight. */
+  /** A string the user cleared away. Putting it back on the next click would be a fight. */
   let clipboardDismissed = "";
 
-  // Re-read on every window focus, not only on open: the usual shape of this is
-  // copying the string from a provider dashboard in the browser and coming
-  // back, and by then the dialog has been open for a minute. Both events are
-  // bound - a Tauri window focus fires `focus` on the webview, and a workspace
-  // switch or an unminimise only fires `visibilitychange`.
-  $effect(() => {
-    if (!open) return;
-    const reread = () => { if (step === "pick") void prefillFromClipboard(); };
-    const onVisible = () => { if (!document.hidden) reread(); };
-    window.addEventListener("focus", reread);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", reread);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  });
-
   async function prefillFromClipboard() {
+    // Typing beats the clipboard, always - and then there is no reason to read it.
+    if (!open || step !== "pick") return;
+    if (quickUri.trim() && quickUri !== clipboardFilled) return;
     try {
-      const raw = String((await navigator.clipboard.readText()) ?? "").trim();
+      const raw = (await readClipboardText()).trim();
       if (!raw || raw.length > 2000 || raw.includes("\n")) return;
       const unwrapped = raw
         .replace(/^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*/, "")
@@ -567,8 +557,7 @@
         .trim();
       const candidate = detectConnectionUri(raw) ? raw : detectConnectionUri(unwrapped) ? unwrapped : "";
       if (!candidate) return;
-      // Anything the user did in the meantime wins - this lands a tick or two
-      // after the dialog opened, and re-runs every time the window is focused.
+      // Anything the user did while the read was in flight wins.
       if (!open || step !== "pick") return;
       if (candidate === quickUri) return;                 // already there
       if (candidate === clipboardDismissed) return;       // they cleared this one away
@@ -1472,8 +1461,8 @@
       quickUri = "";
       quickHint = "";
       void refreshLocal();
-      void prefillFromClipboard();
       // The paste bar takes focus: the modal opens, you paste, you press Enter.
+      // Focus alone does not read the clipboard - only a click into the bar does.
       // Only on the front page - a saved connection opens straight into its form.
       void tick().then(() => { if (step === "pick") quickUriEl?.focus(); });
     });
@@ -2879,7 +2868,7 @@
                       <div
                         data-conn-row
                         class={cn(
-                          "group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none focus:bg-muted/60 focus:text-foreground focus:outline-2 focus:-outline-offset-2 focus:outline-ring active:scale-[0.98]",
+                          "group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-[color,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none focus-visible:bg-muted/60 focus-visible:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring active:scale-[0.98]",
                           savedStagger && "cn-stagger-in",
                           isSel
                             ? "bg-muted/50 text-foreground"
@@ -2917,7 +2906,7 @@
                           }
                           // Shift+Tab is the way back to the filter, the mirror of
                           // the Tab that got here.
-                          if (e.key === "Tab" && e.shiftKey && savedSearchEl) {
+                          if ((e.key === "Tab" || e.code === "Tab") && e.shiftKey && savedSearchEl) {
                             e.preventDefault();
                             savedSearchEl.focus();
                             return;
@@ -2934,8 +2923,12 @@
                         title="Click to edit · double-click to connect ({IS_MAC ? '⌘' : 'Ctrl'}+Enter)"
                       >
                         {#if isSel}
+                          <!-- Selection bar. Hidden while the keyboard focus
+                               outline is up: the outline is drawn 2px inside the
+                               row, so the bar landed right against its left edge
+                               and read as a doubled border. -->
                           <span
-                            class="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-foreground/70"
+                            class="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-foreground/70 transition-opacity duration-150 group-focus-visible:opacity-0"
                           ></span>
                         {/if}
                         <!-- Fixed-size icon slot keeps every row's text left-edge aligned. Fades to Play on hover. -->
@@ -3211,6 +3204,7 @@
                           aria-label="Paste a connection string"
                           spellcheck="false"
                           class="h-9 pl-8 font-mono text-ui-xs"
+                          onclick={() => void prefillFromClipboard()}
                           oninput={(e) => {
                             quickHint = "";
                             // Cleared on purpose: do not hand the same string

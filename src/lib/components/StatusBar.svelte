@@ -154,7 +154,7 @@
       e.preventDefault(); e.stopPropagation()
       dbHl = (dbHl + 1) % n
       scrollDbHlIntoView()
-    } else if (e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey)) {
+    } else if (e.key === 'ArrowUp' || ((e.key === 'Tab' || e.code === 'Tab') && e.shiftKey)) {
       e.preventDefault(); e.stopPropagation()
       dbHl = (dbHl - 1 + n) % n
       scrollDbHlIntoView()

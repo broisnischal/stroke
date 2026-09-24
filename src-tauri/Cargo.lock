@@ -116,6 +116,7 @@ dependencies = [
  "duckdb",
  "ed25519-dalek",
  "futures",
+ "gdk",
  "getrandom 0.2.17",
  "hex",
  "hmac",
@@ -149,6 +150,9 @@ dependencies = [
  "tower-http 0.5.2",
  "urlencoding",
  "uuid",
+ "webkit2gtk",
+ "webview2-com",
+ "windows-core 0.61.2",
 ]
 
 [[package]]

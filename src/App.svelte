@@ -69,10 +69,8 @@
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') { e.preventDefault(); e.stopPropagation() }
     }, { capture: true })
 
-    // Fade in the page now that theme + layout are ready. The window uses native
-    // OS decorations and opens maximized via the Tauri builder, so the OS owns
-    // all window state - no JS show/maximize/geometry handling needed here.
-    document.documentElement.style.opacity = '1'
+    // No fade-in here: AppLockGate has not rendered anything yet. The first
+    // complete screen reveals the page - see $lib/app-reveal.js.
   })
 </script>
 

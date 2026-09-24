@@ -27,7 +27,17 @@
           theme = prefersDark ? 'dark' : 'light'
         }
         document.documentElement.dataset.theme = theme
-        if (!lightThemes.includes(theme)) document.documentElement.classList.add('dark')
+        const isLight = lightThemes.includes(theme)
+        if (!isLight) document.documentElement.classList.add('dark')
+        // The page boots at opacity 0 and stays there until the first finished
+        // screen, so <html> must carry a painted background of its own - with
+        // nothing but the transition below, a transparent root shows the
+        // webview's white backdrop for the whole of startup. Inline, because the
+        // theme stylesheet arrives with the bundle, well after the first paint.
+        // These two are the base light/dark --background, and they match
+        // LIGHT_SURFACE / DARK_SURFACE in src-tauri/src/lib.rs so the window,
+        // the webview and the page all come up the same colour.
+        document.documentElement.style.backgroundColor = isLight ? '#f7f7f7' : '#080808'
         let zoom = 1
         if (parsed?.zoom != null) zoom = Number(parsed.zoom)
         else if (parsed?.fontSize != null) zoom = Number(parsed.fontSize) / 14
@@ -41,6 +51,7 @@
         const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches !== false
         document.documentElement.dataset.theme = prefersDark ? 'dark' : 'light'
         if (prefersDark) document.documentElement.classList.add('dark')
+        document.documentElement.style.backgroundColor = prefersDark ? '#080808' : '#f7f7f7'
       }
       ;(function () {
         var ua = navigator.userAgent || ''

@@ -28,11 +28,7 @@ mod web_search;
 use db::{ActiveConnection, DbState, TunnelState};
 use mcp::McpState;
 use std::sync::{Arc, Mutex};
-use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
-};
+use tauri::Manager;
 
 // The surface behind the page, shown whenever the webview has yet to composite a
 // frame - a cold start, a reload, or any moment the UI is mid-repaint. The
@@ -49,6 +45,96 @@ fn surface_for_theme(theme: tauri::Theme) -> tauri::window::Color {
         tauri::Theme::Light => LIGHT_SURFACE,
         _ => DARK_SURFACE,
     }
+}
+
+/// How long a window may stay hidden before it is shown regardless.
+///
+/// Windows are built hidden and the frontend shows them on its first finished
+/// screen (src/lib/app-reveal.js). The frontend has its own 2.5s failsafe; this
+/// one covers the case where no JS runs at all (a broken bundle, a webview that
+/// never loads), which would otherwise leave a live process with no window.
+const REVEAL_FAILSAFE: std::time::Duration = std::time::Duration::from_secs(4);
+
+pub(crate) fn arm_reveal_failsafe(window: &tauri::WebviewWindow) {
+    let window = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(REVEAL_FAILSAFE);
+        if !window.is_visible().unwrap_or(true) {
+            let _ = window.show();
+        }
+    });
+}
+
+/// Paint the webview's own backdrop, whichever webview this platform uses.
+///
+/// The window background set by `set_background_color` is behind the webview
+/// widget, and the widget fills the window - so what the user actually sees
+/// before the page paints is the *webview's* backdrop, which defaults to white
+/// on all three engines. The page then boots at `opacity: 0` (index.html) and
+/// stays there until the first finished screen, so that white sits on screen
+/// for the whole startup, not just a frame.
+///
+/// Each engine names the knob differently and none of them is reachable through
+/// Tauri's own API:
+///   - WKWebView (macOS):    `underPageBackgroundColor`
+///   - WebView2 (Windows):   `ICoreWebView2Controller2::DefaultBackgroundColor`
+///   - WebKitGTK (Linux):    `webkit_web_view_set_background_color`
+fn set_webview_backdrop(window: &tauri::WebviewWindow, color: tauri::window::Color) {
+    #[cfg(target_os = "macos")]
+    set_macos_webview_backdrop(window, color);
+    #[cfg(target_os = "windows")]
+    set_windows_webview_backdrop(window, color);
+    #[cfg(target_os = "linux")]
+    set_linux_webview_backdrop(window, color);
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    let _ = (window, color);
+}
+
+/// WebView2's pre-paint colour.
+///
+/// `DefaultBackgroundColor` lives on `ICoreWebView2Controller2`, a later
+/// revision of the controller Tauri hands back, so the interface is queried for
+/// rather than assumed - on a runtime too old to carry it the cast fails and the
+/// backdrop stays at the default instead of the call being a hard error.
+#[cfg(target_os = "windows")]
+fn set_windows_webview_backdrop(window: &tauri::WebviewWindow, color: tauri::window::Color) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2Controller2, COREWEBVIEW2_COLOR,
+    };
+    use windows_core::Interface;
+
+    let tauri::window::Color(r, g, b, a) = color;
+    let _ = window.with_webview(move |webview| {
+        if let Ok(controller) = webview.controller().cast::<ICoreWebView2Controller2>() {
+            // A is the alpha channel of the backdrop itself: a translucent value
+            // would let the (white) host window show through again, so it stays
+            // fully opaque whatever the caller passed for the window colour.
+            let _ = unsafe {
+                controller.SetDefaultBackgroundColor(COREWEBVIEW2_COLOR {
+                    A: a,
+                    R: r,
+                    G: g,
+                    B: b,
+                })
+            };
+        }
+    });
+}
+
+/// WebKitGTK's pre-paint colour.
+#[cfg(target_os = "linux")]
+fn set_linux_webview_backdrop(window: &tauri::WebviewWindow, color: tauri::window::Color) {
+    use webkit2gtk::WebViewExt;
+
+    let tauri::window::Color(r, g, b, a) = color;
+    let _ = window.with_webview(move |webview| {
+        webview.inner().set_background_color(&gdk::RGBA::new(
+            r as f64 / 255.0,
+            g as f64 / 255.0,
+            b as f64 / 255.0,
+            a as f64 / 255.0,
+        ));
+    });
 }
 
 /// Paint the webview's own backdrop on macOS.
@@ -181,24 +267,6 @@ fn unlock_macos_webview_frame_rate(window: &tauri::WebviewWindow) {
     });
 }
 
-/// Resolve the tray icon that matches the current system appearance.
-/// A dark mark sits on the light menu bar; a light mark on the dark menu bar,
-/// so the logo stays visible regardless of the OS theme.
-fn tray_icon_for_theme(
-    app: &tauri::AppHandle,
-    theme: tauri::Theme,
-) -> Option<tauri::image::Image<'static>> {
-    let name = match theme {
-        tauri::Theme::Dark => "icons/tray-light.png",
-        _ => "icons/tray-dark.png",
-    };
-    let path = app
-        .path()
-        .resolve(name, tauri::path::BaseDirectory::Resource)
-        .ok()?;
-    tauri::image::Image::from_path(path).ok()
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Linux WebKitGTK rendering fix - set before any threads spawn.
@@ -272,6 +340,15 @@ pub fn run() {
             .min_inner_size(960.0, 600.0)
             .resizable(true)
             .maximized(true)
+            // Hidden until the page has its first finished screen: revealApp()
+            // in src/lib/app-reveal.js shows it. A window visible from build()
+            // put every pre-paint layer on screen in turn - the host surface,
+            // the webview backdrop, the maximize resize - and on Windows that
+            // read as the window flickering between two blacks for half a second
+            // before the app appeared. tao keeps MAXIMIZED across the hide, and
+            // show() issues SW_SHOW then SW_MAXIMIZE, so the OS still records a
+            // real maximized state (minimize -> restore keeps working).
+            .visible(false)
             // Never let the default white surface show. The real theme is only
             // known to the frontend (localStorage), so start on the dark base -
             // 11 of the 16 themes are dark - and correct to light right after
@@ -327,8 +404,8 @@ pub fn run() {
             let window_theme = window.theme().unwrap_or(tauri::Theme::Dark);
             let surface = surface_for_theme(window_theme);
             let _ = window.set_background_color(Some(surface));
-            #[cfg(target_os = "macos")]
-            set_macos_webview_backdrop(&window, surface);
+            set_webview_backdrop(&window, surface);
+            arm_reveal_failsafe(&window);
 
             #[cfg(target_os = "macos")]
             {
@@ -374,71 +451,17 @@ pub fn run() {
                     .level(log::LevelFilter::Info)
                     .build(),
             )?;
-            // ── System tray ───────────────────────────────────────────────────
-            let show_item = MenuItem::with_id(app, "show", "Open Stroke", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit Stroke", true, None::<&str>)?;
-            let sep = PredefinedMenuItem::separator(app)?;
-
-            let tray_menu = Menu::with_items(app, &[&show_item, &sep, &quit_item])?;
-
-            // Dedicated tray icon (Stroke mark) chosen to stay visible against the
-            // current system menu-bar theme; swapped live on ThemeChanged below.
-            let initial_theme = window.theme().unwrap_or(tauri::Theme::Light);
-            let tray_icon = tray_icon_for_theme(app.handle(), initial_theme)
-                .unwrap_or_else(|| app.default_window_icon().unwrap().clone());
-
-            let _tray = TrayIconBuilder::with_id("main-tray")
-                .icon(tray_icon)
-                .menu(&tray_menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
-                })
-                .build(app)?;
-
-            // ── Hide to tray on close instead of quitting ─────────────────────
+            // No tray and no hide-on-close: closing the last window quits the
+            // process. Hiding to the tray left a live instance behind on every
+            // close, and each relaunch added another icon next to the old ones.
             let app_handle = app.handle().clone();
             window.on_window_event(move |event| match event {
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    api.prevent_close();
-                    if let Some(w) = app_handle.get_webview_window("main") {
-                        let _ = w.hide();
-                    }
-                }
-                // Keep the tray mark visible when the OS flips light/dark, and keep
-                // the pre-paint surface on the same end of the scale.
+                // Keep the pre-paint surface on the same end of the scale as the OS.
                 tauri::WindowEvent::ThemeChanged(theme) => {
-                    if let Some(tray) = app_handle.tray_by_id("main-tray") {
-                        if let Some(icon) = tray_icon_for_theme(&app_handle, *theme) {
-                            let _ = tray.set_icon(Some(icon));
-                        }
-                    }
                     if let Some(w) = app_handle.get_webview_window("main") {
                         let surface = surface_for_theme(*theme);
                         let _ = w.set_background_color(Some(surface));
-                        #[cfg(target_os = "macos")]
-                        set_macos_webview_backdrop(&w, surface);
+                        set_webview_backdrop(&w, surface);
                     }
                 }
                 _ => {}
@@ -463,6 +486,7 @@ pub fn run() {
             commands::ai_fetch_page,
             commands::read_file,
             commands::open_new_window,
+            commands::reveal_window,
             commands::restart_app,
             commands::toggle_devtools,
             commands::test_postgres_connection,
@@ -597,9 +621,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
-            // Real exit only (tray Quit / OS shutdown) - the hide-to-tray
-            // CloseRequested path never reaches here. Reap the OmniRoute proxy
-            // we spawned, or it survives every app quit.
+            // The last window closed, or the OS is shutting down. Reap the
+            // OmniRoute proxy we spawned, or it survives every app quit.
             if let tauri::RunEvent::Exit = event {
                 app.state::<omniroute::OmniRouteState>().kill_now();
             }

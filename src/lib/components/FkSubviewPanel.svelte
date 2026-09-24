@@ -38,6 +38,32 @@
     onfullview = () => {},
   } = $props()
 
+  /**
+   * What the panel draws. Every lookup replaces `data` with an empty
+   * `{ loading: true, rows: [] }` first, so drawing `data` directly blanked the
+   * table - headers and all - for the frames between clicking another row's key
+   * and its result landing. Holding the last settled result until the next one
+   * arrives turns that into a single swap. It is only reused for the same
+   * relationship: another relationship's columns would be the wrong table.
+   */
+  let settled = $state.raw(/** @type {any} */ (null))
+  let settledLabel = $state('')
+  $effect(() => {
+    if (data && !data.loading) {
+      settled = data
+      settledLabel = fkLabel
+    }
+  })
+  const view = $derived(data?.loading && settled && settledLabel === fkLabel ? settled : data)
+
+  /** `data.loading`, held back ~220ms (the grid's SPAN_SHOW_AFTER) so it never flashes. */
+  let loadingVisible = $state(false)
+  $effect(() => {
+    if (!data?.loading) { loadingVisible = false; return }
+    const t = setTimeout(() => (loadingVisible = true), 220)
+    return () => clearTimeout(t)
+  })
+
   /** @param {unknown} v */
   function fmt(v) {
     if (v === null || v === undefined) return 'NULL'
@@ -45,8 +71,8 @@
     return String(v)
   }
 
-  const rowCount = $derived(data?.rows?.length ?? 0)
-  const colNames = $derived((data?.columns ?? []).map((c) => c.name ?? c))
+  const rowCount = $derived(view?.rows?.length ?? 0)
+  const colNames = $derived((view?.columns ?? []).map((c) => c.name ?? c))
 
   /**
    * Column widths and alignment, from the same two helpers the grid above sizes
@@ -57,7 +83,7 @@
    * the grid's.
    */
   const cols = $derived(
-    (data?.columns ?? []).map((c) => {
+    (view?.columns ?? []).map((c) => {
       const type = c.dataType ?? c.data_type ?? ''
       return {
         name: c.name ?? c,
@@ -85,13 +111,13 @@
 
   // A new result set invalidates any cell coordinate held from the previous one.
   $effect(() => {
-    void data
+    void view
     sel = null
   })
 
   /** @param {number} i row index @param {number} j column index */
   function cellAt(i, j) {
-    const row = data?.rows?.[i]
+    const row = view?.rows?.[i]
     if (row === undefined) return undefined
     return Array.isArray(row) ? row[j] : row[colNames[j]]
   }
@@ -107,7 +133,7 @@
   /** Tab-separated, which is what spreadsheets and editors paste as columns. */
   function allTsv() {
     const header = colNames.join('\t')
-    const body = data.rows.map((_, i) => colNames.map((_, j) => fmt(cellAt(i, j))).join('\t'))
+    const body = view.rows.map((_, i) => colNames.map((_, j) => fmt(cellAt(i, j))).join('\t'))
     return [header, ...body].join('\n')
   }
 
@@ -172,7 +198,7 @@
     {#if sourceHint}
       <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground">({sourceHint})</span>
     {/if}
-    {#if !data?.loading && !data?.error}
+    {#if !view?.loading && !view?.error}
       <span class="shrink-0 font-mono text-ui-2xs text-muted-foreground">
         {rowCount}{rowCount >= 50 ? '+' : ''} row{rowCount !== 1 ? 's' : ''}
       </span>
@@ -211,18 +237,24 @@
   </div>
 
   <!-- Content, three visually distinct states: loading / failed / empty -->
-  {#if data?.loading}
+  {#if view?.loading}
+    <!-- The row keeps its height from the first frame; only the spinner waits,
+         so a lookup that lands a frame later never flashes it. -->
     <div class="flex flex-1 items-center gap-2 px-3 py-4">
-      <Loader class="size-3.5 animate-spin text-muted-foreground" />
-      <span class="font-mono text-ui-2xs text-muted-foreground">Loading related rows…</span>
+      {#if loadingVisible}
+        <span class="flex items-center gap-2 animate-in fade-in duration-300">
+          <Loader class="size-3.5 animate-spin text-muted-foreground" />
+          <span class="font-mono text-ui-2xs text-muted-foreground">Loading related rows…</span>
+        </span>
+      {/if}
     </div>
 
-  {:else if data?.error}
+  {:else if view?.error}
     <div class="flex flex-1 items-start gap-2 px-3 py-3">
       <TriangleAlert class="mt-px size-3.5 shrink-0 text-destructive" />
       <div class="min-w-0">
         <div class="text-ui-2xs font-medium text-destructive">Couldn't load related rows</div>
-        <div class="mt-0.5 font-mono text-ui-2xs leading-relaxed break-words text-muted-foreground">{data.error}</div>
+        <div class="mt-0.5 font-mono text-ui-2xs leading-relaxed break-words text-muted-foreground">{view.error}</div>
       </div>
     </div>
 
@@ -235,7 +267,7 @@
   {:else}
     <!-- The dock owns this scroll, both axes contained here, never chained to
          the grid (the panel lives outside the grid's scroll container). -->
-    <div class="app-scroll min-h-0 flex-1 overflow-auto overscroll-contain" data-fk-subview-scroll>
+    <div class={cn("app-scroll min-h-0 flex-1 overflow-auto overscroll-contain transition-opacity duration-200", data?.loading && loadingVisible && "opacity-60")} data-fk-subview-scroll>
       <ContextMenu.Root>
         <ContextMenu.Trigger>
           {#snippet child({ props })}
@@ -289,7 +321,7 @@
               </thead>
 
               <tbody>
-                {#each data.rows as row, i (i)}
+                {#each view.rows as row, i (i)}
                   <tr
                     class={cn(
                       'group/row',
@@ -303,7 +335,7 @@
                       <td
                         class={cn(
                           'select-none text-right align-middle tabular-nums text-muted-foreground/60',
-                          metrics.rowRules && i < data.rows.length - 1 && 'border-b border-border/15',
+                          metrics.rowRules && i < view.rows.length - 1 && 'border-b border-border/15',
                         )}
                         style="height:{metrics.rowH}px; padding:0 {Math.round(7 * metrics.zoom)}px"
                       >{i + 1}</td>
@@ -321,7 +353,7 @@
                         aria-selected={isSel}
                         class={cn(
                           'cursor-default overflow-hidden align-middle text-ellipsis whitespace-nowrap outline-none',
-                          metrics.rowRules && i < data.rows.length - 1 && 'border-b border-border/15',
+                          metrics.rowRules && i < view.rows.length - 1 && 'border-b border-border/15',
                           metrics.colRules && 'border-r border-r-border/15',
                           c.alignRight && 'text-right tabular-nums',
                           isNullVal && 'italic text-muted-foreground/70',
@@ -361,7 +393,7 @@
           </ContextMenu.Item>
           <ContextMenu.Item
             disabled={!sel}
-            onSelect={() => sel && copy(data.rows.map((_, i) => fmt(cellAt(i, sel.c))).join('\n'), `Column ${colNames[sel.c]}`)}
+            onSelect={() => sel && copy(view.rows.map((_, i) => fmt(cellAt(i, sel.c))).join('\n'), `Column ${colNames[sel.c]}`)}
           >
             <Columns3 />
             Copy column
@@ -371,7 +403,7 @@
             <Table />
             Copy all rows
           </ContextMenu.Item>
-          <ContextMenu.Item onSelect={() => copy(JSON.stringify(data.rows.map((_, i) => rowObject(i)), null, 2), 'All rows JSON')}>
+          <ContextMenu.Item onSelect={() => copy(JSON.stringify(view.rows.map((_, i) => rowObject(i)), null, 2), 'All rows JSON')}>
             <Braces />
             Copy all as JSON
           </ContextMenu.Item>

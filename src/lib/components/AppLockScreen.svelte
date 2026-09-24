@@ -3,6 +3,7 @@
   // cold start the app is not mounted behind it at all (see AppLockGate); after
   // an idle auto-lock the session is still there, covered and key-deaf.
   import { onMount } from 'svelte'
+  import { revealApp } from '$lib/app-reveal.js'
   import Logo from './Logo.svelte'
   import Icon from './Icon.svelte'
   import PinField from './PinField.svelte'
@@ -20,6 +21,7 @@
   let isTauri = $state(false)
   onMount(() => {
     isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+    revealApp()
   })
 
   /** @param {MouseEvent} e */

@@ -80,7 +80,9 @@ describe('svelte lifecycle imports', () => {
         if (imported.has(api)) continue
         // A call, not a mention: `onDestroy(` at an identifier boundary, and not
         // as a property (`this.tick(`) or a declaration of the same name.
-        const called = new RegExp(`(?<![.\\w$])${api}\\s*\\(`).test(code)
+        // Method shorthand (`mount() {` in a CodeMirror panel) is a definition,
+        // not a call, so a parameter list followed by a body is skipped.
+        const called = new RegExp(`(?<![.\\w$])${api}\\s*\\((?![^)]*\\)\\s*\\{)`).test(code)
         const declared = new RegExp(`(?:function|const|let|var)\\s+${api}\\b`).test(code)
         if (called && !declared) missing.push(`${file}: ${api}() called but not imported from 'svelte'`)
       }

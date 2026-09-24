@@ -418,6 +418,20 @@ Or use the included Arch helper:
 npm run tauri:build:arch
 ```
 
+**Release installers on your own machine** — no CI needed:
+
+```bash
+npm run tauri:build:mac                  # macOS .app + .dmg (on a Mac)
+npm run tauri:build:win                  # Windows x64 setup .exe - native on Windows,
+                                         # cross-compiled from macOS/Linux
+npm run tauri:build:local -- mac-x64     # also: host (default), linux
+```
+
+The Windows cross-build needs NSIS, LLVM and `cargo-xwin` (macOS:
+`brew install nsis llvm && cargo install --locked cargo-xwin`); the script checks
+for each and prints what is missing. macOS and Linux bundles only build on their
+own OS. Details and the DuckDB workaround are in `scripts/build-local.mjs`.
+
 ---
 
 ## Contributing

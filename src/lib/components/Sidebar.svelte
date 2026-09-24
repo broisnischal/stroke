@@ -1153,6 +1153,9 @@
   const isFilterKey = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f'
   const isEscClear = e.key === 'Escape' && selectedItems.size > 0
   if (!isFilterKey && !isEscClear) return
+  // A code editor handles its own Mod-F (find and replace) and marks the key
+  // handled; stealing it here sent focus to the sidebar filter instead.
+  if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('.cm-editor'))) return
   // Guard: filterEl.offsetParent is null when sidebar is hidden via display:none
   if (!filterEl || !filterEl.offsetParent) return
   if (isFilterKey) {
@@ -1609,11 +1612,20 @@
             // a list you cannot tab out of is a focus trap - and Shift+Tab off
             // the first returns to the filter the list was narrowed from.
             // Shift+Enter (above) is the deliberate way into the grid.
-            if (e.key === 'Tab') {
+            // `e.code` as well as `e.key`: on WebKitGTK, Shift+Tab reaches the
+            // page as GTK's ISO_Left_Tab keysym rather than "Tab", so a key-name
+            // check skipped this branch and the browser's own Shift+Tab moved
+            // focus to the previous tab stop - the filter - instead of the
+            // previous row. The physical key is Tab on every engine.
+            if (e.key === 'Tab' || e.code === 'Tab') {
               const onRow = e.target instanceof Element && e.target.closest('[data-sidebar-row]')
               if (!onRow) return
               const rows = listRowButtons()
-              const i = rows.indexOf(/** @type {HTMLElement} */ (document.activeElement))
+              // The ROW, not document.activeElement: the row's checkbox span is
+              // tabindex="-1", so a click near the icon focuses the span, which
+              // is in no row list - every Shift+Tab from there fell through to
+              // the filter instead of going to the previous table.
+              const i = rows.indexOf(/** @type {HTMLElement} */ (onRow))
               const next = i === -1 ? null : rows[i + (e.shiftKey ? -1 : 1)]
               if (next) {
                 e.preventDefault(); kbdNav = true; next.focus()
@@ -1632,7 +1644,8 @@
             // box - the field the list was narrowed from.
             if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return
             const rows = listRowButtons()
-            const i = rows.indexOf(/** @type {HTMLElement} */ (document.activeElement))
+            const focusedRow = e.target instanceof Element ? e.target.closest('[data-sidebar-row]') : null
+            const i = rows.indexOf(/** @type {HTMLElement} */ (focusedRow))
             if (i === -1) return
             e.preventDefault()
             kbdNav = true

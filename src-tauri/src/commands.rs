@@ -288,6 +288,8 @@ pub fn open_new_window(app: tauri::AppHandle) -> Result<(), String> {
     .inner_size(1280.0, 800.0)
     .min_inner_size(960.0, 600.0)
     .resizable(true)
+    // Hidden until its page reveals itself, same as the main window.
+    .visible(false)
     .background_color(tauri::window::Color(8, 8, 8, 255));
 
     #[cfg(target_os = "macos")]
@@ -302,9 +304,20 @@ pub fn open_new_window(app: tauri::AppHandle) -> Result<(), String> {
     }
 
     let window = builder.build().map_err(|e| e.to_string())?;
-    let _ = window.show();
-    let _ = window.set_focus();
+    crate::arm_reveal_failsafe(&window);
     Ok(())
+}
+
+/// Show the calling window. Windows are built hidden and the frontend calls this
+/// on its first finished screen (src/lib/app-reveal.js). An app command rather
+/// than the core `window.show` so it works from every window label - the
+/// capability file only grants core window permissions to `main`.
+#[tauri::command]
+pub fn reveal_window(window: tauri::WebviewWindow) {
+    if !window.is_visible().unwrap_or(false) {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 /// Restart the application - called after an update is installed.

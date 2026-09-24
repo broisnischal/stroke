@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy, untrack, tick } from 'svelte'
   import { fade } from 'svelte/transition'
+  import { revealApp, isRevealed } from '$lib/app-reveal.js'
   import { setReadOnly } from '$lib/stores/read-only.js'
   import { isWriteSql } from '$lib/sql-write.js'
   import Logo from './Logo.svelte'
@@ -367,6 +368,14 @@
    * @param {string} name
    * @param {'Connecting' | 'Reconnecting'} [verb]
    */
+  /** Longest a startup reconnect keeps the window hidden before showing the overlay. */
+  const RECONNECT_REVEAL_MS = 700
+  /** Set by the startup reconnect: reveal the page once the tables have loaded. */
+  let revealOnTables = $state(false)
+  $effect(() => {
+    if (revealOnTables && connection && !loadingTables) revealApp()
+  })
+
   function beginConnectOverlay(name, verb = 'Connecting') {
     autoConnectName = name ?? ''
     autoConnectVerb = verb
@@ -2261,6 +2270,10 @@ let rowSearch = $state('')
 
   createHotkey('Mod+F', (e) => {
     if (commandOpen || showConnectionModal || showSettingsModal) return
+    // Inside a code editor (the cell panel's CodeMirror, its find bar
+    // included) Mod+F is the editor's own find and replace. Taking it here
+    // pulled focus up to the table's row search instead.
+    if (e.target instanceof Element && e.target.closest('.cm-editor')) return
     // Find means "search what this page is showing", and on the objects page
     // that is its own box. It used to mean nothing there at all.
     if (activeTab?.kind === 'objects') { e.preventDefault(); objectsFocusSearch?.(); return }
@@ -2522,6 +2535,8 @@ let rowSearch = $state('')
 
   // Find & replace in the current table - editor-style Ctrl/⌘+H.
   createHotkey('Mod+H', (e) => {
+    // In a code editor this is the editor's own replace, not the table's.
+    if (e.target instanceof Element && e.target.closest('.cm-editor')) return
     if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
     e.preventDefault()
     openFindReplacePanel()
@@ -2531,6 +2546,8 @@ let rowSearch = $state('')
   // swallows Cmd+H to hide the app, so Mod+H never reaches us there - this is the
   // reliable cross-platform binding.
   createHotkey('Mod+Alt+F', (e) => {
+    // In a code editor this is the editor's own replace, not the table's.
+    if (e.target instanceof Element && e.target.closest('.cm-editor')) return
     if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
     e.preventDefault()
     openFindReplacePanel()
@@ -6098,29 +6115,41 @@ let rowSearch = $state('')
       // Non-critical - don't block app start if Tauri backend unavailable (browser dev)
     }
 
+    // Every branch below reveals the page on its own first screen (onboarding,
+    // the connection modal, the welcome screen), except the startup reconnect,
+    // which holds the window back until the shell has its tables - see there.
+
     // First-time user - show onboarding instead of bare connection modal
     try {
       if (!localStorage.getItem(ONBOARDING_KEY)) {
         showOnboarding = true
+        revealApp()
         return
       }
     } catch {}
 
     const last = getLastConnection()
-    if (!last) { showConnectionModal = true; return }
+    if (!last) { showConnectionModal = true; revealApp(); return }
 
     // Disconnect is a decision, and it survives a restart. Coming back connected
     // to the database someone deliberately stepped away from - on a reload, or
     // the next morning - is the one outcome that command exists to prevent, so
     // this launch stays on the welcome screen. The connection is still saved and
     // still the highlighted one; reconnecting is a click.
-    if (wasDisconnected()) return
+    if (wasDisconnected()) { revealApp(); return }
 
     // Respect the "auto reconnect on startup" setting - if disabled, go straight
     // to the connection modal instead of re-connecting silently.
-    if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; return }
+    if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; revealApp(); return }
 
     beginConnectOverlay(last.name ?? '', 'Reconnecting')
+    // A warm reconnect and its table list land in a few hundred ms. Revealing
+    // on the overlay meant three screens in that time - "Reconnecting", an empty
+    // shell with a skeleton sidebar, then the tables - which is the startup
+    // flicker. Stay hidden until the tables are in (the effect watching
+    // `revealOnTables`) and only fall back to the overlay when it runs long.
+    revealOnTables = true
+    setTimeout(revealApp, RECONNECT_REVEAL_MS)
     // The backend already enforces its own per-engine deadlines (DNS + TCP preflight,
     // a 20s connect deadline for Postgres, HTTP timeouts for the REST engines) and
     // fails with a message the user can act on. This race is only a last-resort guard
@@ -6157,6 +6186,8 @@ let rowSearch = $state('')
       showConnectionModal = true
     } finally {
       autoConnecting = false
+      // Failed, cancelled or timed out: whatever screen is up now is final.
+      revealApp()
     }
   })
 
@@ -7234,10 +7265,14 @@ let rowSearch = $state('')
        catalog (schemas/tables/counts) stream into the sidebar skeletons. -->
   <div
     class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-7 bg-background"
-    out:fade={{ duration: 200 }}
+    out:fade={{ duration: isRevealed() ? 120 : 0 }}
   >
+    <!-- The ring and the label wait before they appear. A warm reconnect lands
+         in a few hundred ms, and showing them at once flashed "Reconnecting"
+         for a moment, then faded it out over the shell - on a cold start that
+         read as the window flickering. The plain surface covers the wait. -->
     <!-- Spinning ring + logo -->
-    <div class="relative flex size-[88px] items-center justify-center">
+    <div class="relative flex size-[88px] items-center justify-center" in:fade={{ delay: 350, duration: 150 }}>
       <svg class="absolute inset-0 size-full animate-spin" viewBox="0 0 88 88" fill="none" aria-hidden="true">
         <circle cx="44" cy="44" r="42" stroke="currentColor" stroke-width="1.5"
           stroke-dasharray="44 220" stroke-linecap="round"
@@ -7249,7 +7284,7 @@ let rowSearch = $state('')
     </div>
 
     <!-- Text -->
-    <div class="flex max-w-sm flex-col items-center gap-1.5 text-center">
+    <div class="flex max-w-sm flex-col items-center gap-1.5 text-center" in:fade={{ delay: 350, duration: 150 }}>
       <p class="max-w-full truncate text-ui-sm font-medium text-foreground/70">
         {autoConnectVerb}{autoConnectName ? ` to ${shortConnLabel(autoConnectName)}` : ''}
       </p>
@@ -8515,63 +8550,15 @@ let rowSearch = $state('')
                own axis: a centred logo over a centred label over a centred meta
                line over a left-aligned grid, so nothing lined up with anything
                and the tiles read as off-centre against the text above them.
-               `max-w-lg` is the grid's width, so the header, the list and the
+               `max-w-xl` is the grid's width, so the header, the list and the
                footer now all start where the first tile starts. -->
-          <div class="mx-auto flex min-h-full w-full max-w-lg flex-col justify-center gap-7 px-6 py-10 sm:gap-9 sm:py-12">
+          <div class="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center gap-7 px-6 py-10 sm:gap-9 sm:py-12">
 
           <!-- Header -->
           <div class="flex flex-col items-start gap-3">
             <div class="flex size-11 items-center justify-center rounded-lg border border-border bg-muted">
               <Logo class="size-6" />
             </div>
-            <p class="text-ui-3xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Quick access</p>
-            {#if connection}
-              <div class="flex w-full min-w-0 flex-col gap-1.5">
-                <span class="flex min-w-0 items-center gap-2 font-mono text-ui-sm font-medium text-foreground">
-                  <span class="size-1.5 shrink-0 rounded-full bg-success" aria-hidden="true"></span>
-                  <span class="truncate">{connection.database ?? connection.filePath?.split('/').at(-1) ?? connection.name ?? connection.databaseId ?? 'connected'}</span>
-                </span>
-                <!-- The facts a fresh tab actually needs before it runs anything:
-                     which engine, which schema the next query resolves against,
-                     and where the server is. The schema was the one missing, and
-                     it is the one that silently changes what an unqualified table
-                     name means. `dl` because these are label/value pairs; the
-                     labels stay visible rather than living in a tooltip. -->
-                <dl class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 font-mono text-ui-2xs text-muted-foreground">
-                  <div class="flex min-w-0 items-center gap-1.5">
-                    <dt class="shrink-0 text-muted-foreground/60">engine</dt>
-                    <dd class="truncate capitalize text-foreground/80">{dbType}</dd>
-                  </div>
-                  {#if schemas.length > 0 && activeSchema}
-                    <div class="flex min-w-0 items-center gap-1.5">
-                      <dt class="shrink-0 text-muted-foreground/60">schema</dt>
-                      <dd class="truncate text-foreground/80">{activeSchema}</dd>
-                    </div>
-                  {/if}
-                  <div class="flex min-w-0 items-center gap-1.5">
-                    <dt class="shrink-0 text-muted-foreground/60">tables</dt>
-                    <dd class="tabular-nums text-foreground/80">{tables.length.toLocaleString('en-US')}</dd>
-                  </div>
-                  {#if connection.host}
-                    <div class="flex min-w-0 items-center gap-1.5">
-                      <dt class="shrink-0 text-muted-foreground/60">host</dt>
-                      <dd class="truncate text-foreground/80">{connection.host}{connection.port ? `:${connection.port}` : ''}</dd>
-                    </div>
-                  {:else if connection.filePath}
-                    <div class="flex min-w-0 items-center gap-1.5">
-                      <dt class="shrink-0 text-muted-foreground/60">file</dt>
-                      <dd class="truncate text-foreground/80" title={connection.filePath}>{connection.filePath}</dd>
-                    </div>
-                  {/if}
-                  {#if connection.user}
-                    <div class="flex min-w-0 items-center gap-1.5">
-                      <dt class="shrink-0 text-muted-foreground/60">user</dt>
-                      <dd class="truncate text-foreground/80">{connection.user}</dd>
-                    </div>
-                  {/if}
-                </dl>
-              </div>
-            {/if}
           </div>
           <!-- Five tiles, not sixteen. Sixteen equal-weight tiles asked you to read
                the whole grid to find the one you wanted; these five are what a tab
@@ -8585,6 +8572,11 @@ let rowSearch = $state('')
                  not fit is not a launcher. The fifth tile was Shortcuts, which the
                  footer below already offers, so dropping it cost nothing and left
                  an exact row. -->
+          <!-- The label sits in the same gap-2 column as the tiles, exactly as
+               "Jump to" does with its list. In the header it was a full section
+               gap away from the tiles, so it read as a caption for the logo. -->
+          <div class="flex w-full flex-col gap-2">
+            <p class="text-ui-3xs font-medium uppercase tracking-[0.1em] text-muted-foreground">Quick access</p>
             <div class="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
             {#if isRedis}
               {@render row(KeyRound, "Keyspace", "Browse keys and values", openRedisTab, {})}
@@ -8596,6 +8588,7 @@ let rowSearch = $state('')
             {/if}
             {@render row(Blocks, "Extensions", "Add and manage extensions", openExtensionsTab, { pro: true, keys: [mod, shiftKey, "X"] })}
             {@render row(Database, "Connect", "Switch or add a connection", () => (showConnectionModal = true), { keys: [mod, shiftKey, "C"] })}
+            </div>
           </div>
 
           {#if connection && !isRedis}
@@ -8608,7 +8601,7 @@ let rowSearch = $state('')
                  weight. Same max width as the grid above, so both blocks sit on
                  one alignment edge. -->
             <div class="flex w-full flex-col gap-2">
-              <p class="text-ui-3xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Jump to</p>
+              <p class="text-ui-3xs font-medium uppercase tracking-[0.1em] text-muted-foreground">Jump to</p>
               <!-- Two columns of four. Three columns left an orphan row of two
                    hanging under a full one, which is the shape that reads as
                    "unfinished" no matter how the items are ordered. -->
