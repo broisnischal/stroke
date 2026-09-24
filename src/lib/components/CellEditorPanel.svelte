@@ -49,11 +49,6 @@
   import { cn } from '$lib/utils.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
   import Kbd from './Kbd.svelte'
-  import JsonTree from './JsonTree.svelte'
-  import Search from '@lucide/svelte/icons/search'
-  import { searchJson, matchOffsets, splitHighlight } from '$lib/json-search.js'
-  import Braces from '@lucide/svelte/icons/braces'
-  import { resetInputHistory } from '$lib/input-shortcuts.js'
 
   let {
     open = $bindable(false),
@@ -106,6 +101,9 @@
   let original = $state('')
   /** @type {HTMLTextAreaElement | null} */
   let area = $state(null)
+  /** The raw pane's editor (CodeMirror). `area` is now only the heavy-value window. */
+  /** @type {any} */
+  let cm = $state(null)
   /** @type {HTMLElement | null} */
   let root = $state(null)
 
@@ -139,21 +137,32 @@
     original = text
     draft = text
     seedToken++
+    // Structured text opens unwrapped: pretty-printed JSON is short lines
+    // already, and unwrapped is what lets the gutter number them. Prose keeps
+    // wrapping. Alt+Z still flips it either way.
+    wrap = !/^\s*[[{]/.test(text)
     // Undo/redo, word-delete and line-delete for every plain field in the app
     // live in `input-shortcuts.js`, and its history is keyed by element. This
     // textarea outlives the cell it is showing, so the history has to be
     // dropped whenever it is re-pointed - otherwise ⌘Z in one cell walks back
     // into the value of a cell you have already left.
-    queueMicrotask(() => {
-      resetInputHistory(area)
-      // Focus the textarea on open, because editing is what the raw pane is
-      // for - but only then. A JSON cell opens on the tree, and taking focus
-      // there would cost the thing that makes this a dock rather than a
-      // dialog: the grid keeps the cursor, arrow keys still move it, and the
-      // panel follows. Escape from the grid closes the dock through the grid's
-      // own handler; Escape from inside the dock goes through `onRootKey`.
-      if (justOpened && rawOpen) area?.focus()
-    })
+    // Opening the dock puts the caret in the editor - but only on open. Moving
+    // the grid cursor with the dock already up re-points it without taking
+    // focus, so arrow keys keep walking the grid. Escape from the editor
+    // closes the dock (`onRootKey`).
+    if (justOpened) focusOnReady = true
+  })
+
+  /**
+   * Focus waits for the editor to exist. It is lazy-loaded, so on the first
+   * open `cm` is still null when the cell is seeded - the old `cm?.focus()`
+   * ran then and did nothing.
+   */
+  let focusOnReady = $state(false)
+  $effect(() => {
+    if (!focusOnReady || !cm || !open) return
+    focusOnReady = false
+    queueMicrotask(() => cm?.focus())
   })
 
   const dirty = $derived(draft !== original)
@@ -174,8 +183,6 @@
   const HEAVY_VALUE_CHARS = 2 * 1024 * 1024
 
   const heavy = $derived(draft.length > HEAVY_VALUE_CHARS)
-  /** Set by "Render it anyway" - one parse, on demand, for a heavy value. */
-  let forceParse = $state(false)
 
   /**
    * How much of a heavy value the raw pane shows at once.
@@ -227,12 +234,14 @@
     windowDraft = next
     windowLen = next.length
   }
-  // A new cell is a new decision.
-  $effect(() => { void colName; void sourceHint; forceParse = false })
 
-  const parsed = $derived.by(() => {
-    const t = draft.trim()
-    if (!t || (t[0] !== '{' && t[0] !== '[')) return null
+  /**
+   * The one thing left of the old tree pane: saying when the text on screen is
+   * not the whole value. The tree itself is gone - the editor already shows the
+   * structure (colours, folding, brackets), and the tree re-ran JSON.parse over
+   * the whole value on every keystroke to draw a second copy of it.
+   */
+  const notice = $derived.by(() => {
     // A capped cell ships its first 16KB, which for a JSON value stops
     // mid-token: parsing it can only ever fail, and reporting that failure as
     // "invalid JSON" sent people looking for a corrupt row that does not exist.
@@ -258,14 +267,7 @@
         error: `Loaded ${formatBytes(draft.length)}, which is as much of this value as this view holds. The rest is not shown, so it cannot be parsed or edited here - read it with a query if you need all of it.`,
       }
     }
-    if (heavy && !forceParse) {
-      return {
-        ok: false,
-        heavy: true,
-        error: `${formatBytes(draft.length)} of JSON. Building a tree from it means parsing the whole thing, which takes long enough to be felt - so it waits until you ask.`,
-      }
-    }
-    try { return { ok: true, value: JSON.parse(t) } } catch (e) { return { ok: false, error: String(e) } }
+    return null
   })
 
   let loadingFull = $state(false)
@@ -287,97 +289,9 @@
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`
     return `${(n / 1024 / 1024).toFixed(1)} MB`
   }
-  const isTreeable = $derived(!!parsed?.ok)
-  // A heavy value has no tree until it is asked for, so the raw text is the
-  // thing to show - and the pane it lives in is the one that was hidden.
-  $effect(() => { if (heavy && !forceParse) rawOpen = true })
+  /** The editor is the only pane now; kept as a name for the heavy-window paths. */
+  const rawOpen = true
 
-  /**
-   * Whether the raw text sits beside the tree.
-   *
-   * A JSON cell opens as the tree alone, because that is what you came to do -
-   * read the shape of it. The raw pane is one click away and is where editing
-   * happens. Plain text has no tree, so it is always the raw pane and this
-   * never applies.
-   *
-   * Latched on `isTreeable` rather than set from the seed effect: the dock
-   * follows the cell cursor, and re-deciding this on every move would override
-   * a choice made two rows ago. It flips only when the cursor crosses between a
-   * structured value and a flat one, which is when the old choice stops
-   * meaning anything.
-   */
-  let rawOpen = $state(false)
-  let _lastTreeable = /** @type {boolean | null} */ (null)
-  $effect(() => {
-    const t = isTreeable
-    if (t === _lastTreeable) return
-    _lastTreeable = t
-    rawOpen = !t
-  })
-
-  // ── Find, inside the value ────────────────────────────────────────────────
-  //
-  // A tree is the one shape you cannot scan: what you are looking for is behind
-  // a chevron three levels down. Typing here opens exactly the branches that
-  // lead to a hit and leaves the rest closed, and highlights the run that
-  // matched. The raw pane marks its hits too - see the highlight layer in the
-  // template. It used to only step the caret from match to match, on the
-  // reasoning that a textarea cannot be highlighted: true of the element
-  // itself, but the marks can be drawn behind it. Stepping alone meant typing a
-  // query showed "1/1" over a value with nothing marked on it, and even after
-  // pressing Enter the selection was invisible the moment focus went back to
-  // the find box.
-  let query = $state('')
-  /** @type {HTMLInputElement | null} */
-  let findEl = $state(null)
-  let hit = $state(0)
-
-  const treeSearch = $derived(
-    isTreeable && query ? searchJson(parsed?.value, query) : null,
-  )
-  // Searching a value this size means walking it per keystroke, twice (offsets,
-  // then highlight runs). The find box still works on everything under the line.
-  const rawHits = $derived(query && !heavy ? matchOffsets(draft, query) : [])
-  /** @type {HTMLElement | null} */
-  let hlEl = $state(null)
-  /**
-   * The raw value split into plain and matched runs, each hit carrying its index
-   * so the one the caret is on can be brighter than the others. Null when there
-   * is nothing to mark, which is what keeps the layer out of the DOM entirely
-   * for the overwhelmingly common case of no query.
-   */
-  const rawRuns = $derived.by(() => {
-    if (!query || heavy || !rawHits.length) return null
-    let n = -1
-    return splitHighlight(draft, query).map((run) => ({
-      t: run.t,
-      hit: run.hit ? ++n : -1,
-    }))
-  })
-  /** What the counter says: tree rows while the tree is what you are reading. */
-  const hitCount = $derived(rawOpen && !isTreeable ? rawHits.length : (treeSearch?.count ?? rawHits.length))
-
-  // A query that no longer matches anything should not leave the step index
-  // pointing past the end of the list.
-  $effect(() => {
-    const n = rawHits.length
-    if (hit >= n) hit = n ? n - 1 : 0
-  })
-
-  /** Select the nth match in the raw pane and scroll it into view. */
-  function stepRaw(/** @type {number} */ dir) {
-    if (!rawHits.length || !area) return
-    hit = (hit + dir + rawHits.length) % rawHits.length
-    const at = rawHits[hit]
-    if (!rawOpen) rawOpen = true
-    area.focus()
-    area.setSelectionRange(at, at + query.length)
-    // `blur`/`focus` is what makes a textarea scroll to the selection in WebKit.
-    const before = area.scrollTop
-    area.blur()
-    area.focus()
-    if (area.scrollTop === before) area.scrollTop = before
-  }
 
   /**
    * Put the stored value back.
@@ -392,22 +306,12 @@
     if (readOnly || !dirty) return
     // The tree pane has no textarea to write through; nothing to keep undoable
     // there either, since the tree is not what you edited it with.
-    if (!rawOpen || !area) {
+    if (!rawOpen || !cm) {
       draft = original
       return
     }
-    area.focus()
-    area.setSelectionRange(0, area.value.length)
-    const ok = document.execCommand?.('insertText', false, original)
-    if (!ok) {
-      area.setRangeText(original, 0, area.value.length, 'end')
-      area.dispatchEvent(new Event('input', { bubbles: true }))
-    }
-  }
-
-  function clearFind() {
-    query = ''
-    hit = 0
+    // One editor transaction, so ⌘Z brings the edited text back.
+    cm.replaceAll(original)
   }
 
   // `split` allocates an array the size of the line count; on a one-line 18MB
@@ -440,10 +344,6 @@
   // toggle still works if you want it.
   $effect(() => { if (heavy) wrap = false })
 
-  /** One entry per logical line. Values are a cell, not a file - no windowing. */
-  const lineNumbers = $derived(Array.from({ length: Math.max(1, lines) }, (_, i) => i + 1))
-  /** Sized to the widest number it will draw, so the text does not shift. */
-  const gutterW = $derived(Math.max(2, String(Math.max(1, lines)).length) * 8 + 14)
 
   // The editor's type metrics, as whole pixels. The gutter has to sit on the
   // same baseline grid as the text beside it, and a fractional line-height
@@ -451,18 +351,6 @@
   // rounds it the other way - by line 30 the numbers no longer line up.
   const LINE_H = 20
 
-  /** @type {HTMLElement | null} */
-  let gutterEl = $state(null)
-  function syncGutter() {
-    if (gutterEl && area) gutterEl.scrollTop = area.scrollTop
-    // The highlight layer has to track both axes: with wrapping off the textarea
-    // scrolls sideways, and a mark that does not follow it lands on the wrong
-    // characters rather than merely looking untidy.
-    if (hlEl && area) {
-      hlEl.scrollTop = area.scrollTop
-      hlEl.scrollLeft = area.scrollLeft
-    }
-  }
 
   function apply() {
     if (readOnly || !dirty) { open = false; return }
@@ -479,25 +367,6 @@
     }
   }
 
-  /** @param {KeyboardEvent} e */
-  function onFindKey(e) {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      // First Escape gives up the search, second closes the dock - the same
-      // order a browser's find bar uses.
-      if (query) { clearFind(); return }
-      open = false
-      return
-    }
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      e.stopPropagation()
-      if (rawHits.length) stepRaw(e.shiftKey ? -1 : 1)
-      return
-    }
-  }
-
   /**
    * Escape, from anywhere in the dock.
    *
@@ -511,63 +380,36 @@
    * @param {KeyboardEvent} e
    */
   function onRootKey(e) {
+    // A key the editor already handled (Escape closing its find panel, Mod-F
+    // opening it) is not the dock's: without this, the Escape that closed find
+    // also closed the whole dock.
+    if (e.defaultPrevented) return
     if (e.key === 'Escape') {
       e.preventDefault()
       e.stopPropagation()
       open = false
       return
     }
-    // ⌘F / Ctrl+F puts the caret in the find field, as it does everywhere else.
+    // ⌘F / Ctrl+F from anywhere in the dock opens the editor's find panel.
+    // Inside the editor its own keymap has already done it (defaultPrevented).
     if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
       e.preventDefault()
       e.stopPropagation()
-      findEl?.focus()
-      findEl?.select()
+      cm?.find()
       return
     }
   }
 
   /** @param {KeyboardEvent} e */
-  function onKey(e) {
+  /** The panel's keys, handed to the editor so they win over its defaults. */
+  const editorKeys = [
     // Cmd/Ctrl+Enter applies, matching every other multi-line editor in the app.
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-      e.preventDefault()
-      apply()
-      return
-    }
-    // Alt+Z toggles wrap, as it does in VS Code and every editor that copied it.
-    if (e.altKey && (e.key === 'z' || e.key === 'Z')) {
-      e.preventDefault()
-      wrap = !wrap
-      return
-    }
-    // Alt+R reverts. In the same Alt+letter family as the wrap toggle, and
-    // `preventDefault` is what stops macOS inserting ® instead - the same reason
-    // Alt+Z above does not leave an Ω behind.
-    if (e.altKey && (e.key === 'r' || e.key === 'R')) {
-      e.preventDefault()
-      revert()
-      return
-    }
-    // Tab indents rather than leaving the field - this is an editor, and the
-    // values that need it are JSON and SQL. Shift+Tab still tabs out.
-    //
-    // Inserted through `execCommand`, not by assigning `draft`: a state write
-    // changes the value without an `input` event, so the shared undo stack
-    // never records the step and ⌘Z afterwards skipped straight past the
-    // indent (or, on the first edit, appeared to do nothing at all).
-    if (e.key === 'Tab' && !e.shiftKey && !readOnly && area) {
-      e.preventDefault()
-      const ok = document.execCommand?.('insertText', false, '  ')
-      if (!ok) {
-        // execCommand is deprecated and can refuse; setRangeText + a dispatched
-        // `input` is the same change through the supported path.
-        const { selectionStart: a0, selectionEnd: a1 } = area
-        area.setRangeText('  ', a0, a1, 'end')
-        area.dispatchEvent(new Event('input', { bubbles: true }))
-      }
-    }
-  }
+    { key: 'Mod-Enter', run: () => { apply(); return true } },
+    // Alt+Z toggles wrap, Alt+R reverts - VS Code's keys.
+    { key: 'Alt-z', run: () => { wrap = !wrap; return true } },
+    { key: 'Alt-r', run: () => { revert(); return true } },
+  ]
+
 </script>
 
 <!-- Docked bottom panel, fills the dock's height (flex column). The dock
@@ -594,7 +436,9 @@
       <span class="shrink-0 rounded-[3px] border border-border/50 bg-muted/40 px-1.5 py-px font-mono text-ui-3xs text-muted-foreground">{colType}</span>
     {/if}
     {#if sourceHint}
-      <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">({sourceHint})</span>
+      <!-- ms-2: the gap between identity (name, type) and the facts about
+           this value is twice the gap inside either group. -->
+      <span class="ms-2 shrink-0 font-mono text-ui-3xs text-muted-foreground">{sourceHint}</span>
     {/if}
     {#if isNull && !dirty}
       <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">NULL</span>
@@ -635,69 +479,15 @@
       <span class="shrink-0 text-ui-3xs text-primary">edited</span>
     {/if}
 
-    <div class="ml-auto flex shrink-0 items-center gap-1.5">
-      <!-- Find. Always here rather than behind a toggle: the dock exists to
-           read one value, and finding something in it is the second thing you
-           do after opening it. -->
-      <!-- The frame every field in this app wears: `--field-border-width` (2px)
-           in `--field-border`. At `border/50` this one was a hairline against
-           the dock's own surface and read as a gap between the icon and the
-           text rather than as a control. The input inside opts out with
-           `no-focus-ring`, which is exactly the case app.css documents: the
-           container carries the frame. -->
-      <div
-        class="flex h-7 items-center gap-1 bg-input/30 px-1.5 focus-within:border-ring/60"
-        style="border-radius: var(--radius-field); border: var(--field-border-width) solid var(--field-border)"
-      >
-        <Search class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <input
-          bind:this={findEl}
-          bind:value={query}
-          type="text"
-          aria-label="Find in this value"
-          placeholder="Find"
-          spellcheck="false"
-          class="no-focus-ring h-6 w-24 min-w-0 bg-transparent font-mono text-ui-2xs text-foreground outline-none placeholder:text-muted-foreground"
-          onkeydown={onFindKey}
-        />
-        {#if query}
-          <span class="shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground">
-            {hitCount ? (rawOpen && rawHits.length ? `${hit + 1}/${rawHits.length}` : hitCount) : 'none'}{treeSearch?.truncated ? '+' : ''}
-          </span>
-          <button
-            type="button"
-            class="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-            onclick={clearFind}
-            aria-label="Clear the search"
-          >
-            <X class="size-3" />
-          </button>
-        {/if}
-      </div>
-      {#if isTreeable}
-        <!-- The tree is the default for a structured value and the raw text is
-             one click away, which is the other way round from how this started:
-             the pane beside the editor was a `<pre>` of the very same
-             pretty-printed JSON, so the dock showed one value twice. -->
-        <button
-          type="button"
-          aria-pressed={rawOpen}
-          class={cn(
-            'inline-flex h-7 items-center gap-1.5 rounded px-2 font-mono text-ui-2xs transition-colors hover:bg-muted/40 hover:text-foreground',
-            rawOpen ? 'bg-muted/40 text-foreground' : 'text-muted-foreground',
-          )}
-          onclick={() => (rawOpen = !rawOpen)}
-          title={rawOpen ? 'Hide the raw text' : 'Show the raw text, which is where editing happens'}
-        >
-          <Braces class="size-3.5 shrink-0" />
-          Raw
-        </button>
-      {/if}
+    <!-- Three groups, spaced apart more than their members: view tools
+         (wrap, copy, revert), the commit (Stage), and close. Find is Mod+F in
+         the editor and needs no button here. -->
+    <div class="ml-auto flex shrink-0 items-center gap-0.5">
       <button
         type="button"
         aria-pressed={wrap}
         class={cn(
-          'inline-flex h-7 items-center gap-1.5 rounded px-2 font-mono text-ui-2xs transition-colors hover:bg-muted/40 hover:text-foreground',
+          'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/40 hover:text-foreground',
           wrap ? 'text-foreground' : 'text-muted-foreground',
         )}
         onclick={() => (wrap = !wrap)}
@@ -710,7 +500,7 @@
            row has to fit a find box, three actions and a close button. -->
       <button
         type="button"
-        class="inline-flex h-7 items-center rounded px-2 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={copy}
         title="Copy the value as text"
         aria-label="Copy the value as text"
@@ -720,7 +510,7 @@
       {#if !readOnly}
         <button
           type="button"
-          class="inline-flex h-7 items-center rounded px-2 font-mono text-ui-2xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+          class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
           disabled={!dirty}
           onclick={revert}
           title="Revert to the stored value (Alt+R)"
@@ -730,7 +520,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex h-7 items-center gap-1.5 rounded px-2 font-mono text-ui-2xs text-primary transition-colors hover:bg-primary/10 disabled:opacity-40 disabled:hover:bg-transparent"
+          class="ms-3 inline-flex h-7 items-center gap-1.5 rounded-md bg-primary/10 px-2.5 font-mono text-ui-2xs text-primary transition-colors hover:bg-primary/15 disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-60"
           disabled={!dirty}
           onclick={apply}
           title="Stage this value with your other pending edits"
@@ -741,7 +531,7 @@
       {/if}
       <button
         type="button"
-        class="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        class="ms-2 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
         onclick={() => (open = false)}
         aria-label="Close cell editor"
       >
@@ -755,43 +545,29 @@
        views of one thing. -->
   <!-- `relative`: the raw pane's highlight layer is absolutely positioned inside
        this box, beside the gutter rather than under it. -->
+  <!-- Partly loaded: a slim bar over the editor, with the one action that fixes
+       it. It used to live in the tree pane, which is gone. -->
+  {#if notice}
+    <div class="flex shrink-0 items-start gap-3 border-b border-border/30 bg-muted/15 px-3 py-2">
+      <p class="min-w-0 flex-1 text-ui-2xs leading-normal text-muted-foreground text-pretty">{notice.error}</p>
+      {#if oversize && onloadfull}
+        <button
+          type="button"
+          disabled={loadingFull}
+          class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 text-ui-2xs font-medium text-primary-foreground transition-[opacity,transform] hover:opacity-90 active:scale-[0.97] disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          onclick={() => void loadFull()}
+        >
+          {#if loadingFull}
+            <span class="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent"></span>
+            Loading {formatBytes(oversize?.bytes ?? 0)}
+          {:else}
+            Load {formatBytes(oversize?.bytes ?? 0)}
+          {/if}
+        </button>
+      {/if}
+    </div>
+  {/if}
   <div class="relative flex min-h-0 flex-1">
-    <!-- Line numbers, on the same 20px baseline grid as the text. Padded top by
-         the same 8px the textarea is, so line 1 lines up with line 1. -->
-    {#if !wrap && rawOpen}
-      <div
-        bind:this={gutterEl}
-        aria-hidden="true"
-        class="shrink-0 select-none overflow-hidden border-r border-border/30 bg-muted/10 py-2 text-right font-mono text-ui-3xs tabular-nums text-muted-foreground/45"
-        style="width:{gutterW}px; line-height:{LINE_H}px"
-      >
-        {#each lineNumbers as n (n)}<div class="px-2">{n}</div>{/each}
-      </div>
-    {/if}
-    <!-- Find highlights for the raw pane.
-         A textarea cannot mark a range inside itself, so the marks are drawn on
-         a layer *behind* it: same font, same padding, same 20px leading, same
-         wrap mode, scrolled in lockstep by `syncGutter`, and the textarea's
-         background is already transparent - so each glyph sits directly on top
-         of its own highlight. `text-transparent` here because the visible text
-         is the textarea's; this layer contributes nothing but the marks.
-         Only mounted while something matches, which is almost never. -->
-    {#if rawOpen && rawRuns}
-      <div
-        bind:this={hlEl}
-        aria-hidden="true"
-        class={cn(
-          'pointer-events-none absolute inset-y-0 right-0 z-0 overflow-hidden py-2 pr-3 pl-3',
-          'font-mono text-ui-2xs text-transparent select-none',
-          wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre',
-        )}
-        style="left:{!wrap && rawOpen ? gutterW : 0}px; line-height:{LINE_H}px; tab-size:2"
-      >{#each rawRuns as run, i (i)}{#if run.hit >= 0}<mark
-              class={cn(
-                'rounded-[2px] px-0 text-transparent',
-                run.hit === hit ? 'bg-warning/60' : 'bg-warning/35',
-              )}>{run.t}</mark>{:else}{run.t}{/if}{/each}</div>
-    {/if}
     {#if heavy && rawOpen}
       <!-- Read-only, and only a slice of it. Everything a textarea gives you -
            editing, undo, a caret - costs the browser a full layout of the value,
@@ -837,110 +613,23 @@
         ></textarea>
       </div>
     {/if}
-    <!-- `hidden`, not unmounted: the textarea holds the draft, the undo history
+    <!-- `hidden`, not unmounted: the editor holds the draft, the undo history
          and the caret. Tearing it down to show the tree would discard all three
          and re-seed the value on the way back. -->
-    <textarea
-      class:hidden={!rawOpen || heavy}
-      bind:this={area}
-      bind:value={draft}
-      readonly={readOnly}
-      spellcheck="false"
-      wrap={wrap ? 'soft' : 'off'}
-      onkeydown={onKey}
-      onscroll={syncGutter}
-      aria-label="{colName} value"
-      class={cn(
-        // `relative z-10`: an absolutely-positioned sibling paints above a static
-        // one whatever the DOM order, so without this the highlight layer covers
-        // the text it is meant to sit behind.
-        'no-field-frame app-scroll relative z-10 min-h-0 flex-1 resize-none bg-transparent py-2 pl-3 pr-3',
-        // A code surface, so: whole-pixel leading, two-space tabs, no ligature
-        // of prose typography. `leading-relaxed` was 1.625 - a third of a line of
-        // air between every row, which is what made this read as a text box
-        // rather than an editor.
-        'font-mono text-ui-2xs text-foreground outline-none placeholder:text-muted-foreground',
-        wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'overflow-x-auto whitespace-pre',
-      )}
-      style="line-height:{LINE_H}px; tab-size:2"
-      placeholder={isNull ? 'NULL' : ''}
-    ></textarea>
-    {#if parsed}
-      <!-- A tree, not a second copy of the text. This is also what a JSON cell
-           opens into now: it used to open a modal that instantiated Monaco -
-           a ~4MB chunk, its workers and a full editor - to display a 300-byte
-           object, which is the whole of the lag. `JsonTree` mounts only the
-           nodes that are expanded and pages long arrays, so a click costs
-           nothing and there is no dialog over the rows the value came from. -->
-      <div
-        class={cn(
-          'flex min-h-0 flex-col',
-          rawOpen ? 'w-1/2 shrink-0 border-l border-border/40' : 'flex-1',
-        )}
-      >
-        <div class="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/30 px-2.5">
-          <span class="text-ui-3xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            {parsed.ok ? 'Tree' : 'Preview'}
-          </span>
-          {#if parsed.truncated}
-            <span class="truncate font-mono text-ui-3xs text-warning">truncated value</span>
-          {:else if !parsed.ok}
-            <span class="truncate font-mono text-ui-3xs text-destructive">invalid JSON</span>
-          {/if}
-        </div>
-        <div class="app-scroll min-h-0 flex-1 overflow-auto px-2 py-1.5">
-          {#if parsed.ok && query && !treeSearch?.count}
-            <p class="px-1 py-1 font-mono text-ui-3xs text-muted-foreground">
-              No match for <span class="text-foreground/80">{query}</span> in this value.
-            </p>
-          {:else if parsed.ok}
-            <JsonTree
-              value={parsed.value}
-              defaultDepth={2}
-              {query}
-              matchPaths={treeSearch?.paths ?? null}
-              openPaths={treeSearch?.open ?? null}
-              oncopy={(v) => {
-                const text = typeof v === 'string' ? v : JSON.stringify(v, null, 2)
-                void navigator.clipboard?.writeText(text)
-                toast.success('Copied')
-              }}
-            />
-          {:else}
-            <p class={cn('whitespace-pre-wrap font-mono text-ui-3xs leading-relaxed', parsed.truncated ? 'text-muted-foreground' : 'text-destructive/90')}>{parsed.error}</p>
-            {#if parsed.heavy}
-              <button
-                type="button"
-                class="mt-2.5 inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 font-mono text-ui-3xs font-medium text-primary-foreground transition-[opacity,transform] hover:opacity-90 active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                onclick={() => (forceParse = true)}
-              >
-                Render it anyway
-              </button>
-              <p class="mt-1.5 font-mono text-ui-3xs text-muted-foreground/70">
-                The raw text is already here, and Find works on it under 2 MB.
-              </p>
-            {/if}
-            {#if parsed.truncated && oversize && onloadfull}
-              <button
-                type="button"
-                disabled={loadingFull}
-                class="mt-2.5 inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 font-mono text-ui-3xs font-medium text-primary-foreground transition-[opacity,transform] hover:opacity-90 active:scale-[0.97] disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                onclick={() => void loadFull()}
-              >
-                {#if loadingFull}
-                  <span class="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent"></span>
-                  Loading {formatBytes(oversize?.bytes ?? 0)}…
-                {:else}
-                  Load {formatBytes(oversize?.bytes ?? 0)}
-                {/if}
-              </button>
-              <p class="mt-1.5 font-mono text-ui-3xs text-muted-foreground/70">
-                Fetched for this row only - the page stays light.
-              </p>
-            {/if}
-          {/if}
-        </div>
-      </div>
-    {/if}
+    <div class={cn('min-h-0 min-w-0 flex-1 flex-col', !rawOpen || heavy ? 'hidden' : 'flex')}>
+      <!-- Loaded on first use: CodeMirror is ~170KB gzipped, and in the boot
+           chunk every launch paid for an editor most sessions never open. -->
+      {#await import('./CodeEditor.svelte') then { default: CodeEditor }}
+      <CodeEditor
+        bind:this={cm}
+        bind:value={draft}
+        {readOnly}
+        {wrap}
+        placeholder={isNull ? 'NULL' : ''}
+        ariaLabel="{colName} value"
+        keys={editorKeys}
+      />
+      {/await}
+    </div>
   </div>
 </div>
