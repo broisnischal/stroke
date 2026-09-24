@@ -2906,7 +2906,7 @@
                           }
                           // Shift+Tab is the way back to the filter, the mirror of
                           // the Tab that got here.
-                          if (e.key === "Tab" && e.shiftKey && savedSearchEl) {
+                          if ((e.key === "Tab" || e.code === "Tab") && e.shiftKey && savedSearchEl) {
                             e.preventDefault();
                             savedSearchEl.focus();
                             return;
