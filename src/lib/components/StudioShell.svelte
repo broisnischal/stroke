@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy, untrack, tick } from 'svelte'
   import { fade } from 'svelte/transition'
-  import { revealApp } from '$lib/app-reveal.js'
+  import { revealApp, isRevealed } from '$lib/app-reveal.js'
   import { setReadOnly } from '$lib/stores/read-only.js'
   import { isWriteSql } from '$lib/sql-write.js'
   import Logo from './Logo.svelte'
@@ -368,6 +368,14 @@
    * @param {string} name
    * @param {'Connecting' | 'Reconnecting'} [verb]
    */
+  /** Longest a startup reconnect keeps the window hidden before showing the overlay. */
+  const RECONNECT_REVEAL_MS = 700
+  /** Set by the startup reconnect: reveal the page once the tables have loaded. */
+  let revealOnTables = $state(false)
+  $effect(() => {
+    if (revealOnTables && connection && !loadingTables) revealApp()
+  })
+
   function beginConnectOverlay(name, verb = 'Connecting') {
     autoConnectName = name ?? ''
     autoConnectVerb = verb
@@ -6107,34 +6115,41 @@ let rowSearch = $state('')
       // Non-critical - don't block app start if Tauri backend unavailable (browser dev)
     }
 
-    // Everything below decides the first screen synchronously (onboarding, the
-    // connection modal, the welcome screen, or the reconnect overlay), so the
-    // fade-in lands on that screen rather than on a frame of the one before it.
-    revealApp()
+    // Every branch below reveals the page on its own first screen (onboarding,
+    // the connection modal, the welcome screen), except the startup reconnect,
+    // which holds the window back until the shell has its tables - see there.
 
     // First-time user - show onboarding instead of bare connection modal
     try {
       if (!localStorage.getItem(ONBOARDING_KEY)) {
         showOnboarding = true
+        revealApp()
         return
       }
     } catch {}
 
     const last = getLastConnection()
-    if (!last) { showConnectionModal = true; return }
+    if (!last) { showConnectionModal = true; revealApp(); return }
 
     // Disconnect is a decision, and it survives a restart. Coming back connected
     // to the database someone deliberately stepped away from - on a reload, or
     // the next morning - is the one outcome that command exists to prevent, so
     // this launch stays on the welcome screen. The connection is still saved and
     // still the highlighted one; reconnecting is a click.
-    if (wasDisconnected()) return
+    if (wasDisconnected()) { revealApp(); return }
 
     // Respect the "auto reconnect on startup" setting - if disabled, go straight
     // to the connection modal instead of re-connecting silently.
-    if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; return }
+    if (!loadSettings().autoReconnectOnStartup) { showConnectionModal = true; revealApp(); return }
 
     beginConnectOverlay(last.name ?? '', 'Reconnecting')
+    // A warm reconnect and its table list land in a few hundred ms. Revealing
+    // on the overlay meant three screens in that time - "Reconnecting", an empty
+    // shell with a skeleton sidebar, then the tables - which is the startup
+    // flicker. Stay hidden until the tables are in (the effect watching
+    // `revealOnTables`) and only fall back to the overlay when it runs long.
+    revealOnTables = true
+    setTimeout(revealApp, RECONNECT_REVEAL_MS)
     // The backend already enforces its own per-engine deadlines (DNS + TCP preflight,
     // a 20s connect deadline for Postgres, HTTP timeouts for the REST engines) and
     // fails with a message the user can act on. This race is only a last-resort guard
@@ -6171,6 +6186,8 @@ let rowSearch = $state('')
       showConnectionModal = true
     } finally {
       autoConnecting = false
+      // Failed, cancelled or timed out: whatever screen is up now is final.
+      revealApp()
     }
   })
 
@@ -7248,7 +7265,7 @@ let rowSearch = $state('')
        catalog (schemas/tables/counts) stream into the sidebar skeletons. -->
   <div
     class="fixed inset-0 z-50 flex flex-col items-center justify-center gap-7 bg-background"
-    out:fade={{ duration: 200 }}
+    out:fade={{ duration: isRevealed() ? 120 : 0 }}
   >
     <!-- The ring and the label wait before they appear. A warm reconnect lands
          in a few hundred ms, and showing them at once flashed "Reconnecting"

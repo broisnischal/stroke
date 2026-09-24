@@ -21,6 +21,12 @@ async function showWindow() {
   } catch { /* browser dev, or the window is already up */ }
 }
 
+/** Has the page been revealed yet? Lets a screen skip an exit animation that
+ *  would otherwise play, unseen, while the window is still hidden. */
+export function isRevealed() {
+  return revealed
+}
+
 /** Fade the page in. Idempotent - only the first caller does anything. */
 export function revealApp() {
   if (revealed || typeof document === 'undefined') return
