@@ -52,7 +52,10 @@ function editableKind(/** @type {Element} */ el) {
 }
 
 function inManagedEditor(/** @type {Element} */ el) {
-  return !!el.closest?.('.monaco-editor, .cm-editor')
+  // CodeMirror manages its text surface (.cm-content), not the inputs in its
+  // panels: matching all of .cm-editor left the find/replace fields with no
+  // word delete, no undo and no shield from the global hotkeys.
+  return !!el.closest?.('.monaco-editor, .cm-content')
 }
 
 /** @param {HTMLInputElement | HTMLTextAreaElement} el */
