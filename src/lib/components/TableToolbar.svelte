@@ -312,6 +312,24 @@
 
   const hiddenCount = $derived(hiddenColumns.size);
 
+  /** Everything the Hide all / Show all control owns: real columns and the
+   *  virtual relationship columns. Virtual expr columns are left out - they are
+   *  enabled/disabled through their own store, not through `hiddenColumns`. */
+  const hideableColumnValues = $derived([
+    ...columns.map((c) => c.name),
+    ...virtualRelColumns.map((vc) => `__vrel:${vc.label}`),
+  ]);
+
+  /* The control asks "is anything still visible?", not "is anything hidden?".
+     Incoming foreign keys load after the table opens, so hiding everything
+     before they land leaves the relationship columns visible with something
+     already hidden - and keying the label off `hiddenCount` turned the button
+     into "Show all" at exactly that point, with no way left to hide them. */
+  const allColumnsHidden = $derived(
+    hideableColumnValues.length > 0 &&
+      hideableColumnValues.every((v) => hiddenColumns.has(v)),
+  );
+
   /** @param {string} name */
   function toggleColumn(name) {
     const next = new Set(hiddenColumns);
@@ -530,17 +548,8 @@
     }
   }
 
-  function toggleAllColumns() {
-    if (hiddenCount > 0) {
-      showAllColumns();
-    } else {
-      onhiddencolumnschange(
-        new Set([
-          ...columns.map((c) => c.name),
-          ...virtualRelColumns.map((vc) => `__vrel:${vc.label}`),
-        ]),
-      );
-    }
+  function hideAllColumns() {
+    onhiddencolumnschange(new Set(hideableColumnValues));
   }
 
   /** Filter-row column options: "Any column" + every column. */
@@ -1048,13 +1057,29 @@
         {#snippet header()}
           <div class="flex items-center justify-between border-b border-border/40 px-3 py-1.5">
             <span class="text-ui-2xs font-medium uppercase tracking-wide text-muted-foreground">Columns</span>
-            <button
-              type="button"
-              class="text-ui-2xs text-muted-foreground transition-colors hover:text-foreground"
-              onclick={toggleAllColumns}
-            >
-              {hiddenCount > 0 ? "Show all" : "Hide all"}
-            </button>
+            <!-- Both actions, whenever both mean something. One toggle that
+                 flipped on "anything hidden" made "Hide all" unreachable as
+                 soon as a single column was hidden. -->
+            <div class="flex shrink-0 items-center gap-2">
+              {#if !allColumnsHidden}
+                <button
+                  type="button"
+                  class="text-ui-2xs text-muted-foreground transition-colors hover:text-foreground"
+                  onclick={hideAllColumns}
+                >
+                  Hide all
+                </button>
+              {/if}
+              {#if hiddenCount > 0}
+                <button
+                  type="button"
+                  class="text-ui-2xs text-muted-foreground transition-colors hover:text-foreground"
+                  onclick={showAllColumns}
+                >
+                  Show all
+                </button>
+              {/if}
+            </div>
           </div>
         {/snippet}
         {#snippet item(it)}
