@@ -2262,6 +2262,10 @@ let rowSearch = $state('')
 
   createHotkey('Mod+F', (e) => {
     if (commandOpen || showConnectionModal || showSettingsModal) return
+    // Inside a code editor (the cell panel's CodeMirror, its find bar
+    // included) Mod+F is the editor's own find and replace. Taking it here
+    // pulled focus up to the table's row search instead.
+    if (e.target instanceof Element && e.target.closest('.cm-editor')) return
     // Find means "search what this page is showing", and on the objects page
     // that is its own box. It used to mean nothing there at all.
     if (activeTab?.kind === 'objects') { e.preventDefault(); objectsFocusSearch?.(); return }
@@ -2523,6 +2527,8 @@ let rowSearch = $state('')
 
   // Find & replace in the current table - editor-style Ctrl/⌘+H.
   createHotkey('Mod+H', (e) => {
+    // In a code editor this is the editor's own replace, not the table's.
+    if (e.target instanceof Element && e.target.closest('.cm-editor')) return
     if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
     e.preventDefault()
     openFindReplacePanel()
@@ -2532,6 +2538,8 @@ let rowSearch = $state('')
   // swallows Cmd+H to hide the app, so Mod+H never reaches us there - this is the
   // reliable cross-platform binding.
   createHotkey('Mod+Alt+F', (e) => {
+    // In a code editor this is the editor's own replace, not the table's.
+    if (e.target instanceof Element && e.target.closest('.cm-editor')) return
     if (!connection || !activeTable || columns.length === 0 || !findReplaceEnabled) return
     e.preventDefault()
     openFindReplacePanel()

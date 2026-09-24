@@ -1153,6 +1153,9 @@
   const isFilterKey = (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === 'f'
   const isEscClear = e.key === 'Escape' && selectedItems.size > 0
   if (!isFilterKey && !isEscClear) return
+  // A code editor handles its own Mod-F (find and replace) and marks the key
+  // handled; stealing it here sent focus to the sidebar filter instead.
+  if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('.cm-editor'))) return
   // Guard: filterEl.offsetParent is null when sidebar is hidden via display:none
   if (!filterEl || !filterEl.offsetParent) return
   if (isFilterKey) {
