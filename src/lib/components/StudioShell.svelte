@@ -8529,16 +8529,15 @@ let rowSearch = $state('')
                own axis: a centred logo over a centred label over a centred meta
                line over a left-aligned grid, so nothing lined up with anything
                and the tiles read as off-centre against the text above them.
-               `max-w-lg` is the grid's width, so the header, the list and the
+               `max-w-xl` is the grid's width, so the header, the list and the
                footer now all start where the first tile starts. -->
-          <div class="mx-auto flex min-h-full w-full max-w-lg flex-col justify-center gap-7 px-6 py-10 sm:gap-9 sm:py-12">
+          <div class="mx-auto flex min-h-full w-full max-w-xl flex-col justify-center gap-7 px-6 py-10 sm:gap-9 sm:py-12">
 
           <!-- Header -->
           <div class="flex flex-col items-start gap-3">
             <div class="flex size-11 items-center justify-center rounded-lg border border-border bg-muted">
               <Logo class="size-6" />
             </div>
-            <p class="text-ui-3xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Quick access</p>
           </div>
           <!-- Five tiles, not sixteen. Sixteen equal-weight tiles asked you to read
                the whole grid to find the one you wanted; these five are what a tab
@@ -8552,6 +8551,11 @@ let rowSearch = $state('')
                  not fit is not a launcher. The fifth tile was Shortcuts, which the
                  footer below already offers, so dropping it cost nothing and left
                  an exact row. -->
+          <!-- The label sits in the same gap-2 column as the tiles, exactly as
+               "Jump to" does with its list. In the header it was a full section
+               gap away from the tiles, so it read as a caption for the logo. -->
+          <div class="flex w-full flex-col gap-2">
+            <p class="text-ui-3xs font-medium uppercase tracking-[0.1em] text-muted-foreground">Quick access</p>
             <div class="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
             {#if isRedis}
               {@render row(KeyRound, "Keyspace", "Browse keys and values", openRedisTab, {})}
@@ -8563,6 +8567,7 @@ let rowSearch = $state('')
             {/if}
             {@render row(Blocks, "Extensions", "Add and manage extensions", openExtensionsTab, { pro: true, keys: [mod, shiftKey, "X"] })}
             {@render row(Database, "Connect", "Switch or add a connection", () => (showConnectionModal = true), { keys: [mod, shiftKey, "C"] })}
+            </div>
           </div>
 
           {#if connection && !isRedis}
@@ -8575,7 +8580,7 @@ let rowSearch = $state('')
                  weight. Same max width as the grid above, so both blocks sit on
                  one alignment edge. -->
             <div class="flex w-full flex-col gap-2">
-              <p class="text-ui-3xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Jump to</p>
+              <p class="text-ui-3xs font-medium uppercase tracking-[0.1em] text-muted-foreground">Jump to</p>
               <!-- Two columns of four. Three columns left an orphan row of two
                    hanging under a full one, which is the shape that reads as
                    "unfinished" no matter how the items are ordered. -->
