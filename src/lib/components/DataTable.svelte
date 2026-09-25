@@ -2969,6 +2969,25 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /**
+   * The whole focused row as one JSON object, in the dock (Alt+J).
+   *
+   * Reading a row across a wide table means scrolling sideways and holding the
+   * column names in your head. This is the same row with the names attached,
+   * on one screen. Detached on purpose - it is a view of a row, not of a cell,
+   * so the cursor moving must not re-point it at whatever cell it lands on.
+   * @param {number} rowIdx
+   */
+  function openRowJson(rowIdx) {
+    if (rows[rowIdx] === undefined) return;
+    // Through the same helper "Copy row as JSON" uses, so the two agree and
+    // hidden columns stay hidden. Built from effectiveCellValue rather than the
+    // raw row so staged edits show: this is the row as it stands, which is what
+    // the grid above it is showing too.
+    const values = columns.map((_, i) => effectiveCellValue(rowIdx, i));
+    openValueInDock(rowToRecord(columns, values, hiddenColumns), `row ${rowIdx + 1}`);
+  }
+
+  /**
    * Point the editor at a cell. Split out of `openCellEditor` so the cursor can
    * move the open dock from cell to cell without re-opening it.
    * @param {number} rowIdx @param {number} colIdx
@@ -4938,6 +4957,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (e.key === " " && e.altKey && !e.ctrlKey && !e.metaKey) {
       if (cellEditorOpen && cellEditorRef?.focusEditor()) {
         e.preventDefault();
+        return;
+      }
+    }
+
+    // Alt+J: the whole row as JSON in the dock. Alt+Space steps into it, the
+    // same as it does for a cell, and Escape closes it.
+    if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "j" || e.key === "J")) {
+      if (!editingCell && focusedRow !== null) {
+        e.preventDefault();
+        openRowJson(focusedRow);
         return;
       }
     }
