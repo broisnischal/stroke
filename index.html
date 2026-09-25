@@ -94,14 +94,14 @@
          on nothing the bundle provides. */
       #splash {
         position: fixed; inset: 0; z-index: 0;
-        display: flex; align-items: center; justify-content: center; gap: 11px;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
         color: #080808;
       }
       html.dark #splash { color: #f7f7f7 }
-      #splash img { width: 32px; height: 32px; object-fit: contain; user-select: none; -webkit-user-drag: none }
+      #splash img { width: 72px; height: 72px; object-fit: contain; user-select: none; -webkit-user-drag: none }
       #splash span {
-        font: 600 19px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-        letter-spacing: -0.015em;
+        font: 600 15px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        letter-spacing: 0.02em;
       }
       /* The mark that stays visible against the surface behind it. The theme is
          only known to the head script, which has already set `.dark` by now. */

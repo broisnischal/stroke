@@ -494,14 +494,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let _fkFollowTimer = null
   let _fkFollowSeq = 0
 
+  // Across a row it follows the column too. A table whose columns are all
+  // foreign keys is exactly where the dock earns its keep, and arrowing along
+  // one used to keep showing the relation the dock was opened on: the cursor
+  // said credits_credithistory and the dock said authtoken_token. Only the row
+  // was watched, so a sideways move changed nothing.
   $effect(() => {
-    const target = focusedRow
-    const anchored = fkSubview?.rowIdx
-    if (anchored === undefined || target === null || target === anchored) return
-    if (rows[target] === undefined) return
+    const targetRow = focusedRow
+    const targetVis = focusedCol
+    const sv = fkSubview
+    if (!sv || targetRow === null || rows[targetRow] === undefined) return
+    const targetCol = targetVis === null ? -1 : visToActualColIdx(targetVis)
+    // A reverse relation hangs off the row, not off any one column, so it keeps
+    // following rows only. A forward one belongs to its column, and moving onto
+    // a different foreign key is a request to see that one.
+    const movedToOtherFk =
+      sv.kind === 'forward' && targetCol >= 0 && targetCol !== sv.colIdx && !!_colCache[targetCol]?.fk
+    if (targetRow === sv.rowIdx && !movedToOtherFk) return
     untrack(() => {
       if (_fkFollowTimer) clearTimeout(_fkFollowTimer)
-      _fkFollowTimer = setTimeout(() => { _fkFollowTimer = null; void followFkSubview(target) }, FK_FOLLOW_DELAY)
+      _fkFollowTimer = setTimeout(() => {
+        _fkFollowTimer = null
+        void followFkSubview(targetRow, movedToOtherFk ? targetCol : -1)
+      }, FK_FOLLOW_DELAY)
     })
   })
 
@@ -510,16 +525,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * height. A NULL foreign key resolves to the panel's empty state rather than a
    * query that can only come back empty.
    * @param {number} idx
+   * @param {number} [nextCol] Switch to this column's relation as well as this
+   *   row; -1 or omitted keeps the relation the dock already has.
    */
-  async function followFkSubview(idx) {
+  async function followFkSubview(idx, nextCol = -1) {
     const sv = fkSubview
-    if (!sv || sv.rowIdx === idx || rows[idx] === undefined) return
+    if (!sv || rows[idx] === undefined) return
+    if (sv.rowIdx === idx && nextCol < 0) return
     const row = rows[idx] ?? []
+    // Switching column switches the relation, and with it the label the settle
+    // below checks itself against.
+    const colIdx = nextCol >= 0 ? nextCol : (sv.colIdx ?? -1)
+    const label =
+      nextCol >= 0 && _colCache[nextCol]?.fk
+        ? foreignKeyTargetLabel(_colCache[nextCol].fk)
+        : sv.label
     const seq = ++_fkFollowSeq
     /** @param {{ columns?: any[], rows?: any[], error?: string | null }} res */
     const settle = (res) => {
       // A newer move (or a close, or a different relation) owns the dock now.
-      if (seq !== _fkFollowSeq || fkSubview?.rowIdx !== idx || fkSubview?.label !== sv.label) return
+      if (seq !== _fkFollowSeq || fkSubview?.rowIdx !== idx || fkSubview?.label !== label) return
       fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
     }
 
@@ -534,15 +559,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return
     }
 
-    const colIdx = sv.colIdx ?? -1
     const fk = _colCache[colIdx]?.fk ?? null
     if (!fk) return
     const value = row[colIdx]
     if (value === null || value === undefined) {
-      fkSubview = { ...sv, rowIdx: idx, data: { loading: false, columns: [], rows: [], error: null } }
+      fkSubview = { ...sv, rowIdx: idx, colIdx, label, data: { loading: false, columns: [], rows: [], error: null } }
       return
     }
-    fkSubview = { ...sv, rowIdx: idx, data: { loading: true, columns: [], rows: [], error: null } }
+    fkSubview = { ...sv, rowIdx: idx, colIdx, label, data: { loading: true, columns: [], rows: [], error: null } }
     settle(await onfetchrelatedrows({ kind: 'forward', fk, row }))
   }
 
