@@ -8798,6 +8798,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           Preview cell
           <ContextMenu.Shortcut combo="Space" />
         </ContextMenu.Item>
+        <!-- The whole row, as JSON, in the same dock. Beside Preview cell
+             because it is the same question asked of the row instead of the
+             cell, and it had the same problem: a binding and no way to reach it
+             with the hand already holding the pointer. -->
+        <ContextMenu.Item onSelect={() => runMenuAction(() => openRowJson(contextRowIdx))}>
+          <Braces />
+          Preview row JSON
+          <ContextMenu.Shortcut combo="Alt+J" />
+        </ContextMenu.Item>
         {#if menuForeignKey}
           <ContextMenu.Item
             disabled={menuCellNull}
