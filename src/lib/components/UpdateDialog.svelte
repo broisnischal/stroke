@@ -31,11 +31,22 @@
   let pendingUpdate = $state(null)
   let dismissed = $state(false)
   let checking = $state(false)
+  /** Which operation produced `errorMsg`, so Retry repeats that one. */
+  let failedAction = $state(/** @type {'check'|'install'} */ ('check'))
+
+  // A check that cannot reach GitHub should give up in seconds. Without an
+  // explicit bound it inherits the HTTP stack's default, which left the dialog
+  // spinning on "Checking for updates…" far longer than anyone waits.
+  const CHECK_TIMEOUT_MS = 15_000
 
   /** Manually trigger an update check (e.g. from the command palette). */
   export async function checkNow() {
     if (checking || status === 'downloading') return
     dismissed = false
+    // Drop the previous outcome: re-checking after a failure showed "Update
+    // failed" in the header while the new check was still running.
+    status = 'idle'
+    errorMsg = ''
     checking = true
     await checkForUpdate()
     if (status === 'idle') status = 'up-to-date'
@@ -180,9 +191,30 @@
     })
   }
 
+  /**
+   * Record a failure and remember what caused it, so Retry repeats that step
+   * rather than always falling back to a fresh check.
+   * @param {'check'|'install'} action
+   * @param {unknown} e
+   */
+  function fail(action, e) {
+    failedAction = action
+    errorMsg = String(e)
+    status = 'error'
+  }
+
+  /** Re-run whatever failed: the download if we already have an update, else the check. */
+  async function retry() {
+    if (failedAction === 'install' && pendingUpdate) {
+      await install()
+      return
+    }
+    await checkNow()
+  }
+
   async function checkForUpdate() {
     try {
-      const update = await check()
+      const update = await check({ timeout: CHECK_TIMEOUT_MS })
       if (!update) {
         console.info('[updater] no update available')
         return
@@ -195,10 +227,7 @@
       onupdatefound()
     } catch (e) {
       console.error('[updater] check failed:', e)
-      if (checking) {
-        errorMsg = String(e)
-        status = 'error'
-      }
+      if (checking) fail('check', e)
     }
   }
 
@@ -209,21 +238,38 @@
     progress = 0
     downloadedBytes = 0
     totalBytes = 0
+    // downloadAndInstall reports one Progress event per HTTP chunk, which is
+    // thousands of them for a build this size. Writing $state on every event
+    // re-rendered the dialog at that same rate and was most of why downloading
+    // felt slow, so the running total is kept out of reactivity and published
+    // once a frame.
+    let received = 0
+    let frame = 0
+    const publish = () => {
+      frame = 0
+      downloadedBytes = received
+      if (totalBytes > 0) progress = Math.round((received / totalBytes) * 100)
+    }
+
     try {
       await pendingUpdate.downloadAndInstall((event) => {
         if (event.event === 'Started') {
           totalBytes = event.data.contentLength ?? 0
         } else if (event.event === 'Progress') {
-          downloadedBytes += event.data.chunkLength
-          if (totalBytes > 0) progress = Math.round((downloadedBytes / totalBytes) * 100)
+          received += event.data.chunkLength
+          if (!frame) frame = requestAnimationFrame(publish)
         } else if (event.event === 'Finished') {
+          if (frame) cancelAnimationFrame(frame)
+          frame = 0
+          downloadedBytes = received
           progress = 100
         }
       })
       status = 'done'
     } catch (e) {
-      errorMsg = String(e)
-      status = 'error'
+      if (frame) cancelAnimationFrame(frame)
+      console.error('[updater] download failed:', e)
+      fail('install', e)
     }
   }
 
@@ -296,18 +342,18 @@
         </div>
 
         <span class="flex-1 whitespace-nowrap text-ui font-semibold text-foreground">
-          {#if checking}
-            Checking for updates…
+          {#if status === 'error'}
+            {failedAction === 'install' ? 'Download failed' : "Couldn't check for updates"}
           {:else if status === 'available'}
             Stroke {updateVersion} available
           {:else if status === 'downloading'}
             Downloading update…
           {:else if status === 'done'}
             Ready to install
-          {:else if status === 'error'}
-            Update failed
           {:else if status === 'up-to-date'}
             Up to date
+          {:else if checking}
+            Checking for updates…
           {/if}
         </span>
 
@@ -390,7 +436,31 @@
           </div>
 
         {:else if status === 'error'}
-          <p class="font-mono text-ui-xs text-destructive">{errorMsg}</p>
+          <p class="mb-2.5 text-ui-sm text-muted-foreground">
+            {failedAction === 'install'
+              ? 'The download did not finish.'
+              : 'Stroke could not reach the update server.'}
+          </p>
+          <!-- break-words: the endpoint URL is one long token and ran past the
+               dialog edge without it. -->
+          <p class="mb-4 font-mono text-ui-xs break-words text-destructive">{errorMsg}</p>
+          <div class="flex gap-2.5">
+            <button
+              type="button"
+              onclick={() => (dismissed = true)}
+              class="field-surface inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-3 text-ui-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              Not now
+            </button>
+            <button
+              type="button"
+              onclick={() => void retry()}
+              class="inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-3 text-ui-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              <RefreshCw class="size-3.5 shrink-0" />
+              Retry
+            </button>
+          </div>
 
         {:else if status === 'up-to-date' || checking}
           <p class="text-ui-sm leading-relaxed text-muted-foreground">
