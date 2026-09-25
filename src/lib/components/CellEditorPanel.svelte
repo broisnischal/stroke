@@ -448,10 +448,12 @@
   })()
 
   /**
-   * Line numbers, remembered the same way. Wrap already hides them while it is
-   * on - a gutter numbering logical lines against wrapped visual rows either
-   * disagrees with the count in the bar or lies - so this is the answer for
-   * when the value is unwrapped and the numbers are still not wanted.
+   * Line numbers, remembered the same way soft wrap is.
+   *
+   * It holds while wrapped too. The gutter numbers logical lines, so a wrapped
+   * line carries its number on its first visual row and nothing on the rest,
+   * which is what every editor that wraps does and is the reading everyone
+   * already has. Tying this to wrap only took the choice away.
    */
   const GUTTER_PREF_KEY = 'stroke:cell-editor-gutter'
   let showGutter = $state((() => {
@@ -632,19 +634,17 @@
       >
         <WrapText class="size-3.5 shrink-0" />
       </button>
-      <!-- Line numbers. Disabled while wrap is on, which hides them anyway. -->
+      <!-- Works wrapped too: a wrapped line keeps its number on its first
+           visual row, the way every wrapping editor does it. -->
       <button
         type="button"
-        disabled={wrap}
-        aria-pressed={showGutter && !wrap}
+        aria-pressed={showGutter}
         class={cn(
-          'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent',
-          showGutter && !wrap ? 'text-foreground' : 'text-muted-foreground',
+          'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/40 hover:text-foreground',
+          showGutter ? 'text-foreground' : 'text-muted-foreground',
         )}
         onclick={toggleGutter}
-        title={wrap
-          ? 'Line numbers are hidden while soft wrap is on'
-          : `${showGutter ? 'Hide' : 'Show'} line numbers (Alt+L)`}
+        title="{showGutter ? 'Hide' : 'Show'} line numbers (Alt+L)"
       >
         <ListOrdered class="size-3.5 shrink-0" />
       </button>
@@ -778,7 +778,7 @@
         bind:value={draft}
         {readOnly}
         {wrap}
-        gutter={showGutter && !wrap}
+        gutter={showGutter}
         placeholder={isNull ? 'NULL' : ''}
         ariaLabel="{colName} value"
         keys={editorKeys}
