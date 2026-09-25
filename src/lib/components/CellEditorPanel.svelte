@@ -159,7 +159,12 @@
     // the grid cursor with the dock already up re-points it without taking
     // focus, so arrow keys keep walking the grid. Escape from the editor
     // closes the dock (`onRootKey`).
-    if (justOpened && autofocus) focusOnReady = true
+    if (justOpened && autofocus) {
+      // Same rule as focusEditor('auto'), decided here because this is where
+      // the seeded text is known: end of a short value, top of a long one.
+      pendingCaret = text.length <= SMALL_VALUE_CHARS ? text.length : 0
+      focusOnReady = true
+    }
   })
 
   /**

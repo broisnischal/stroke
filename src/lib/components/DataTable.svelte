@@ -2793,6 +2793,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   // ── Full-size cell editor (Space) ─────────────────────────────────────────
   /** @type {{ focusEditor: (caret?: 'auto'|'start'|'end') => boolean } | null} */
   let cellEditorRef = $state(null);
+  /** Shift+Space opens the dock already focused; plain Space does not. */
+  let cellEditorFocusOnOpen = $state(false);
   let cellEditorOpen = $state(false);
   let cellEditorRow = $state(-1);
   let cellEditorCol = $state(-1);
@@ -2896,8 +2898,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     scrollRowIntoView(rowIdx)
   }
 
-  function openCellEditor(rowIdx, colIdx) {
+  /**
+   * @param {number} rowIdx @param {number} colIdx
+   * @param {boolean} [focus] Open with the caret in the editor (Shift+Space).
+   *   Set before `cellEditorOpen`, so the panel has it when it first seeds.
+   */
+  function openCellEditor(rowIdx, colIdx, focus = false) {
     if (!seedCellEditor(rowIdx, colIdx)) return;
+    cellEditorFocusOnOpen = focus;
     cellEditorDetached = false;
     // One dock at a time. Both live along the bottom edge, and stacking them
     // leaves the grid a couple of rows tall.
@@ -4912,9 +4920,12 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         const ai = visToActualColIdx(focusedCol);
         if (ai >= 0) {
           e.preventDefault();
-          const stepIn = e.shiftKey;
-          openCellEditor(focusedRow, ai);
-          if (stepIn) void tick().then(() => cellEditorRef?.focusEditor('auto'));
+          // Passed into the open, not chased afterwards: the editor inside the
+          // dock is lazy-loaded, so a focus call made from out here on the tick
+          // after opening can land before it exists, or before the seed
+          // replaces its document. The panel already knows how to wait for its
+          // own editor, so this just tells it to.
+          openCellEditor(focusedRow, ai, e.shiftKey);
           return;
         }
       }
@@ -8919,7 +8930,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     <CellEditorPanel
       bind:this={cellEditorRef}
       bind:open={cellEditorOpen}
-      autofocus={false}
+      autofocus={cellEditorFocusOnOpen}
       colName={cellEditorName}
       colType={cellEditorType}
       value={cellEditorValue}

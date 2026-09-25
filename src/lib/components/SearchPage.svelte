@@ -23,6 +23,8 @@
     active = false,
     /** @param {string} tableName @param {string} searchTerm */
     onopentable = (tableName, searchTerm) => {},
+    /** Assigned here; the shell calls it for ⌘F. */
+    focusSearch = $bindable(/** @type {() => void} */ (() => {})),
   } = $props()
 
   let query = $state('')
@@ -39,6 +41,12 @@
   let regexError = $state('')
   /** @type {HTMLInputElement | null} */
   let inputEl = $state(null)
+
+  $effect(() => {
+    // Selects as well as focuses, so ⌘F on a page that already has a query
+    // replaces it by typing rather than appending to it.
+    focusSearch = () => { inputEl?.focus(); inputEl?.select() }
+  })
 
   $effect(() => {
     if (active && inputEl) {
