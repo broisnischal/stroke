@@ -157,6 +157,7 @@ export const SHORTCUT_GROUPS = [
       { combo: 'Mod+Escape', desc: 'Discard every staged row' },
       { combo: 'Mod+E', desc: 'Expand / collapse the focused row' },
       { combo: 'Space', desc: 'Preview the focused cell in the bottom dock (or Shift+click it)' },
+      { combo: 'Shift+Space', desc: 'Preview the focused cell and step into the editor' },
       { combo: 'Alt+Space', desc: 'Step into the preview editor (Escape returns to the grid)' },
       { combo: 'Enter', desc: 'Edit cell' },
       { combo: 'F2', desc: 'Edit cell' },

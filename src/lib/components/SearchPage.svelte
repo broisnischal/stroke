@@ -2,10 +2,12 @@
   import { getTableRows } from '$lib/api.js'
   import { buildSearchQuery, searchOptionsSupported, searchOptionHotkey, SEARCH_OPTION_KEYS } from '$lib/search-options.js'
   import Search from '@lucide/svelte/icons/search'
+  import X from '@lucide/svelte/icons/x'
   import Table2 from '@lucide/svelte/icons/table-2'
   import Eye from '@lucide/svelte/icons/eye'
   import Loader from '@lucide/svelte/icons/loader'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
+  import { untrack } from 'svelte'
   import { cn } from '$lib/utils.js'
 
   /**
@@ -63,9 +65,45 @@
     }
   }
 
+  /**
+   * A search is one query per table, ten at a time, so it is not something to
+   * fire on a keystroke: on a 135-table schema that is 135 round trips for a
+   * letter that is about to be followed by another. Waiting out a pause in the
+   * typing is what makes searching-as-you-type affordable here.
+   */
+  const DEBOUNCE_MS = 400
+  /** One character matches most of the database; it is not a search yet. */
+  const MIN_QUERY = 2
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let debounceTimer
+
+  /** Drop results and stop anything in flight. */
+  function resetResults() {
+    searchGeneration++
+    results = []
+    searched = false
+    searching = false
+    progress = { done: 0, total: 0 }
+  }
+
+  $effect(() => {
+    const q = query.trim()
+    // Re-run when an option changes too: they change what the query means.
+    void matchCase; void wholeWord; void useRegex
+    clearTimeout(debounceTimer)
+    if (q.length < MIN_QUERY) {
+      untrack(() => resetResults())
+      return
+    }
+    debounceTimer = setTimeout(() => void runSearch(), DEBOUNCE_MS)
+    return () => clearTimeout(debounceTimer)
+  })
+
   async function runSearch() {
     const q = query.trim()
-    if (!q || searching) return
+    // No `searching` guard: a newer search supersedes an older one rather than
+    // being dropped by it, and the generation check below stops the old workers.
+    if (!q) return
 
     if (useRegex && optionsSupported) {
       const err = validateRegex(q)
@@ -128,9 +166,21 @@
   }
 
   function handleKeydown(/** @type {KeyboardEvent} */ e) {
+    // Enter is "do not wait for the pause", not a separate way to search.
     if (e.key === 'Enter') {
       e.preventDefault()
-      void runSearch()
+      clearTimeout(debounceTimer)
+      if (query.trim()) void runSearch()
+      return
+    }
+    // Escape empties the box, and the effect above clears the results with it.
+    // Only when there is something to clear, so an empty box lets Escape reach
+    // whatever else is listening.
+    if (e.key === 'Escape' && query) {
+      e.preventDefault()
+      e.stopPropagation()
+      query = ''
+      regexError = ''
       return
     }
     const opt = searchOptionHotkey(e)
@@ -165,10 +215,14 @@
   <!-- Search bar. Same 72rem column as the results underneath it: a field that
        runs the full width of a wide window has its caret in one place and its
        controls a thousand pixels away. -->
-  <div class="shrink-0 border-b border-border/50 px-3 py-2">
+  <!-- h-9 with no vertical padding, so this row is the same height as the
+       sidebar header beside it (which is h-9 too) and the two line up across
+       the split. The control inside is h-7, the same as the schema picker and
+       the filter box over there. -->
+  <div class="flex h-9 shrink-0 items-center border-b border-border/50 px-2">
     <div
       class={cn(
-        'mx-auto flex h-9 w-full max-w-[72rem] items-center gap-2 rounded-md bg-muted/30 px-3 transition-colors',
+        'mx-auto flex h-7 w-full max-w-[72rem] items-center gap-1.5 rounded-md bg-muted/30 px-2 transition-colors',
         'border-[length:var(--field-border-width)]',
         regexError ? 'border-destructive/50' : 'border-border/40 focus-within:border-ring/60',
       )}
@@ -177,7 +231,7 @@
       <input
         bind:this={inputEl}
         type="text"
-        placeholder={useRegex ? 'Regex pattern…' : `Search across all tables in ${schema}…`}
+        placeholder={useRegex ? 'Regex pattern…' : `Search ${schema}…`}
         class="no-focus-ring min-w-0 flex-1 bg-transparent text-ui-xs outline-none placeholder:text-muted-foreground"
         bind:value={query}
         onkeydown={handleKeydown}
@@ -232,21 +286,27 @@
       {/if}
       {#if searching}
         <Loader class="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-      {:else}
+      {:else if query}
         <button
           type="button"
-          class="h-6 rounded bg-primary px-2.5 text-ui-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
-          disabled={!query.trim()}
-          onclick={() => void runSearch()}
+          class="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          title="Clear (Esc)"
+          aria-label="Clear search"
+          onclick={() => { query = ''; regexError = '' }}
         >
-          Search
+          <X class="size-3.5" />
         </button>
       {/if}
     </div>
-    {#if regexError}
-      <p class="mt-1 px-1 text-ui-xs text-destructive">{regexError}</p>
-    {/if}
   </div>
+  <!-- Its own row: the bar above is a fixed h-9 so it lines up with the sidebar
+       header, and a second child in there would sit beside the field, not under
+       it. -->
+  {#if regexError}
+    <div class="shrink-0 border-b border-border/50 px-2 pb-1.5">
+      <p class="mx-auto w-full max-w-[72rem] px-1 text-ui-xs text-destructive">{regexError}</p>
+    </div>
+  {/if}
 
   <!-- Progress bar (only while searching) -->
   {#if searching}
@@ -338,7 +398,9 @@
       <div class="flex flex-col items-center justify-center gap-2 py-12 text-center">
         <Search class="size-8 text-muted-foreground" />
         <p class="text-ui-sm text-muted-foreground">Search across all {tables.length} tables</p>
-        <p class="text-ui-xs text-muted-foreground">Type a value and press <kbd>Enter</kbd></p>
+        <p class="text-ui-xs text-muted-foreground">
+          {query.trim().length ? 'Keep typing…' : 'Start typing'}
+        </p>
       </div>
     {/if}
   </div>

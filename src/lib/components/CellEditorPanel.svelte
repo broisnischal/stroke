@@ -168,17 +168,40 @@
    * ran then and did nothing.
    */
   let focusOnReady = $state(false)
+  /** Where the caret goes once the editor exists; -1 leaves it alone. */
+  let pendingCaret = -1
   $effect(() => {
     if (!focusOnReady || !cm || !open) return
     focusOnReady = false
-    queueMicrotask(() => cm?.focus())
+    const pos = pendingCaret
+    pendingCaret = -1
+    queueMicrotask(() => {
+      if (pos >= 0) cm?.select(pos, pos)
+      else cm?.focus()
+    })
   })
 
-  /** Step into the editor from outside, once the dock is already up. */
-  export function focusEditor() {
+  /**
+   * Past this, the value is something to read from the top rather than a line
+   * you are about to finish typing.
+   */
+  const SMALL_VALUE_CHARS = 2_000
+
+  /**
+   * Step into the editor from outside, once the dock is already up.
+   *
+   * `auto` puts the caret where the value says it should go: at the end of a
+   * short value, which is almost always one you mean to edit, and at the start
+   * of a long one, which is one you mean to read.
+   * @param {'auto'|'start'|'end'} [caret]
+   */
+  export function focusEditor(caret = 'auto') {
     if (!open) return false
-    if (cm) { cm.focus(); return true }
+    const at = caret === 'auto' ? (draft.length <= SMALL_VALUE_CHARS ? 'end' : 'start') : caret
+    const pos = at === 'end' ? draft.length : 0
+    if (cm) { cm.select(pos, pos); return true }
     // Lazy-loaded: if it is not mounted yet, focus it the moment it is.
+    pendingCaret = pos
     focusOnReady = true
     return true
   }

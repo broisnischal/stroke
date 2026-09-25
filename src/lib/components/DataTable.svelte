@@ -2791,7 +2791,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   // ── Full-size cell editor (Space) ─────────────────────────────────────────
-  /** @type {{ focusEditor: () => boolean } | null} */
+  /** @type {{ focusEditor: (caret?: 'auto'|'start'|'end') => boolean } | null} */
   let cellEditorRef = $state(null);
   let cellEditorOpen = $state(false);
   let cellEditorRow = $state(-1);
@@ -4897,12 +4897,24 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
     }
 
+    // Space previews the focused cell, full size. It is a printable character,
+    // so without this it fell through to type-to-edit below and opened the
+    // editor with a space typed into it - the one keystroke on the grid that
+    // destroyed the cell it was aimed at.
+    //
+    // Plain Space leaves the cursor on the grid, so arrows keep walking the
+    // table and the dock follows along. Shift+Space is the same preview and
+    // steps into the editor too: caret at the end of a short value, which is
+    // one you mean to edit, and at the top of a long one, which is one you mean
+    // to read.
     if (e.key === " " && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (!editingCell && focusedRow !== null && focusedCol !== null) {
         const ai = visToActualColIdx(focusedCol);
         if (ai >= 0) {
           e.preventDefault();
+          const stepIn = e.shiftKey;
           openCellEditor(focusedRow, ai);
+          if (stepIn) void tick().then(() => cellEditorRef?.focusEditor('auto'));
           return;
         }
       }
