@@ -64,6 +64,8 @@
     onloadfull = null,
     truncatedLoad = false,
     oncommit = /** @type {(next: string) => void} */ (() => {}),
+    /** Fired when the dock dismisses itself, so the owner can take focus back. */
+    onclose = /** @type {() => void} */ (() => {}),
   } = $props()
 
   /**
@@ -352,10 +354,20 @@
   const LINE_H = 20
 
 
-  function apply() {
-    if (readOnly || !dirty) { open = false; return }
-    oncommit(draft)
+  /**
+   * Close the dock and tell the owner. Closing alone left focus on a element
+   * that was about to be removed, so it fell back to <body> and the grid
+   * stopped answering arrow keys - every dismissal has to hand focus back.
+   */
+  function dismiss() {
     open = false
+    onclose()
+  }
+
+  function apply() {
+    if (readOnly || !dirty) { dismiss(); return }
+    oncommit(draft)
+    dismiss()
   }
 
   async function copy() {
@@ -387,7 +399,7 @@
     if (e.key === 'Escape') {
       e.preventDefault()
       e.stopPropagation()
-      open = false
+      dismiss()
       return
     }
     // ⌘F / Ctrl+F from anywhere in the dock opens the editor's find panel.
@@ -532,7 +544,7 @@
       <button
         type="button"
         class="ms-2 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-        onclick={() => (open = false)}
+        onclick={dismiss}
         aria-label="Close cell editor"
       >
         <X class="size-3.5" />

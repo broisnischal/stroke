@@ -8872,6 +8872,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       onloadfull={onfetchcellvalue && cellEditorRow >= 0 ? loadFullCellValue : null}
 
       oncommit={commitCellEditor}
+      onclose={() => tick().then(() => tableContainer?.focus({ preventScroll: true }))}
     />
   </div>
 {/if}
