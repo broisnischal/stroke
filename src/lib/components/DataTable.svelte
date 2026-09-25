@@ -1171,18 +1171,31 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function pgArrayText(arr) {
     return "{" + arr.map(pgArrayElem).join(",") + "}";
   }
-  // Cached pgAdmin-style display for SQL *array columns* only (drawCell passes the
-  // value after confirming the column type ends with []). Cached per value object
-  // so the scroll hot path never rebuilds the string. jsonb arrays never reach
-  // this - they render as ["a","b"] via formatCell.
+  // Display for SQL *array columns* (drawCell passes the value after confirming
+  // the column type ends with []). Cached per value object so the scroll hot
+  // path never rebuilds the string.
+  //
+  // JSON form, not the pgAdmin literal `{a,b}`. Three things in this app showed
+  // the same array three different ways: a text[] cell read `{Dhaka,Gazipur}`,
+  // the jsonb column beside it read `["Dhaka","Gazipur"]`, and double-clicking
+  // either one put `["Dhaka","Gazipur"]` in the box to edit - so the row you
+  // were reading and the value you were editing did not look like the same
+  // thing. They all read as JSON now, which is the form the editor already used.
+  // pgArrayText is still what writes go out as; that is the literal Postgres
+  // wants and it was never the right thing to read.
   /** @type {WeakMap<object, string>} */
   const _arrayDisplayCache = new WeakMap();
   function arrayDisplay(arr) {
     const hit = _arrayDisplayCache.get(arr);
     if (hit !== undefined) return hit;
-    const s = pgArrayText(arr);
-    _arrayDisplayCache.set(arr, s);
-    return s;
+    let s;
+    try {
+      s = JSON.stringify(arr);
+    } catch {
+      s = pgArrayText(arr); // cyclic or otherwise unserialisable - fall back
+    }
+    _arrayDisplayCache.set(arr, s ?? pgArrayText(arr));
+    return s ?? pgArrayText(arr);
   }
   /** True when a column's SQL type is an array (ends with []). */
   function isSqlArrayType(colType) {
