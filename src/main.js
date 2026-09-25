@@ -17,10 +17,13 @@ if (import.meta.env.VITE_FRESH_START === '1') {
   } catch (_) {}
 }
 
+// First, before anything that can throw. Everything below it is startup work
+// that the page does not need in order to be visible, and a throw in any of it
+// used to leave the failsafe unarmed and the window black.
+armRevealFailsafe()
 applySettings(loadSettings())
 installZoomShortcuts()
 resetWebviewZoom()
-armRevealFailsafe()
 
 // ── Zoom watchdog ────────────────────────────────────────────────────────────
 // Final safety net against any stray webview zoom that slips past the event

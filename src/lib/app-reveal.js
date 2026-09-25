@@ -36,6 +36,9 @@ export function revealApp() {
   // caller just set (overlay, modal) is in the DOM before the fade starts.
   void showWindow().finally(() => {
     requestAnimationFrame(() => {
+      // Both: the attribute cancels the CSS boot floor in index.html and beats
+      // the inline opacity:0, the inline value keeps the 200ms fade.
+      document.documentElement.dataset.revealed = ''
       document.documentElement.style.opacity = '1'
     })
   })

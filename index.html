@@ -67,6 +67,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
     <meta name="format-detection" content="telephone=no, email=no, address=no" />
     <title>DB Studio</title>
+    <style>
+      /* The page boots at opacity 0 and JS reveals it - but the window is shown
+         from Rust on its own timer, so anything that stops the bundle before
+         armRevealFailsafe() runs (a throw at module scope, an import that never
+         resolves, a JavaScriptCore crash) leaves a painted black rectangle on
+         screen with no way out but killing the app. That happened.
+
+         This is the floor, and it needs no JS to work: after 8s the page shows
+         itself. Longer than the 2.5s JS failsafe so a healthy boot always wins
+         and this is never what reveals the app. */
+      @keyframes stroke-boot-reveal { to { opacity: 1 } }
+      html { animation: stroke-boot-reveal 0s linear 8s forwards; }
+      /* revealApp() sets this. Stops the animation so a later repaint cannot
+         re-run it, and beats the inline opacity:0 that starts the page hidden. */
+      html[data-revealed] { animation: none; opacity: 1 !important; }
+    </style>
   </head>
   <body class="h-full" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     <div id="app"></div>
