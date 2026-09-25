@@ -1,5 +1,6 @@
 ### New Features
 - Alt+J previews the whole row as JSON in the bottom dock, and follows the cursor from row to row
+- JSON colours are selectable in Settings → Appearance: Auto, Vivid, Ocean, Solarized, GitHub and Monochrome
 
 ### Bug Fixes
 - Opening an array cell no longer takes the view down with "This view hit an error"

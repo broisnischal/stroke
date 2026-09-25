@@ -27,6 +27,7 @@
     ICON_STYLES,
     ICON_SETS,
     TABLE_STYLES,
+    JSON_THEMES,
     TABLE_ALIGN_OPTIONS,
     ROW_SPACINGS,
     GRID_FONT_MIN,
@@ -172,6 +173,12 @@
   const iconStyleEntries = Object.entries(ICON_STYLES);
   const iconSetEntries = Object.entries(ICON_SETS);
   const tableStyleEntries = Object.entries(TABLE_STYLES);
+  const jsonThemeEntries = Object.entries(JSON_THEMES);
+  /** @param {string | undefined} id */
+  function setJsonTheme(id) {
+    if (!id || id === settings.jsonTheme) return;
+    settings = updateSettings({ jsonTheme: /** @type {any} */ (id) });
+  }
   // Theme-aware CSS previews (mirror how each preset renders on the canvas grid).
   const tableStylePreview = {
     lines:   "background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);background-size:7px 7px;",
@@ -1147,6 +1154,32 @@
       >
         {#snippet lead(it)}
           <span class="size-4 shrink-0 overflow-hidden rounded-[3px] border border-border/40 bg-background" style={tableStylePreview[it.value] ?? ''} aria-hidden="true"></span>
+        {/snippet}
+      </SelectMenu>
+    </div>
+  {/if}
+  {#if show('JSON colours', 'Palette for JSON keys, strings, numbers and booleans')}
+    <div class={rowCls}>
+      <div class="min-w-0">
+        <p class="text-ui-sm font-medium text-foreground">JSON colours</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
+          Palette for keys, strings, numbers and booleans wherever JSON is shown: the expanded row, the cell preview and the editors. Auto follows the app theme; the rest are fixed whichever theme is on, for a theme whose own colours read badly against them.
+        </p>
+      </div>
+      <SelectMenu
+        ariaLabel="JSON colours"
+        value={settings.jsonTheme}
+        onValueChange={setJsonTheme}
+        items={jsonThemeEntries.map(([id, p]) => ({ value: id, label: p.label, keywords: [p.label, p.description] }))}
+      >
+        {#snippet lead(it)}
+          <!-- The palette itself, which is the only description that matters. -->
+          <span class="flex shrink-0 items-center gap-px" data-json-theme={it.value} aria-hidden="true">
+            <span class="size-1.5 rounded-[1px]" style="background:var(--json-key)"></span>
+            <span class="size-1.5 rounded-[1px]" style="background:var(--json-string)"></span>
+            <span class="size-1.5 rounded-[1px]" style="background:var(--json-number)"></span>
+            <span class="size-1.5 rounded-[1px]" style="background:var(--json-boolean)"></span>
+          </span>
         {/snippet}
       </SelectMenu>
     </div>

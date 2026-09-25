@@ -73,7 +73,7 @@ const markFontDefaultApplied = () => {
 /** @typedef {'geist' | 'serif' | 'apple' | 'inter' | 'mono' | 'fira' | 'plex' | 'space' | 'source'} FontId */
 /** @typedef {'regular' | 'light' | 'bold'} IconStyleId */
 /** @typedef {'lucide' | 'hugeicons' | 'phosphor'} IconSetId */
-/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, lazyWideColumns: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, motion: MotionId, zebraRows: boolean, showRowNumbers: boolean, showMenuBar: boolean, numberGrouping: boolean, imagePreview: boolean, openUrlsOnClick: boolean, highlightActiveRow: boolean, gridFontSize: number, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
+/** @typedef {{ theme: ThemeId, zoom: number, font: FontId, iconStyle: IconStyleId, iconSet: IconSetId, tableStyle: TableStyleId, jsonTheme: JsonThemeId, mcpAutoStart: boolean, launchAtLogin: boolean, autoReconnectOnStartup: boolean, previewDmlBeforeApply: boolean, defaultDataView: string, paginationMode: string, maxQueryHistory: number, connectTimeoutMs: number, socketTimeoutMs: number, maxAllowedPacket: number, sessionTimezone: string, vimMode: boolean, cmdkAiEnabled: boolean, liveModeEnabled: boolean, lazyWideColumns: boolean, nullSortOrder: string, agentChatFontSize: number, agentCodeFontSize: number, agentThinkingStyle: string, agentShowQueryCards: boolean, agentWebAccess: boolean, tableTextAlign: string, telemetry: boolean, jsonWordWrap: boolean, nativeScroll: boolean, rowSpacing: RowSpacingId, motion: MotionId, zebraRows: boolean, showRowNumbers: boolean, showMenuBar: boolean, numberGrouping: boolean, imagePreview: boolean, openUrlsOnClick: boolean, highlightActiveRow: boolean, gridFontSize: number, autoSaveQueries: boolean, sqlFormat: import('$lib/sql-format-options.js').SqlFormatOptions }} AppSettings */
 
 /**
  * UI type scale in design pixels: `[step, font-size, line-height?]`, matching
@@ -347,6 +347,34 @@ export function normalizeTableStyle(/** @type {unknown} */ id) {
   return TABLE_STYLES[/** @type {TableStyleId} */ (id)] ? /** @type {TableStyleId} */ (id) : DEFAULT_TABLE_STYLE
 }
 
+/**
+ * Colour palettes for JSON - the expanded row, the cell dock and every
+ * highlighted value in the app.
+ *
+ * These were one hardcoded set on `html` with a single light override, so all
+ * 26 app themes rendered JSON in the same four colours. `auto` keeps that
+ * behaviour (it follows light and dark); the rest are the palettes people
+ * already know from their editors, chosen so a theme the app palette clashes
+ * with has somewhere to go.
+ *
+ * @typedef {'auto'|'vivid'|'ocean'|'solarized'|'github'|'monochrome'} JsonThemeId
+ */
+export const JSON_THEMES = {
+  auto:       { label: 'Auto',       description: 'Follows the app theme' },
+  vivid:      { label: 'Vivid',      description: 'High-chroma, maximum separation' },
+  ocean:      { label: 'Ocean',      description: 'Cool blues and teals' },
+  solarized:  { label: 'Solarized',  description: 'The classic low-contrast set' },
+  github:     { label: 'GitHub',     description: "GitHub's syntax colours" },
+  monochrome: { label: 'Monochrome', description: 'Weight and shade only, no hue' },
+}
+/** @type {JsonThemeId} */
+export const DEFAULT_JSON_THEME = 'auto'
+export const JSON_THEME_IDS = /** @type {JsonThemeId[]} */ (Object.keys(JSON_THEMES))
+
+export function normalizeJsonTheme(/** @type {unknown} */ id) {
+  return JSON_THEMES[/** @type {JsonThemeId} */ (id)] ? /** @type {JsonThemeId} */ (id) : DEFAULT_JSON_THEME
+}
+
 // ── Query & connection defaults ──────────────────────────────────────────────
 // Numeric/text knobs surfaced under Settings → Database. `maxQueryHistory` is
 // consumed by the query-history store; the connector values (packet/timeouts/
@@ -445,6 +473,7 @@ export const DEFAULT_SETTINGS = {
   iconStyle: DEFAULT_ICON_STYLE,
   iconSet: DEFAULT_ICON_SET,
   tableStyle: DEFAULT_TABLE_STYLE,
+  jsonTheme: DEFAULT_JSON_THEME,
   mcpAutoStart: false,
   launchAtLogin: false,
   autoReconnectOnStartup: true,
@@ -588,6 +617,7 @@ export const appPaginationMode = writable(/** @type {string} */ (DEFAULT_PAGINAT
 /** Reactive canvas-table grid style preset (synced by applySettings). DataTable
  *  subscribes to repaint when it changes. */
 export const appTableStyle = writable(/** @type {TableStyleId} */ (DEFAULT_TABLE_STYLE))
+export const appJsonTheme = writable(/** @type {JsonThemeId} */ (DEFAULT_JSON_THEME))
 
 const LAST_DARK_KEY  = 'stroke:last-dark-theme'
 const LAST_LIGHT_KEY = 'stroke:last-light-theme'
@@ -701,6 +731,7 @@ export function loadSettings() {
     const iconStyle = normalizeIconStyle(parsed.iconStyle)
     const iconSet = normalizeIconSet(parsed.iconSet)
     const tableStyle = normalizeTableStyle(parsed.tableStyle)
+    const jsonTheme = normalizeJsonTheme(parsed.jsonTheme)
     const defaultDataView = DATA_VIEW_IDS.includes(parsed.defaultDataView) ? parsed.defaultDataView : DEFAULT_DATA_VIEW
     const paginationMode = PAGINATION_MODE_IDS.includes(parsed.paginationMode) ? parsed.paginationMode : DEFAULT_PAGINATION_MODE
     const maxQueryHistory = normalizeInt(parsed.maxQueryHistory, DEFAULT_MAX_QUERY_HISTORY, 1, 100000)
@@ -751,7 +782,7 @@ export function loadSettings() {
     const agentShowQueryCards = parsed.agentShowQueryCards !== false
     const agentWebAccess = parsed.agentWebAccess === true
     const tableTextAlign = TABLE_ALIGN_IDS.includes(parsed.tableTextAlign) ? parsed.tableTextAlign : DEFAULT_TABLE_ALIGN
-    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, lazyWideColumns, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, motion, zebraRows, showRowNumbers, showMenuBar, numberGrouping, imagePreview, openUrlsOnClick, highlightActiveRow, gridFontSize, autoSaveQueries, sqlFormat }
+    _settingsCache = { theme, zoom, font, iconStyle, iconSet, tableStyle, jsonTheme, mcpAutoStart, launchAtLogin, autoReconnectOnStartup, previewDmlBeforeApply, defaultDataView, paginationMode, maxQueryHistory, connectTimeoutMs, socketTimeoutMs, maxAllowedPacket, sessionTimezone, vimMode, cmdkAiEnabled, liveModeEnabled, lazyWideColumns, nullSortOrder, agentChatFontSize, agentCodeFontSize, agentThinkingStyle, agentShowQueryCards, agentWebAccess, tableTextAlign, telemetry, jsonWordWrap, nativeScroll, rowSpacing, motion, zebraRows, showRowNumbers, showMenuBar, numberGrouping, imagePreview, openUrlsOnClick, highlightActiveRow, gridFontSize, autoSaveQueries, sqlFormat }
     return { ..._settingsCache }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -905,6 +936,13 @@ export function applySettings(settings) {
   const tableStyle = normalizeTableStyle(settings.tableStyle)
   setAttr(root, 'data-table-style', tableStyle)
   setStore(appTableStyle, tableStyle)
+
+  // JSON colours. A data attribute only - every consumer reads the
+  // --json-* custom properties, so the palette swaps with no component
+  // re-rendering anything.
+  const jsonTheme = normalizeJsonTheme(settings.jsonTheme)
+  setAttr(root, 'data-json-theme', jsonTheme)
+  setStore(appJsonTheme, jsonTheme)
 
   // Keep the canvas-table zoom in lockstep with the app zoom so Cmd +/-/0 (and
   // the zoom buttons) scale the grid alongside the rest of the UI. The canvas

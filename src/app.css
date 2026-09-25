@@ -154,6 +154,72 @@ html[data-theme="light"] {
   --json-number: oklch(0.55 0.13 60);
   --json-boolean: oklch(0.5 0.18 310);
 }
+
+/* Selectable JSON palettes (Settings → Appearance → JSON colours).
+   `auto` is the pair above: it follows light and dark and is the default.
+   Each of the rest is written twice, once for dark surfaces and once for
+   light, because a palette tuned for one is unreadable on the other - the
+   lightness moves, the hue does not. */
+[data-json-theme="vivid"] {
+  --json-key: oklch(0.78 0.16 250);
+  --json-string: oklch(0.82 0.19 145);
+  --json-number: oklch(0.85 0.17 80);
+  --json-boolean: oklch(0.78 0.21 320);
+}
+html[data-theme="light"][data-json-theme="vivid"],
+html[data-theme="light"] [data-json-theme="vivid"] {
+  --json-key: oklch(0.48 0.21 255);
+  --json-string: oklch(0.45 0.18 150);
+  --json-number: oklch(0.5 0.17 60);
+  --json-boolean: oklch(0.46 0.24 320);
+}
+
+[data-json-theme="ocean"] {
+  --json-key: oklch(0.76 0.11 230);
+  --json-string: oklch(0.79 0.11 195);
+  --json-number: oklch(0.82 0.09 160);
+  --json-boolean: oklch(0.72 0.13 265);
+}
+html[data-theme="light"][data-json-theme="ocean"],
+html[data-theme="light"] [data-json-theme="ocean"] {
+  --json-key: oklch(0.46 0.14 235);
+  --json-string: oklch(0.45 0.11 200);
+  --json-number: oklch(0.48 0.1 165);
+  --json-boolean: oklch(0.44 0.16 270);
+}
+
+/* Solarized's own accent values, which are defined once and used on both of
+   its backgrounds - that is the point of the palette. */
+[data-json-theme="solarized"] {
+  --json-key: oklch(0.63 0.11 240);   /* blue    #268bd2 */
+  --json-string: oklch(0.68 0.1 190); /* cyan    #2aa198 */
+  --json-number: oklch(0.68 0.13 130);/* green   #859900 */
+  --json-boolean: oklch(0.6 0.15 350);/* magenta #d33682 */
+}
+
+[data-json-theme="github"] {
+  --json-key: oklch(0.72 0.14 280);   /* purple  */
+  --json-string: oklch(0.75 0.11 235);/* blue    */
+  --json-number: oklch(0.76 0.13 45); /* orange  */
+  --json-boolean: oklch(0.7 0.16 20); /* red     */
+}
+html[data-theme="light"][data-json-theme="github"],
+html[data-theme="light"] [data-json-theme="github"] {
+  --json-key: oklch(0.45 0.19 285);
+  --json-string: oklch(0.42 0.15 240);
+  --json-number: oklch(0.5 0.15 45);
+  --json-boolean: oklch(0.48 0.19 20);
+}
+
+/* No hue at all: the structure carries on the shades and the app theme's own
+   accent is the only colour left on screen. */
+[data-json-theme="monochrome"] {
+  --json-key: var(--foreground);
+  --json-string: color-mix(in oklch, var(--foreground) 72%, transparent);
+  --json-number: color-mix(in oklch, var(--foreground) 88%, transparent);
+  --json-boolean: color-mix(in oklch, var(--foreground) 60%, transparent);
+  --json-null: color-mix(in oklch, var(--foreground) 42%, transparent);
+}
 .json-tok-key { color: var(--json-key); }
 .json-tok-str { color: var(--json-string); }
 .json-tok-num { color: var(--json-number); }
