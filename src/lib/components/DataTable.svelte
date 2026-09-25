@@ -4858,6 +4858,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // the cell it was aimed at. Enter and any other character still start an
     // edit; Space previews. Shift+Space stays bound to the same thing, which is
     // what it was before.
+    // Alt+Space steps into the dock the Space beside it opened. Space leaves the
+    // cursor on the grid on purpose, so arrows keep walking the table and the
+    // preview follows; this is the deliberate way in. Escape brings focus back.
+    if (e.key === " " && e.altKey && !e.ctrlKey && !e.metaKey) {
+      if (cellEditorOpen && cellEditorRef?.focusEditor()) {
+        e.preventDefault();
+        return;
+      }
+    }
+
     if (e.key === " " && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (!editingCell && focusedRow !== null && focusedCol !== null) {
         const ai = visToActualColIdx(focusedCol);
@@ -4925,7 +4935,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
 
     // The cell menu's two quick filters, as chords. Alt+F sits beside
-    // Alt+Shift+F, which opens the filter menu: same family, one step shorter,
+    // Alt+A, which opens the filter menu: same family, one step shorter,
     // and Alt+E is the other half of the pair. Handled before the switch so a
     // plain `f` or `e` still reaches type-to-edit.
     if (!editingCell && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "f" || e.key === "F" || e.key === "e" || e.key === "E")) {

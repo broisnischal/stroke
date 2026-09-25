@@ -18,10 +18,10 @@
    *  know a key exists, not when you are already on the button. */
   const KEY = {
     search: IS_MAC ? "⌘F" : "Ctrl+F",
-    filter: IS_MAC ? "⌥⇧F" : "Alt+Shift+F",
-    sort: IS_MAC ? "⌥⇧S" : "Alt+Shift+S",
-    columns: IS_MAC ? "⌥⇧C" : "Alt+Shift+C",
-    reset: IS_MAC ? "⌥⇧R" : "Alt+Shift+R",
+    filter: IS_MAC ? "⌥A" : "Alt+A",
+    sort: IS_MAC ? "⌥S" : "Alt+S",
+    columns: IS_MAC ? "⌥C" : "Alt+C",
+    reset: IS_MAC ? "⌥R" : "Alt+R",
     addRow: IS_MAC ? "⌥N" : "Alt+N",
   };
   import { GAME_WORD, CLEAR_WORD, isMagic } from '$lib/games/easter-eggs.js'

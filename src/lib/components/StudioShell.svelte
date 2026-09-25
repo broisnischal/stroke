@@ -2670,19 +2670,19 @@ let rowSearch = $state('')
     return true
   }
 
-  createHotkey('Alt+Shift+F', (e) => {
+  createHotkey('Alt+A', (e) => {
     if (!tableMenuHotkeyGuard(e)) return
     e.preventDefault()
     tableToolbar?.openFilterMenu?.()
   })
 
-  createHotkey('Alt+Shift+S', (e) => {
+  createHotkey('Alt+S', (e) => {
     if (!tableMenuHotkeyGuard(e)) return
     e.preventDefault()
     tableToolbar?.openSortMenu?.()
   })
 
-  createHotkey('Alt+Shift+C', (e) => {
+  createHotkey('Alt+C', (e) => {
     if (!tableMenuHotkeyGuard(e)) return
     e.preventDefault()
     tableToolbar?.openColumnsMenu?.()
@@ -2702,7 +2702,7 @@ let rowSearch = $state('')
   // Reset the active table tab to its unfiltered default (clears search, filters,
   // sort, hidden columns, custom view, and resets the data view + page). Works in
   // any table view mode, but not while typing in an input.
-  createHotkey('Alt+Shift+R', (e) => {
+  createHotkey('Alt+R', (e) => {
     if (activeTab?.kind !== 'table' || !activeTable) return
     if (commandOpen || showConnectionModal || showSettingsModal) return
     const el = document.activeElement

@@ -105,7 +105,7 @@ describe('searchOptionHotkey', () => {
   it('ignores the same letters without Alt, and Alt with another modifier', () => {
     expect(searchOptionHotkey(ev({ code: 'KeyC' }))).toBe(null)
     expect(searchOptionHotkey(ev({ altKey: true, ctrlKey: true, code: 'KeyC' }))).toBe(null)
-    // Alt+Shift+R is "reset table view" - it must not land here too.
+    // Alt+R is "reset table view" - it must not land here too.
     expect(searchOptionHotkey(ev({ altKey: true, shiftKey: true, code: 'KeyR' }))).toBe(null)
   })
 
