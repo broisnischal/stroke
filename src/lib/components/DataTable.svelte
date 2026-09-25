@@ -1262,10 +1262,23 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     );
   }
 
+  /**
+   * Fold a multi-line value onto the one line a grid row has for it.
+   *
+   * fillText draws no line breaks, so a newline came out as nothing at all
+   * while the indentation around it was drawn in full - pretty-printed JSON
+   * read as `[   "a",   "b" ]`, gaps where the structure used to be. The break
+   * and the whitespace either side of it collapse to a single space, which is
+   * what the copy-as-TSV path already does with the same values.
+   */
+  function foldLines(/** @type {string} */ s) {
+    return s.includes("\n") || s.includes("\r") ? s.replace(/\s*[\r\n]+\s*/g, " ") : s;
+  }
+
   function displayCell(value) {
     // Escaped before the cut, so the limit counts what is actually drawn and an
     // escape can never be sliced in half.
-    const s = showControlChars(formatCell(value));
+    const s = foldLines(showControlChars(formatCell(value)));
     return s.length > CELL_DISPLAY_LIMIT ? s.slice(0, CELL_DISPLAY_LIMIT) + "…" : s;
   }
 
@@ -5513,7 +5526,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (holdPaint && _surfaceHasFrame) { _blitDy = 0; return }
     _surfaceHasFrame = true
 
-    // ── Scroll blitting ──────────────────────────────────────────────────────
+    // Scratch surface for the scroll blit. One canvas, grown as needed and never
+  // shrunk, so a scroll allocates nothing after its first frame.
+  /** @type {{ canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D } | null} */
+  let _blitScratch = null
+  function blitScratch(/** @type {number} */ w, /** @type {number} */ h) {
+    if (w <= 0 || h <= 0) return null
+    if (!_blitScratch) {
+      const canvas = document.createElement('canvas')
+      const c = canvas.getContext('2d', { alpha: true })
+      if (!c) return null
+      _blitScratch = { canvas, ctx: c }
+    }
+    const { canvas, ctx: c } = _blitScratch
+    if (canvas.width < w || canvas.height < h) {
+      canvas.width = Math.max(canvas.width, w)
+      canvas.height = Math.max(canvas.height, h)
+    }
+    return { canvas, ctx: c }
+  }
+
+  // ── Scroll blitting ──────────────────────────────────────────────────────
     // After the truncation cache, `fillText` is the whole remaining draw cost:
     // measured at 167 calls / 6,243 glyphs per frame, 4.8ms of an 8.7ms draw,
     // ~29us a call. That is Cairo rasterising glyphs on the CPU and no amount of
@@ -5635,14 +5668,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const srcTop = headDev + (kDev > 0 ? kDev : 0)
       const dstTop = headDev + (kDev > 0 ? 0 : -kDev)
       const keepDev = devH - Math.max(srcTop, dstTop)
-      ctx.save()
-      ctx.setTransform(1, 0, 0, 1, 0, 0)
-      ctx.drawImage(
-        ctx.canvas,
-        0, srcTop, ctx.canvas.width, keepDev,
-        0, dstTop, ctx.canvas.width, keepDev,
-      )
-      ctx.restore()
+      // Through a scratch surface, never canvas-onto-itself.
+      //
+      // Source and destination overlap by everything but `dy` - that is the
+      // point of the copy - and a self-drawImage across overlapping regions is
+      // only safe if the engine snapshots the source first. WebKitGTK's canvas
+      // is rasterised on the CPU by Cairo, which copies in place, so a band
+      // could be read after it had already been written over: rows duplicated
+      // above the seam and a torn frame that only ever appeared mid-scroll.
+      //
+      // Two copies instead of one, and both are flat surface moves with no text
+      // in them - still nothing beside repainting 6,000 glyphs.
+      const scratch = blitScratch(ctx.canvas.width, keepDev)
+      if (scratch) {
+        scratch.ctx.setTransform(1, 0, 0, 1, 0, 0)
+        scratch.ctx.clearRect(0, 0, ctx.canvas.width, keepDev)
+        scratch.ctx.drawImage(
+          ctx.canvas,
+          0, srcTop, ctx.canvas.width, keepDev,
+          0, 0, ctx.canvas.width, keepDev,
+        )
+        ctx.save()
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        ctx.drawImage(
+          scratch.canvas,
+          0, 0, ctx.canvas.width, keepDev,
+          0, dstTop, ctx.canvas.width, keepDev,
+        )
+        ctx.restore()
+      }
       // Back in CSS px for the strip. Rounded outward so a fractional viewport
       // height can only ever make us repaint a hair more than was uncovered,
       // never leave a sliver of stale pixels behind.

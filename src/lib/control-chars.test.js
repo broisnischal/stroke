@@ -8,6 +8,23 @@ const show = (s) =>
     ? s.replace(CONTROL_CHARS_G, (c) => '\\u' + c.codePointAt(0).toString(16).padStart(4, '0'))
     : s
 
+const fold = (s) => (s.includes('\n') || s.includes('\r') ? s.replace(/\s*[\r\n]+\s*/g, ' ') : s)
+
+describe('multi-line values on one grid row', () => {
+  it('folds pretty-printed JSON onto one line', () => {
+    expect(fold('[\n  "Alex Smith",\n  "Live test"\n]')).toBe('[ "Alex Smith", "Live test" ]')
+  })
+  it('collapses the indentation that came with the break', () => {
+    expect(fold('a\n\n        b')).toBe('a b')
+  })
+  it('leaves a single-line value untouched', () => {
+    expect(fold('["Alex Smith","Live test"]')).toBe('["Alex Smith","Live test"]')
+  })
+  it('handles CRLF', () => {
+    expect(fold('a\r\nb')).toBe('a b')
+  })
+})
+
 describe('control characters in grid cells', () => {
   it('names the C1 char that drew as a box', () => {
     expect(show('â\u0080¯')).toBe('â\\u0080¯')
