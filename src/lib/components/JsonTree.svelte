@@ -169,7 +169,7 @@
   }
 </script>
 
-<div class="min-w-0 font-mono text-ui-sm leading-relaxed">
+<div class="min-w-0 font-mono text-ui-xs leading-normal">
   <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
   <div class="group/jsonrow flex min-w-0 items-start gap-1">
     {#if isContainer}
@@ -209,7 +209,7 @@
             >{#if searching}{#each splitHighlight(label ?? "", query) as run, i (i)}{#if run.hit}<mark
                     class="rounded-[2px] bg-warning/35 px-0 text-foreground">{run.t}</mark
                   >{:else}{run.t}{/if}{/each}{:else}{label}{/if}</button
-          ><span class="text-muted-foreground">:</span>
+          ><span class="-ms-1 text-muted-foreground">:</span>
         {/if}
 
         {#if isContainer}

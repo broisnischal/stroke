@@ -8,7 +8,7 @@
   // Sizing + color come from `class` (size-*, text-*), matching how Lucide icons
   // are used across the app - so this is a drop-in replacement for a bare glyph.
   import { HugeiconsIcon } from '@hugeicons/svelte'
-  import { appIconSet, appIconStyle } from '$lib/stores/settings.js'
+  import { iconFamily } from '$lib/icon-family.svelte.js'
   import { ICON_MAP, PHOSPHOR_MAP } from '$lib/icon-registry.js'
   import { cn } from '$lib/utils.js'
 
@@ -21,19 +21,16 @@
     ...rest
   } = $props()
 
+  // The family and the weight come off one app-wide subscription rather than
+  // one per icon - see icon-family.svelte.js.
   const entry = $derived(ICON_MAP[name])
-  const useHuge = $derived($appIconSet === 'hugeicons' && !!entry?.huge)
-  const Phosphor = $derived($appIconSet === 'phosphor' ? PHOSPHOR_MAP[name] : undefined)
+  const useHuge = $derived(iconFamily.set === 'hugeicons' && !!entry?.huge)
+  const Phosphor = $derived(iconFamily.set === 'phosphor' ? PHOSPHOR_MAP[name] : undefined)
   const Lucide = $derived(entry?.lucide)
-  // Phosphor carries weight in the glyph itself (not stroke-width), so the
-  // icon-weight setting maps to its native weight variants.
-  const phWeight = $derived(
-    $appIconStyle === 'light' ? 'light' : $appIconStyle === 'bold' ? 'bold' : 'regular',
-  )
 </script>
 
 {#if Phosphor}
-  <Phosphor class={cn('shrink-0', className)} weight={phWeight} size="100%" {...rest} />
+  <Phosphor class={cn('shrink-0', className)} weight={iconFamily.phosphorWeight} size="100%" {...rest} />
 {:else if useHuge}
   <HugeiconsIcon icon={entry.huge} class={cn('shrink-0', className)} {strokeWidth} {...rest} />
 {:else if Lucide}

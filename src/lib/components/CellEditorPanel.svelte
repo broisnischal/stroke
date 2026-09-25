@@ -155,8 +155,13 @@
     // Structured text opens unwrapped: pretty-printed JSON is short lines
     // already, and unwrapped is what lets the gutter number them. Prose keeps
     // wrapping. Alt+Z still flips it either way.
-    maxLineLen = longestLine(text)
-    wrap = maxLineLen <= MAX_WRAP_LINE && (wrapPref ?? !/^\s*[[{]/.test(text))
+    // Measured into a local and used from it. Reading `maxLineLen` back on the
+    // next line made this effect depend on a value it had just written, which
+    // is the read-and-write cycle Svelte refuses to run - it took down the
+    // whole view with effect_update_depth_exceeded on any cell that reached it.
+    const longest = longestLine(text)
+    maxLineLen = longest
+    wrap = longest <= MAX_WRAP_LINE && (wrapPref ?? !/^\s*[[{]/.test(text))
     // Undo/redo, word-delete and line-delete for every plain field in the app
     // live in `input-shortcuts.js`, and its history is keyed by element. This
     // textarea outlives the cell it is showing, so the history has to be

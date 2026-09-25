@@ -1171,18 +1171,31 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function pgArrayText(arr) {
     return "{" + arr.map(pgArrayElem).join(",") + "}";
   }
-  // Cached pgAdmin-style display for SQL *array columns* only (drawCell passes the
-  // value after confirming the column type ends with []). Cached per value object
-  // so the scroll hot path never rebuilds the string. jsonb arrays never reach
-  // this - they render as ["a","b"] via formatCell.
+  // Display for SQL *array columns* (drawCell passes the value after confirming
+  // the column type ends with []). Cached per value object so the scroll hot
+  // path never rebuilds the string.
+  //
+  // JSON form, not the pgAdmin literal `{a,b}`. Three things in this app showed
+  // the same array three different ways: a text[] cell read `{Dhaka,Gazipur}`,
+  // the jsonb column beside it read `["Dhaka","Gazipur"]`, and double-clicking
+  // either one put `["Dhaka","Gazipur"]` in the box to edit - so the row you
+  // were reading and the value you were editing did not look like the same
+  // thing. They all read as JSON now, which is the form the editor already used.
+  // pgArrayText is still what writes go out as; that is the literal Postgres
+  // wants and it was never the right thing to read.
   /** @type {WeakMap<object, string>} */
   const _arrayDisplayCache = new WeakMap();
   function arrayDisplay(arr) {
     const hit = _arrayDisplayCache.get(arr);
     if (hit !== undefined) return hit;
-    const s = pgArrayText(arr);
-    _arrayDisplayCache.set(arr, s);
-    return s;
+    let s;
+    try {
+      s = JSON.stringify(arr);
+    } catch {
+      s = pgArrayText(arr); // cyclic or otherwise unserialisable - fall back
+    }
+    _arrayDisplayCache.set(arr, s ?? pgArrayText(arr));
+    return s ?? pgArrayText(arr);
   }
   /** True when a column's SQL type is an array (ends with []). */
   function isSqlArrayType(colType) {
@@ -1224,8 +1237,48 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Truncated version for DOM rendering - keeps long values out of the render tree */
+  // Characters with no glyph anywhere: the C0 and C1 control ranges and DEL.
+  // Tab, newline and carriage return are left out - they are ordinary in text
+  // columns and escaping them would rewrite every multi-line value on screen.
+  const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/;
+  const CONTROL_CHARS_G = new RegExp(CONTROL_CHARS.source, "g");
+
+  /**
+   * Show control characters instead of drawing nothing where they are.
+   *
+   * A font has no glyph for these, so the grid drew each one as a blank box and
+   * a value carrying one was indistinguishable from a value that did not - the
+   * mojibake `â\u0080¯` read as `â ¯` with a hole in the middle, and nothing on
+   * screen said what the hole was.
+   *
+   * Escaped in ASCII rather than swapped for a Control Pictures glyph (␀): the
+   * replacement has to be certain to render, and those glyphs are missing from
+   * plenty of monospace faces - which would put the box straight back.
+   */
+  function showControlChars(/** @type {string} */ s) {
+    if (!CONTROL_CHARS.test(s)) return s;
+    return s.replace(CONTROL_CHARS_G, (c) =>
+      "\\u" + (c.codePointAt(0) ?? 0).toString(16).padStart(4, "0"),
+    );
+  }
+
+  /**
+   * Fold a multi-line value onto the one line a grid row has for it.
+   *
+   * fillText draws no line breaks, so a newline came out as nothing at all
+   * while the indentation around it was drawn in full - pretty-printed JSON
+   * read as `[   "a",   "b" ]`, gaps where the structure used to be. The break
+   * and the whitespace either side of it collapse to a single space, which is
+   * what the copy-as-TSV path already does with the same values.
+   */
+  function foldLines(/** @type {string} */ s) {
+    return s.includes("\n") || s.includes("\r") ? s.replace(/\s*[\r\n]+\s*/g, " ") : s;
+  }
+
   function displayCell(value) {
-    const s = formatCell(value);
+    // Escaped before the cut, so the limit counts what is actually drawn and an
+    // escape can never be sliced in half.
+    const s = foldLines(showControlChars(formatCell(value)));
     return s.length > CELL_DISPLAY_LIMIT ? s.slice(0, CELL_DISPLAY_LIMIT) + "…" : s;
   }
 
@@ -2819,6 +2872,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let cellEditorRef = $state(null);
   /** Shift+Space opens the dock already focused; plain Space does not. */
   let cellEditorFocusOnOpen = $state(false);
+  /** The dock is showing a whole row as JSON (Alt+J), not one cell. */
+  let cellEditorRowJson = $state(false);
   let cellEditorOpen = $state(false);
   let cellEditorRow = $state(-1);
   let cellEditorCol = $state(-1);
@@ -2943,6 +2998,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {unknown} value @param {string} label
    */
   function openValueInDock(value, label) {
+    cellEditorRowJson = false;
     cellEditorOversize = null;
     cellEditorTruncated = false;
     cellEditorRow = -1;
@@ -2956,6 +3012,30 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /**
+   * The whole focused row as one JSON object, in the dock (Alt+J).
+   *
+   * Reading a row across a wide table means scrolling sideways and holding the
+   * column names in your head. This is the same row with the names attached,
+   * on one screen. Detached on purpose - it is a view of a row, not of a cell,
+   * so the cursor moving must not re-point it at whatever cell it lands on.
+   * @param {number} rowIdx
+   */
+  function openRowJson(rowIdx) {
+    if (rows[rowIdx] === undefined) return;
+    // Through the same helper "Copy row as JSON" uses, so the two agree and
+    // hidden columns stay hidden. Built from effectiveCellValue rather than the
+    // raw row so staged edits show: this is the row as it stands, which is what
+    // the grid above it is showing too.
+    const values = columns.map((_, i) => effectiveCellValue(rowIdx, i));
+    openValueInDock(rowToRecord(columns, values, hiddenColumns), `row ${rowIdx + 1}`);
+    // After openValueInDock, which clears both: the dock is detached so the
+    // cell-follow effect leaves it alone, and the row is remembered so the
+    // row-follow effect below can move it.
+    cellEditorRow = rowIdx;
+    cellEditorRowJson = true;
+  }
+
+  /**
    * Point the editor at a cell. Split out of `openCellEditor` so the cursor can
    * move the open dock from cell to cell without re-opening it.
    * @param {number} rowIdx @param {number} colIdx
@@ -2964,6 +3044,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function seedCellEditor(rowIdx, colIdx) {
     const col = columns[colIdx];
     if (!col || rowIdx < 0) return false;
+    cellEditorRowJson = false;
     const value = effectiveCellValue(rowIdx, colIdx);
     // Only a preview of an oversize cell was ever loaded; editing it would write
     // the preview back over the real value.
@@ -3002,6 +3083,33 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (ai < 0) return;
       if (r === cellEditorRow && ai === cellEditorCol) return;
       seedCellEditor(r, ai);
+    });
+  });
+
+  /**
+   * The row-JSON dock follows the row cursor, the way the cell dock follows the
+   * cell one. Moving down the grid with it open used to leave it on the row it
+   * was opened from, so the highlighted row and the JSON under it disagreed
+   * about which row you were reading.
+   *
+   * Only the row is watched: stepping across columns within a row changes
+   * nothing about the row, and re-rendering it there would be work for an
+   * identical result. `dataVersion` is watched too, so a staged edit shows up
+   * in the JSON the same moment it shows up in the grid.
+   */
+  $effect(() => {
+    if (!cellEditorOpen || !cellEditorRowJson) return;
+    const r = focusedRow;
+    void dataVersion;
+    if (r === null || rows[r] === undefined) return;
+    untrack(() => {
+      if (r === cellEditorRow && cellEditorValue !== null) {
+        // Same row, but the data under it may have changed.
+        const values = columns.map((_, i) => effectiveCellValue(r, i));
+        cellEditorValue = rowToRecord(columns, values, hiddenColumns);
+        return;
+      }
+      openRowJson(r);
     });
   });
 
@@ -4929,6 +5037,16 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       }
     }
 
+    // Alt+J: the whole row as JSON in the dock. Alt+Space steps into it, the
+    // same as it does for a cell, and Escape closes it.
+    if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "j" || e.key === "J")) {
+      if (!editingCell && focusedRow !== null) {
+        e.preventDefault();
+        openRowJson(focusedRow);
+        return;
+      }
+    }
+
     // Space previews the focused cell, full size. It is a printable character,
     // so without this it fell through to type-to-edit below and opened the
     // editor with a space typed into it - the one keystroke on the grid that
@@ -5408,7 +5526,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     if (holdPaint && _surfaceHasFrame) { _blitDy = 0; return }
     _surfaceHasFrame = true
 
-    // ── Scroll blitting ──────────────────────────────────────────────────────
+    // Scratch surface for the scroll blit. One canvas, grown as needed and never
+  // shrunk, so a scroll allocates nothing after its first frame.
+  /** @type {{ canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D } | null} */
+  let _blitScratch = null
+  function blitScratch(/** @type {number} */ w, /** @type {number} */ h) {
+    if (w <= 0 || h <= 0) return null
+    if (!_blitScratch) {
+      const canvas = document.createElement('canvas')
+      const c = canvas.getContext('2d', { alpha: true })
+      if (!c) return null
+      _blitScratch = { canvas, ctx: c }
+    }
+    const { canvas, ctx: c } = _blitScratch
+    if (canvas.width < w || canvas.height < h) {
+      canvas.width = Math.max(canvas.width, w)
+      canvas.height = Math.max(canvas.height, h)
+    }
+    return { canvas, ctx: c }
+  }
+
+  // ── Scroll blitting ──────────────────────────────────────────────────────
     // After the truncation cache, `fillText` is the whole remaining draw cost:
     // measured at 167 calls / 6,243 glyphs per frame, 4.8ms of an 8.7ms draw,
     // ~29us a call. That is Cairo rasterising glyphs on the CPU and no amount of
@@ -5530,14 +5668,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       const srcTop = headDev + (kDev > 0 ? kDev : 0)
       const dstTop = headDev + (kDev > 0 ? 0 : -kDev)
       const keepDev = devH - Math.max(srcTop, dstTop)
-      ctx.save()
-      ctx.setTransform(1, 0, 0, 1, 0, 0)
-      ctx.drawImage(
-        ctx.canvas,
-        0, srcTop, ctx.canvas.width, keepDev,
-        0, dstTop, ctx.canvas.width, keepDev,
-      )
-      ctx.restore()
+      // Through a scratch surface, never canvas-onto-itself.
+      //
+      // Source and destination overlap by everything but `dy` - that is the
+      // point of the copy - and a self-drawImage across overlapping regions is
+      // only safe if the engine snapshots the source first. WebKitGTK's canvas
+      // is rasterised on the CPU by Cairo, which copies in place, so a band
+      // could be read after it had already been written over: rows duplicated
+      // above the seam and a torn frame that only ever appeared mid-scroll.
+      //
+      // Two copies instead of one, and both are flat surface moves with no text
+      // in them - still nothing beside repainting 6,000 glyphs.
+      const scratch = blitScratch(ctx.canvas.width, keepDev)
+      if (scratch) {
+        scratch.ctx.setTransform(1, 0, 0, 1, 0, 0)
+        scratch.ctx.clearRect(0, 0, ctx.canvas.width, keepDev)
+        scratch.ctx.drawImage(
+          ctx.canvas,
+          0, srcTop, ctx.canvas.width, keepDev,
+          0, 0, ctx.canvas.width, keepDev,
+        )
+        ctx.save()
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        ctx.drawImage(
+          scratch.canvas,
+          0, 0, ctx.canvas.width, keepDev,
+          0, dstTop, ctx.canvas.width, keepDev,
+        )
+        ctx.restore()
+      }
       // Back in CSS px for the strip. Rounded outward so a fractional viewport
       // height can only ever make us repaint a hair more than was uncovered,
       // never leave a sliver of stale pixels behind.
@@ -8638,6 +8797,15 @@ import FilterX from "@lucide/svelte/icons/filter-x";
           <PanelBottom />
           Preview cell
           <ContextMenu.Shortcut combo="Space" />
+        </ContextMenu.Item>
+        <!-- The whole row, as JSON, in the same dock. Beside Preview cell
+             because it is the same question asked of the row instead of the
+             cell, and it had the same problem: a binding and no way to reach it
+             with the hand already holding the pointer. -->
+        <ContextMenu.Item onSelect={() => runMenuAction(() => openRowJson(contextRowIdx))}>
+          <Braces />
+          Preview row JSON
+          <ContextMenu.Shortcut combo="Alt+J" />
         </ContextMenu.Item>
         {#if menuForeignKey}
           <ContextMenu.Item
