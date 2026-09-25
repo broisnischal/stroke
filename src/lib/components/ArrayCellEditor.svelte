@@ -106,7 +106,7 @@
     onclick={(e) => { if (e.target === e.currentTarget) cancel() }}
     onkeydown={(e) => { if (e.key === 'Escape') { e.preventDefault(); cancel() } }}
   >
-    <div class="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border/50 bg-background elevate-3-rim">
+    <div class="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border/50 bg-background elevate-3-rim">
       <!-- Header -->
       <div class="flex items-center gap-3 border-b border-border/15 px-4 py-3.5">
         <div class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -130,8 +130,10 @@
         </button>
       </div>
 
-      <!-- Elements -->
-      <div class="min-h-0 flex-1 overflow-y-auto p-2">
+      <!-- Elements. One bordered surface with hairline separators rather than a
+           bordered box per row: eleven outlines stacked up read as eleven
+           fields to fill in, when what this is is one list. -->
+      <div class="min-h-0 flex-1 overflow-y-auto px-3 py-2.5">
         {#if items.length === 0}
           <div class="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border/50 px-4 py-8 text-center">
             <p class="text-ui-xs text-muted-foreground">Empty array <span class="font-mono">{'{}'}</span></p>
@@ -144,21 +146,22 @@
             </button>
           </div>
         {:else}
-          <div class="flex flex-col">
+          <div class="flex flex-col overflow-hidden rounded-lg border border-border/40 bg-muted/10">
             {#each items as item, i (i)}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class={cn(
-                  'group relative flex items-center gap-2 rounded-lg px-1 py-1 transition-[opacity,background-color] duration-150',
+                  'group relative flex h-8 items-center gap-1.5 px-1.5 transition-[opacity,background-color] duration-150',
+                  i > 0 && 'border-t border-border/25',
                   dragIndex === i && 'opacity-40',
-                  overIndex === i && dragIndex !== i && 'bg-primary/5',
+                  overIndex === i && dragIndex !== i ? 'bg-primary/10' : 'hover:bg-muted/25',
                 )}
                 ondragover={(e) => onDragOver(i, e)}
                 ondrop={() => onDrop(i)}
               >
                 <!-- Drop indicator line above the hovered row -->
                 {#if overIndex === i && dragIndex !== null && dragIndex !== i}
-                  <span class="pointer-events-none absolute inset-x-2 -top-px h-0.5 rounded-full bg-primary"></span>
+                  <span class="pointer-events-none absolute inset-x-0 -top-px h-0.5 bg-primary"></span>
                 {/if}
                 <!-- Drag handle -->
                 <button
@@ -167,15 +170,15 @@
                   draggable="true"
                   ondragstart={(e) => onDragStart(i, e)}
                   ondragend={onDragEnd}
-                  class="flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground transition-colors hover:text-muted-foreground active:cursor-grabbing"
+                  class="flex size-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/35 transition-colors group-hover:text-muted-foreground active:cursor-grabbing"
                 >
                   <GripVertical class="size-3.5" />
                 </button>
-                <span class="w-5 shrink-0 text-right font-mono text-ui-2xs tabular-nums text-muted-foreground">{i}</span>
+                <span class="w-6 shrink-0 pr-1 text-right font-mono text-ui-3xs tabular-nums text-muted-foreground/60">{i}</span>
                 {#if item.v === null}
                   <button
                     type="button"
-                    class= "field-surface flex h-8 flex-1 items-center bg-muted/15 px-2.5 text-ui-xs font-medium italic tracking-wide text-warning transition-colors hover:bg-muted/25"
+                    class="flex h-7 flex-1 items-center rounded-md px-2 text-left font-mono text-ui-xs italic text-warning transition-colors hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
                     onclick={() => toggleNull(i)}
                     title="Click to enter a value"
                   >NULL</button>
@@ -186,17 +189,23 @@
                     placeholder="value"
                     spellcheck="false"
                     autocomplete="off"
-                    class= "field-surface h-8 min-w-0 flex-1 bg-muted/15 px-2.5 font-mono text-ui-xs leading-none text-foreground outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground hover:"
+                    class="h-7 min-w-0 flex-1 rounded-md bg-transparent px-2 font-mono text-ui-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 hover:bg-muted/25 focus:bg-muted/30 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
                     onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addItem() } }}
                   />
                 {/if}
-                <div class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+                <!-- Always there, just quiet. Fading them in on hover moved
+                     nothing but made the row look different every time the
+                     pointer crossed it, and left them unreachable by keyboard. -->
+                <div class="flex shrink-0 items-center gap-0.5">
                   <button type="button" aria-label={item.v === null ? 'Clear NULL' : 'Set NULL'}
-                    class={cn('inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/50', item.v === null ? 'text-warning' : 'text-muted-foreground hover:text-foreground')}
+                    class={cn(
+                      'inline-flex size-6 items-center justify-center rounded transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring',
+                      item.v === null ? 'text-warning' : 'text-muted-foreground/40 group-hover:text-muted-foreground hover:text-foreground',
+                    )}
                     title={item.v === null ? 'Clear NULL' : 'Set NULL'}
                     onclick={() => toggleNull(i)}><CircleSlash class="size-3.5" /></button>
                   <button type="button" aria-label="Remove element"
-                    class="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/15 hover:text-destructive"
+                    class="inline-flex size-6 items-center justify-center rounded text-muted-foreground/40 transition-colors group-hover:text-muted-foreground hover:bg-destructive/15 hover:text-destructive focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
                     title="Remove"
                     onclick={() => removeAt(i)}><X class="size-3.5" /></button>
                 </div>
@@ -207,7 +216,7 @@
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center gap-2 border-t border-border/15 px-3 py-2.5">
+      <div class="flex items-center gap-1.5 border-t border-border/15 bg-muted/10 px-3 py-2.5">
         <button
           type="button"
           class= "field-surface inline-flex h-8 items-center gap-1.5 px-2.5 text-ui-xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
@@ -218,9 +227,9 @@
         {#if items.length > 0}
           <button
             type="button"
-            class="inline-flex h-8 items-center rounded-md px-2.5 text-ui-xs text-muted-foreground transition-colors hover:text-destructive"
+            class="inline-flex h-8 items-center rounded-md px-2 text-ui-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             onclick={clearAll}
-          >Clear</button>
+          >Clear all</button>
         {/if}
         <div class="ml-auto flex items-center gap-2">
           <button
@@ -228,9 +237,12 @@
             class= "field-surface inline-flex h-8 items-center px-3 text-ui-xs text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/40 hover:text-foreground active:scale-[0.96]"
             onclick={cancel}
           >Cancel</button>
+          <!-- bg-primary, the way ConfirmDialog and the update dialog do it. It
+               was the only primary button in the app painted in the foreground
+               colour. -->
           <button
             type="button"
-            class="inline-flex h-8 items-center rounded-md bg-foreground px-4 text-ui-xs font-medium text-background transition-[background-color,transform] duration-150 ease-out hover:bg-foreground/85 active:scale-[0.96]"
+            class="inline-flex h-8 items-center rounded-md bg-primary px-4 text-ui-xs font-medium text-primary-foreground transition-[background-color,transform] duration-150 ease-out hover:bg-primary/90 active:scale-[0.96] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             onclick={save}
           >Save</button>
         </div>
