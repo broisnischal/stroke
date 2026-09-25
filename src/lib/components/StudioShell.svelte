@@ -1473,6 +1473,8 @@ let rowSearch = $state('')
   const virtualExprColsForToolbar = $derived($virtualColumnsStore[_vcolTableKey] ?? [])
   /** @type {{ focusRowSearch?: () => void, clearRowSearch?: () => void } | null} */
   let tableToolbar = $state(null)
+  /** @type {{ focusedColumnName: () => string } | null} */
+  let dataTable = $state(null)
   /** @type {ReturnType<typeof setTimeout> | null} */
   let filterDebounceTimer = null
   /** @type {ReturnType<typeof setTimeout> | null} */
@@ -2673,7 +2675,9 @@ let rowSearch = $state('')
   createHotkey('Alt+A', (e) => {
     if (!tableMenuHotkeyGuard(e)) return
     e.preventDefault()
-    tableToolbar?.openFilterMenu?.()
+    // Seeded with the column the cell cursor is on: the filter you want is
+    // nearly always about the cell you are looking at.
+    tableToolbar?.openFilterMenu?.(dataTable?.focusedColumnName?.() ?? '')
   })
 
   createHotkey('Alt+S', (e) => {
@@ -8297,6 +8301,7 @@ let rowSearch = $state('')
                    edits, selection and scroll position survive mode switches. -->
               <div class={dataViewMode === 'table' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}>
               <DataTable
+                bind:this={dataTable}
                 {columns}
                 {rows}
                 {primaryKey}

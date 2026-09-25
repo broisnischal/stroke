@@ -376,10 +376,17 @@
   export function openColumnsMenu() {
     if (columns.length) columnsMenuOpen = true;
   }
-  /** Open the filter bar, seeding an empty filter row (hotkey from the parent). */
-  export function openFilterMenu() {
+  /**
+   * Open the filter bar, seeding an empty filter row (hotkey from the parent).
+   *
+   * @param {string} [preferColumn] Column to seed the new row with - the one the
+   *   cell cursor is on. Filtering is almost always about the column you are
+   *   already looking at, and picking it again from a list of eighty is the
+   *   step worth removing.
+   */
+  export function openFilterMenu(preferColumn = "") {
     if (!columns.length) return;
-    if (!filterBarOpen) openFilterBar();
+    if (!filterBarOpen) openFilterBar(preferColumn);
   }
 
   /** Clear the row search and focus the input (Ctrl+T shortcut). */
@@ -407,9 +414,9 @@
   }
 
   /** Open the filter bar (seeding a row if empty) and land the caret in its value. */
-  function openFilterBar() {
+  function openFilterBar(preferColumn = "") {
     filterBarOpen = true;
-    if (rowFilters.length === 0) addFilter();
+    if (rowFilters.length === 0) addFilter(preferColumn);
     focusLastFilter();
   }
 
@@ -681,8 +688,10 @@
     onsearchchange("");
   }
 
-  function addFilter() {
-    const col = columns[0]?.name ?? "";
+  /** @param {string} [preferColumn] Seed this column instead of the first one. */
+  function addFilter(preferColumn = "") {
+    const wanted = preferColumn && columns.some((c) => c.name === preferColumn) ? preferColumn : "";
+    const col = wanted || (columns[0]?.name ?? "");
     const op = col ? defaultOpForCol(col) : "contains";
     onfilterschange([...rowFilters, createFilter(col, op)]);
   }

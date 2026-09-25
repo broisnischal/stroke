@@ -2779,6 +2779,17 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Open the dedicated array editor for a cell (from the context menu). */
+  /**
+   * The column the cell cursor is sitting on. For callers that want to act on
+   * the cell you are looking at rather than make you name the column again -
+   * the filter bar seeds itself with this.
+   */
+  export function focusedColumnName() {
+    if (focusedCol === null) return "";
+    const ai = visToActualColIdx(focusedCol);
+    return ai >= 0 ? (columns[ai]?.name ?? "") : "";
+  }
+
   // ── Full-size cell editor (Space) ─────────────────────────────────────────
   /** @type {{ focusEditor: () => boolean } | null} */
   let cellEditorRef = $state(null);
