@@ -1473,7 +1473,7 @@ let rowSearch = $state('')
   const virtualExprColsForToolbar = $derived($virtualColumnsStore[_vcolTableKey] ?? [])
   /** @type {{ focusRowSearch?: () => void, clearRowSearch?: () => void } | null} */
   let tableToolbar = $state(null)
-  /** @type {{ focusedColumnName: () => string } | null} */
+  /** @type {{ focusedColumnName: () => string, openCellDock: (r: number, c: number) => void } | null} */
   let dataTable = $state(null)
   /** @type {ReturnType<typeof setTimeout> | null} */
   let filterDebounceTimer = null
@@ -6944,9 +6944,11 @@ let rowSearch = $state('')
       // A cut value in a cell is worse than the size it replaces: it reads as
       // the value and is not one. Past this size nothing loads whole anywhere,
       // so the dock is the honest answer - it pages through what it has.
-      toast.info('Too large to load whole', {
-        description: `${col.name} is ${formatByteSize(res.bytes)}, past the ${formatByteSize(CELL_VALUE_MAX)} this loads in one piece. Open it with Space to read it in pages.`,
-      })
+      //
+      // It opens it, rather than printing a message telling you to press a key.
+      // Load is a request to see the value, and the answer to a request you can
+      // satisfy is not a notification.
+      dataTable?.openCellDock?.(detail.rowIdx, detail.colIdx)
       return
     }
     // A JSON column renders from a parsed value, the way an under-cap row in the

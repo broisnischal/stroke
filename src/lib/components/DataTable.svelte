@@ -2835,9 +2835,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     try {
       await onloadcellvalue({ rowIdx, colIdx })
       // The dock is a view of a cell, so a cell that just changed under it has
-      // to be re-read. Without this the panel kept showing "not loaded" over a
-      // row that already held the value.
-      if (cellEditorOpen && !cellEditorDetached && cellEditorRow === rowIdx && cellEditorCol === colIdx) {
+      // to be re-read. It used to re-read only when the dock already happened to
+      // be on this cell, which is not where it usually is: the Load button is in
+      // the cell, clicking it does not move the cursor, and the dock follows the
+      // cursor - so loading a value left the dock showing some other row and
+      // still saying "not loaded". Loading a cell is a request to see that cell.
+      if (cellEditorOpen && !cellEditorDetached) {
+        focusedRow = rowIdx
+        focusedCol = actualToVisColIdx(colIdx) >= 0 ? actualToVisColIdx(colIdx) : focusedCol
         seedCellEditor(rowIdx, colIdx)
       }
     } catch (e) {
@@ -2877,6 +2882,19 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       cellEditorTruncated = false
     })
   })
+
+  /**
+   * Open the dock on a cell from outside. For a value too big to put in the
+   * row: the dock reads it in pages, so this is the answer rather than a
+   * message telling you to press a key yourself.
+   */
+  export function openCellDock(rowIdx, colIdx) {
+    focusedRow = rowIdx
+    const vi = actualToVisColIdx(colIdx)
+    if (vi >= 0) focusedCol = vi
+    openCellEditor(rowIdx, colIdx)
+    scrollRowIntoView(rowIdx)
+  }
 
   function openCellEditor(rowIdx, colIdx) {
     if (!seedCellEditor(rowIdx, colIdx)) return;

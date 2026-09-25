@@ -149,7 +149,7 @@
     // already, and unwrapped is what lets the gutter number them. Prose keeps
     // wrapping. Alt+Z still flips it either way.
     maxLineLen = longestLine(text)
-    wrap = maxLineLen <= MAX_WRAP_LINE && !/^\s*[[{]/.test(text)
+    wrap = maxLineLen <= MAX_WRAP_LINE && (wrapPref ?? !/^\s*[[{]/.test(text))
     // Undo/redo, word-delete and line-delete for every plain field in the app
     // live in `input-shortcuts.js`, and its history is keyed by element. This
     // textarea outlives the cell it is showing, so the history has to be
@@ -394,7 +394,31 @@
    */
   const MAX_WRAP_LINE = 10_000
   const canWrap = $derived(maxLineLen <= MAX_WRAP_LINE)
+  // Forced off because the value cannot afford it, which is not a preference and
+  // must not be saved as one.
   $effect(() => { if (!canWrap) wrap = false })
+
+  /**
+   * Whether to wrap is a reading preference, not a property of the cell, so it
+   * outlives the cell. Stored as the answer the reader last gave; until they
+   * give one, structured text opens unwrapped and prose opens wrapped.
+   */
+  const WRAP_PREF_KEY = 'stroke:cell-editor-wrap'
+  /** @type {boolean | null} */
+  let wrapPref = (() => {
+    try {
+      const v = localStorage.getItem(WRAP_PREF_KEY)
+      return v === '1' ? true : v === '0' ? false : null
+    } catch { return null }
+  })()
+
+  /** The toggle and Alt+Z. Only an explicit answer is remembered. */
+  function toggleWrap() {
+    if (!canWrap) return
+    wrap = !wrap
+    wrapPref = wrap
+    try { localStorage.setItem(WRAP_PREF_KEY, wrap ? '1' : '0') } catch { /* private window, or storage is full */ }
+  }
 
 
   // The editor's type metrics, as whole pixels. The gutter has to sit on the
@@ -468,7 +492,7 @@
     // Cmd/Ctrl+Enter applies, matching every other multi-line editor in the app.
     { key: 'Mod-Enter', run: () => { apply(); return true } },
     // Alt+Z toggles wrap, Alt+R reverts - VS Code's keys.
-    { key: 'Alt-z', run: () => { if (canWrap) wrap = !wrap; return true } },
+    { key: 'Alt-z', run: () => { toggleWrap(); return true } },
     { key: 'Alt-r', run: () => { revert(); return true } },
   ]
 
@@ -535,7 +559,7 @@
           'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent',
           wrap ? 'text-foreground' : 'text-muted-foreground',
         )}
-        onclick={() => { if (canWrap) wrap = !wrap }}
+        onclick={toggleWrap}
         title={canWrap
           ? 'Soft wrap (Alt+Z)'
           : `Soft wrap is off for this value: its longest line is ${maxLineLen.toLocaleString()} characters, and wrapping one line that long lays it out all at once`}
