@@ -132,9 +132,15 @@
     // what this cell holds without moving the cursor, and the draft has to
     // follow it.
     const cell = `${colName}\u0000${sourceHint}\u0000${detached ? 'd' : ''}\u0000${oversize ? 'preview' : 'full'}`
-    const text = toText(value)
+    // Read, not converted. `toText` used to run up here, above both guards, so
+    // every re-run stringified the value and threw the result away - twice for
+    // anything it pretty-prints, and on every arrow key, because the dock
+    // follows the cursor. It even did it with the dock closed. The read is what
+    // registers the dependency; the work belongs after the guards.
+    const raw = value
     if (!open) { wasOpen = false; seededCell = ''; return }
     if (wasOpen && cell === seededCell) return
+    const text = toText(raw)
     const justOpened = !wasOpen
     // An unstaged draft is about to be replaced by the cell the cursor moved to.
     // Said out loud, because losing typing silently is worse than a toast.
