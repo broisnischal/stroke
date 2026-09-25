@@ -1237,8 +1237,35 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Truncated version for DOM rendering - keeps long values out of the render tree */
+  // Characters with no glyph anywhere: the C0 and C1 control ranges and DEL.
+  // Tab, newline and carriage return are left out - they are ordinary in text
+  // columns and escaping them would rewrite every multi-line value on screen.
+  const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/;
+  const CONTROL_CHARS_G = new RegExp(CONTROL_CHARS.source, "g");
+
+  /**
+   * Show control characters instead of drawing nothing where they are.
+   *
+   * A font has no glyph for these, so the grid drew each one as a blank box and
+   * a value carrying one was indistinguishable from a value that did not - the
+   * mojibake `â\u0080¯` read as `â ¯` with a hole in the middle, and nothing on
+   * screen said what the hole was.
+   *
+   * Escaped in ASCII rather than swapped for a Control Pictures glyph (␀): the
+   * replacement has to be certain to render, and those glyphs are missing from
+   * plenty of monospace faces - which would put the box straight back.
+   */
+  function showControlChars(/** @type {string} */ s) {
+    if (!CONTROL_CHARS.test(s)) return s;
+    return s.replace(CONTROL_CHARS_G, (c) =>
+      "\\u" + (c.codePointAt(0) ?? 0).toString(16).padStart(4, "0"),
+    );
+  }
+
   function displayCell(value) {
-    const s = formatCell(value);
+    // Escaped before the cut, so the limit counts what is actually drawn and an
+    // escape can never be sliced in half.
+    const s = showControlChars(formatCell(value));
     return s.length > CELL_DISPLAY_LIMIT ? s.slice(0, CELL_DISPLAY_LIMIT) + "…" : s;
   }
 
