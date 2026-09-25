@@ -5213,6 +5213,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     rowRules: _tableStyle.rows === true,
     colRules: _tableStyle.cols === true,
     zebra: _tableStyle.zebra === true,
+    // The rest of the chosen style, for surfaces that draw their own table and
+    // have to land on the same look: dashes, weight, and the heavier rule every
+    // Nth row. Three booleans were not enough - every dashed, dotted, ledger or
+    // bordered preset came out as plain solid lines in the FK sub-view.
+    dash: _tableStyle.dash ?? null,
+    double: _tableStyle.double === true,
+    strong: _tableStyle.strong === true,
+    groupEvery: _tableStyle.groupEvery ?? 0,
     align: $appTableAlign,
     rowNumbers: $appRowNumbers === true,
   })

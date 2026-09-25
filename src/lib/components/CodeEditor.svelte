@@ -42,6 +42,7 @@
     placeholder = '',
     ariaLabel = '',
     keys = [],
+    gutter = true,
   } = $props()
 
   /** @type {HTMLDivElement | null} */
@@ -50,6 +51,7 @@
   let view = null
 
   const wrapC = new Compartment()
+  const gutterC = new Compartment()
   const readOnlyC = new Compartment()
   const langC = new Compartment()
 
@@ -555,9 +557,11 @@
     return EditorState.create({
       doc,
       extensions: [
-        lineNumbers(),
+        // Reconfigurable: the panel hides the gutter on request, and hiding it
+        // means dropping the fold gutter with it - a fold arrow column with no
+        // numbers beside it is a stripe nothing explains.
+        gutterC.of(gutter ? [lineNumbers(), foldGutter({ openText: '▾', closedText: '▸' })] : []),
         codeFolding(),
-        foldGutter({ openText: '▾', closedText: '▸' }),
         highlightActiveLine(),
         highlightActiveLineGutter(),
         drawSelection(),
@@ -611,6 +615,10 @@
     if (view && next !== view.state.doc.toString()) view.setState(freshState(next))
   })
   $effect(() => { const w = wrap; view?.dispatch({ effects: wrapC.reconfigure(w ? EditorView.lineWrapping : []) }) })
+  $effect(() => {
+    const g = gutter
+    view?.dispatch({ effects: gutterC.reconfigure(g ? [lineNumbers(), foldGutter({ openText: '▾', closedText: '▸' })] : []) })
+  })
   $effect(() => { const r = readOnly; view?.dispatch({ effects: readOnlyC.reconfigure(EditorState.readOnly.of(r)) }) })
 
   export function focus() { view?.focus() }

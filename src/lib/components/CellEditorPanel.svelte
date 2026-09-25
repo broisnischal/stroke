@@ -45,6 +45,7 @@
   import Download from '@lucide/svelte/icons/download'
   import Undo2 from '@lucide/svelte/icons/undo-2'
   import WrapText from '@lucide/svelte/icons/wrap-text'
+  import ListOrdered from '@lucide/svelte/icons/list-ordered'
   import X from '@lucide/svelte/icons/x'
   import { cn } from '$lib/utils.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
@@ -440,6 +441,22 @@
     } catch { return null }
   })()
 
+  /**
+   * Line numbers, remembered the same way. Wrap already hides them while it is
+   * on - a gutter numbering logical lines against wrapped visual rows either
+   * disagrees with the count in the bar or lies - so this is the answer for
+   * when the value is unwrapped and the numbers are still not wanted.
+   */
+  const GUTTER_PREF_KEY = 'stroke:cell-editor-gutter'
+  let showGutter = $state((() => {
+    try { return localStorage.getItem(GUTTER_PREF_KEY) !== '0' } catch { return true }
+  })())
+
+  function toggleGutter() {
+    showGutter = !showGutter
+    try { localStorage.setItem(GUTTER_PREF_KEY, showGutter ? '1' : '0') } catch { /* private window, or storage is full */ }
+  }
+
   /** The toggle and Alt+Z. Only an explicit answer is remembered. */
   function toggleWrap() {
     if (!canWrap) return
@@ -521,6 +538,7 @@
     { key: 'Mod-Enter', run: () => { apply(); return true } },
     // Alt+Z toggles wrap, Alt+R reverts - VS Code's keys.
     { key: 'Alt-z', run: () => { toggleWrap(); return true } },
+    { key: 'Alt-l', run: () => { toggleGutter(); return true } },
     { key: 'Alt-r', run: () => { revert(); return true } },
   ]
 
@@ -593,6 +611,22 @@
           : `Soft wrap is off for this value: its longest line is ${maxLineLen.toLocaleString()} characters, and wrapping one line that long lays it out all at once`}
       >
         <WrapText class="size-3.5 shrink-0" />
+      </button>
+      <!-- Line numbers. Disabled while wrap is on, which hides them anyway. -->
+      <button
+        type="button"
+        disabled={wrap}
+        aria-pressed={showGutter && !wrap}
+        class={cn(
+          'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent',
+          showGutter && !wrap ? 'text-foreground' : 'text-muted-foreground',
+        )}
+        onclick={toggleGutter}
+        title={wrap
+          ? 'Line numbers are hidden while soft wrap is on'
+          : `${showGutter ? 'Hide' : 'Show'} line numbers (Alt+L)`}
+      >
+        <ListOrdered class="size-3.5 shrink-0" />
       </button>
       <!-- Icon only, like the wrap toggle beside it. The word "Copy" next to a
            copy glyph is the label saying what the picture already says, and this
@@ -724,6 +758,7 @@
         bind:value={draft}
         {readOnly}
         {wrap}
+        gutter={showGutter && !wrap}
         placeholder={isNull ? 'NULL' : ''}
         ariaLabel="{colName} value"
         keys={editorKeys}

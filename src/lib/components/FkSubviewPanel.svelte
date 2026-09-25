@@ -21,7 +21,7 @@
    * Appearance → Grid text size) scaled by the canvas zoom, not a rung of the
    * UI scale, and the panel has to land on the same number to read as the same
    * table. The fallbacks are the shipped defaults at 100%.
-   * @typedef {{ zoom: number, cellPx: number, typePx: number, rowH: number, headerH: number, padX: number, rowRules: boolean, colRules: boolean, zebra: boolean, align: string, rowNumbers: boolean }} GridMetrics
+   * @typedef {{ zoom: number, cellPx: number, typePx: number, rowH: number, headerH: number, padX: number, rowRules: boolean, colRules: boolean, zebra: boolean, align: string, rowNumbers: boolean, dash?: number[] | null, double?: boolean, strong?: boolean, groupEvery?: number }} GridMetrics
    */
   let {
     data,
@@ -29,6 +29,7 @@
     metrics = {
       zoom: 1, cellPx: 13, typePx: 11, rowH: 28, headerH: 30, padX: 10,
       rowRules: true, colRules: true, zebra: false, align: 'numbers', rowNumbers: true,
+      dash: null, double: false, strong: false, groupEvery: 0,
     },
     fkLabel = '',
     /** Small context hint shown next to the badge (e.g. "row 12"). */
@@ -37,6 +38,39 @@
     /** Navigate to the related table WITH the FK filter applied */
     onfullview = () => {},
   } = $props()
+
+  /**
+   * The grid's table style, translated into what a CSS border can say.
+   *
+   * The grid draws on canvas and takes a dash array; a border takes a keyword,
+   * so the array is matched to the nearest one - a 1px-on dash reads as dotted,
+   * anything longer as dashed. `double` and `strong` are borrowed as-is. What
+   * cannot cross over (corner dots, column ticks) simply does not, rather than
+   * being approximated into something the grid never shows.
+   */
+  const rule = $derived.by(() => {
+    const d = metrics.dash
+    const style = metrics.double ? 'double' : !d ? 'solid' : d[0] <= 1 ? 'dotted' : 'dashed'
+    // `double` needs 3px to render as two lines at all; a 1px double border is
+    // drawn by every engine as a single solid one.
+    const width = metrics.double ? 3 : 1
+    return {
+      style,
+      width,
+      // Dashes and dots read lighter than a solid rule of the same colour
+      // because so much of the line is missing, so they are given back some
+      // contrast to sit at the same weight as the grid above.
+      row: metrics.strong ? 'border-border/60' : style === 'solid' ? 'border-border/15' : 'border-border/30',
+      col: metrics.strong ? 'border-r-border/60' : style === 'solid' ? 'border-r-border/15' : 'border-r-border/30',
+      group: metrics.strong ? 'border-border/70' : 'border-border/40',
+    }
+  })
+
+  /** A heavier rule every Nth row (ledger, graph, bands). 1-based like the gutter. */
+  function isGroupEdge(/** @type {number} */ i) {
+    const n = metrics.groupEvery ?? 0
+    return n > 0 && (i + 1) % n === 0
+  }
 
   /**
    * What the panel draws. Every lookup replaces `data` with an empty
@@ -305,7 +339,11 @@
                     <th
                       class={cn(
                         'overflow-hidden border-b border-border/60 bg-muted/25 align-middle font-[530] whitespace-nowrap text-foreground/80',
-                        metrics.colRules && 'border-r border-r-border/25',
+                        metrics.colRules && cn('border-r', metrics.strong ? 'border-r-border/50' : 'border-r-border/25'),
+                        // The header's own bottom rule stays solid whatever the
+                        // style: it separates the table from its labels rather
+                        // than one row from the next, and a dashed version of it
+                        // reads as a missing row.
                         c.alignRight ? 'text-right' : 'text-left',
                       )}
                       style="height:{metrics.headerH}px; padding:0 {metrics.padX}px"
@@ -335,9 +373,12 @@
                       <td
                         class={cn(
                           'select-none text-right align-middle tabular-nums text-muted-foreground/60',
-                          metrics.rowRules && i < view.rows.length - 1 && 'border-b border-border/15',
+                          (metrics.rowRules || isGroupEdge(i)) && i < view.rows.length - 1 &&
+                            cn('border-b', isGroupEdge(i) ? rule.group : rule.row),
                         )}
-                        style="height:{metrics.rowH}px; padding:0 {Math.round(7 * metrics.zoom)}px"
+                        style="height:{metrics.rowH}px; padding:0 {Math.round(7 * metrics.zoom)}px;
+                               border-bottom-style:{rule.style};
+                               border-bottom-width:{isGroupEdge(i) ? Math.max(rule.width, 2) : rule.width}px"
                       >{i + 1}</td>
                     {/if}
                     {#each cols as c, j (c.name)}
@@ -353,14 +394,18 @@
                         aria-selected={isSel}
                         class={cn(
                           'cursor-default overflow-hidden align-middle text-ellipsis whitespace-nowrap outline-none',
-                          metrics.rowRules && i < view.rows.length - 1 && 'border-b border-border/15',
-                          metrics.colRules && 'border-r border-r-border/15',
+                          (metrics.rowRules || isGroupEdge(i)) && i < view.rows.length - 1 &&
+                            cn('border-b', isGroupEdge(i) ? rule.group : rule.row),
+                          metrics.colRules && cn('border-r', rule.col),
                           c.alignRight && 'text-right tabular-nums',
                           isNullVal && 'italic text-muted-foreground/70',
                           !isSel && 'group-hover/row:bg-muted/10',
                           isSel && 'bg-primary/15 ring-1 ring-inset ring-primary/40',
                         )}
-                        style="height:{metrics.rowH}px; padding:0 {metrics.padX}px"
+                        style="height:{metrics.rowH}px; padding:0 {metrics.padX}px;
+                               border-bottom-style:{rule.style};
+                               border-bottom-width:{isGroupEdge(i) ? Math.max(rule.width, 2) : rule.width}px;
+                               border-right-style:{rule.style}; border-right-width:{rule.width}px"
                         title={isNullVal ? '' : text}
                         onclick={() => selectCell(i, j)}
                         onfocus={() => selectCell(i, j)}
