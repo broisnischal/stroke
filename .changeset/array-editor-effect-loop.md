@@ -1,5 +1,5 @@
 ### New Features
-- Alt+J previews the whole row as JSON in the bottom dock, and follows the cursor from row to row
+- Alt+J previews the whole row as JSON in the bottom dock, and follows the cursor from row to row. Also on the cell right-click menu
 - JSON colours are selectable in Settings → Appearance: Auto, Vivid, Ocean, Solarized, GitHub and Monochrome
 
 ### Bug Fixes
@@ -13,3 +13,5 @@
 - Array columns read as JSON, the same form the editor and the jsonb column beside them already used
 - The array editor reads as one list instead of a stack of separate fields, and its row controls stay put instead of appearing under the pointer
 - The expanded row and its JSON tree sit on one type scale, and a key's colon sits against the key
+- Settings descriptions are one line each instead of a paragraph
+- Opening a schema with hundreds of tables costs one icon-settings subscription instead of one per icon
