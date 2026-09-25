@@ -32,10 +32,16 @@
   // Seed the working copy whenever the editor opens for a new cell.
   $effect(() => {
     if (open) {
-      items = (Array.isArray(value) ? value : []).map((el) => ({
+      // Built into a local and read from it. Assigning `items` and then reading
+      // `items.length` on the next line made this effect depend on the state it
+      // had just written - and since each run assigns a brand new array, the
+      // dependency fired again every time. Opening an array cell took the whole
+      // view down with effect_update_depth_exceeded.
+      const next = (Array.isArray(value) ? value : []).map((el) => ({
         v: el === null || el === undefined ? null : String(el),
       }))
-      inputEls.length = items.length
+      items = next
+      inputEls.length = next.length
     }
   })
 
