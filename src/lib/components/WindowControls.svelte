@@ -27,18 +27,25 @@
     return () => unlisten()
   })
 
-  async function minimizeWindow() {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window')
-    getCurrentWindow().minimize()
+  // Every one of these is an ACL-gated core command, and the window is frameless,
+  // so these buttons are the only chrome there is - a denied call leaves the user
+  // with a window they cannot move, resize or close. That is how the missing
+  // `core:window:allow-destroy` shipped in 2.1.0: `close()` runs through to
+  // `destroy`, the ACL refused it, and the rejection went nowhere. Await and log
+  // so the next gap in src-tauri/capabilities/default.json is visible.
+  /** @param {string} name @param {(w: import('@tauri-apps/api/window').Window) => Promise<unknown>} fn */
+  async function windowAction(name, fn) {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      await fn(getCurrentWindow())
+    } catch (err) {
+      console.error(`window ${name} failed:`, err)
+    }
   }
-  async function toggleMaximizeWindow() {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window')
-    getCurrentWindow().toggleMaximize()
-  }
-  async function closeWindow() {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window')
-    getCurrentWindow().close()
-  }
+
+  const minimizeWindow = () => windowAction('minimize', (w) => w.minimize())
+  const toggleMaximizeWindow = () => windowAction('toggleMaximize', (w) => w.toggleMaximize())
+  const closeWindow = () => windowAction('close', (w) => w.close())
 
   const winBtn = 'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-foreground/[0.08] hover:text-foreground'
 </script>
