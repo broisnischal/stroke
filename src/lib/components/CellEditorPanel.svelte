@@ -5,7 +5,7 @@
    * A grid row is 28px tall, which is the wrong surface for a paragraph of
    * markdown, a stack trace, a 40-line JSON payload or a SQL snippet stored in a
    * text column - the inline editor shows one line of it and scrolls the rest
-   * sideways. Shift+Space opens the same value here: the whole thing, wrapped,
+   * sideways. Space opens the same value here: the whole thing, wrapped,
    * editable, with the raw text and a read-only preview side by side when the
    * value is structured.
    *
@@ -45,6 +45,7 @@
   import Download from '@lucide/svelte/icons/download'
   import Undo2 from '@lucide/svelte/icons/undo-2'
   import WrapText from '@lucide/svelte/icons/wrap-text'
+  import ListOrdered from '@lucide/svelte/icons/list-ordered'
   import X from '@lucide/svelte/icons/x'
   import { cn } from '$lib/utils.js'
   import { toast } from '$lib/components/ui/sonner/toast.svelte.js'
@@ -64,6 +65,14 @@
     onloadfull = null,
     truncatedLoad = false,
     oncommit = /** @type {(next: string) => void} */ (() => {}),
+    /** Fired when the dock dismisses itself, so the owner can take focus back. */
+    onclose = /** @type {() => void} */ (() => {}),
+    /**
+     * Put the caret in the editor when the dock opens. Off for the grid, which
+     * opens this as a preview: the cursor stays on the cell so arrows keep
+     * walking the table, and the reader steps in deliberately (`focusEditor`).
+     */
+    autofocus = true,
   } = $props()
 
   /**
@@ -123,9 +132,15 @@
     // what this cell holds without moving the cursor, and the draft has to
     // follow it.
     const cell = `${colName}\u0000${sourceHint}\u0000${detached ? 'd' : ''}\u0000${oversize ? 'preview' : 'full'}`
-    const text = toText(value)
+    // Read, not converted. `toText` used to run up here, above both guards, so
+    // every re-run stringified the value and threw the result away - twice for
+    // anything it pretty-prints, and on every arrow key, because the dock
+    // follows the cursor. It even did it with the dock closed. The read is what
+    // registers the dependency; the work belongs after the guards.
+    const raw = value
     if (!open) { wasOpen = false; seededCell = ''; return }
     if (wasOpen && cell === seededCell) return
+    const text = toText(raw)
     const justOpened = !wasOpen
     // An unstaged draft is about to be replaced by the cell the cursor moved to.
     // Said out loud, because losing typing silently is worse than a toast.
@@ -140,7 +155,8 @@
     // Structured text opens unwrapped: pretty-printed JSON is short lines
     // already, and unwrapped is what lets the gutter number them. Prose keeps
     // wrapping. Alt+Z still flips it either way.
-    wrap = !/^\s*[[{]/.test(text)
+    maxLineLen = longestLine(text)
+    wrap = maxLineLen <= MAX_WRAP_LINE && (wrapPref ?? !/^\s*[[{]/.test(text))
     // Undo/redo, word-delete and line-delete for every plain field in the app
     // live in `input-shortcuts.js`, and its history is keyed by element. This
     // textarea outlives the cell it is showing, so the history has to be
@@ -150,7 +166,12 @@
     // the grid cursor with the dock already up re-points it without taking
     // focus, so arrow keys keep walking the grid. Escape from the editor
     // closes the dock (`onRootKey`).
-    if (justOpened) focusOnReady = true
+    if (justOpened && autofocus) {
+      // Same rule as focusEditor('auto'), decided here because this is where
+      // the seeded text is known: end of a short value, top of a long one.
+      pendingCaret = text.length <= SMALL_VALUE_CHARS ? text.length : 0
+      focusOnReady = true
+    }
   })
 
   /**
@@ -159,11 +180,43 @@
    * ran then and did nothing.
    */
   let focusOnReady = $state(false)
+  /** Where the caret goes once the editor exists; -1 leaves it alone. */
+  let pendingCaret = -1
   $effect(() => {
     if (!focusOnReady || !cm || !open) return
     focusOnReady = false
-    queueMicrotask(() => cm?.focus())
+    const pos = pendingCaret
+    pendingCaret = -1
+    queueMicrotask(() => {
+      if (pos >= 0) cm?.select(pos, pos)
+      else cm?.focus()
+    })
   })
+
+  /**
+   * Past this, the value is something to read from the top rather than a line
+   * you are about to finish typing.
+   */
+  const SMALL_VALUE_CHARS = 2_000
+
+  /**
+   * Step into the editor from outside, once the dock is already up.
+   *
+   * `auto` puts the caret where the value says it should go: at the end of a
+   * short value, which is almost always one you mean to edit, and at the start
+   * of a long one, which is one you mean to read.
+   * @param {'auto'|'start'|'end'} [caret]
+   */
+  export function focusEditor(caret = 'auto') {
+    if (!open) return false
+    const at = caret === 'auto' ? (draft.length <= SMALL_VALUE_CHARS ? 'end' : 'start') : caret
+    const pos = at === 'end' ? draft.length : 0
+    if (cm) { cm.select(pos, pos); return true }
+    // Lazy-loaded: if it is not mounted yet, focus it the moment it is.
+    pendingCaret = pos
+    focusOnReady = true
+    return true
+  }
 
   const dirty = $derived(draft !== original)
   const isNull = $derived(value === null || value === undefined)
@@ -254,8 +307,8 @@
         ok: false,
         truncated: true,
         error: loaded
-          ? `Showing the first ${formatBytes(loaded)} of ${formatBytes(oversize.bytes)}. The page fetched a preview of this column instead of the value - that is what keeps a table of half-megabyte cells openable at all.`
-          : `This cell holds ${formatBytes(oversize.bytes)}. The page fetched its size, not its contents: reading a column like this for every row on screen is what makes a table take ten seconds to open. It is one click away.`,
+          ? `Showing the first ${formatBytes(loaded)} of ${formatBytes(oversize.bytes)}. The grid reads a preview of a column this wide, not the whole value.`
+          : `The grid reads this column's size, not its contents, so a table full of cells this wide still opens fast.`,
       }
     }
     // Loaded, but the server stopped at the ceiling: the text really is cut, so
@@ -344,6 +397,82 @@
   // toggle still works if you want it.
   $effect(() => { if (heavy) wrap = false })
 
+  /**
+   * Longest line in the value, measured once per cell rather than per keystroke
+   * and without a `split('\n')`, which would allocate a second copy of a value
+   * already big enough to be the problem.
+   */
+  let maxLineLen = $state(0)
+  function longestLine(/** @type {string} */ text) {
+    let max = 0
+    let at = 0
+    for (;;) {
+      const nl = text.indexOf('\n', at)
+      if (nl === -1) return Math.max(max, text.length - at)
+      if (nl - at > max) max = nl - at
+      at = nl + 1
+    }
+  }
+
+  /**
+   * The line length past which soft wrap is refused, not merely defaulted off.
+   *
+   * CodeMirror virtualises by line: rows outside the viewport cost nothing, but
+   * a single line always lays out whole. A jsonb column holding a file arrives
+   * as one line of half a million characters, and wrapping that means measuring
+   * every one of them into a few thousand visual rows in one frame. The editor
+   * stops answering, which is what it did here before this line existed.
+   *
+   * Unwrapped there is no such cost: the line is one row and the view draws the
+   * slice that is on screen. So past the cap the toggle is disabled rather than
+   * merely off, because turning it on is the hang.
+   */
+  const MAX_WRAP_LINE = 10_000
+  const canWrap = $derived(maxLineLen <= MAX_WRAP_LINE)
+  // Forced off because the value cannot afford it, which is not a preference and
+  // must not be saved as one.
+  $effect(() => { if (!canWrap) wrap = false })
+
+  /**
+   * Whether to wrap is a reading preference, not a property of the cell, so it
+   * outlives the cell. Stored as the answer the reader last gave; until they
+   * give one, structured text opens unwrapped and prose opens wrapped.
+   */
+  const WRAP_PREF_KEY = 'stroke:cell-editor-wrap'
+  /** @type {boolean | null} */
+  let wrapPref = (() => {
+    try {
+      const v = localStorage.getItem(WRAP_PREF_KEY)
+      return v === '1' ? true : v === '0' ? false : null
+    } catch { return null }
+  })()
+
+  /**
+   * Line numbers, remembered the same way soft wrap is.
+   *
+   * It holds while wrapped too. The gutter numbers logical lines, so a wrapped
+   * line carries its number on its first visual row and nothing on the rest,
+   * which is what every editor that wraps does and is the reading everyone
+   * already has. Tying this to wrap only took the choice away.
+   */
+  const GUTTER_PREF_KEY = 'stroke:cell-editor-gutter'
+  let showGutter = $state((() => {
+    try { return localStorage.getItem(GUTTER_PREF_KEY) !== '0' } catch { return true }
+  })())
+
+  function toggleGutter() {
+    showGutter = !showGutter
+    try { localStorage.setItem(GUTTER_PREF_KEY, showGutter ? '1' : '0') } catch { /* private window, or storage is full */ }
+  }
+
+  /** The toggle and Alt+Z. Only an explicit answer is remembered. */
+  function toggleWrap() {
+    if (!canWrap) return
+    wrap = !wrap
+    wrapPref = wrap
+    try { localStorage.setItem(WRAP_PREF_KEY, wrap ? '1' : '0') } catch { /* private window, or storage is full */ }
+  }
+
 
   // The editor's type metrics, as whole pixels. The gutter has to sit on the
   // same baseline grid as the text beside it, and a fractional line-height
@@ -352,10 +481,20 @@
   const LINE_H = 20
 
 
-  function apply() {
-    if (readOnly || !dirty) { open = false; return }
-    oncommit(draft)
+  /**
+   * Close the dock and tell the owner. Closing alone left focus on a element
+   * that was about to be removed, so it fell back to <body> and the grid
+   * stopped answering arrow keys - every dismissal has to hand focus back.
+   */
+  function dismiss() {
     open = false
+    onclose()
+  }
+
+  function apply() {
+    if (readOnly || !dirty) { dismiss(); return }
+    oncommit(draft)
+    dismiss()
   }
 
   async function copy() {
@@ -387,7 +526,7 @@
     if (e.key === 'Escape') {
       e.preventDefault()
       e.stopPropagation()
-      open = false
+      dismiss()
       return
     }
     // ⌘F / Ctrl+F from anywhere in the dock opens the editor's find panel.
@@ -406,7 +545,8 @@
     // Cmd/Ctrl+Enter applies, matching every other multi-line editor in the app.
     { key: 'Mod-Enter', run: () => { apply(); return true } },
     // Alt+Z toggles wrap, Alt+R reverts - VS Code's keys.
-    { key: 'Alt-z', run: () => { wrap = !wrap; return true } },
+    { key: 'Alt-z', run: () => { toggleWrap(); return true } },
+    { key: 'Alt-l', run: () => { toggleGutter(); return true } },
     { key: 'Alt-r', run: () => { revert(); return true } },
   ]
 
@@ -431,14 +571,27 @@
        beside the name, and a 28px row of value did not need 92px of chrome. -->
   <div class="flex h-8 shrink-0 items-center gap-2 border-b border-border/40 bg-muted/20 px-2.5">
     <Pencil class="size-3.5 shrink-0 text-muted-foreground" />
-    <span class="min-w-0 truncate font-mono text-ui-2xs font-medium text-foreground/85">{colName}</span>
+    <!-- One shrinking group for everything that describes the value, so a
+         narrow dock takes room from the description rather than pushing the
+         buttons out of the bar. Every badge in here is shrink-0, so without a
+         container that can give way the row simply grew past its own width and
+         Stage and Close went off the end of it. -->
+    <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+    <!-- title: this is the only place the column is named, and it is the first
+         thing to be truncated when the bar runs out of room. -->
+    <span
+      class="min-w-0 truncate font-mono text-ui-2xs font-medium text-foreground/85"
+      title={colType ? `${colName} · ${colType}` : colName}
+    >{colName}</span>
     {#if colType}
       <span class="shrink-0 rounded-[3px] border border-border/50 bg-muted/40 px-1.5 py-px font-mono text-ui-3xs text-muted-foreground">{colType}</span>
     {/if}
     {#if sourceHint}
       <!-- ms-2: the gap between identity (name, type) and the facts about
            this value is twice the gap inside either group. -->
-      <span class="ms-2 shrink-0 font-mono text-ui-3xs text-muted-foreground">{sourceHint}</span>
+      <!-- tabular-nums: this counts up as the cursor moves, and proportional
+           digits made everything after it shift on the step from row 9 to 10. -->
+      <span class="ms-2 shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground">{sourceHint}</span>
     {/if}
     {#if isNull && !dirty}
       <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">NULL</span>
@@ -456,44 +609,44 @@
         class="shrink-0 rounded-[3px] border border-warning/30 bg-warning/10 px-1.5 py-px font-mono text-ui-3xs text-warning"
         title="A wide column reports its size per row instead of its contents - the value is not loaded and cannot be edited until it is"
       >{formatBytes(oversize.bytes)} · not loaded</span>
-      {#if onloadfull}
-        <button
-          type="button"
-          disabled={loadingFull}
-          title="Load this value ({formatBytes(oversize.bytes)})"
-          aria-label="Load this value"
-          class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-primary/15 px-2 font-mono text-ui-3xs font-medium text-primary transition-colors hover:bg-primary/25 disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-          onclick={() => void loadFull()}
-        >
-          {#if loadingFull}
-            <span class="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent"></span>
-            Loading
-          {:else}
-            <Download class="size-3 shrink-0" />
-            Load
-          {/if}
-        </button>
-      {/if}
     {/if}
     {#if dirty && !readOnly}
       <span class="shrink-0 text-ui-3xs text-primary">edited</span>
     {/if}
+    </div>
 
     <!-- Three groups, spaced apart more than their members: view tools
          (wrap, copy, revert), the commit (Stage), and close. Find is Mod+F in
          the editor and needs no button here. -->
-    <div class="ml-auto flex shrink-0 items-center gap-0.5">
+    <div class="flex shrink-0 items-center gap-0.5">
       <button
         type="button"
+        disabled={!canWrap}
         aria-pressed={wrap}
         class={cn(
-          'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/40 hover:text-foreground',
+          'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent',
           wrap ? 'text-foreground' : 'text-muted-foreground',
         )}
-        onclick={() => (wrap = !wrap)}
-        title="Soft wrap (Alt+Z)"
+        onclick={toggleWrap}
+        title={canWrap
+          ? 'Soft wrap (Alt+Z)'
+          : `Soft wrap is off for this value: its longest line is ${maxLineLen.toLocaleString()} characters, and wrapping one line that long lays it out all at once`}
       >
         <WrapText class="size-3.5 shrink-0" />
+      </button>
+      <!-- Works wrapped too: a wrapped line keeps its number on its first
+           visual row, the way every wrapping editor does it. -->
+      <button
+        type="button"
+        aria-pressed={showGutter}
+        class={cn(
+          'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/40 hover:text-foreground',
+          showGutter ? 'text-foreground' : 'text-muted-foreground',
+        )}
+        onclick={toggleGutter}
+        title="{showGutter ? 'Hide' : 'Show'} line numbers (Alt+L)"
+      >
+        <ListOrdered class="size-3.5 shrink-0" />
       </button>
       <!-- Icon only, like the wrap toggle beside it. The word "Copy" next to a
            copy glyph is the label saying what the picture already says, and this
@@ -532,7 +685,7 @@
       <button
         type="button"
         class="ms-2 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-        onclick={() => (open = false)}
+        onclick={dismiss}
         aria-label="Close cell editor"
       >
         <X class="size-3.5" />
@@ -625,6 +778,7 @@
         bind:value={draft}
         {readOnly}
         {wrap}
+        gutter={showGutter}
         placeholder={isNull ? 'NULL' : ''}
         ariaLabel="{colName} value"
         keys={editorKeys}

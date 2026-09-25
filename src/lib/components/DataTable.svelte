@@ -494,14 +494,29 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let _fkFollowTimer = null
   let _fkFollowSeq = 0
 
+  // Across a row it follows the column too. A table whose columns are all
+  // foreign keys is exactly where the dock earns its keep, and arrowing along
+  // one used to keep showing the relation the dock was opened on: the cursor
+  // said credits_credithistory and the dock said authtoken_token. Only the row
+  // was watched, so a sideways move changed nothing.
   $effect(() => {
-    const target = focusedRow
-    const anchored = fkSubview?.rowIdx
-    if (anchored === undefined || target === null || target === anchored) return
-    if (rows[target] === undefined) return
+    const targetRow = focusedRow
+    const targetVis = focusedCol
+    const sv = fkSubview
+    if (!sv || targetRow === null || rows[targetRow] === undefined) return
+    const targetCol = targetVis === null ? -1 : visToActualColIdx(targetVis)
+    // A reverse relation hangs off the row, not off any one column, so it keeps
+    // following rows only. A forward one belongs to its column, and moving onto
+    // a different foreign key is a request to see that one.
+    const movedToOtherFk =
+      sv.kind === 'forward' && targetCol >= 0 && targetCol !== sv.colIdx && !!_colCache[targetCol]?.fk
+    if (targetRow === sv.rowIdx && !movedToOtherFk) return
     untrack(() => {
       if (_fkFollowTimer) clearTimeout(_fkFollowTimer)
-      _fkFollowTimer = setTimeout(() => { _fkFollowTimer = null; void followFkSubview(target) }, FK_FOLLOW_DELAY)
+      _fkFollowTimer = setTimeout(() => {
+        _fkFollowTimer = null
+        void followFkSubview(targetRow, movedToOtherFk ? targetCol : -1)
+      }, FK_FOLLOW_DELAY)
     })
   })
 
@@ -510,16 +525,26 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * height. A NULL foreign key resolves to the panel's empty state rather than a
    * query that can only come back empty.
    * @param {number} idx
+   * @param {number} [nextCol] Switch to this column's relation as well as this
+   *   row; -1 or omitted keeps the relation the dock already has.
    */
-  async function followFkSubview(idx) {
+  async function followFkSubview(idx, nextCol = -1) {
     const sv = fkSubview
-    if (!sv || sv.rowIdx === idx || rows[idx] === undefined) return
+    if (!sv || rows[idx] === undefined) return
+    if (sv.rowIdx === idx && nextCol < 0) return
     const row = rows[idx] ?? []
+    // Switching column switches the relation, and with it the label the settle
+    // below checks itself against.
+    const colIdx = nextCol >= 0 ? nextCol : (sv.colIdx ?? -1)
+    const label =
+      nextCol >= 0 && _colCache[nextCol]?.fk
+        ? foreignKeyTargetLabel(_colCache[nextCol].fk)
+        : sv.label
     const seq = ++_fkFollowSeq
     /** @param {{ columns?: any[], rows?: any[], error?: string | null }} res */
     const settle = (res) => {
       // A newer move (or a close, or a different relation) owns the dock now.
-      if (seq !== _fkFollowSeq || fkSubview?.rowIdx !== idx || fkSubview?.label !== sv.label) return
+      if (seq !== _fkFollowSeq || fkSubview?.rowIdx !== idx || fkSubview?.label !== label) return
       fkSubview = { ...fkSubview, data: { loading: false, columns: res.columns ?? [], rows: res.rows ?? [], error: res.error ?? null } }
     }
 
@@ -534,15 +559,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return
     }
 
-    const colIdx = sv.colIdx ?? -1
     const fk = _colCache[colIdx]?.fk ?? null
     if (!fk) return
     const value = row[colIdx]
     if (value === null || value === undefined) {
-      fkSubview = { ...sv, rowIdx: idx, data: { loading: false, columns: [], rows: [], error: null } }
+      fkSubview = { ...sv, rowIdx: idx, colIdx, label, data: { loading: false, columns: [], rows: [], error: null } }
       return
     }
-    fkSubview = { ...sv, rowIdx: idx, data: { loading: true, columns: [], rows: [], error: null } }
+    fkSubview = { ...sv, rowIdx: idx, colIdx, label, data: { loading: true, columns: [], rows: [], error: null } }
     settle(await onfetchrelatedrows({ kind: 'forward', fk, row }))
   }
 
@@ -2779,7 +2803,22 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Open the dedicated array editor for a cell (from the context menu). */
-  // ── Full-size cell editor (Shift+Space) ───────────────────────────────────
+  /**
+   * The column the cell cursor is sitting on. For callers that want to act on
+   * the cell you are looking at rather than make you name the column again -
+   * the filter bar seeds itself with this.
+   */
+  export function focusedColumnName() {
+    if (focusedCol === null) return "";
+    const ai = visToActualColIdx(focusedCol);
+    return ai >= 0 ? (columns[ai]?.name ?? "") : "";
+  }
+
+  // ── Full-size cell editor (Space) ─────────────────────────────────────────
+  /** @type {{ focusEditor: (caret?: 'auto'|'start'|'end') => boolean } | null} */
+  let cellEditorRef = $state(null);
+  /** Shift+Space opens the dock already focused; plain Space does not. */
+  let cellEditorFocusOnOpen = $state(false);
   let cellEditorOpen = $state(false);
   let cellEditorRow = $state(-1);
   let cellEditorCol = $state(-1);
@@ -2822,9 +2861,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     try {
       await onloadcellvalue({ rowIdx, colIdx })
       // The dock is a view of a cell, so a cell that just changed under it has
-      // to be re-read. Without this the panel kept showing "not loaded" over a
-      // row that already held the value.
-      if (cellEditorOpen && !cellEditorDetached && cellEditorRow === rowIdx && cellEditorCol === colIdx) {
+      // to be re-read. It used to re-read only when the dock already happened to
+      // be on this cell, which is not where it usually is: the Load button is in
+      // the cell, clicking it does not move the cursor, and the dock follows the
+      // cursor - so loading a value left the dock showing some other row and
+      // still saying "not loaded". Loading a cell is a request to see that cell.
+      if (cellEditorOpen && !cellEditorDetached) {
+        focusedRow = rowIdx
+        focusedCol = actualToVisColIdx(colIdx) >= 0 ? actualToVisColIdx(colIdx) : focusedCol
         seedCellEditor(rowIdx, colIdx)
       }
     } catch (e) {
@@ -2865,8 +2909,27 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     })
   })
 
-  function openCellEditor(rowIdx, colIdx) {
+  /**
+   * Open the dock on a cell from outside. For a value too big to put in the
+   * row: the dock reads it in pages, so this is the answer rather than a
+   * message telling you to press a key yourself.
+   */
+  export function openCellDock(rowIdx, colIdx) {
+    focusedRow = rowIdx
+    const vi = actualToVisColIdx(colIdx)
+    if (vi >= 0) focusedCol = vi
+    openCellEditor(rowIdx, colIdx)
+    scrollRowIntoView(rowIdx)
+  }
+
+  /**
+   * @param {number} rowIdx @param {number} colIdx
+   * @param {boolean} [focus] Open with the caret in the editor (Shift+Space).
+   *   Set before `cellEditorOpen`, so the panel has it when it first seeds.
+   */
+  function openCellEditor(rowIdx, colIdx, focus = false) {
     if (!seedCellEditor(rowIdx, colIdx)) return;
+    cellEditorFocusOnOpen = focus;
     cellEditorDetached = false;
     // One dock at a time. Both live along the bottom edge, and stacking them
     // leaves the grid a couple of rows tall.
@@ -2924,7 +2987,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * Arrowing through the grid with the editor open used to leave it showing the
    * cell you opened it on, so the panel and the cursor disagreed about which
    * value you were looking at - and the only way to edit the next row was to
-   * close the panel and press Shift+Space again. Now it reads like an inspector:
+   * close the panel and press Space again. Now it reads like an inspector:
    * move the cursor, the panel follows. `untrack` around the write keeps the
    * effect off its own output; the cell coordinates it sets are exactly what it
    * would otherwise re-enter on.
@@ -4850,14 +4913,43 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
 
-    // Shift+Space: the focused cell, full size. Space alone stays free for the
-    // row-selection convention, and the grid has no other use for the chord.
-    if (e.key === " " && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // Space: the focused cell, full size. Space is a printable character, so
+    // without this it fell through to type-to-edit below and opened the editor
+    // with a space typed into it - the one keystroke on the grid that destroyed
+    // the cell it was aimed at. Enter and any other character still start an
+    // edit; Space previews. Shift+Space stays bound to the same thing, which is
+    // what it was before.
+    // Alt+Space steps into the dock the Space beside it opened. Space leaves the
+    // cursor on the grid on purpose, so arrows keep walking the table and the
+    // preview follows; this is the deliberate way in. Escape brings focus back.
+    if (e.key === " " && e.altKey && !e.ctrlKey && !e.metaKey) {
+      if (cellEditorOpen && cellEditorRef?.focusEditor()) {
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // Space previews the focused cell, full size. It is a printable character,
+    // so without this it fell through to type-to-edit below and opened the
+    // editor with a space typed into it - the one keystroke on the grid that
+    // destroyed the cell it was aimed at.
+    //
+    // Plain Space leaves the cursor on the grid, so arrows keep walking the
+    // table and the dock follows along. Shift+Space is the same preview and
+    // steps into the editor too: caret at the end of a short value, which is
+    // one you mean to edit, and at the top of a long one, which is one you mean
+    // to read.
+    if (e.key === " " && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (!editingCell && focusedRow !== null && focusedCol !== null) {
         const ai = visToActualColIdx(focusedCol);
         if (ai >= 0) {
           e.preventDefault();
-          openCellEditor(focusedRow, ai);
+          // Passed into the open, not chased afterwards: the editor inside the
+          // dock is lazy-loaded, so a focus call made from out here on the tick
+          // after opening can land before it exists, or before the seed
+          // replaces its document. The panel already knows how to wait for its
+          // own editor, so this just tells it to.
+          openCellEditor(focusedRow, ai, e.shiftKey);
           return;
         }
       }
@@ -4919,7 +5011,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     }
 
     // The cell menu's two quick filters, as chords. Alt+F sits beside
-    // Alt+Shift+F, which opens the filter menu: same family, one step shorter,
+    // Alt+A, which opens the filter menu: same family, one step shorter,
     // and Alt+E is the other half of the pair. Handled before the switch so a
     // plain `f` or `e` still reaches type-to-edit.
     if (!editingCell && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "f" || e.key === "F" || e.key === "e" || e.key === "E")) {
@@ -5145,6 +5237,14 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     rowRules: _tableStyle.rows === true,
     colRules: _tableStyle.cols === true,
     zebra: _tableStyle.zebra === true,
+    // The rest of the chosen style, for surfaces that draw their own table and
+    // have to land on the same look: dashes, weight, and the heavier rule every
+    // Nth row. Three booleans were not enough - every dashed, dotted, ledger or
+    // bordered preset came out as plain solid lines in the FK sub-view.
+    dash: _tableStyle.dash ?? null,
+    double: _tableStyle.double === true,
+    strong: _tableStyle.strong === true,
+    groupEvery: _tableStyle.groupEvery ?? 0,
     align: $appTableAlign,
     rowNumbers: $appRowNumbers === true,
   })
@@ -7190,7 +7290,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (editingCell) cancelEdit()
 
         // Shift+click previews the cell in the dock - the pointer half of
-        // Shift+Space. A cell you have to squint at is the reason the dock
+        // Space. A cell you have to squint at is the reason the dock
         // exists, and reaching for a chord to open it is a step.
         if (e.shiftKey) {
           e.stopPropagation()
@@ -8537,7 +8637,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Item onSelect={() => runMenuAction(() => openCellEditor(contextRowIdx, contextColIdx))}>
           <PanelBottom />
           Preview cell
-          <ContextMenu.Shortcut combo="Shift+Space" />
+          <ContextMenu.Shortcut combo="Space" />
         </ContextMenu.Item>
         {#if menuForeignKey}
           <ContextMenu.Item
@@ -8860,7 +8960,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       onpointerdown={(e) => startDockResize(e, 'cell')}
     ></div>
     <CellEditorPanel
+      bind:this={cellEditorRef}
       bind:open={cellEditorOpen}
+      autofocus={cellEditorFocusOnOpen}
       colName={cellEditorName}
       colType={cellEditorType}
       value={cellEditorValue}
@@ -8872,6 +8974,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       onloadfull={onfetchcellvalue && cellEditorRow >= 0 ? loadFullCellValue : null}
 
       oncommit={commitCellEditor}
+      onclose={() => tick().then(() => tableContainer?.focus({ preventScroll: true }))}
     />
   </div>
 {/if}

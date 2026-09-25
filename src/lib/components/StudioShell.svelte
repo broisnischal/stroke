@@ -219,7 +219,6 @@
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import { humanizeDbError } from '$lib/ai.js'
-  import { formatByteSize } from '$lib/cell-value.js'
   import { focusTrap } from '$lib/actions/focus-trap.js'
   import {
     MAX_PAGE_SIZE,
@@ -404,6 +403,7 @@
   }
   /** Assigned by ObjectsPage so ⌘F can reach its search box. */
   let objectsFocusSearch = $state(/** @type {() => void} */ (() => {}))
+  let dbSearchFocusInput = $state(/** @type {() => void} */ (() => {}))
   let showConnectionModal = $state(false)
   /** Engine chosen on the welcome screen - the modal opens straight into its form. */
   let connectionModalEngine = $state('')
@@ -1473,6 +1473,8 @@ let rowSearch = $state('')
   const virtualExprColsForToolbar = $derived($virtualColumnsStore[_vcolTableKey] ?? [])
   /** @type {{ focusRowSearch?: () => void, clearRowSearch?: () => void } | null} */
   let tableToolbar = $state(null)
+  /** @type {{ focusedColumnName: () => string, openCellDock: (r: number, c: number) => void } | null} */
+  let dataTable = $state(null)
   /** @type {ReturnType<typeof setTimeout> | null} */
   let filterDebounceTimer = null
   /** @type {ReturnType<typeof setTimeout> | null} */
@@ -2277,6 +2279,7 @@ let rowSearch = $state('')
     // Find means "search what this page is showing", and on the objects page
     // that is its own box. It used to mean nothing there at all.
     if (activeTab?.kind === 'objects') { e.preventDefault(); objectsFocusSearch?.(); return }
+    if (activeTab?.kind === 'search') { e.preventDefault(); dbSearchFocusInput?.(); return }
     if (activeTab?.kind !== 'table' || !activeTable) return
     e.preventDefault()
     tableToolbar?.focusRowSearch?.()
@@ -2670,19 +2673,21 @@ let rowSearch = $state('')
     return true
   }
 
-  createHotkey('Alt+Shift+F', (e) => {
+  createHotkey('Alt+A', (e) => {
     if (!tableMenuHotkeyGuard(e)) return
     e.preventDefault()
-    tableToolbar?.openFilterMenu?.()
+    // Seeded with the column the cell cursor is on: the filter you want is
+    // nearly always about the cell you are looking at.
+    tableToolbar?.openFilterMenu?.(dataTable?.focusedColumnName?.() ?? '')
   })
 
-  createHotkey('Alt+Shift+S', (e) => {
+  createHotkey('Alt+S', (e) => {
     if (!tableMenuHotkeyGuard(e)) return
     e.preventDefault()
     tableToolbar?.openSortMenu?.()
   })
 
-  createHotkey('Alt+Shift+C', (e) => {
+  createHotkey('Alt+C', (e) => {
     if (!tableMenuHotkeyGuard(e)) return
     e.preventDefault()
     tableToolbar?.openColumnsMenu?.()
@@ -2702,7 +2707,7 @@ let rowSearch = $state('')
   // Reset the active table tab to its unfiltered default (clears search, filters,
   // sort, hidden columns, custom view, and resets the data view + page). Works in
   // any table view mode, but not while typing in an input.
-  createHotkey('Alt+Shift+R', (e) => {
+  createHotkey('Alt+R', (e) => {
     if (activeTab?.kind !== 'table' || !activeTable) return
     if (commandOpen || showConnectionModal || showSettingsModal) return
     const el = document.activeElement
@@ -6940,9 +6945,11 @@ let rowSearch = $state('')
       // A cut value in a cell is worse than the size it replaces: it reads as
       // the value and is not one. Past this size nothing loads whole anywhere,
       // so the dock is the honest answer - it pages through what it has.
-      toast.info('Too large to load whole', {
-        description: `${col.name} is ${formatByteSize(res.bytes)}, past the ${formatByteSize(CELL_VALUE_MAX)} this loads in one piece. Open it with Shift+Space to read it in pages.`,
-      })
+      //
+      // It opens it, rather than printing a message telling you to press a key.
+      // Load is a request to see the value, and the answer to a request you can
+      // satisfy is not a notification.
+      dataTable?.openCellDock?.(detail.rowIdx, detail.colIdx)
       return
     }
     // A JSON column renders from a parsed value, the way an under-cap row in the
@@ -7898,6 +7905,7 @@ let rowSearch = $state('')
           <svelte:boundary failed={tabError}>
             {#await import('./SearchPage.svelte')}<TabLoading />{:then { default: SearchPage }}
               <SearchPage
+                bind:focusSearch={dbSearchFocusInput}
                 {tables}
                 schema={activeSchema}
                 dialect={dbType}
@@ -8297,6 +8305,7 @@ let rowSearch = $state('')
                    edits, selection and scroll position survive mode switches. -->
               <div class={dataViewMode === 'table' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}>
               <DataTable
+                bind:this={dataTable}
                 {columns}
                 {rows}
                 {primaryKey}

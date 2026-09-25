@@ -18,10 +18,10 @@
    *  know a key exists, not when you are already on the button. */
   const KEY = {
     search: IS_MAC ? "⌘F" : "Ctrl+F",
-    filter: IS_MAC ? "⌥⇧F" : "Alt+Shift+F",
-    sort: IS_MAC ? "⌥⇧S" : "Alt+Shift+S",
-    columns: IS_MAC ? "⌥⇧C" : "Alt+Shift+C",
-    reset: IS_MAC ? "⌥⇧R" : "Alt+Shift+R",
+    filter: IS_MAC ? "⌥A" : "Alt+A",
+    sort: IS_MAC ? "⌥S" : "Alt+S",
+    columns: IS_MAC ? "⌥C" : "Alt+C",
+    reset: IS_MAC ? "⌥R" : "Alt+R",
     addRow: IS_MAC ? "⌥N" : "Alt+N",
   };
   import { GAME_WORD, CLEAR_WORD, isMagic } from '$lib/games/easter-eggs.js'
@@ -376,10 +376,17 @@
   export function openColumnsMenu() {
     if (columns.length) columnsMenuOpen = true;
   }
-  /** Open the filter bar, seeding an empty filter row (hotkey from the parent). */
-  export function openFilterMenu() {
+  /**
+   * Open the filter bar, seeding an empty filter row (hotkey from the parent).
+   *
+   * @param {string} [preferColumn] Column to seed the new row with - the one the
+   *   cell cursor is on. Filtering is almost always about the column you are
+   *   already looking at, and picking it again from a list of eighty is the
+   *   step worth removing.
+   */
+  export function openFilterMenu(preferColumn = "") {
     if (!columns.length) return;
-    if (!filterBarOpen) openFilterBar();
+    if (!filterBarOpen) openFilterBar(preferColumn);
   }
 
   /** Clear the row search and focus the input (Ctrl+T shortcut). */
@@ -407,9 +414,9 @@
   }
 
   /** Open the filter bar (seeding a row if empty) and land the caret in its value. */
-  function openFilterBar() {
+  function openFilterBar(preferColumn = "") {
     filterBarOpen = true;
-    if (rowFilters.length === 0) addFilter();
+    if (rowFilters.length === 0) addFilter(preferColumn);
     focusLastFilter();
   }
 
@@ -681,8 +688,10 @@
     onsearchchange("");
   }
 
-  function addFilter() {
-    const col = columns[0]?.name ?? "";
+  /** @param {string} [preferColumn] Seed this column instead of the first one. */
+  function addFilter(preferColumn = "") {
+    const wanted = preferColumn && columns.some((c) => c.name === preferColumn) ? preferColumn : "";
+    const col = wanted || (columns[0]?.name ?? "");
     const op = col ? defaultOpForCol(col) : "contains";
     onfilterschange([...rowFilters, createFilter(col, op)]);
   }
@@ -1173,7 +1182,7 @@
           .map((c) => `${c.name} (~${fmtBytes(c.avgBytes)}/row)`)
           .join(', ')}.\n\nA page of these would move ${fmtBytes(
           previewColumns.reduce((n, c) => n + c.avgBytes, 0) * Math.max(1, to - from + 1),
-        )}. Open a cell (Shift+Space) and press Load to read one in full.`}
+        )}. Open a cell (Space) and press Load to read one in full.`}
       >
         <Icon name="eye-off" class="size-3 shrink-0" />
         {previewColumns.length === 1 ? previewColumns[0].name : `${previewColumns.length} columns`} previewed
