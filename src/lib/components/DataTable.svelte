@@ -2832,6 +2832,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   let cellEditorRef = $state(null);
   /** Shift+Space opens the dock already focused; plain Space does not. */
   let cellEditorFocusOnOpen = $state(false);
+  /** The dock is showing a whole row as JSON (Alt+J), not one cell. */
+  let cellEditorRowJson = $state(false);
   let cellEditorOpen = $state(false);
   let cellEditorRow = $state(-1);
   let cellEditorCol = $state(-1);
@@ -2956,6 +2958,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * @param {unknown} value @param {string} label
    */
   function openValueInDock(value, label) {
+    cellEditorRowJson = false;
     cellEditorOversize = null;
     cellEditorTruncated = false;
     cellEditorRow = -1;
@@ -2985,6 +2988,11 @@ import FilterX from "@lucide/svelte/icons/filter-x";
     // the grid above it is showing too.
     const values = columns.map((_, i) => effectiveCellValue(rowIdx, i));
     openValueInDock(rowToRecord(columns, values, hiddenColumns), `row ${rowIdx + 1}`);
+    // After openValueInDock, which clears both: the dock is detached so the
+    // cell-follow effect leaves it alone, and the row is remembered so the
+    // row-follow effect below can move it.
+    cellEditorRow = rowIdx;
+    cellEditorRowJson = true;
   }
 
   /**
@@ -2996,6 +3004,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   function seedCellEditor(rowIdx, colIdx) {
     const col = columns[colIdx];
     if (!col || rowIdx < 0) return false;
+    cellEditorRowJson = false;
     const value = effectiveCellValue(rowIdx, colIdx);
     // Only a preview of an oversize cell was ever loaded; editing it would write
     // the preview back over the real value.
@@ -3034,6 +3043,33 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       if (ai < 0) return;
       if (r === cellEditorRow && ai === cellEditorCol) return;
       seedCellEditor(r, ai);
+    });
+  });
+
+  /**
+   * The row-JSON dock follows the row cursor, the way the cell dock follows the
+   * cell one. Moving down the grid with it open used to leave it on the row it
+   * was opened from, so the highlighted row and the JSON under it disagreed
+   * about which row you were reading.
+   *
+   * Only the row is watched: stepping across columns within a row changes
+   * nothing about the row, and re-rendering it there would be work for an
+   * identical result. `dataVersion` is watched too, so a staged edit shows up
+   * in the JSON the same moment it shows up in the grid.
+   */
+  $effect(() => {
+    if (!cellEditorOpen || !cellEditorRowJson) return;
+    const r = focusedRow;
+    void dataVersion;
+    if (r === null || rows[r] === undefined) return;
+    untrack(() => {
+      if (r === cellEditorRow && cellEditorValue !== null) {
+        // Same row, but the data under it may have changed.
+        const values = columns.map((_, i) => effectiveCellValue(r, i));
+        cellEditorValue = rowToRecord(columns, values, hiddenColumns);
+        return;
+      }
+      openRowJson(r);
     });
   });
 

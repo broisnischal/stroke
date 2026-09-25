@@ -113,7 +113,7 @@
     // or a still-long preview) - the span-per-token HTML is the memory hog. Plain
     // escaped text stays cheap to build and render.
     html = truncated || source.length > HIGHLIGHT_LIMIT
-      ? `<pre class="m-0 p-0 font-mono text-ui-sm leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
+      ? `<pre class="m-0 p-0 font-mono text-ui-xs leading-relaxed whitespace-pre text-foreground">${escapeHtml(source)}</pre>`
       : highlightJson(source)
   })
 
@@ -351,10 +351,10 @@
       oncontextmenu={handleContextMenu}
     >
       {#if !html}
-        <p class="font-mono text-ui-sm text-muted-foreground">Loading…</p>
+        <p class="font-mono text-ui-xs text-muted-foreground">Loading…</p>
       {:else}
         <div
-          class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-ui-sm [&_pre]:leading-relaxed [&_.json-inspector-url]:text-link [&_.json-inspector-url]:hover:underline [&_.json-inspector-url]:underline-offset-2 {wrapClass === 'whitespace-pre-wrap break-all' ? '[&_pre]:whitespace-pre-wrap [&_pre]:break-all' : '[&_pre]:whitespace-pre'}"
+          class="[&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-ui-xs [&_pre]:leading-relaxed [&_.json-inspector-url]:text-link [&_.json-inspector-url]:hover:underline [&_.json-inspector-url]:underline-offset-2 {wrapClass === 'whitespace-pre-wrap break-all' ? '[&_pre]:whitespace-pre-wrap [&_pre]:break-all' : '[&_pre]:whitespace-pre'}"
         >
           {@html html}
         </div>
@@ -381,7 +381,7 @@
       {#if contextMenu.value !== null}
         <button
           type="button"
-          class="flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-ui-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+          class="flex w-full items-center gap-2 px-2.5 py-1 text-left text-ui-2xs text-foreground hover:bg-accent hover:text-accent-foreground"
           onclick={() => { copyText(/** @type {string} */ (contextMenu?.value)); dismissMenu() }}
         >
           <Copy class="size-3.5 shrink-0 text-muted-foreground" />
@@ -390,7 +390,7 @@
       {/if}
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-2.5 py-1 text-left font-mono text-ui-sm text-foreground hover:bg-accent hover:text-accent-foreground"
+        class="flex w-full items-center gap-2 px-2.5 py-1 text-left text-ui-2xs text-foreground hover:bg-accent hover:text-accent-foreground"
         onclick={() => { copyJson(); dismissMenu() }}
       >
         <Copy class="size-3.5 shrink-0 text-muted-foreground" />
