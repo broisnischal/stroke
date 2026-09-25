@@ -219,7 +219,6 @@
   import { openNotebookFile } from '$lib/api.js'
   import { formatCompactCount, normalizeTableRowCount } from '$lib/table-list.js'
   import { humanizeDbError } from '$lib/ai.js'
-  import { formatByteSize } from '$lib/cell-value.js'
   import { focusTrap } from '$lib/actions/focus-trap.js'
   import {
     MAX_PAGE_SIZE,
