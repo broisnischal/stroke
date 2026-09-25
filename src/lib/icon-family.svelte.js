@@ -1,0 +1,29 @@
+/**
+ * The active icon family and weight, subscribed once for the whole app.
+ *
+ * Icon reads two settings stores, and reading a store inside a component
+ * subscribes that component. A sidebar listing a few hundred tables draws two
+ * or three icons a row, so first paint was standing up several hundred
+ * subscriptions and their teardown for a pair of values that are the same for
+ * every icon on screen and change only when the setting does.
+ *
+ * Module scope, so there are two subscriptions in the process however many
+ * icons are mounted. They are never torn down on purpose: both stores live as
+ * long as the app does.
+ */
+import { appIconSet, appIconStyle } from '$lib/stores/settings.js'
+
+let set = $state('hugeicons')
+let style = $state('regular')
+
+appIconSet.subscribe((v) => { set = v })
+appIconStyle.subscribe((v) => { style = v })
+
+export const iconFamily = {
+  get set() { return set },
+  get style() { return style },
+  /** Phosphor carries weight in the glyph rather than a stroke width. */
+  get phosphorWeight() {
+    return style === 'light' ? 'light' : style === 'bold' ? 'bold' : 'regular'
+  },
+}
