@@ -5,7 +5,7 @@
    * A grid row is 28px tall, which is the wrong surface for a paragraph of
    * markdown, a stack trace, a 40-line JSON payload or a SQL snippet stored in a
    * text column - the inline editor shows one line of it and scrolls the rest
-   * sideways. Shift+Space opens the same value here: the whole thing, wrapped,
+   * sideways. Space opens the same value here: the whole thing, wrapped,
    * editable, with the raw text and a read-only preview side by side when the
    * value is structured.
    *
@@ -256,8 +256,8 @@
         ok: false,
         truncated: true,
         error: loaded
-          ? `Showing the first ${formatBytes(loaded)} of ${formatBytes(oversize.bytes)}. The page fetched a preview of this column instead of the value - that is what keeps a table of half-megabyte cells openable at all.`
-          : `This cell holds ${formatBytes(oversize.bytes)}. The page fetched its size, not its contents: reading a column like this for every row on screen is what makes a table take ten seconds to open. It is one click away.`,
+          ? `Showing the first ${formatBytes(loaded)} of ${formatBytes(oversize.bytes)}. The grid reads a preview of a column this wide, not the whole value.`
+          : `The grid reads this column's size, not its contents, so a table full of cells this wide still opens fast.`,
       }
     }
     // Loaded, but the server stopped at the ceiling: the text really is cut, so
@@ -468,24 +468,6 @@
         class="shrink-0 rounded-[3px] border border-warning/30 bg-warning/10 px-1.5 py-px font-mono text-ui-3xs text-warning"
         title="A wide column reports its size per row instead of its contents - the value is not loaded and cannot be edited until it is"
       >{formatBytes(oversize.bytes)} · not loaded</span>
-      {#if onloadfull}
-        <button
-          type="button"
-          disabled={loadingFull}
-          title="Load this value ({formatBytes(oversize.bytes)})"
-          aria-label="Load this value"
-          class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-primary/15 px-2 font-mono text-ui-3xs font-medium text-primary transition-colors hover:bg-primary/25 disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-          onclick={() => void loadFull()}
-        >
-          {#if loadingFull}
-            <span class="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent"></span>
-            Loading
-          {:else}
-            <Download class="size-3 shrink-0" />
-            Load
-          {/if}
-        </button>
-      {/if}
     {/if}
     {#if dirty && !readOnly}
       <span class="shrink-0 text-ui-3xs text-primary">edited</span>

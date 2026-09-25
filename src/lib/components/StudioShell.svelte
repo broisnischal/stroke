@@ -6941,7 +6941,7 @@ let rowSearch = $state('')
       // the value and is not one. Past this size nothing loads whole anywhere,
       // so the dock is the honest answer - it pages through what it has.
       toast.info('Too large to load whole', {
-        description: `${col.name} is ${formatByteSize(res.bytes)}, past the ${formatByteSize(CELL_VALUE_MAX)} this loads in one piece. Open it with Shift+Space to read it in pages.`,
+        description: `${col.name} is ${formatByteSize(res.bytes)}, past the ${formatByteSize(CELL_VALUE_MAX)} this loads in one piece. Open it with Space to read it in pages.`,
       })
       return
     }

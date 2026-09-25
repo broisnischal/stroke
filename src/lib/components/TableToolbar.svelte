@@ -1173,7 +1173,7 @@
           .map((c) => `${c.name} (~${fmtBytes(c.avgBytes)}/row)`)
           .join(', ')}.\n\nA page of these would move ${fmtBytes(
           previewColumns.reduce((n, c) => n + c.avgBytes, 0) * Math.max(1, to - from + 1),
-        )}. Open a cell (Shift+Space) and press Load to read one in full.`}
+        )}. Open a cell (Space) and press Load to read one in full.`}
       >
         <Icon name="eye-off" class="size-3 shrink-0" />
         {previewColumns.length === 1 ? previewColumns[0].name : `${previewColumns.length} columns`} previewed

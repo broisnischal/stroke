@@ -2779,7 +2779,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
   }
 
   /** Open the dedicated array editor for a cell (from the context menu). */
-  // ── Full-size cell editor (Shift+Space) ───────────────────────────────────
+  // ── Full-size cell editor (Space) ─────────────────────────────────────────
   let cellEditorOpen = $state(false);
   let cellEditorRow = $state(-1);
   let cellEditorCol = $state(-1);
@@ -2924,7 +2924,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
    * Arrowing through the grid with the editor open used to leave it showing the
    * cell you opened it on, so the panel and the cursor disagreed about which
    * value you were looking at - and the only way to edit the next row was to
-   * close the panel and press Shift+Space again. Now it reads like an inspector:
+   * close the panel and press Space again. Now it reads like an inspector:
    * move the cursor, the panel follows. `untrack` around the write keeps the
    * effect off its own output; the cell coordinates it sets are exactly what it
    * would otherwise re-enter on.
@@ -4850,9 +4850,13 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       return;
     }
 
-    // Shift+Space: the focused cell, full size. Space alone stays free for the
-    // row-selection convention, and the grid has no other use for the chord.
-    if (e.key === " " && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // Space: the focused cell, full size. Space is a printable character, so
+    // without this it fell through to type-to-edit below and opened the editor
+    // with a space typed into it - the one keystroke on the grid that destroyed
+    // the cell it was aimed at. Enter and any other character still start an
+    // edit; Space previews. Shift+Space stays bound to the same thing, which is
+    // what it was before.
+    if (e.key === " " && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (!editingCell && focusedRow !== null && focusedCol !== null) {
         const ai = visToActualColIdx(focusedCol);
         if (ai >= 0) {
@@ -7190,7 +7194,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         if (editingCell) cancelEdit()
 
         // Shift+click previews the cell in the dock - the pointer half of
-        // Shift+Space. A cell you have to squint at is the reason the dock
+        // Space. A cell you have to squint at is the reason the dock
         // exists, and reaching for a chord to open it is a step.
         if (e.shiftKey) {
           e.stopPropagation()
@@ -8537,7 +8541,7 @@ import FilterX from "@lucide/svelte/icons/filter-x";
         <ContextMenu.Item onSelect={() => runMenuAction(() => openCellEditor(contextRowIdx, contextColIdx))}>
           <PanelBottom />
           Preview cell
-          <ContextMenu.Shortcut combo="Shift+Space" />
+          <ContextMenu.Shortcut combo="Space" />
         </ContextMenu.Item>
         {#if menuForeignKey}
           <ContextMenu.Item

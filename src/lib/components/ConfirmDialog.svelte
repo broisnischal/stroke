@@ -57,16 +57,24 @@
   let contentEl = $state(null)
 
   /**
-   * Hold focus on the dialog itself instead of letting it land on Cancel, which
-   * is the first focusable child. With Cancel focused, Enter would click it -
-   * the exact opposite of the confirm-on-Enter below. Tab still reaches both
-   * buttons, and Escape still cancels.
+   * Focus the confirm button, not Cancel and not the dialog box.
+   *
+   * Cancel is the first focusable child, so the default would put focus on it
+   * and Enter would cancel - the opposite of the confirm-on-Enter below.
+   * Parking focus on the box avoided that but left nothing on screen looking
+   * focused, so the dialog opened with no visible answer to "where am I".
+   *
+   * The confirm button is the default action and already says so with its ↵, so
+   * it is the honest place for focus: Enter now activates it the ordinary way
+   * (onkeydown below steps aside for a focused button, so it fires once), and
+   * Escape still cancels.
    * @param {Event} e
    */
   function onOpenAutoFocus(e) {
     if (!confirmOnEnter) return
     e.preventDefault()
-    try { contentEl?.focus({ preventScroll: true }) } catch { /* not focusable */ }
+    const target = contentEl?.querySelector('[data-confirm-action]') ?? contentEl
+    try { /** @type {HTMLElement|null} */ (target)?.focus({ preventScroll: true }) } catch { /* not focusable */ }
   }
 
   /**
@@ -133,10 +141,16 @@
            other, and it showed - one carried an icon and a boxed kbd chip, the
            other an ✕ that said nothing "Cancel" did not already say. -->
       <Button variant="outline" onclick={cancel}>{cancelLabel}</Button>
+      <!-- focus: as well as focus-visible. onOpenAutoFocus sets focus in code and
+           WebKitGTK does not always count that as :focus-visible, which is the
+           only state the shared button styles draw a ring for - so the dialog
+           opened with its default action focused and nothing showing it. -->
       <Button
         variant={variant === 'destructive' ? 'destructive' : 'default'}
         {disabled}
         onclick={confirm}
+        data-confirm-action
+        class="focus:outline-2 focus:outline-offset-0 focus:outline-ring"
       >
         {#if confirmIcon}<Icon name={confirmIcon} class="size-3.5 shrink-0" />{/if}
         {confirmLabel}
