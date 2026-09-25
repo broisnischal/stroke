@@ -705,7 +705,7 @@
     <div class={rowCls}>
       <div class="min-w-0">
         <p class="text-ui-sm font-medium text-foreground">Null sort order</p>
-        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">Applied to quick-query ordering on databases that support explicit null placement.</p>
+        <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">Applies where the database supports explicit null placement.</p>
       </div>
       <SelectMenu
         ariaLabel="Null sort order"
@@ -738,7 +738,7 @@
   {#if show('Auto-save executed queries', 'File every successful run under Saved Queries, not just Query History')}
     {@render switchRow(
       'Auto-save executed queries',
-      'File every successful run under Saved Queries as well as Query History, deduplicated by its SQL so re-running the same statement adds one entry, not fifty.',
+      'Keep every successful run in Saved Queries, deduplicated by its SQL.',
       settings.autoSaveQueries,
       toggleAutoSaveQueries,
     )}
@@ -759,7 +759,7 @@
       <div class="min-w-0">
         <p class="text-ui-sm font-medium text-foreground">Formatting options</p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
-          Casing, indentation and wrapping for Format (⇧⌥F) in every editor and for the DDL viewer.
+          Casing, indentation and wrapping for Format (⇧⌥F).
         </p>
       </div>
       <Icon name={sqlFmtOpen ? 'chevron-up' : 'chevron-down'} class="size-3.5 shrink-0 text-muted-foreground" />
@@ -904,7 +904,7 @@
   {#if show('Web access', 'Let the agent search the web and read pages')}
     {@render switchRow(
       'Web access',
-      'Let the agent search the web and read pages for things your database cannot answer: error codes, function syntax, current docs. Your search terms leave your machine when it does.',
+      'Let the agent search the web. Your search terms leave your machine.',
       settings.agentWebAccess,
       toggleAgentWebAccess,
     )}
@@ -912,7 +912,7 @@
   {#if show('Show query cards', 'Display the SQL the agent ran and the rows it returned')}
     {@render switchRow(
       'Show query cards',
-      'Show the SQL the agent ran and the rows it came back with. Failed queries are always shown, so a correction still has something to refer to.',
+      'Show the SQL the agent ran and the rows it returned. Failures always show.',
       settings.agentShowQueryCards,
       toggleAgentQueryCards,
     )}
@@ -960,8 +960,8 @@
           </span>
         </p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
-          A {$lockStatus.pinLength}-digit PIN that locks Stroke on launch. Stored as a salted
-          hash in your OS keychain - there is no reset link, so pick one you will remember.
+          A {$lockStatus.pinLength}-digit PIN that locks Stroke on launch. There is no reset,
+          so pick one you will remember.
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-2">
@@ -978,7 +978,7 @@
     {#if show('Ask when connecting', 'Confirm the PIN before opening or reconnecting to a database')}
       {@render switchRow(
         'Ask when connecting',
-        'Confirm the PIN before opening or reconnecting to a database. The reconnect right after you unlock the app is exempt - you just proved who you are.',
+        'Ask for the PIN before connecting. The reconnect right after unlocking is exempt.',
         $lockStatus.requireOnConnect,
         () => void updateLockPrefs({ requireOnConnect: !$lockStatus.requireOnConnect }),
       )}
@@ -988,8 +988,7 @@
         <div class="min-w-0">
           <p class="text-ui-sm font-medium text-foreground">Auto-lock</p>
           <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
-            Lock again after this much inactivity. Open tabs and queries are kept - the
-            screen goes over the session, not through it.
+            Lock again after this much inactivity. Open tabs and queries are kept.
           </p>
         </div>
         {@render segmented('Auto-lock after', AUTO_LOCK_OPTIONS, $lockStatus.autoLockMinutes, (v) => void updateLockPrefs({ autoLockMinutes: v }))}
@@ -1006,7 +1005,7 @@
   {#if show('Anonymous usage data', 'Help decide what to build next')}
     {@render switchRow(
       'Anonymous usage data',
-      'Sends which features you use, how often, the app version and your OS. Nothing else. No queries, no table or database names, no connection details, and nothing about the data you browse. Turning it off takes effect immediately.',
+      'Which features you use, the app version and your OS. Never queries, names or data.',
       settings.telemetry,
       toggleTelemetry,
     )}
@@ -1163,7 +1162,7 @@
       <div class="min-w-0">
         <p class="text-ui-sm font-medium text-foreground">JSON colours</p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
-          Palette for keys, strings, numbers and booleans wherever JSON is shown: the expanded row, the cell preview and the editors. Auto follows the app theme; the rest are fixed whichever theme is on, for a theme whose own colours read badly against them.
+          Colours for JSON keys, strings, numbers and booleans. Auto follows the app theme.
         </p>
       </div>
       <SelectMenu
@@ -1189,7 +1188,7 @@
       <div class="min-w-0">
         <p class="text-ui-sm font-medium text-foreground">Row spacing</p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
-          Vertical space each row of the data grid takes. Compact fits about a third more rows on screen; relaxed is easier to track across a wide table.
+          Row height in the data grid. Compact fits about a third more rows on screen.
         </p>
       </div>
       <SelectMenu
@@ -1205,7 +1204,7 @@
       <div class="min-w-0 flex-1">
         <p class="text-ui-sm font-medium text-foreground">Grid text size</p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
-          Size of the values in the data grid at 100% zoom. Separate from the app zoom, so the grid can run denser or larger than the rest of the interface without changing it.
+          Text size in the data grid at 100% zoom, independent of the app zoom.
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-1">
@@ -1233,7 +1232,7 @@
   {#if show('Boolean glyphs', 'Show a coloured dot or check for boolean columns')}
     {@render switchRow(
       'Boolean glyphs',
-      'Draw boolean columns as a coloured dot or ✓ / ✗ instead of the raw true / false text, so a column of them reads at a glance. This is the Boolean Glyphs extension - the same switch, and its dot-or-check choice, live in Extensions.',
+      'Draw booleans as a dot or ✓ / ✗ instead of true / false text.',
       boolGlyphOn,
       () => setPluginEnabled(BOOL_GLYPH_ID, !boolGlyphOn),
     )}
@@ -1241,7 +1240,7 @@
   {#if show('Group large numbers', 'Thousands separators on integers in the grid')}
     {@render switchRow(
       'Group large numbers',
-      'Show integers with thousands separators, so 162957 reads as 162,957. Applies to whole numbers only - decimals are left exactly as the database returned them rather than being rounded to fit a format.',
+      'Thousands separators on integers: 162957 reads as 162,957. Decimals are untouched.',
       settings.numberGrouping,
       toggleNumberGrouping,
     )}
@@ -1249,7 +1248,7 @@
   {#if show('Image previews', 'Show thumbnails for image URLs in the grid')}
     {@render switchRow(
       'Image previews',
-      'Draw a thumbnail for cells holding an image URL, and open the full image in a lightbox when one is clicked. Turning this off stops the images being downloaded at all, not just drawn - useful on a metered connection, or when a table of URLs should stay text.',
+      'Thumbnail cells holding an image URL. Off stops the download, not just the drawing.',
       settings.imagePreview,
       toggleImagePreview,
     )}
@@ -1257,7 +1256,7 @@
   {#if show('Open links on click', 'Clicking a URL cell opens it in your browser')}
     {@render switchRow(
       'Open links on click',
-      'Click a cell holding a URL to open it in your browser. With this off a click just selects the cell, so a table full of links can be read and copied without one stray click leaving the app.',
+      'Click a URL cell to open it in your browser. Off, a click only selects the cell.',
       settings.openUrlsOnClick,
       toggleOpenUrls,
     )}
@@ -1265,7 +1264,7 @@
   {#if show('Highlight the active row', 'Tint the row the keyboard is on')}
     {@render switchRow(
       'Highlight the active row',
-      'Tint the full width of the row holding the focused cell. Turn it off if you navigate cell by cell and find the band distracting - the focused cell keeps its own outline either way.',
+      'Tint the full row holding the focused cell. The cell keeps its outline either way.',
       settings.highlightActiveRow,
       toggleHighlightActiveRow,
     )}
@@ -1275,7 +1274,7 @@
       <div class="min-w-0 flex-1">
         <p class="text-ui-sm font-medium text-foreground">Rows per page</p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
-          How many rows a newly opened table fetches. The page-size control in the grid toolbar changes the same value, and applies to the table already open.
+          How many rows a newly opened table fetches. Same value as the toolbar control.
         </p>
       </div>
       <SelectMenu
@@ -1289,7 +1288,7 @@
   {#if show('Empty and NULL markers', 'Tell NULL, empty string and whitespace-only cells apart')}
     {@render switchRow(
       'Empty and NULL markers',
-      'Draw NULL as ∅, an empty string as "", and a whitespace-only value as ·····, so three things that all look blank stop looking the same. This is the Empty & NULL Markers extension - the same switch lives in Extensions.',
+      'Draw NULL as ∅, an empty string as "" and whitespace as ·····, so blanks differ.',
       nullishOn,
       () => setPluginEnabled(NULLISH_ID, !nullishOn),
     )}
@@ -1299,7 +1298,7 @@
       <div class="min-w-0">
         <p class="text-ui-sm font-medium text-foreground">Sidebar position</p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
-          Which side of the window the tables sidebar sits on. Also on its own right-click menu.
+          Which side of the window the sidebar sits on.
         </p>
       </div>
       <SelectMenu
@@ -1315,7 +1314,7 @@
       <div class="min-w-0">
         <p class="text-ui-sm font-medium text-foreground">Motion</p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
-          System follows your OS reduced-motion setting. Override it when you want animation in your window manager but not in a tool you stare at all day, or when the machine's setting isn't yours to change. A loading spinner keeps turning either way.
+          System follows your OS reduced-motion setting. Spinners keep turning either way.
         </p>
       </div>
       <SelectMenu
@@ -1329,7 +1328,7 @@
   {#if show('Alternating row colors', 'Shade every other grid row')}
     {@render switchRow(
       'Alternating row colors',
-      'Shade every other row so a long row stays readable across the full width. The Striped and Dots grid styles already do this as part of their look.',
+      'Shade every other row. The Striped and Dots grid styles already do this.',
       settings.zebraRows,
       toggleZebraRows,
     )}
@@ -1337,7 +1336,7 @@
   {#if show('Menu bar', 'File, Edit, View, Tools and Help in the title bar')}
     {@render switchRow(
       'Menu bar',
-      'Show File, Edit, View, Tools and Help in the title bar. Everything in it is also in the command palette (⌘K) and on a shortcut; turning it off gives the space back to the window drag region.',
+      'Show File, Edit, View, Tools and Help in the title bar. All of it is also in ⌘K.',
       settings.showMenuBar,
       toggleMenuBar,
     )}
@@ -1345,7 +1344,7 @@
   {#if show('Row numbers', 'Number every grid row in the gutter')}
     {@render switchRow(
       'Row numbers',
-      'Number each row in the gutter, counting from the first row of the page rather than from the first row on screen - so row 201 reads 201 on page 3, not 1. Off by default: it is a reading aid, not data, and it takes width from every table.',
+      'Number rows in the gutter, counting from the first row of the page.',
       settings.showRowNumbers,
       toggleRowNumbers,
     )}
@@ -1355,7 +1354,7 @@
       <div class="min-w-0">
         <p class="text-ui-sm font-medium text-foreground">Cell alignment</p>
         <p class="mt-0.5 text-ui-xs leading-relaxed text-muted-foreground">
-          Which side grid cell text sits on. "Numbers right" lines digits up by place value so you can compare magnitudes down a column, and leaves prose on the left.
+          Which side cell text sits on. Numbers right lines digits up by place value.
         </p>
       </div>
       <SelectMenu
