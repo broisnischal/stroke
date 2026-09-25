@@ -2780,6 +2780,8 @@ import FilterX from "@lucide/svelte/icons/filter-x";
 
   /** Open the dedicated array editor for a cell (from the context menu). */
   // ── Full-size cell editor (Space) ─────────────────────────────────────────
+  /** @type {{ focusEditor: () => boolean } | null} */
+  let cellEditorRef = $state(null);
   let cellEditorOpen = $state(false);
   let cellEditorRow = $state(-1);
   let cellEditorCol = $state(-1);
@@ -8864,7 +8866,9 @@ import FilterX from "@lucide/svelte/icons/filter-x";
       onpointerdown={(e) => startDockResize(e, 'cell')}
     ></div>
     <CellEditorPanel
+      bind:this={cellEditorRef}
       bind:open={cellEditorOpen}
+      autofocus={false}
       colName={cellEditorName}
       colType={cellEditorType}
       value={cellEditorValue}

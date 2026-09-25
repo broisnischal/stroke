@@ -66,6 +66,12 @@
     oncommit = /** @type {(next: string) => void} */ (() => {}),
     /** Fired when the dock dismisses itself, so the owner can take focus back. */
     onclose = /** @type {() => void} */ (() => {}),
+    /**
+     * Put the caret in the editor when the dock opens. Off for the grid, which
+     * opens this as a preview: the cursor stays on the cell so arrows keep
+     * walking the table, and the reader steps in deliberately (`focusEditor`).
+     */
+    autofocus = true,
   } = $props()
 
   /**
@@ -142,7 +148,8 @@
     // Structured text opens unwrapped: pretty-printed JSON is short lines
     // already, and unwrapped is what lets the gutter number them. Prose keeps
     // wrapping. Alt+Z still flips it either way.
-    wrap = !/^\s*[[{]/.test(text)
+    maxLineLen = longestLine(text)
+    wrap = maxLineLen <= MAX_WRAP_LINE && !/^\s*[[{]/.test(text)
     // Undo/redo, word-delete and line-delete for every plain field in the app
     // live in `input-shortcuts.js`, and its history is keyed by element. This
     // textarea outlives the cell it is showing, so the history has to be
@@ -152,7 +159,7 @@
     // the grid cursor with the dock already up re-points it without taking
     // focus, so arrow keys keep walking the grid. Escape from the editor
     // closes the dock (`onRootKey`).
-    if (justOpened) focusOnReady = true
+    if (justOpened && autofocus) focusOnReady = true
   })
 
   /**
@@ -166,6 +173,15 @@
     focusOnReady = false
     queueMicrotask(() => cm?.focus())
   })
+
+  /** Step into the editor from outside, once the dock is already up. */
+  export function focusEditor() {
+    if (!open) return false
+    if (cm) { cm.focus(); return true }
+    // Lazy-loaded: if it is not mounted yet, focus it the moment it is.
+    focusOnReady = true
+    return true
+  }
 
   const dirty = $derived(draft !== original)
   const isNull = $derived(value === null || value === undefined)
@@ -346,6 +362,40 @@
   // toggle still works if you want it.
   $effect(() => { if (heavy) wrap = false })
 
+  /**
+   * Longest line in the value, measured once per cell rather than per keystroke
+   * and without a `split('\n')`, which would allocate a second copy of a value
+   * already big enough to be the problem.
+   */
+  let maxLineLen = $state(0)
+  function longestLine(/** @type {string} */ text) {
+    let max = 0
+    let at = 0
+    for (;;) {
+      const nl = text.indexOf('\n', at)
+      if (nl === -1) return Math.max(max, text.length - at)
+      if (nl - at > max) max = nl - at
+      at = nl + 1
+    }
+  }
+
+  /**
+   * The line length past which soft wrap is refused, not merely defaulted off.
+   *
+   * CodeMirror virtualises by line: rows outside the viewport cost nothing, but
+   * a single line always lays out whole. A jsonb column holding a file arrives
+   * as one line of half a million characters, and wrapping that means measuring
+   * every one of them into a few thousand visual rows in one frame. The editor
+   * stops answering, which is what it did here before this line existed.
+   *
+   * Unwrapped there is no such cost: the line is one row and the view draws the
+   * slice that is on screen. So past the cap the toggle is disabled rather than
+   * merely off, because turning it on is the hang.
+   */
+  const MAX_WRAP_LINE = 10_000
+  const canWrap = $derived(maxLineLen <= MAX_WRAP_LINE)
+  $effect(() => { if (!canWrap) wrap = false })
+
 
   // The editor's type metrics, as whole pixels. The gutter has to sit on the
   // same baseline grid as the text beside it, and a fractional line-height
@@ -418,7 +468,7 @@
     // Cmd/Ctrl+Enter applies, matching every other multi-line editor in the app.
     { key: 'Mod-Enter', run: () => { apply(); return true } },
     // Alt+Z toggles wrap, Alt+R reverts - VS Code's keys.
-    { key: 'Alt-z', run: () => { wrap = !wrap; return true } },
+    { key: 'Alt-z', run: () => { if (canWrap) wrap = !wrap; return true } },
     { key: 'Alt-r', run: () => { revert(); return true } },
   ]
 
@@ -479,13 +529,16 @@
     <div class="ml-auto flex shrink-0 items-center gap-0.5">
       <button
         type="button"
+        disabled={!canWrap}
         aria-pressed={wrap}
         class={cn(
-          'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/40 hover:text-foreground',
+          'inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-muted/40 hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent',
           wrap ? 'text-foreground' : 'text-muted-foreground',
         )}
-        onclick={() => (wrap = !wrap)}
-        title="Soft wrap (Alt+Z)"
+        onclick={() => { if (canWrap) wrap = !wrap }}
+        title={canWrap
+          ? 'Soft wrap (Alt+Z)'
+          : `Soft wrap is off for this value: its longest line is ${maxLineLen.toLocaleString()} characters, and wrapping one line that long lays it out all at once`}
       >
         <WrapText class="size-3.5 shrink-0" />
       </button>

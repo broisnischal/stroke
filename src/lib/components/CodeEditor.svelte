@@ -53,8 +53,33 @@
   const readOnlyC = new Compartment()
   const langC = new Compartment()
 
+  /**
+   * Longest logical line, without splitting the string into an array - a
+   * `split('\n')` on a multi-megabyte value allocates a second copy of it.
+   */
+  function longestLine(/** @type {string} */ text) {
+    let max = 0
+    let at = 0
+    for (;;) {
+      const nl = text.indexOf('\n', at)
+      if (nl === -1) return Math.max(max, text.length - at)
+      if (nl - at > max) max = nl - at
+      at = nl + 1
+    }
+  }
+
+  /**
+   * Past this, no language and so no parse or highlight. A jsonb column holding
+   * a file comes through as one line of a few hundred thousand characters, and
+   * handing that to the JSON parser costs more than the colour is worth. VS
+   * Code draws the same line at 20,000 characters
+   * (`editor.maxTokenizationLineLength`), for the same reason.
+   */
+  const MAX_TOKENIZE_LINE = 20_000
+
   /** JSON by its first character, markup by an early tag; everything else plain. */
   function languageFor(/** @type {string} */ text) {
+    if (longestLine(text) > MAX_TOKENIZE_LINE) return []
     if (/^\s*[[{]/.test(text)) return json()
     if (/<[A-Za-z!/]/.test(text.slice(0, 2000))) return html()
     return []
