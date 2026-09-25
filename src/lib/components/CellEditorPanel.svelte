@@ -563,14 +563,27 @@
        beside the name, and a 28px row of value did not need 92px of chrome. -->
   <div class="flex h-8 shrink-0 items-center gap-2 border-b border-border/40 bg-muted/20 px-2.5">
     <Pencil class="size-3.5 shrink-0 text-muted-foreground" />
-    <span class="min-w-0 truncate font-mono text-ui-2xs font-medium text-foreground/85">{colName}</span>
+    <!-- One shrinking group for everything that describes the value, so a
+         narrow dock takes room from the description rather than pushing the
+         buttons out of the bar. Every badge in here is shrink-0, so without a
+         container that can give way the row simply grew past its own width and
+         Stage and Close went off the end of it. -->
+    <div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+    <!-- title: this is the only place the column is named, and it is the first
+         thing to be truncated when the bar runs out of room. -->
+    <span
+      class="min-w-0 truncate font-mono text-ui-2xs font-medium text-foreground/85"
+      title={colType ? `${colName} · ${colType}` : colName}
+    >{colName}</span>
     {#if colType}
       <span class="shrink-0 rounded-[3px] border border-border/50 bg-muted/40 px-1.5 py-px font-mono text-ui-3xs text-muted-foreground">{colType}</span>
     {/if}
     {#if sourceHint}
       <!-- ms-2: the gap between identity (name, type) and the facts about
            this value is twice the gap inside either group. -->
-      <span class="ms-2 shrink-0 font-mono text-ui-3xs text-muted-foreground">{sourceHint}</span>
+      <!-- tabular-nums: this counts up as the cursor moves, and proportional
+           digits made everything after it shift on the step from row 9 to 10. -->
+      <span class="ms-2 shrink-0 font-mono text-ui-3xs tabular-nums text-muted-foreground">{sourceHint}</span>
     {/if}
     {#if isNull && !dirty}
       <span class="shrink-0 font-mono text-ui-3xs text-muted-foreground">NULL</span>
@@ -592,11 +605,12 @@
     {#if dirty && !readOnly}
       <span class="shrink-0 text-ui-3xs text-primary">edited</span>
     {/if}
+    </div>
 
     <!-- Three groups, spaced apart more than their members: view tools
          (wrap, copy, revert), the commit (Stage), and close. Find is Mod+F in
          the editor and needs no button here. -->
-    <div class="ml-auto flex shrink-0 items-center gap-0.5">
+    <div class="flex shrink-0 items-center gap-0.5">
       <button
         type="button"
         disabled={!canWrap}
