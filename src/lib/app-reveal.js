@@ -31,17 +31,16 @@ export function isRevealed() {
 export function revealApp() {
   if (revealed || typeof document === 'undefined') return
   revealed = true
-  // Show first: a hidden WebKitGTK window never fires requestAnimationFrame,
-  // so the fade below would wait forever. Then one frame so whatever the
-  // caller just set (overlay, modal) is in the DOM before the fade starts.
-  void showWindow().finally(() => {
-    requestAnimationFrame(() => {
-      // The attribute is the whole switch now: index.html gates #app rather than
-      // <html>, so that the splash can be seen while the app is still booting.
-      // It cancels the CSS boot floor, fades the app in and retires the splash.
-      document.documentElement.dataset.revealed = ''
-    })
-  })
+  // Mark first, and synchronously. This used to wait on the show IPC to come
+  // back and then on a requestAnimationFrame - a frame a hidden window never
+  // produces, so when the show did not land the page stayed hidden and what
+  // finally uncovered it was a timer, seconds later. Nothing here waits now:
+  // the attribute is set, the CSS swaps the splash for the app, and the window
+  // is asked to show itself afterwards. Marking before the window appears is
+  // the right order anyway - the first thing on screen is the finished app
+  // rather than a page fading in.
+  document.documentElement.dataset.revealed = ''
+  void showWindow()
 }
 
 /** Never leave a blank window: reveal regardless if no screen claimed it. */

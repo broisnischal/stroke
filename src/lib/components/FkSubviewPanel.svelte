@@ -73,6 +73,28 @@
   }
 
   /**
+   * The cell classes, built once instead of per cell.
+   *
+   * The dock follows the cell cursor, so this table re-renders on every arrow
+   * key. At 50 rows and a wide table that is a few thousand cells a keystroke,
+   * and it was doing a seven-argument `cn()`, three `isGroupEdge` calls and a
+   * four-interpolation style string for each of them. None of that varies by
+   * cell, so none of it belongs in the loop: what is left per cell is picking
+   * between strings that already exist.
+   */
+  const cls = $derived.by(() => {
+    const base = 'cursor-default overflow-hidden align-middle text-ellipsis whitespace-nowrap outline-none'
+    const col = metrics.colRules ? ` ${rule.col}` : ''
+    return {
+      cell: base + col,
+      cellRight: base + col + ' text-right tabular-nums',
+      num: 'select-none text-right align-middle tabular-nums text-muted-foreground/60',
+      rowRule: rule.row,
+      groupRule: rule.group,
+    }
+  })
+
+  /**
    * What the panel draws. Every lookup replaces `data` with an empty
    * `{ loading: true, rows: [] }` first, so drawing `data` directly blanked the
    * table - headers and all - for the frames between clicking another row's key
@@ -184,6 +206,20 @@
   /** @param {number} i @param {number} j */
   function selectCell(i, j) {
     sel = { r: i, c: j }
+  }
+
+  /**
+   * One handler for the body. The cell already names itself in `data-fk-cell`,
+   * so the row and column come off the event target rather than out of a
+   * closure built per cell.
+   * @param {Event} e
+   */
+  function onBodyPick(e) {
+    const el = /** @type {Element | null} */ (e.target)?.closest?.('[data-fk-cell]')
+    const id = el?.getAttribute('data-fk-cell')
+    if (!id) return
+    const [r, c] = id.split(':')
+    selectCell(Number(r), Number(c))
   }
 
   /** Move the selection, clamped to the result set. @param {number} dr @param {number} dc */
@@ -314,7 +350,10 @@
               role="grid"
               data-studio-selectable="text"
               class="min-w-full border-separate font-mono"
-              style="border-spacing:0; table-layout:fixed; width:{tableW}px; font-size:{metrics.cellPx}px; line-height:1"
+              data-colrule={metrics.colRules ? '' : undefined}
+              style="border-spacing:0; table-layout:fixed; width:{tableW}px; font-size:{metrics.cellPx}px; line-height:1;
+                     --row-h:{metrics.rowH}px; --pad-x:{metrics.padX}px; --num-pad:{Math.round(7 * metrics.zoom)}px;
+                     --rs:{rule.style}; --rw:{rule.width}px; --rwg:{Math.max(rule.width, 2)}px"
               onkeydown={onGridKey}
             >
               <colgroup>
@@ -358,9 +397,20 @@
                 </tr>
               </thead>
 
-              <tbody>
+              <!-- One listener for the whole body instead of three per cell.
+                   At 50 rows and a wide table that was a few thousand closures
+                   rebuilt on every arrow key, for a target the cell already
+                   names in `data-fk-cell`. -->
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+              <tbody onclickcapture={onBodyPick} onfocusincapture={onBodyPick} oncontextmenu={onBodyPick}>
                 {#each view.rows as row, i (i)}
+                  {@const lastRow = i === view.rows.length - 1}
+                  {@const group = isGroupEdge(i)}
+                  {@const ruled = (metrics.rowRules || group) && !lastRow}
+                  {@const rowRule = ruled ? (group ? cls.groupRule : cls.rowRule) : ''}
                   <tr
+                    data-rule={ruled ? (group ? 'group' : 'row') : undefined}
                     class={cn(
                       'group/row',
                       // Zebra is the grid's own shading, so the two surfaces
@@ -370,46 +420,25 @@
                     )}
                   >
                     {#if numW}
-                      <td
-                        class={cn(
-                          'select-none text-right align-middle tabular-nums text-muted-foreground/60',
-                          (metrics.rowRules || isGroupEdge(i)) && i < view.rows.length - 1 &&
-                            cn('border-b', isGroupEdge(i) ? rule.group : rule.row),
-                        )}
-                        style="height:{metrics.rowH}px; padding:0 {Math.round(7 * metrics.zoom)}px;
-                               border-bottom-style:{rule.style};
-                               border-bottom-width:{isGroupEdge(i) ? Math.max(rule.width, 2) : rule.width}px"
-                      >{i + 1}</td>
+                      <td data-num class={cn(cls.num, rowRule)}>{i + 1}</td>
                     {/if}
                     {#each cols as c, j (c.name)}
                       {@const v = cellAt(i, j)}
                       {@const isNullVal = v === null || v === undefined}
                       {@const isSel = sel?.r === i && sel?.c === j}
                       {@const text = fmt(v)}
-                      <!-- svelte-ignore a11y_click_events_have_key_events -->
                       <td
                         role="gridcell"
                         data-fk-cell="{i}:{j}"
                         tabindex={isSel || (!sel && i === 0 && j === 0) ? 0 : -1}
                         aria-selected={isSel}
                         class={cn(
-                          'cursor-default overflow-hidden align-middle text-ellipsis whitespace-nowrap outline-none',
-                          (metrics.rowRules || isGroupEdge(i)) && i < view.rows.length - 1 &&
-                            cn('border-b', isGroupEdge(i) ? rule.group : rule.row),
-                          metrics.colRules && cn('border-r', rule.col),
-                          c.alignRight && 'text-right tabular-nums',
+                          c.alignRight ? cls.cellRight : cls.cell,
+                          rowRule,
                           isNullVal && 'italic text-muted-foreground/70',
-                          !isSel && 'group-hover/row:bg-muted/10',
-                          isSel && 'bg-primary/15 ring-1 ring-inset ring-primary/40',
+                          isSel ? 'bg-primary/15 ring-1 ring-inset ring-primary/40' : 'group-hover/row:bg-muted/10',
                         )}
-                        style="height:{metrics.rowH}px; padding:0 {metrics.padX}px;
-                               border-bottom-style:{rule.style};
-                               border-bottom-width:{isGroupEdge(i) ? Math.max(rule.width, 2) : rule.width}px;
-                               border-right-style:{rule.style}; border-right-width:{rule.width}px"
                         title={isNullVal ? '' : text}
-                        onclick={() => selectCell(i, j)}
-                        onfocus={() => selectCell(i, j)}
-                        oncontextmenu={() => selectCell(i, j)}
                       >{text}</td>
                     {/each}
                   </tr>
@@ -463,3 +492,15 @@
     {/if}
   {/if}
 </div>
+
+<style>
+  /* Geometry and rule weight come off custom properties set on the table, so a
+     cell carries no inline style at all. The colour still rides on a utility
+     class, which is the one part that genuinely differs between a normal rule
+     and a group one. */
+  tbody td { height: var(--row-h); padding: 0 var(--pad-x); }
+  tbody td[data-num] { padding: 0 var(--num-pad); }
+  tbody tr[data-rule] > td { border-bottom-style: var(--rs); border-bottom-width: var(--rw); }
+  tbody tr[data-rule='group'] > td { border-bottom-width: var(--rwg); }
+  table[data-colrule] tbody td { border-right-style: var(--rs); border-right-width: var(--rw); }
+</style>
