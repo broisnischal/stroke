@@ -8,9 +8,13 @@
 - A value past the 8 MB inline cap opens in the dock, which reads it in pages, instead of showing a message explaining that it was too big and which key to press.
 
 #### Cell Editor
+- Line numbers toggle on and off (Alt+L), and the choice is remembered. Soft wrap already hides them while it is on, so the button is disabled there and says why.
 - Soft wrap is remembered. It was decided per cell from the text, so turning it on meant turning it on again at the next cell, and the next.
 - Confirm dialogs show what is focused. They parked focus on the dialog box so Enter would not hit Cancel, which left nothing on screen looking focused. Focus goes to the confirm button, which is the default action and already says so with its ↵.
 - The oversize cell notice had two Load buttons for one action.
+
+#### Related Rows
+- The related-rows sub-view draws in the table style that is actually selected. It read three booleans off the grid, so dotted, dashed, hairline, double, bordered, ledger, graph and bands all came out as plain solid lines, directly under a grid drawing something else.
 
 #### Startup
 - The window can no longer be stuck on a black screen. The page boots hidden and JavaScript reveals it, but the window is shown on a separate timer, so anything that stopped the bundle first left a black rectangle with no way out but killing the app. The reveal failsafe now runs before anything that can throw, and the page carries a second one that needs no JavaScript at all.
