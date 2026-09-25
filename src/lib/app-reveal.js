@@ -36,10 +36,10 @@ export function revealApp() {
   // caller just set (overlay, modal) is in the DOM before the fade starts.
   void showWindow().finally(() => {
     requestAnimationFrame(() => {
-      // Both: the attribute cancels the CSS boot floor in index.html and beats
-      // the inline opacity:0, the inline value keeps the 200ms fade.
+      // The attribute is the whole switch now: index.html gates #app rather than
+      // <html>, so that the splash can be seen while the app is still booting.
+      // It cancels the CSS boot floor, fades the app in and retires the splash.
       document.documentElement.dataset.revealed = ''
-      document.documentElement.style.opacity = '1'
     })
   })
 }
